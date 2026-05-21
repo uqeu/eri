@@ -349,9 +349,11 @@ export default function BillingPage() {
     style: "primary" | "ghost";
   } | null {
     if (planSlug === tier) return null;
-    if (planSlug === "free" || (isPaidTier(tier) && planSlug !== tier)) {
+    // Downgrade to Free still goes through the Stripe portal — cancellation
+    // surveys and retention prompts live there.
+    if (planSlug === "free") {
       return {
-        label: pending === "portal" ? "Opening…" : "Switch via portal",
+        label: pending === "portal" ? "Opening…" : "Downgrade via portal",
         onClick: () => {
           void openPortal();
         },
@@ -359,12 +361,20 @@ export default function BillingPage() {
         style: "ghost",
       };
     }
+    // Every other transition (Free→paid, paid→different paid) hits our
+    // checkout route, which decides between in-app subscription update vs.
+    // launching a fresh Checkout session.
     const niceName = planDefFor(planSlug).name;
+    const isUpgradeFromPaid = isPaidTier(tier) && planSlug !== tier;
     return {
       label:
         pending === `upgrade-${planSlug}`
-          ? "Redirecting…"
-          : `Upgrade to ${niceName}`,
+          ? isUpgradeFromPaid
+            ? "Updating…"
+            : "Redirecting…"
+          : isUpgradeFromPaid
+            ? `Switch to ${niceName}`
+            : `Upgrade to ${niceName}`,
       onClick: () => {
         void upgrade(planSlug);
       },
