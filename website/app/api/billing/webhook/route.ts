@@ -61,6 +61,22 @@ function customerIdFrom(
   return typeof ref === "string" ? ref : ref.id;
 }
 
+// Stripe moved `current_period_end` from Subscription to SubscriptionItem
+// in API version 2025-03-31. Read from the first item, fall back to the
+// subscription-level field for older webhooks, and fall back to 0 if
+// neither is set so postgres-js doesn't get undefined.
+function subscriptionPeriodEnd(subscription: Stripe.Subscription): number {
+  const firstItem = subscription.items.data[0] as
+    | (Stripe.SubscriptionItem & { current_period_end?: number })
+    | undefined;
+  const fromItem = firstItem?.current_period_end;
+  if (typeof fromItem === "number") return fromItem;
+  const fromSub = (subscription as { current_period_end?: number })
+    .current_period_end;
+  if (typeof fromSub === "number") return fromSub;
+  return 0;
+}
+
 function tierFromSubscriptionItem(item: Stripe.SubscriptionItem | undefined): Tier {
   if (!item) return "free";
   const metadataTier = item.price.metadata?.tier;
@@ -86,7 +102,7 @@ async function applySubscription(
     tier,
     stripe_subscription_id: subscription.id,
     subscription_status: subscription.status,
-    current_period_end: subscription.current_period_end,
+    current_period_end: subscriptionPeriodEnd(subscription),
   };
   if (userId) {
     await applySubscriptionByUserId(userId, update);
@@ -102,7 +118,7 @@ async function clearSubscription(subscription: Stripe.Subscription): Promise<voi
   await clearSubscriptionByCustomerId(
     customerId,
     subscription.status,
-    subscription.current_period_end,
+    subscriptionPeriodEnd(subscription),
   );
 }
 
@@ -259,7 +275,7 @@ async function handleSubscriptionPaused(
   await clearSubscriptionByCustomerId(
     customerId,
     "paused",
-    subscription.current_period_end,
+    subscriptionPeriodEnd(subscription),
   );
 }
 
@@ -415,10 +431,13 @@ export async function POST(request: Request): Promise<NextResponse> {
         break;
     }
   } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const stack = error instanceof Error ? error.stack : undefined;
     console.error("stripe webhook handler failed", {
       type: event.type,
       id: event.id,
-      error,
+      message,
+      stack,
     });
     return NextResponse.json(
       { error: "Webhook handler failed." },
