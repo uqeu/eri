@@ -1,18 +1,21 @@
 "use client";
 
+import { Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 
 interface GoogleSignInButtonProps {
   label?: string;
 }
 
-/**
- * Google sign-in button. Renders a plain anchor that hits our server-side
- * OAuth start route — no Google JS SDK required. The visual G is a simple
- * four-color glyph; we intentionally avoid Google's pixel-perfect brand
- * mark so the button reads as ours, not theirs.
- */
-export function GoogleSignInButton({
+export function GoogleSignInButton(props: GoogleSignInButtonProps) {
+  return (
+    <Suspense fallback={<GoogleSignInButtonInner {...props} href="/api/auth/google/start" />}>
+      <GoogleSignInButtonWithParams {...props} />
+    </Suspense>
+  );
+}
+
+function GoogleSignInButtonWithParams({
   label = "Continue with Google",
 }: GoogleSignInButtonProps) {
   const params = useSearchParams();
@@ -21,6 +24,13 @@ export function GoogleSignInButton({
     ? `/api/auth/google/start?next=${encodeURIComponent(next)}`
     : "/api/auth/google/start";
 
+  return <GoogleSignInButtonInner label={label} href={href} />;
+}
+
+function GoogleSignInButtonInner({
+  label = "Continue with Google",
+  href,
+}: GoogleSignInButtonProps & { href: string }) {
   return (
     <a
       href={href}
