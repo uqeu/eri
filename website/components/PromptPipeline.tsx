@@ -60,7 +60,7 @@ interface Scene {
 }
 
 const MODELS: ReadonlyArray<ModelLane> = [
-  { key: "eri-engine", name: "eri Engine", lane: "diffusion · short edits", tier: "FREE" },
+  { key: "eri-engine", name: "eri's engine", lane: "diffusion · short edits", tier: "FREE" },
   { key: "sonnet", name: "Claude Sonnet 4.6", lane: "polish · careful diffs", tier: "STARTER" },
   { key: "opus", name: "Claude Opus 4.7", lane: "reasoning · long horizon", tier: "PRO" },
   { key: "gemini", name: "Gemini 2.5 Pro", lane: "multimodal · image-in", tier: "PRO+" },
@@ -209,8 +209,8 @@ const SCENES: ReadonlyArray<Scene> = [
     reason: "small refactor with layout reasoning — polish lane",
     previewKind: "nav",
     previewLabel: "Nav.tsx",
-    gazeStart: { x: 35, y: 35 },
-    gazeEnd: { x: 24, y: 50 },
+    gazeStart: { x: 35, y: 33 },
+    gazeEnd: { x: 36, y: 33 },
     diff: [
       { kind: "meta", text: "~ justify-start → justify-center" },
       { kind: "meta", text: "~ Nav.tsx · 1 line modified" },
