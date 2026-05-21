@@ -30,14 +30,19 @@ function CheckIcon() {
 function SuccessInner() {
   const params = useSearchParams();
   const sessionId = params?.get("session_id") ?? null;
+  const action = params?.get("action") ?? null;
   const { user, reload } = useUser();
   const [pollCount, setPollCount] = useState(0);
+
+  const isSwitch = action === "updated";
+  const isNoop = action === "unchanged";
 
   // Webhooks usually finalize within a few seconds, but to be safe we poll
   // the user record a few times so the tier badge updates without a manual
   // refresh.
   useEffect(() => {
     if (!user) return;
+    if (isNoop) return;
     if (user.tier && user.tier !== "free") return;
     if (pollCount > 6) return;
     const id = window.setTimeout(() => {
@@ -45,15 +50,26 @@ function SuccessInner() {
       setPollCount((n) => n + 1);
     }, 1500);
     return () => window.clearTimeout(id);
-  }, [user, pollCount, reload]);
+  }, [user, pollCount, reload, isNoop]);
 
   const upgraded = user?.tier && user.tier !== "free";
+
+  const heading = isNoop
+    ? "Already on this plan"
+    : isSwitch
+      ? "Plan updated"
+      : "Payment successful";
+  const subHeading = isNoop
+    ? "No changes were made"
+    : upgraded
+      ? "Your plan is active"
+      : "Activating your plan…";
 
   return (
     <div className="max-w-2xl">
       <p className="text-xs uppercase tracking-[0.25em] text-accent">Billing</p>
       <h1 className="mt-3 font-display text-4xl md:text-5xl tracking-tight">
-        Payment successful
+        {heading}
       </h1>
 
       <section className="mt-12 border-t border-white/[0.06] pt-10">
@@ -62,14 +78,32 @@ function SuccessInner() {
             <CheckIcon />
           </div>
           <div className="min-w-0">
-            <h2 className="text-[15px] font-medium text-paper">
-              {upgraded ? "Your plan is active" : "Activating your plan…"}
-            </h2>
+            <h2 className="text-[15px] font-medium text-paper">{subHeading}</h2>
             <p className="mt-1.5 text-[13px] text-muted leading-relaxed">
-              {upgraded ? (
+              {isNoop ? (
                 <>
-                  Welcome to <span className="text-paper capitalize">{user?.tier.replace("_", " ")}</span>.
-                  A receipt has been sent to{" "}
+                  You&apos;re already subscribed to{" "}
+                  <span className="text-paper capitalize">
+                    {user?.tier.replace("_", " ")}
+                  </span>
+                  . Nothing was charged.
+                </>
+              ) : isSwitch ? (
+                <>
+                  Your subscription is now{" "}
+                  <span className="text-paper capitalize">
+                    {user?.tier.replace("_", " ") ?? "updating"}
+                  </span>
+                  . We&apos;ve prorated the difference — any credit or charge
+                  appears on your next invoice.
+                </>
+              ) : upgraded ? (
+                <>
+                  Welcome to{" "}
+                  <span className="text-paper capitalize">
+                    {user?.tier.replace("_", " ")}
+                  </span>
+                  . A receipt has been sent to{" "}
                   <span className="text-paper">{user?.email}</span>.
                 </>
               ) : (
