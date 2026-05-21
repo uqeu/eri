@@ -144,12 +144,17 @@ export async function GET(request: Request): Promise<NextResponse> {
   try {
     upserted = await upsertGoogleUser(userInfo, email);
   } catch (error) {
+    const message =
+      error instanceof Error ? error.message : String(error);
     console.error("google oauth db_error", {
       email,
       sub: userInfo.id,
-      error: error instanceof Error ? { message: error.message, stack: error.stack } : error,
+      error: error instanceof Error ? { message, stack: error.stack } : error,
     });
-    return errorRedirect(request, "db_error");
+    const target = new URL("/sign-in", request.url);
+    target.searchParams.set("oauth_error", "db_error");
+    target.searchParams.set("oauth_debug", message.slice(0, 200));
+    return NextResponse.redirect(target, { status: 302 });
   }
 
   const tokens = await issueTokenPair({
