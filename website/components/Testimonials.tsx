@@ -25,7 +25,7 @@ const TESTIMONIALS: ReadonlyArray<Testimonial> = [
   },
   {
     quote:
-      "The eri Engine is the first diffusion engine that actually feels like it edits the file instead of regenerating it. The diffs are surgical.",
+      "Eri's engine is the first diffusion engine that actually feels like it edits the file instead of regenerating it. The diffs are surgical.",
     name: "M.R.",
     role: "Staff engineer",
     company: "Stealth fintech",

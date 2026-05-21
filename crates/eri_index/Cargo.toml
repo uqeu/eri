@@ -9,7 +9,12 @@ license = "LicenseRef-Proprietary"
 workspace = true
 
 [lib]
-path = "src/eri_index.rs"
+path = "src/lib.rs"
+
+[features]
+default = ["ollama"]
+ollama = []
+candle = []
 
 [dependencies]
 log.workspace = true
@@ -17,6 +22,17 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 ureq.workspace = true
+
+ignore = "0.4"
+rusqlite = { version = "0.31", features = ["bundled", "blob"] }
+blake3 = "1.5"
+
+tree-sitter = "0.22"
+tree-sitter-rust = "0.21"
+tree-sitter-python = "0.21"
+tree-sitter-javascript = "0.21"
+tree-sitter-typescript = "0.21"
+tree-sitter-go = "0.21"
 
 [dev-dependencies]
 tempfile.workspace = true

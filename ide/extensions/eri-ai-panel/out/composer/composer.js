@@ -9,8 +9,8 @@ const FORWARDED_METHODS = new Set([
     "eri/composer/error",
     "eri/model/changed",
 ]);
-function activateComposer(context, getSidecar) {
-    const view = new composerView_1.ComposerView(context, getSidecar);
+function activateComposer(context, getSidecar, atMentions) {
+    const view = new composerView_1.ComposerView(context, getSidecar, atMentions);
     context.subscriptions.push({
         dispose: () => view.dispose(),
     });

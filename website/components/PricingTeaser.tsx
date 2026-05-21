@@ -11,18 +11,18 @@ const TIERS: ReadonlyArray<Tier> = [
   {
     name: "Free",
     price: "$0",
-    tagline: "Local voice loop, your own keys, single project.",
+    tagline: "Stock eri voice on us, diffusion edits, no keys to bring.",
   },
   {
     name: "Adaptive Eri",
-    price: "$20",
-    tagline: "eri Engine included, cloud agents, unlimited projects.",
-    highlight: true,
+    price: "$15",
+    tagline: "Cross-session memory, premium voice presets, eri-cloud credits.",
   },
   {
     name: "Frontier Eri",
-    price: "$60",
-    tagline: "Every frontier model, longer cloud runs, priority routing.",
+    price: "$25",
+    tagline: "Multi-model routing, cloud agents, custom MCP servers.",
+    highlight: true,
   },
 ];
 

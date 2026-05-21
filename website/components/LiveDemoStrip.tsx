@@ -35,7 +35,7 @@ function ThinkingDots(): React.ReactElement {
         />
       ))}
       <span className="ml-3 font-mono text-[11px] uppercase tracking-[0.2em] text-muted">
-        eri Engine
+        eri's engine
       </span>
     </div>
   );
@@ -70,7 +70,7 @@ const FRAMES: ReadonlyArray<Frame> = [
   },
   {
     label: "02 · Watch",
-    caption: "The eri Engine diffuses the diff in 1.8s.",
+    caption: "Eri's engine diffuses the diff in 1.8s.",
     body: <ThinkingDots />,
   },
   {

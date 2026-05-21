@@ -16,6 +16,12 @@
 //! template's keyword list — and entirely deterministic.
 
 use std::collections::HashSet;
+use std::path::PathBuf;
+
+/// Soft cap on bytes embedded into the edit-mode user prompt. Set well below
+/// Mercury's hard context budget so we leave headroom for the assistant's
+/// reply and any system-prompt overhead.
+pub const EDIT_MODE_EMBED_BUDGET_CHARS: usize = 30_000;
 
 /// A project starter that eri can drop in as the seed for a new build.
 #[derive(Debug, Clone, Copy)]
@@ -160,6 +166,111 @@ pub fn template_by_slug(slug: &str) -> Option<&'static Template> {
             || t.slug.replace('-', " ") == target
             || t.slug.replace('-', "") == target.replace([' ', '-'], "")
     })
+}
+
+/// System prompt for "edit mode" — used when the intent classifier decides
+/// the user is iterating on existing files rather than starting fresh.
+///
+/// The output instructs the model to emit aider-style search/replace blocks
+/// that [`eri_apply`](../../../eri_apply/index.html) can parse and apply
+/// deterministically, sidestepping the latency and drift of asking for full
+/// file contents on every small edit.
+pub fn edit_mode_system_prompt(language: Option<&str>) -> String {
+    let language_hint = match language {
+        Some(lang) if !lang.trim().is_empty() => {
+            format!("\nThe user's active language is {}. Match its idioms.", lang.trim())
+        }
+        _ => String::new(),
+    };
+    format!(
+        "You are eri, a coding assistant. The user is editing existing files.\n\
+         Emit your edits as one or more search/replace blocks in this exact format:\n\
+         \n\
+         <<<<<<< SEARCH path/to/file\n\
+         [the exact text currently in the file]\n\
+         =======\n\
+         [the new text]\n\
+         >>>>>>> REPLACE\n\
+         \n\
+         Rules:\n\
+         - The SEARCH region must match the file contents byte-for-byte (whitespace included).\n\
+         - Include 2-3 lines of unchanged context above and below the change so the location is unambiguous.\n\
+         - For a new file: leave the SEARCH region empty.\n\
+         - For deleting a region: leave the REPLACE region empty.\n\
+         - Do NOT emit explanatory prose between blocks - the parser is strict.\n\
+         - You may emit multiple blocks per response, and multiple blocks per file.\n\
+         - Use the relative path the user supplied; do not invent absolute paths.\n\
+         - Never wrap blocks in markdown code fences.{language_hint}"
+    )
+}
+
+/// Build the user prompt for edit mode. Each open file becomes a fenced
+/// section keyed by its relative path; the user's request comes last.
+///
+/// Embedded file content is capped at [`EDIT_MODE_EMBED_BUDGET_CHARS`]. If
+/// the total exceeds the budget, the largest files are truncated first
+/// (oldest-by-size order) and a `[... <N> files truncated ...]` marker is
+/// inserted in their place so the model knows context is missing.
+pub fn edit_mode_user_prompt(user_request: &str, open_files: &[(PathBuf, String)]) -> String {
+    let kept = select_files_within_budget(open_files, EDIT_MODE_EMBED_BUDGET_CHARS);
+    let mut buf = String::new();
+    for (path, content) in &kept.kept {
+        buf.push_str("## ");
+        buf.push_str(&path.display().to_string());
+        buf.push_str("\n```\n");
+        buf.push_str(content);
+        if !content.ends_with('\n') {
+            buf.push('\n');
+        }
+        buf.push_str("```\n\n");
+    }
+    if kept.truncated_count > 0 {
+        buf.push_str(&format!("[... {} files truncated ...]\n\n", kept.truncated_count));
+    }
+    buf.push_str("## Request\n");
+    buf.push_str(user_request.trim());
+    buf.push('\n');
+    buf
+}
+
+struct SelectedFiles<'a> {
+    kept: Vec<(&'a PathBuf, &'a String)>,
+    truncated_count: usize,
+}
+
+fn select_files_within_budget(
+    files: &[(PathBuf, String)],
+    budget: usize,
+) -> SelectedFiles<'_> {
+    // WHY: drop the largest files first so a single huge file can't crowd out
+    // the rest of the working set. Order within the kept set is preserved
+    // from the caller so the model sees files in the user's open-tab order.
+    let mut indexed: Vec<(usize, &(PathBuf, String))> = files.iter().enumerate().collect();
+    indexed.sort_by_key(|(_, (_, c))| std::cmp::Reverse(c.len()));
+
+    let mut total: usize = 0;
+    let mut keep_flags = vec![true; files.len()];
+    let mut truncated = 0usize;
+    for (idx, (_, content)) in &indexed {
+        if total.saturating_add(content.len()) > budget {
+            keep_flags[*idx] = false;
+            truncated += 1;
+        } else {
+            total += content.len();
+        }
+    }
+
+    let kept: Vec<(&PathBuf, &String)> = files
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| keep_flags[*i])
+        .map(|(_, (p, c))| (p, c))
+        .collect();
+
+    SelectedFiles {
+        kept,
+        truncated_count: truncated,
+    }
 }
 
 fn tokenize(input: &str) -> HashSet<String> {
@@ -1089,6 +1200,47 @@ mod tests {
                 template.slug
             );
         }
+    }
+
+    #[test]
+    fn edit_mode_system_prompt_contains_strict_format_rules() {
+        let prompt = edit_mode_system_prompt(Some("rust"));
+        assert!(prompt.contains("<<<<<<< SEARCH path/to/file"));
+        assert!(prompt.contains("======="));
+        assert!(prompt.contains(">>>>>>> REPLACE"));
+        assert!(prompt.contains("byte-for-byte"));
+        assert!(prompt.contains("rust"));
+        assert!(!prompt.contains("Mercury"));
+    }
+
+    #[test]
+    fn edit_mode_user_prompt_embeds_files_and_request() {
+        let files = vec![
+            (PathBuf::from("src/a.rs"), "fn a() {}\n".to_string()),
+            (PathBuf::from("src/b.rs"), "fn b() {}".to_string()),
+        ];
+        let prompt = edit_mode_user_prompt("rename a to alpha", &files);
+        assert!(prompt.contains("## src/a.rs"));
+        assert!(prompt.contains("fn a() {}"));
+        assert!(prompt.contains("## src/b.rs"));
+        assert!(prompt.contains("## Request\nrename a to alpha"));
+        // Both files fit easily under the budget.
+        assert!(!prompt.contains("truncated"));
+    }
+
+    #[test]
+    fn edit_mode_user_prompt_truncates_largest_files_first() {
+        let big = "x".repeat(EDIT_MODE_EMBED_BUDGET_CHARS + 5_000);
+        let small = "y".repeat(100);
+        let files = vec![
+            (PathBuf::from("big.txt"), big),
+            (PathBuf::from("small.txt"), small),
+        ];
+        let prompt = edit_mode_user_prompt("trim it", &files);
+        assert!(prompt.contains("## small.txt"));
+        assert!(!prompt.contains("## big.txt"));
+        assert!(prompt.contains("1 files truncated"));
+        assert!(prompt.contains("## Request\ntrim it"));
     }
 
     #[test]

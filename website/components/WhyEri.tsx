@@ -311,11 +311,11 @@ export function WhyEri(): React.ReactElement {
         <div className="max-w-2xl">
           <p className="mono-cap text-accent">Why eri</p>
           <h2 className="mt-4 font-display text-h1 text-balance font-normal">
-            Four things nothing else does.
+            Four reflexes the keyboard can't reach.
           </h2>
           <p className="mt-5 text-body text-paper/60">
             Voice in, diffusion out, eyes on the file, every turn rewindable.
-            Pick a tab.
+            Voice and gaze run on-device; pick a tab to see how each lands.
           </p>
         </div>
 

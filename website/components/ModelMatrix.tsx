@@ -30,12 +30,12 @@ interface ModelCard {
 const MODELS: ReadonlyArray<ModelCard> = [
   {
     key: "eri-engine",
-    name: "eri Engine",
+    name: "eri's engine",
     vendor: "eri",
     vendorTag: "// in-house · diffusion",
     role: "diffusion edits",
     tagline:
-      "The whole diff at once. The eri Engine denoises a multi-file change in the time a tokenizer would still be warming up.",
+      "The whole diff at once. Eri's engine denoises a multi-file change in the time a tokenizer would still be warming up.",
     stat: "1.8s",
     statLabel: "median edit",
     note: "default for in-editor turns",
@@ -61,7 +61,7 @@ const MODELS: ReadonlyArray<ModelCard> = [
     vendorTag: "// anthropic · polish",
     role: "polish lane",
     tagline:
-      "Catch the lint, fix the imports, write the commit message. Sonnet runs alongside the eri Engine so the diff lands clean without a second prompt.",
+      "Catch the lint, fix the imports, write the commit message. Sonnet runs alongside eri's engine so the diff lands clean without a second prompt.",
     stat: "≤ 4s",
     statLabel: "polish pass",
     note: "default for cleanup turns",
@@ -129,7 +129,7 @@ export function ModelMatrix(): React.ReactElement {
               call.
             </p>
             <p className="mt-3 max-w-xl text-paper/40 text-[12px] leading-relaxed">
-              eri uses multiple frontier models behind the eri Engine API.
+              eri uses multiple frontier models behind eri's engine API.
             </p>
           </div>
           <RouteBadge model={MODELS[activeIdx]!} />

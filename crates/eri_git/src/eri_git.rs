@@ -6,6 +6,13 @@
 //! instead of pulling in libgit2 so eri stays a small, fast binary on user
 //! machines and we never debug a vendored C build chain.
 
+pub mod checkpoints;
+
+pub use checkpoints::{
+    ChangeKind, Checkpoint, CheckpointDiff, CheckpointStore, FileChange, RestoreOptions,
+    RestoreReport,
+};
+
 use std::{
     path::{Path, PathBuf},
     process::{Command, Output},
@@ -413,7 +420,7 @@ fn days_to_ymd(days_since_epoch: i64) -> (i32, u32, u32) {
     (year, m_signed as u32, d as u32)
 }
 
-fn ensure_repo_exists(project_dir: &Path) -> Result<(), GitError> {
+pub(crate) fn ensure_repo_exists(project_dir: &Path) -> Result<(), GitError> {
     if project_dir.join(".git").is_dir() {
         Ok(())
     } else {
@@ -421,7 +428,7 @@ fn ensure_repo_exists(project_dir: &Path) -> Result<(), GitError> {
     }
 }
 
-fn run_git(project_dir: &Path, args: &[&str]) -> Result<String, GitError> {
+pub(crate) fn run_git(project_dir: &Path, args: &[&str]) -> Result<String, GitError> {
     let mut command = Command::new("git");
     command.arg("-C").arg(project_dir).args(args);
     let output = match command.output() {

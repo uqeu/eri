@@ -204,7 +204,7 @@ function DiffusionSpot(): React.ReactElement {
     <div className="flex h-full">
       <div className="flex-1 min-w-0 p-7 sm:p-8 flex flex-col justify-between">
         <div className="min-w-0">
-          <p className="mono-cap text-accent break-words">eri Engine diffusion</p>
+          <p className="mono-cap text-accent break-words">eri's engine diffusion</p>
           <h3 className="mt-3 font-display text-2xl text-paper font-normal leading-tight">
             Edits resolve{" "}
             <span className="italic">in one breath.</span>

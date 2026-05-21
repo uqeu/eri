@@ -15,6 +15,7 @@ path = "src/eri_git.rs"
 log.workspace = true
 serde.workspace = true
 thiserror.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

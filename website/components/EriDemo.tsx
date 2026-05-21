@@ -138,7 +138,7 @@ export function EriDemo(): ReactElement {
           </h2>
           <p className="mt-5 max-w-xl text-body text-paper/60">
             Watch eri turn a single spoken request into a deployed page. The
-            transcript runs locally, the eri Engine diffuses the diff, every beat
+            transcript runs locally, eri's engine diffuses the diff, every beat
             below is real — slowed down so you can see it.
           </p>
         </div>
@@ -204,7 +204,7 @@ function ModelPicker(): ReactElement {
   return (
     <div className="hidden sm:flex items-center gap-1.5 px-2 py-1 rounded-sm border border-white/[0.08] bg-bg-2 text-[11px] text-paper/70 font-mono">
       <span className="h-1.5 w-1.5 rounded-full bg-accent" />
-      eri Engine
+      eri's engine
       <span aria-hidden className="text-paper/30 ml-0.5">
         ▾
       </span>
@@ -293,7 +293,7 @@ function PreviewPane({
   slotProgress: slotP,
   beat,
 }: PreviewPaneProps): ReactElement {
-  // The preview canvas is empty until the eri Engine has heard enough of the
+  // The preview canvas is empty until eri's engine has heard enough of the
   // prompt to start diffusing. Before that we show the "waiting for diff…"
   // placeholder so each slot visibly resets when its iteration begins.
   const showPreview = beat === "denoising" || beat === "ready";
@@ -694,14 +694,14 @@ function DiffusionStatus({ beat }: { readonly beat: Beat }): ReactElement {
   if (beat === "listening" || beat === "transcribing") {
     return (
       <div className="rounded-md border border-white/[0.04] bg-bg-3/50 p-3 text-[11px] text-paper/40 font-mono">
-        eri Engine — idle
+        eri's engine — idle
       </div>
     );
   }
   if (beat === "denoising") {
     return (
       <div className="rounded-md border border-accent/30 bg-accent/5 p-3 text-[11px] text-paper/80 font-mono">
-        eri Engine — denoising
+        eri's engine — denoising
         <span className="inline-flex ml-1 gap-0.5">
           <span className="pulse-dot inline-block w-1 h-1 rounded-full bg-accent" style={{ animationDelay: "0ms" }} />
           <span className="pulse-dot inline-block w-1 h-1 rounded-full bg-accent" style={{ animationDelay: "140ms" }} />

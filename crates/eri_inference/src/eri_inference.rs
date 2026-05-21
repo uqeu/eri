@@ -16,6 +16,7 @@ use thiserror::Error;
 pub mod bug_finder;
 pub mod code_assist;
 pub mod costs;
+pub mod edit_mode;
 pub mod goose_backend;
 pub mod integrations;
 pub mod intent;
@@ -56,7 +57,14 @@ pub use pr::{
     parse_pr_response,
 };
 pub use pr_workflow::{PrWorkflowError, open_pr_workflow};
-pub use templates::{TEMPLATES, Template, match_template, template_by_slug};
+pub use templates::{
+    EDIT_MODE_EMBED_BUDGET_CHARS, TEMPLATES, Template, edit_mode_system_prompt,
+    edit_mode_user_prompt, match_template, template_by_slug,
+};
+pub use edit_mode::{
+    EditModeRequest, EditModeResponse, StreamEvent, TokenUsage, run_edit_mode,
+    run_edit_mode_streaming, run_iteration_via_edit_blocks,
+};
 
 pub trait InferenceBackend {
     fn iterate(

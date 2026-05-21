@@ -21,7 +21,7 @@ interface NodeMeta {
 
 const NODES: ReadonlyArray<NodeMeta> = [
   { key: "voice", label: "Voice", sub: "whisper · on-device", window: [0, 0.33] },
-  { key: "mercury", label: "eri Engine", sub: "diffusion · 1.8s", window: [0.33, 0.66] },
+  { key: "mercury", label: "eri's engine", sub: "diffusion · 1.8s", window: [0.33, 0.66] },
   { key: "preview", label: "Preview", sub: "hot reload · live", window: [0.66, 1] },
 ];
 

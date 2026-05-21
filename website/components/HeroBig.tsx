@@ -439,7 +439,7 @@ function DemoPanel({
               aria-hidden
             />
             <span className="font-mono text-[10px] text-accent">
-              eri Engine
+              eri's engine
             </span>
           </div>
         </div>

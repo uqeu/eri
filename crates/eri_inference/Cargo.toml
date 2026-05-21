@@ -13,6 +13,7 @@ path = "src/eri_inference.rs"
 
 [dependencies]
 dotenvy.workspace = true
+eri_apply = { path = "../eri_apply" }
 eri_core.workspace = true
 eri_git.workspace = true
 eri_tokens.workspace = true

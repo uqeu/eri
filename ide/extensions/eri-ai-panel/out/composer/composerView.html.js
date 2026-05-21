@@ -223,6 +223,50 @@ function renderComposerHtml(initialModel) {
     padding: 0 14px 6px;
     min-height: 18px;
   }
+  .chips-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+    min-height: 28px;
+  }
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 8px;
+    border-radius: 9999px;
+    background: rgba(224, 255, 79, 0.08);
+    border: 1px solid rgba(224, 255, 79, 0.35);
+    color: var(--fg);
+    font-size: 12px;
+    font-family: var(--vscode-editor-font-family, monospace);
+    max-width: 360px;
+  }
+  .chip .token { color: var(--eri-accent); font-weight: 600; }
+  .chip .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chip .subtitle { color: var(--muted); font-size: 11px; }
+  .chip .remove {
+    border: none;
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+    padding: 0 2px;
+    font-size: 14px;
+    line-height: 1;
+  }
+  .chip .remove:hover { color: var(--removed); }
+  .chip-empty { color: var(--muted); font-size: 12px; font-style: italic; }
+  button.add-chip {
+    background: transparent;
+    border: 1px dashed var(--border);
+    color: var(--muted);
+    border-radius: 9999px;
+    padding: 3px 10px;
+    cursor: pointer;
+    font-size: 12px;
+  }
+  button.add-chip:hover { color: var(--fg); border-color: var(--accent); }
 </style>
 </head>
 <body>
@@ -235,6 +279,13 @@ function renderComposerHtml(initialModel) {
 </div>
 
 <div class="body">
+  <div class="chips-row" id="chips">
+    <span class="chip-empty" id="chips-empty">no context attached — click @ to add</span>
+  </div>
+  <div class="prompt-row">
+    <button class="add-chip" id="btn-add-chip" title="Add @-mention context">@ add context</button>
+    <span class="summary" id="hint">tip: type @ in the prompt for inline mentions</span>
+  </div>
   <div class="prompt-row">
     <textarea
       class="prompt"
@@ -244,7 +295,7 @@ function renderComposerHtml(initialModel) {
     ></textarea>
   </div>
   <div class="prompt-row">
-    <span class="summary" id="hint">tip: press Cmd-Enter to plan</span>
+    <span class="summary">Cmd-Enter to plan</span>
     <span class="spacer"></span>
     <button class="plan" id="btn-plan">Plan changes</button>
   </div>
@@ -275,6 +326,9 @@ const discardBtn = document.getElementById('btn-discard');
 const planBtn = document.getElementById('btn-plan');
 const closeBtn = document.getElementById('btn-close');
 const modelPill = document.getElementById('model-pill');
+const chipsEl = document.getElementById('chips');
+const chipsEmptyEl = document.getElementById('chips-empty');
+const addChipBtn = document.getElementById('btn-add-chip');
 
 function modelDisplayLabel(modelId) {
   // wire-format model ids, not user-visible — map to "eri Engine"
@@ -469,6 +523,48 @@ closeBtn.addEventListener('click', () => {
   send('eri/composer/close', {});
 });
 
+addChipBtn.addEventListener('click', () => {
+  send('eri/composer/mention/open', {});
+});
+
+function renderChips(chips) {
+  while (chipsEl.firstChild) chipsEl.removeChild(chipsEl.firstChild);
+  if (!Array.isArray(chips) || chips.length === 0) {
+    const empty = document.createElement('span');
+    empty.className = 'chip-empty';
+    empty.textContent = 'no context attached — click @ to add';
+    chipsEl.appendChild(empty);
+    return;
+  }
+  for (const chip of chips) {
+    const wrap = document.createElement('span');
+    wrap.className = 'chip';
+    const token = document.createElement('span');
+    token.className = 'token';
+    token.textContent = chip.token || '@';
+    const label = document.createElement('span');
+    label.className = 'label';
+    label.textContent = chip.label || '';
+    wrap.appendChild(token);
+    wrap.appendChild(label);
+    if (chip.subtitle) {
+      const sub = document.createElement('span');
+      sub.className = 'subtitle';
+      sub.textContent = '· ' + chip.subtitle;
+      wrap.appendChild(sub);
+    }
+    const remove = document.createElement('button');
+    remove.className = 'remove';
+    remove.title = 'Remove';
+    remove.textContent = '×';
+    remove.addEventListener('click', () => {
+      send('eri/composer/chip/remove', { chipId: chip.chipId });
+    });
+    wrap.appendChild(remove);
+    chipsEl.appendChild(wrap);
+  }
+}
+
 modelPill.addEventListener('click', () => {
   send('eri/model/cycle', {});
 });
@@ -477,6 +573,19 @@ promptEl.addEventListener('keydown', (e) => {
   if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
     e.preventDefault();
     planBtn.click();
+  }
+});
+
+// Inline @-mention trigger inside the textarea — mirrors the editor
+// completion provider so the composer is consistent with normal documents.
+promptEl.addEventListener('input', (event) => {
+  if (event.inputType !== 'insertText' || event.data !== '@') {
+    return;
+  }
+  const cursor = promptEl.selectionStart;
+  const before = cursor >= 2 ? promptEl.value.charAt(cursor - 2) : '';
+  if (cursor === 1 || /\s/.test(before)) {
+    send('eri/composer/mention/open', {});
   }
 });
 
@@ -502,10 +611,14 @@ window.addEventListener('message', (event) => {
     case 'eri/composer/focus':
       promptEl.focus();
       break;
+    case 'eri/composer/chips':
+      renderChips(Array.isArray(params.chips) ? params.chips : []);
+      break;
   }
 });
 
 renderGroups([]);
+renderChips([]);
 </script>
 </body>
 </html>`;

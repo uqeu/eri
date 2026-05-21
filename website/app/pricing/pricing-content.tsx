@@ -386,11 +386,13 @@ function FaqRow({ item }: { item: FaqItem }): React.ReactElement {
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="w-full flex items-start justify-between gap-6 py-6 text-left transition hover:text-accent"
+        className="w-full flex items-start justify-between gap-6 py-6 text-left transition-colors hover:text-paper cursor-pointer"
       >
-        <span className="font-display text-lg sm:text-xl tracking-tight">{item.q}</span>
+        <span className={`font-display text-lg sm:text-xl tracking-tight transition-colors ${open ? "text-paper" : "text-paper/90"}`}>
+          {item.q}
+        </span>
         <span
-          className={`mt-2 text-accent transition-transform ${open ? "rotate-180" : ""}`}
+          className={`mt-2 text-paper/60 transition-transform duration-200 ${open ? "rotate-180 text-paper" : ""}`}
           aria-hidden
         >
           <svg viewBox="0 0 16 16" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -403,7 +405,7 @@ function FaqRow({ item }: { item: FaqItem }): React.ReactElement {
         style={{ gridTemplateRows: open ? "1fr" : "0fr" }}
       >
         <div className="overflow-hidden">
-          <p className="pb-6 pr-10 text-muted leading-relaxed">{item.a}</p>
+          <p className="pb-6 pr-10 text-paper/80 leading-relaxed">{item.a}</p>
         </div>
       </div>
     </div>
@@ -443,7 +445,7 @@ function PlanArt({ slug }: { slug: PlanSlug }): React.ReactElement {
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
       aria-hidden
-      className="text-accent"
+      className={slug === "pro" ? "text-accent" : "text-paper/60"}
     >
       <circle cx="28" cy="28" r="3" fill="currentColor" />
       {Array.from({ length: rings }).map((_, i) => (
@@ -500,13 +502,13 @@ function PlanTile({
     <div
       className={`group relative flex h-full flex-col rounded-2xl border p-6 transition-all duration-200 ${
         plan.popular
-          ? "border-accent/40 bg-accent/[0.04] shadow-lg shadow-black/30"
+          ? "border-accent/50 bg-white/[0.03] shadow-lg shadow-black/30"
           : "border-white/10 bg-white/[0.02] hover:border-white/20"
       }`}
     >
       {plan.popular && (
-        <span className="absolute -top-2.5 left-6 px-2.5 py-1 font-mono text-[9px] uppercase tracking-[0.22em] bg-accent text-ink rounded-full">
-          Most popular
+        <span className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-1 font-mono text-[10px] uppercase tracking-[0.22em] bg-accent text-ink rounded-full shadow-md shadow-accent/30 whitespace-nowrap">
+          ★ Most popular
         </span>
       )}
 
@@ -562,7 +564,7 @@ function PlanTile({
         <p className="text-[13px] font-medium text-paper/80">
           {plan.includesHeader}
         </p>
-        <ul className="mt-3 flex flex-col gap-2 text-[13px] text-paper/80">
+        <ul className="mt-3 flex flex-col gap-2 text-[13px] text-paper/75">
           {plan.features.map((f) => (
             <li key={f.label} className="flex items-start gap-2">
               <svg
@@ -572,7 +574,7 @@ function PlanTile({
                 fill="currentColor"
                 viewBox="0 0 256 256"
                 aria-hidden
-                className="mt-0.5 shrink-0 text-accent"
+                className={`mt-0.5 shrink-0 ${plan.popular ? "text-accent" : "text-paper/50"}`}
               >
                 <path d="M229.66 77.66l-128 128a8 8 0 0 1-11.32 0l-56-56a8 8 0 0 1 11.32-11.32L96 188.69 218.34 66.34a8 8 0 0 1 11.32 11.32Z" />
               </svg>

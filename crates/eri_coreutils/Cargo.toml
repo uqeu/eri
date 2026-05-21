@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 
+[lib]
+name = "eri_coreutils"
+path = "src/lib.rs"
+
 [[bin]]
 name = "eri-coreutils"
 path = "src/eri_coreutils.rs"
@@ -15,3 +19,12 @@ serde_json = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "io-std", "io-util", "sync", "signal"] }
 tracing = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+eri_rules = { path = "../eri_rules" }
+eri_apply = { path = "../eri_apply" }
+eri_index = { path = "../eri_index" }
+eri_mcp = { path = "../eri_mcp" }
+eri_git = { path = "../eri_git" }
+
+[dev-dependencies]
+tempfile = { workspace = true }

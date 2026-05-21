@@ -79,7 +79,7 @@ export default function SecurityPage() {
           </h1>
           <p className="mt-5 text-lg text-muted leading-relaxed">
             eri is a desktop app. The model calls go from your machine straight
-            to the provider (the eri Engine, Anthropic, OpenAI, or your local
+            to the provider (eri's engine, Anthropic, OpenAI, or your local
             Llama). Our servers handle billing and account state — nothing
             else.
           </p>
@@ -92,7 +92,7 @@ export default function SecurityPage() {
             How requests flow
           </h2>
           <div className="mt-8 rounded-lg border border-white/10 bg-white/[0.02] p-6 font-mono text-xs leading-relaxed text-paper/90">
-            <pre>{`your machine ─────────────► eri Engine (diffusion)
+            <pre>{`your machine ─────────────► eri's engine (diffusion)
               │
               ├──────────► Anthropic (Claude polish)
               │

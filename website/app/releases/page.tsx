@@ -62,7 +62,7 @@ const RELEASES: ReadonlyArray<Release> = [
       "The first build we let strangers run. Onboarding now finishes in under sixty seconds and the editor reaches steady state on first launch.",
     highlights: [
       "End-to-end onboarding flow with mic, gaze, and project import wired together.",
-      "The eri Engine now drives all multi-line edits by default.",
+      "Eri's engine now drives all multi-line edits by default.",
       "Editor surface holds 120 fps through full-file diffusion on the reference machine.",
       "Auto-update through the in-app channel switcher.",
     ],

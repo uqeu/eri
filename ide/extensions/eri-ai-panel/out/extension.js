@@ -9,6 +9,7 @@ const panel_1 = require("./panel");
 const preview_1 = require("./preview");
 const tab_1 = require("./tab/tab");
 const mentions_1 = require("./mentions/mentions");
+const at_mentions_1 = require("./at_mentions");
 const mcpRegistry_1 = require("./mcp/mcpRegistry");
 const composer_1 = require("./composer/composer");
 const gaze_1 = require("./gaze/gaze");
@@ -21,6 +22,7 @@ let panelProvider = null;
 let previewManager = null;
 let mcpRegistry = null;
 let composer = null;
+let atMentions = null;
 let gaze = null;
 let tierClient = null;
 function activate(context) {
@@ -42,10 +44,11 @@ function activate(context) {
     // setContext + sidecar handshake reflects the user's real tier.
     tierClient = (0, tierClient_1.activateTierClient)(context, () => sidecar);
     (0, tab_1.activateTab)(context, () => sidecar);
-    (0, mentions_1.activateMentions)(context, () => sidecar);
+    atMentions = (0, at_mentions_1.activateAtMentions)(context, () => sidecar);
+    (0, mentions_1.activateMentionCompletions)(context, atMentions.registry);
     mcpRegistry = (0, mcpRegistry_1.activateMcp)(context, () => sidecar);
     gaze = (0, gaze_1.activateGaze)(context, () => sidecar);
-    composer = (0, composer_1.activateComposer)(context, () => sidecar);
+    composer = (0, composer_1.activateComposer)(context, () => sidecar, atMentions);
     context.subscriptions.push(vscode.commands.registerCommand("eri.openPreview", () => {
         previewManager?.open();
     }), vscode.commands.registerCommand("eri.toggleMic", () => {
@@ -82,6 +85,8 @@ function deactivate() {
     mcpRegistry?.dispose();
     mcpRegistry = null;
     composer = null;
+    atMentions?.dispose();
+    atMentions = null;
     gaze?.dispose();
     gaze = null;
     tierClient?.dispose();

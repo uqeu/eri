@@ -6,7 +6,7 @@ import { PricingContent } from "./pricing-content";
 export const metadata: Metadata = {
   title: "Pricing — eri",
   description:
-    "Adaptive, Frontier, or Personalized Eri. Free with your own keys, or $20–$60/mo for cross-session memory, premium eri voice presets, and multi-model routing. Teams and Enterprise also available.",
+    "Adaptive, Frontier, or Personalized Eri. Free forever (voice included, no keys to bring), or $15–$45/mo for cross-session memory, premium voice presets, and multi-model routing.",
 };
 
 export default function PricingPage() {

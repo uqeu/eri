@@ -188,7 +188,18 @@ export function FooterBig(): React.ReactElement {
           ))}
         </div>
 
-        <div className="mt-20 flex flex-col gap-3 border-t border-white/[0.05] pt-6 font-mono text-[12px] text-paper/40 sm:flex-row sm:items-center sm:justify-between">
+        <div className="mt-16 flex flex-col gap-2 border-t border-white/[0.05] pt-6 font-mono text-[11px] text-paper/55 sm:flex-row sm:items-start sm:justify-between">
+          <span className="inline-flex items-center gap-2">
+            <span
+              aria-hidden
+              className="h-1.5 w-1.5 rounded-full bg-accent shadow-[0_0_8px_rgba(224,255,79,0.5)]"
+            />
+            BYOK keys never leave your machine — stored in OS Keychain, never
+            synced to our servers.
+          </span>
+        </div>
+
+        <div className="mt-6 flex flex-col gap-3 border-t border-white/[0.05] pt-6 font-mono text-[12px] text-paper/40 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
             <span>© {year} eri labs, inc.</span>
             <span aria-hidden className="text-paper/20">

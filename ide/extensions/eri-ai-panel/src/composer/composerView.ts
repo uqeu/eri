@@ -1,4 +1,6 @@
 import * as vscode from "vscode";
+import { AtMentionChip, AtMentionsHandle } from "../at_mentions";
+import { AtMentionKind } from "../at_mentions/registry";
 import { Sidecar, SidecarNotification } from "../sidecar";
 import { renderComposerHtml } from "./composerView.html";
 
@@ -20,16 +22,31 @@ interface ComposerApplyParams {
   paths?: unknown;
 }
 
+interface ComposerPickMentionParams {
+  kind?: string;
+}
+
+interface ComposerRemoveChipParams {
+  chipId?: string;
+}
+
+interface ChipWithId extends AtMentionChip {
+  readonly chipId: string;
+}
+
 const VIEW_TYPE = "eri.composer";
 
 export class ComposerView {
   private panel: vscode.WebviewPanel | null = null;
   private pendingPlan: Promise<void> | null = null;
   private currentChanges: ComposerChange[] = [];
+  private chips: ChipWithId[] = [];
+  private chipCounter = 0;
 
   constructor(
     private readonly context: vscode.ExtensionContext,
     private readonly getSidecar: () => Sidecar | null,
+    private readonly atMentions: AtMentionsHandle,
   ) {}
 
   open(): void {
@@ -58,10 +75,14 @@ export class ComposerView {
     this.panel.onDidDispose(() => {
       this.panel = null;
       this.currentChanges = [];
+      this.chips = [];
       this.pendingPlan = null;
+      this.atMentions.setComposerSink(null);
     });
 
+    this.atMentions.setComposerSink((chip) => this.appendChip(chip));
     this.postFocus();
+    this.postChips();
   }
 
   postFromSidecar(notification: SidecarNotification): void {
@@ -108,6 +129,33 @@ export class ComposerView {
     });
   }
 
+  private postChips(): void {
+    this.panel?.webview.postMessage({
+      method: "eri/composer/chips",
+      params: {
+        chips: this.chips.map((chip) => ({
+          chipId: chip.chipId,
+          kind: chip.kind,
+          token: tokenForKind(chip.kind),
+          label: chip.label,
+          subtitle: chip.subtitle,
+        })),
+      },
+    });
+  }
+
+  private appendChip(chip: AtMentionChip): void {
+    this.chipCounter += 1;
+    const chipId = `chip-${this.chipCounter}`;
+    this.chips.push({ ...chip, chipId });
+    this.postChips();
+  }
+
+  private removeChip(chipId: string): void {
+    this.chips = this.chips.filter((entry) => entry.chipId !== chipId);
+    this.postChips();
+  }
+
   private readDefaultModel(): string {
     const fromConfig = vscode.workspace
       .getConfiguration("eri")
@@ -125,7 +173,9 @@ export class ComposerView {
     }
     switch (message.method) {
       case "eri/composer/plan/request":
-        this.handlePlanRequest(message.params as ComposerPlanRequest | undefined);
+        void this.handlePlanRequest(
+          message.params as ComposerPlanRequest | undefined,
+        );
         break;
       case "eri/composer/apply":
         this.handleApply(message.params as ComposerApplyParams | undefined);
@@ -136,6 +186,16 @@ export class ComposerView {
       case "eri/composer/close":
         this.panel?.dispose();
         break;
+      case "eri/composer/mention/open":
+        void this.handlePickMention(
+          message.params as ComposerPickMentionParams | undefined,
+        );
+        break;
+      case "eri/composer/chip/remove":
+        this.handleRemoveChip(
+          message.params as ComposerRemoveChipParams | undefined,
+        );
+        break;
       case "eri/model/cycle":
         this.getSidecar()?.notify("eri/model/cycle", {});
         break;
@@ -145,7 +205,24 @@ export class ComposerView {
     }
   }
 
-  private handlePlanRequest(params: ComposerPlanRequest | undefined): void {
+  private async handlePickMention(
+    params: ComposerPickMentionParams | undefined,
+  ): Promise<void> {
+    const rawKind = params?.kind;
+    const kind = typeof rawKind === "string" ? (rawKind as AtMentionKind) : undefined;
+    await this.atMentions.pick(kind);
+  }
+
+  private handleRemoveChip(params: ComposerRemoveChipParams | undefined): void {
+    const chipId = params?.chipId;
+    if (typeof chipId === "string" && chipId.length > 0) {
+      this.removeChip(chipId);
+    }
+  }
+
+  private async handlePlanRequest(
+    params: ComposerPlanRequest | undefined,
+  ): Promise<void> {
     const prompt = params?.prompt ?? "";
     if (prompt.trim().length === 0) {
       this.postError("empty prompt");
@@ -164,8 +241,12 @@ export class ComposerView {
     }
 
     const files = this.collectWorkspaceFiles();
+    const assembled = await this.atMentions.assemble(this.chips, prompt);
     this.pendingPlan = sidecar
-      .request<ComposerPlanResponse>("eri/composer/plan", { prompt, files })
+      .request<ComposerPlanResponse>("eri/composer/plan", {
+        prompt: assembled,
+        files,
+      })
       .then(
         (response) => {
           const changes = Array.isArray(response?.changes)
@@ -242,5 +323,22 @@ export class ComposerView {
     // the tree itself with its own ignore rules. Walking node_modules from
     // here would be slow and noisy.
     return folders.map((folder) => folder.uri.fsPath);
+  }
+}
+
+function tokenForKind(kind: AtMentionKind): string {
+  switch (kind) {
+    case "file": return "@File";
+    case "folder": return "@Folder";
+    case "code": return "@Code";
+    case "docs": return "@Docs";
+    case "web": return "@Web";
+    case "codebase": return "@Codebase";
+    case "git": return "@Git";
+    case "pastChats": return "@PastChats";
+    case "recentChanges": return "@RecentChanges";
+    case "linterErrors": return "@LinterErrors";
+    case "definitions": return "@Definitions";
+    default: return "@Mention";
   }
 }

@@ -1,6 +1,6 @@
 "use client";
 
-// EngineRoom — a full-bleed canvas particle visualization of the eri Engine.
+// EngineRoom — a full-bleed canvas particle visualization of eri's engine.
 //
 // Three lanes share a single canvas: voice (left), diffusion core (center), and
 // render (right). The animation is driven by a single requestAnimationFrame
@@ -942,7 +942,7 @@ function InstrumentsPanel({ readout }: InstrumentsPanelProps): ReactElement {
     },
     {
       label: "MODEL",
-      value: "eri Engine",
+      value: "eri's engine",
       accent: false,
     },
     {
@@ -1181,9 +1181,14 @@ export function EngineRoom(): ReactElement {
             From breath to commit, in one open room.
           </h2>
           <p className="mt-5 max-w-2xl font-sans text-base leading-relaxed text-[#9a9aa3] md:text-lg">
-            A live cross-section of the eri Engine. The waveform on the left is your voice;
+            A live cross-section of eri's engine. The waveform on the left is your voice;
             the lattice in the middle is the diffusion settling into code; the panel on the
             right is the preview your eyes have already started to want.
+          </p>
+          <p className="mt-4 max-w-2xl font-mono text-[11px] leading-relaxed tracking-wide text-[#6e6e78]">
+            voice transcription, gaze tracking, and text-to-speech all run on
+            your machine. only the model inference call crosses the network — to
+            the provider you chose, with the key you hold.
           </p>
         </header>
 
@@ -1195,7 +1200,7 @@ export function EngineRoom(): ReactElement {
           <canvas
             ref={canvasRef}
             className="block h-full w-full"
-            aria-label="Live visualization of the eri Engine: voice input, diffusion, and rendered preview."
+            aria-label="Live visualization of eri's engine: voice input, diffusion, and rendered preview."
             role="img"
           />
 

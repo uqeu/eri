@@ -176,7 +176,7 @@ export function Footer(): React.ReactElement {
               />
             </Link>
             <p className="mt-5 text-[14px] leading-relaxed text-paper/55">
-              The voice-first IDE. Speak your intent, the eri Engine diffuses the diff,
+              The voice-first IDE. Speak your intent, eri's engine diffuses the diff,
               and your repo grows in the background while you keep thinking.
             </p>
             <div className="mt-7 flex flex-wrap items-center gap-2">
@@ -220,7 +220,18 @@ export function Footer(): React.ReactElement {
           ))}
         </div>
 
-        <div className="mt-20 flex flex-col gap-6 border-t border-white/[0.06] pt-8 sm:flex-row sm:items-center sm:justify-between">
+        <div className="mt-16 border-t border-white/[0.05] pt-6 font-mono text-[11px] text-paper/55">
+          <span className="inline-flex items-center gap-2">
+            <span
+              aria-hidden
+              className="h-1.5 w-1.5 rounded-full bg-accent shadow-[0_0_8px_rgba(224,255,79,0.5)]"
+            />
+            BYOK keys never leave your machine — stored in OS Keychain, never
+            synced to our servers.
+          </span>
+        </div>
+
+        <div className="mt-6 flex flex-col gap-6 border-t border-white/[0.06] pt-8 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex flex-col gap-1 font-mono text-[12px] text-paper/40">
             <span>© {year} eri labs, inc. all rights reserved.</span>
             <span className="text-paper/30">

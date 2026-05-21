@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { AtMentionsHandle } from "../at_mentions";
 import { Sidecar, SidecarNotification } from "../sidecar";
 import { ComposerView } from "./composerView";
 
@@ -19,8 +20,9 @@ const FORWARDED_METHODS: ReadonlySet<string> = new Set([
 export function activateComposer(
   context: vscode.ExtensionContext,
   getSidecar: () => Sidecar | null,
+  atMentions: AtMentionsHandle,
 ): ComposerHandle {
-  const view = new ComposerView(context, getSidecar);
+  const view = new ComposerView(context, getSidecar, atMentions);
 
   context.subscriptions.push({
     dispose: () => view.dispose(),

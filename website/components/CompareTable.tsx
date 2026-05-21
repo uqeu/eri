@@ -27,7 +27,7 @@ const ROWS: ReadonlyArray<ComparisonRow> = [
   },
   {
     feature: "Diffusion edits",
-    eri: "eri Engine",
+    eri: "eri's engine",
     cursor: "no",
     v0: "no",
     bolt: "no",

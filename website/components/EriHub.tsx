@@ -216,7 +216,7 @@ function CenterCard(): React.ReactElement {
           </span>
         </div>
         <span className="rounded-full border border-[#228df2]/30 bg-[#228df2]/10 px-2 py-0.5 text-[10px] font-medium text-[#228df2]">
-          eri Engine
+          eri's engine
         </span>
       </div>
       <div className="rounded-md border border-[#262626] bg-[#0f0f0f] px-3 py-2 text-[13px] text-[#d6d6dd]">

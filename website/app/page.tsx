@@ -3,6 +3,7 @@ import { HeroBig } from "@/components/HeroBig";
 import { EriDemo } from "@/components/EriDemo";
 import { EngineRoom } from "@/components/EngineRoom";
 import { WhyEri } from "@/components/WhyEri";
+import { Promises } from "@/components/Promises";
 import { Spotlights } from "@/components/Spotlights";
 import { ModelMatrix } from "@/components/ModelMatrix";
 import { PromptPipeline } from "@/components/PromptPipeline";
@@ -22,6 +23,7 @@ export default function HomePage(): React.ReactElement {
       <EngineRoom />
       <HeroBig />
       <WhyEri />
+      <Promises />
       <Spotlights />
       <ModelMatrix />
       <PromptPipeline />

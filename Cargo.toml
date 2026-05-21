@@ -23,6 +23,8 @@ members = [
     "crates/eri_telemetry",
     "crates/eri_tokens",
     "crates/eri_voice",
+    "crates/eri_rules",
+    "crates/eri_apply",
 ]
 
 [workspace.package]

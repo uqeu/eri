@@ -3,7 +3,8 @@ import { resolveBinaryPath, Sidecar, SidecarNotification } from "./sidecar";
 import { EriPanelProvider } from "./panel";
 import { PreviewManager } from "./preview";
 import { activateTab } from "./tab/tab";
-import { activateMentions } from "./mentions/mentions";
+import { activateMentionCompletions } from "./mentions/mentions";
+import { activateAtMentions, AtMentionsHandle } from "./at_mentions";
 import { activateMcp, applyServerStatus, McpRegistryHandle } from "./mcp/mcpRegistry";
 import { McpServerState } from "./mcp/mcpView";
 import { activateComposer, ComposerHandle } from "./composer/composer";
@@ -17,6 +18,7 @@ let panelProvider: EriPanelProvider | null = null;
 let previewManager: PreviewManager | null = null;
 let mcpRegistry: McpRegistryHandle | null = null;
 let composer: ComposerHandle | null = null;
+let atMentions: AtMentionsHandle | null = null;
 let gaze: GazeHandle | null = null;
 let tierClient: TierClientHandle | null = null;
 
@@ -46,10 +48,11 @@ export function activate(context: vscode.ExtensionContext): void {
   tierClient = activateTierClient(context, () => sidecar);
 
   activateTab(context, () => sidecar);
-  activateMentions(context, () => sidecar);
+  atMentions = activateAtMentions(context, () => sidecar);
+  activateMentionCompletions(context, atMentions.registry);
   mcpRegistry = activateMcp(context, () => sidecar);
   gaze = activateGaze(context, () => sidecar);
-  composer = activateComposer(context, () => sidecar);
+  composer = activateComposer(context, () => sidecar, atMentions);
 
   context.subscriptions.push(
     vscode.commands.registerCommand("eri.openPreview", () => {
@@ -101,6 +104,8 @@ export function deactivate(): void {
   mcpRegistry?.dispose();
   mcpRegistry = null;
   composer = null;
+  atMentions?.dispose();
+  atMentions = null;
   gaze?.dispose();
   gaze = null;
   tierClient?.dispose();

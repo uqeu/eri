@@ -41,7 +41,7 @@ const FEATURES: ReadonlyArray<Feature> = [
   },
   {
     title: "Diffusion preview",
-    body: "See edits arrive as a denoising wash, not a typewriter crawl. The eri Engine lands multi-line patches in under two seconds.",
+    body: "See edits arrive as a denoising wash, not a typewriter crawl. Eri's engine lands multi-line patches in under two seconds.",
     availability: "now",
     signature: true,
     icon: (
@@ -171,7 +171,7 @@ const FEATURES: ReadonlyArray<Feature> = [
   },
   {
     title: "Multi-model routing",
-    body: "Send edits to the eri Engine, polish to Claude, chat to GPT-4o, experiments to Gemini — all from one TOML. Or stay fully local with Llama.",
+    body: "Send edits to eri's engine, polish to Claude, chat to GPT-4o, experiments to Gemini — all from one TOML. Or stay fully local with Llama.",
     availability: "now",
     icon: (
       <Icon>

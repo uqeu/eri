@@ -7,12 +7,16 @@ const VIEW_TYPE = "eri.composer";
 class ComposerView {
     context;
     getSidecar;
+    atMentions;
     panel = null;
     pendingPlan = null;
     currentChanges = [];
-    constructor(context, getSidecar) {
+    chips = [];
+    chipCounter = 0;
+    constructor(context, getSidecar, atMentions) {
         this.context = context;
         this.getSidecar = getSidecar;
+        this.atMentions = atMentions;
     }
     open() {
         if (this.panel) {
@@ -31,9 +35,13 @@ class ComposerView {
         this.panel.onDidDispose(() => {
             this.panel = null;
             this.currentChanges = [];
+            this.chips = [];
             this.pendingPlan = null;
+            this.atMentions.setComposerSink(null);
         });
+        this.atMentions.setComposerSink((chip) => this.appendChip(chip));
         this.postFocus();
+        this.postChips();
     }
     postFromSidecar(notification) {
         if (!this.panel) {
@@ -70,6 +78,30 @@ class ComposerView {
             params: {},
         });
     }
+    postChips() {
+        this.panel?.webview.postMessage({
+            method: "eri/composer/chips",
+            params: {
+                chips: this.chips.map((chip) => ({
+                    chipId: chip.chipId,
+                    kind: chip.kind,
+                    token: tokenForKind(chip.kind),
+                    label: chip.label,
+                    subtitle: chip.subtitle,
+                })),
+            },
+        });
+    }
+    appendChip(chip) {
+        this.chipCounter += 1;
+        const chipId = `chip-${this.chipCounter}`;
+        this.chips.push({ ...chip, chipId });
+        this.postChips();
+    }
+    removeChip(chipId) {
+        this.chips = this.chips.filter((entry) => entry.chipId !== chipId);
+        this.postChips();
+    }
     readDefaultModel() {
         const fromConfig = vscode.workspace
             .getConfiguration("eri")
@@ -83,7 +115,7 @@ class ComposerView {
         }
         switch (message.method) {
             case "eri/composer/plan/request":
-                this.handlePlanRequest(message.params);
+                void this.handlePlanRequest(message.params);
                 break;
             case "eri/composer/apply":
                 this.handleApply(message.params);
@@ -94,6 +126,12 @@ class ComposerView {
             case "eri/composer/close":
                 this.panel?.dispose();
                 break;
+            case "eri/composer/mention/open":
+                void this.handlePickMention(message.params);
+                break;
+            case "eri/composer/chip/remove":
+                this.handleRemoveChip(message.params);
+                break;
             case "eri/model/cycle":
                 this.getSidecar()?.notify("eri/model/cycle", {});
                 break;
@@ -102,7 +140,18 @@ class ComposerView {
                 break;
         }
     }
-    handlePlanRequest(params) {
+    async handlePickMention(params) {
+        const rawKind = params?.kind;
+        const kind = typeof rawKind === "string" ? rawKind : undefined;
+        await this.atMentions.pick(kind);
+    }
+    handleRemoveChip(params) {
+        const chipId = params?.chipId;
+        if (typeof chipId === "string" && chipId.length > 0) {
+            this.removeChip(chipId);
+        }
+    }
+    async handlePlanRequest(params) {
         const prompt = params?.prompt ?? "";
         if (prompt.trim().length === 0) {
             this.postError("empty prompt");
@@ -120,8 +169,12 @@ class ComposerView {
             return;
         }
         const files = this.collectWorkspaceFiles();
+        const assembled = await this.atMentions.assemble(this.chips, prompt);
         this.pendingPlan = sidecar
-            .request("eri/composer/plan", { prompt, files })
+            .request("eri/composer/plan", {
+            prompt: assembled,
+            files,
+        })
             .then((response) => {
             const changes = Array.isArray(response?.changes)
                 ? response.changes
@@ -188,4 +241,20 @@ class ComposerView {
     }
 }
 exports.ComposerView = ComposerView;
+function tokenForKind(kind) {
+    switch (kind) {
+        case "file": return "@File";
+        case "folder": return "@Folder";
+        case "code": return "@Code";
+        case "docs": return "@Docs";
+        case "web": return "@Web";
+        case "codebase": return "@Codebase";
+        case "git": return "@Git";
+        case "pastChats": return "@PastChats";
+        case "recentChanges": return "@RecentChanges";
+        case "linterErrors": return "@LinterErrors";
+        case "definitions": return "@Definitions";
+        default: return "@Mention";
+    }
+}
 //# sourceMappingURL=composerView.js.map

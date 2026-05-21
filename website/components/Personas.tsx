@@ -13,7 +13,7 @@ const PERSONAS: ReadonlyArray<Persona> = [
   {
     glyph: "◇",
     title: "Solo SaaS",
-    body: "Run your whole stack from one window. The eri Engine diffuses the small edits, Opus handles the long refactors, cloud agents grind the migrations while you sleep.",
+    body: "Run your whole stack from one window. Eri's engine diffuses the small edits, Opus handles the long refactors, cloud agents grind the migrations while you sleep.",
   },
   {
     glyph: "◈",

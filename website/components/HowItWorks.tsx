@@ -27,7 +27,7 @@ const STEPS: ReadonlyArray<Step> = [
   {
     number: "02",
     title: "Diffuse it",
-    body: "The eri Engine denoises the whole diff in parallel. Eri stages the change, runs the type check, and applies it before your eyes finish moving.",
+    body: "Eri's engine denoises the whole diff in parallel. Eri stages the change, runs the type check, and applies it before your eyes finish moving.",
     detail: "median 1.8s · whole-file diff",
     window: [0.33, 0.7],
   },

@@ -28,19 +28,19 @@ interface PillarItem {
 
 const PILLARS: ReadonlyArray<PillarItem> = [
   {
-    tag: "Voice",
+    tag: "Voice — on device",
     title: "Build at the speed of speech",
-    body: "A local Whisper sidecar transcribes you in the same room your code lives in. No round-trip, no consent screens, no waiting.",
+    body: "A local Whisper sidecar transcribes you in the same room your code lives in. Audio never leaves the machine. No consent screens, no upstream upload, no waiting.",
   },
   {
-    tag: "Diffusion",
+    tag: "Diffusion preview",
     title: "See the diff before it's written",
-    body: "The eri Engine denoises a working patch while you finish your sentence. Watch the preview resolve instead of staring at a streaming cursor.",
+    body: "Eri's engine denoises a working patch while you finish your sentence. Watch the preview resolve instead of staring at a streaming cursor.",
   },
   {
-    tag: "Gaze",
+    tag: "Gaze — on device",
     title: "Look at what you mean",
-    body: "An optional eye tracker tells eri where on screen you're pointing. “move that button up” stops being a guessing game.",
+    body: "An optional MediaPipe gaze layer tells eri where on screen you're pointing. \"Move that button up\" stops being a guessing game — and the camera frame never leaves your laptop.",
   },
 ];
 
@@ -112,9 +112,7 @@ export function Hero(): React.ReactElement {
           className="mt-8 mx-auto max-w-2xl text-center text-body text-paper/65 animate-fade-up"
           style={{ animationDelay: "0.25s", opacity: 0 }}
         >
-          A voice-driven, diffusion-native editor that reads the room — knows
-          what you mean, anticipates the next change, and resolves the diff
-          while you finish the sentence. No friction between intent and code.
+          Voice, gaze, and diffusion edits in one local-first editor. Voice transcription and gaze tracking run on your machine; model calls go to the provider you choose with the key you hold.
         </p>
 
         <div
@@ -141,7 +139,7 @@ export function Hero(): React.ReactElement {
           className="mt-5 text-center text-[12px] text-paper/40 font-mono animate-fade-up"
           style={{ animationDelay: "0.45s", opacity: 0 }}
         >
-          Forked from VSCodium · Your keys · Your machine · Free in beta
+          Forked from VSCodium · BYOK in OS Keychain · Voice + gaze on-device · Free in beta
         </p>
 
         <div
@@ -202,12 +200,12 @@ function PillarGrid(): React.ReactElement {
   return (
     <div>
       <div className="flex flex-col items-center text-center mb-12">
-        <p className="mono-cap text-accent">What Cursor can't do</p>
+        <p className="mono-cap text-accent">The wedge</p>
         <h2
           className="mt-4 font-display text-h2 text-balance"
           style={{ fontWeight: 400 }}
         >
-          Three differentiators baked into the editor.
+          Three things that only work on your machine.
         </h2>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
