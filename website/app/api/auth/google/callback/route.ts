@@ -143,7 +143,12 @@ export async function GET(request: Request): Promise<NextResponse> {
   let upserted: UpsertResult;
   try {
     upserted = await upsertGoogleUser(userInfo, email);
-  } catch {
+  } catch (error) {
+    console.error("google oauth db_error", {
+      email,
+      sub: userInfo.id,
+      error: error instanceof Error ? { message: error.message, stack: error.stack } : error,
+    });
     return errorRedirect(request, "db_error");
   }
 
