@@ -1,0 +1,32 @@
+[package]
+name = "eri_auth"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+license = "LicenseRef-Proprietary"
+
+[lints]
+workspace = true
+
+[lib]
+path = "src/eri_auth.rs"
+
+[features]
+default = []
+# Enables an in-memory refresh-token store used by tests and CI environments
+# that don't have an OS keychain (Linux GHA runners, sandboxed builders).
+test-support = []
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+ureq.workspace = true
+keyring = { version = "3", default-features = false, features = [
+    "apple-native",
+    "windows-native",
+    "linux-native",
+] }
+
+[dev-dependencies]
+eri_auth = { path = ".", features = ["test-support"] }

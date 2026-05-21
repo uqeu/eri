@@ -1,0 +1,50 @@
+Change workbench default values to land at a Cursor-like layout out of the box.
+
+Covers RESKIN_PUNCH_LIST.md §2:
+
+  - `workbench.activityBar.location` default: `default` -> `top`
+    (horizontal activity bar across top of side bar).
+  - `workbench.secondarySideBar.defaultVisibility` default:
+    `visibleInWorkspace` -> `visible` (right AI auxiliary bar always
+    visible by default).
+  - `workbench.colorTheme` dark default: `Dark 2026` -> `Eri Dark`
+    (theme registered by eri-02-default-theme.patch).
+
+`window.titleBarStyle` and `window.customTitleBarVisibility` defaults
+already match the spec (`custom` / `auto`) in
+`src/vs/workbench/electron-browser/desktop.contribution.ts`, so no
+change is needed for those keys.
+
+diff --git a/src/vs/workbench/browser/workbench.contribution.ts b/src/vs/workbench/browser/workbench.contribution.ts
+--- a/src/vs/workbench/browser/workbench.contribution.ts
++++ b/src/vs/workbench/browser/workbench.contribution.ts
+@@ -587,7 +587,7 @@
+ 			'workbench.secondarySideBar.defaultVisibility': {
+ 				'type': 'string',
+ 				'enum': ['hidden', 'visibleInWorkspace', 'visible', 'maximizedInWorkspace', 'maximized'],
+-				'default': 'visibleInWorkspace',
++				'default': 'visible',
+ 				'description': localize('secondarySideBarDefaultVisibility', "Controls the default visibility of the secondary side bar in workspaces or empty windows that are opened for the first time. Can be overridden by the agent sessions startup editor setting."),
+ 				'enumDescriptions': [
+ 					localize('workbench.secondarySideBar.defaultVisibility.hidden', "The secondary side bar is hidden by default."),
+@@ -636,7 +636,7 @@
+ 			[LayoutSettings.ACTIVITY_BAR_LOCATION]: {
+ 				'type': 'string',
+ 				'enum': ['default', 'top', 'bottom', 'hidden'],
+-				'default': 'default',
++				'default': 'top',
+ 				'markdownDescription': localize({ comment: ['This is the description for a setting'], key: 'activityBarLocation' }, "Controls the location of the Activity Bar relative to the Primary and Secondary Side Bars."),
+ 				'enumDescriptions': [
+ 					localize('workbench.activityBar.location.default', "Show the Activity Bar on the side of the Primary Side Bar and on top of the Secondary Side Bar."),
+diff --git a/src/vs/workbench/services/themes/common/workbenchThemeService.ts b/src/vs/workbench/services/themes/common/workbenchThemeService.ts
+--- a/src/vs/workbench/services/themes/common/workbenchThemeService.ts
++++ b/src/vs/workbench/services/themes/common/workbenchThemeService.ts
+@@ -39,7 +39,7 @@
+ }
+
+ export namespace ThemeSettingDefaults {
+-	export const COLOR_THEME_DARK = 'Dark 2026';
++	export const COLOR_THEME_DARK = 'Eri Dark';
+ 	export const COLOR_THEME_LIGHT = 'Light 2026';
+ 	export const COLOR_THEME_HC_DARK = 'Default High Contrast';
+ 	export const COLOR_THEME_HC_LIGHT = 'Default High Contrast Light';

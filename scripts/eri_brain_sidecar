@@ -1,0 +1,56 @@
+#!/usr/bin/env zsh
+# eri brain sidecar wrapper.
+#
+# Auto-picks between the mlx (Apple Silicon, default) and lite/CPU paths:
+#
+#   1. If $ERI_TIER == "lite", or $ERI_BRAIN_BACKEND == "light", use the
+#      llama-cpp-python sidecar against the .venv-lite venv.
+#   2. Else if .venv-brain exists AND mlx_lm imports AND arch is arm64,
+#      use the mlx sidecar (the original path).
+#   3. Else fall back to the lite sidecar if .venv-lite exists.
+#   4. Else emit a structured error telling the user which setup script to run.
+#
+# All sidecars accept the same flags (`--run --port N`) and emit the same
+# JSON-line stdout format, so the Rust supervisor doesn't need to care which
+# backend won.
+set -euo pipefail
+
+ROOT_DIR="${0:A:h}/.."
+BRAIN_VENV="$ROOT_DIR/.venv-brain"
+LITE_VENV="$ROOT_DIR/.venv-lite"
+MLX_SIDECAR="$ROOT_DIR/script/eri_brain_sidecar.py"
+LITE_SIDECAR="$ROOT_DIR/script/eri_brain_sidecar_light.py"
+
+want_lite=0
+if [[ "${ERI_TIER:-}" == "lite" ]] || [[ "${ERI_BRAIN_BACKEND:-}" == "light" ]]; then
+  want_lite=1
+fi
+
+arch="$(uname -m 2>/dev/null || echo unknown)"
+case "$arch" in
+  arm64|aarch64) arch="arm64" ;;
+  *)             arch="x86_64" ;;
+esac
+
+mlx_ok=0
+if [[ "$want_lite" -eq 0 && "$arch" == "arm64" && -x "$BRAIN_VENV/bin/python" && -f "$MLX_SIDECAR" ]]; then
+  if "$BRAIN_VENV/bin/python" -c 'import mlx_lm' >/dev/null 2>&1; then
+    mlx_ok=1
+  fi
+fi
+
+if [[ "$mlx_ok" -eq 1 ]]; then
+  exec "$BRAIN_VENV/bin/python" "$MLX_SIDECAR" "$@"
+fi
+
+if [[ -x "$LITE_VENV/bin/python" && -f "$LITE_SIDECAR" ]]; then
+  exec "$LITE_VENV/bin/python" "$LITE_SIDECAR" "$@"
+fi
+
+# Last resort — give the user a precise next step.
+if [[ "$arch" == "arm64" ]]; then
+  printf '%s\n' '{"type":"error","message":"no brain backend available. Run: script/eri_brain_setup  (mlx, default)  OR  script/eri_lite_setup  (CPU, any laptop)"}' >&2
+else
+  printf '%s\n' '{"type":"error","message":"no brain backend available on this CPU. Run: script/eri_lite_setup"}' >&2
+fi
+exit 127

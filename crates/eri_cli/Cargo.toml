@@ -1,0 +1,19 @@
+[package]
+name = "eri_cli"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+license = "LicenseRef-Proprietary"
+description = "Headless CLI for eri — one-shot Mercury 2 builds, surgical iterations, template scaffolds, and Vercel deploys without launching the IDE GUI."
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "eri"
+path = "src/eri_cli.rs"
+
+[dependencies]
+clap.workspace = true
+eri_core.workspace = true
+eri_inference.workspace = true

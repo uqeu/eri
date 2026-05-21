@@ -1,0 +1,17 @@
+[package]
+name = "eri_coreutils"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "eri-coreutils"
+path = "src/eri_coreutils.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "io-std", "io-util", "sync", "signal"] }
+tracing = { workspace = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

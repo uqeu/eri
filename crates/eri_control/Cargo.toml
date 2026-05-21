@@ -1,0 +1,19 @@
+[package]
+name = "eri_control"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+license = "LicenseRef-Proprietary"
+
+[lints]
+workspace = true
+
+[lib]
+path = "src/eri_control.rs"
+
+[dependencies]
+anyhow.workspace = true
+eri_core.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

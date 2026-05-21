@@ -1,0 +1,16 @@
+[package]
+name = "eri_core"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+license = "LicenseRef-Proprietary"
+
+[lints]
+workspace = true
+
+[lib]
+path = "src/eri_core.rs"
+
+[dependencies]
+serde.workspace = true
+thiserror.workspace = true

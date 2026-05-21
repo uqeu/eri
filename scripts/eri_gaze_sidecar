@@ -1,0 +1,21 @@
+#!/usr/bin/env zsh
+set -euo pipefail
+
+ROOT_DIR="${0:A:h}/.."
+
+EYEGESTURES_PY="$ROOT_DIR/.venv-eyegestures/bin/python"
+EYEGESTURES_SCRIPT="$ROOT_DIR/script/eri_gaze_eyegestures.py"
+
+if [[ -x "$EYEGESTURES_PY" && -f "$EYEGESTURES_SCRIPT" ]]; then
+  exec "$EYEGESTURES_PY" "$EYEGESTURES_SCRIPT" "$@"
+fi
+
+LEGACY_PY="$ROOT_DIR/.venv-gaze/bin/python"
+LEGACY_SCRIPT="$ROOT_DIR/script/eri_gaze_mediapipe.py"
+
+if [[ -x "$LEGACY_PY" && -f "$LEGACY_SCRIPT" ]]; then
+  printf '%s\n' '{"type":"status","message":"Using legacy MediaPipe gaze (run script/eri_gaze_setup for calibrated EyeGestures)."}'
+  exec "$LEGACY_PY" "$LEGACY_SCRIPT" "$@"
+fi
+
+exec /usr/bin/env swift "$ROOT_DIR/script/eri_gaze_vision.swift" "$@"

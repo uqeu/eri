@@ -1,0 +1,71 @@
+#!/usr/bin/env zsh
+# Bootstrap the local brain sidecar venv for eri.
+#
+# By default this installs the mlx Llama-3.2-1B-Instruct-4bit path (Apple
+# Silicon, the original behavior). Pass `--light` to install the CPU-only
+# llama-cpp-python path against `.venv-lite/` instead, downloading
+# SmolLM2-360M-Instruct GGUF (~210 MB).
+#
+# Idempotent: re-running just refreshes deps.
+set -euo pipefail
+
+ROOT_DIR="${0:A:h}/.."
+UV_CACHE="$ROOT_DIR/.uv-cache"
+
+if ! command -v uv >/dev/null 2>&1; then
+  echo "uv is required (https://docs.astral.sh/uv). Install with: brew install uv"
+  exit 1
+fi
+
+mkdir -p "$UV_CACHE"
+
+mode="default"
+for arg in "$@"; do
+  case "$arg" in
+    --light) mode="light" ;;
+    --default) mode="default" ;;
+    -h|--help)
+      cat <<EOF
+Usage: script/eri_brain_setup [--light]
+
+  (no flag)    install mlx Llama-3.2-1B-Instruct-4bit into .venv-brain  (Apple Silicon, default)
+  --light      install llama-cpp-python + SmolLM2-360M-Instruct GGUF into .venv-lite (any CPU)
+EOF
+      exit 0
+      ;;
+    *)
+      echo "Unknown flag: $arg" >&2
+      exit 2
+      ;;
+  esac
+done
+
+if [[ "$mode" == "light" ]]; then
+  # Defer to the full lite installer — it also primes the vision and embed
+  # models. We do not want to duplicate that logic here; a one-stop install
+  # is friendlier than three half-finished venvs.
+  echo "Delegating to script/eri_lite_setup for the CPU/lite path."
+  exec "$ROOT_DIR/script/eri_lite_setup"
+fi
+
+VENV_DIR="$ROOT_DIR/.venv-brain"
+
+if [[ ! -d "$VENV_DIR" ]]; then
+  echo "Creating brain venv at $VENV_DIR"
+  uv --cache-dir "$UV_CACHE" venv --python 3.11 "$VENV_DIR"
+fi
+
+echo "Installing brain deps (mlx-lm)"
+uv --cache-dir "$UV_CACHE" pip install \
+  --python "$VENV_DIR/bin/python" \
+  --upgrade \
+  mlx-lm
+
+echo "Pre-warming Llama-3.2-1B-Instruct-4bit (downloads ~700MB on first run)."
+"$VENV_DIR/bin/python" - <<'PY'
+from mlx_lm import load
+model, tokenizer = load("mlx-community/Llama-3.2-1B-Instruct-4bit")
+print("Llama-3.2-1B-Instruct-4bit initialized.")
+PY
+
+echo "Brain environment ready. Run: script/eri_brain_sidecar --run"

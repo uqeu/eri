@@ -1,0 +1,37 @@
+{
+	"name": "font-size",
+	"description": "",
+	"version": "1.0.0",
+	"author": {
+		"name": "Baptiste Augrain",
+		"email": "daiyam@zokugun.org"
+	},
+	"license": "MIT",
+	"type": "module",
+	"main": "generate-css.ts",
+	"scripts": {
+		"audit:fix": "npm audit fix --min-release-age=0",
+		"ci:lint": "zizmor .",
+		"ci:lint:fix": "zizmor . --fix=all",
+		"lint": "xo",
+		"lint:all": "fixpack && npm audit && npm run ci:lint && npm run lint",
+		"lint:fix": "xo --fix",
+		"prepare": "fixpack || true",
+		"update:artifacts": "artifact update",
+		"update:deps": "taze"
+	},
+	"dependencies": {
+		"@zokugun/fs-extra-plus": "0.3.8",
+		"@zokugun/xtry": "0.10.1",
+		"fast-glob": "3.3.3",
+		"postcss": "8.5.10"
+	},
+	"devDependencies": {
+		"@types/node": "22.19.17",
+		"fixpack": "4.0.0",
+		"taze": "19.11.0",
+		"typescript": "5.9.3",
+		"xo": "0.60.0"
+	},
+	"keywords": []
+}

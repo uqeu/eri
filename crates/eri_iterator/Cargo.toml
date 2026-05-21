@@ -1,0 +1,21 @@
+[package]
+name = "eri_iterator"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+license = "LicenseRef-Proprietary"
+
+[lints]
+workspace = true
+
+[lib]
+path = "src/eri_iterator.rs"
+
+[dependencies]
+anyhow.workspace = true
+eri_core.workspace = true
+eri_inference.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

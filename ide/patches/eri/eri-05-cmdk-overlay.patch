@@ -1,0 +1,386 @@
+diff --git a/src/vs/editor/editor.all.ts b/src/vs/editor/editor.all.ts
+--- a/src/vs/editor/editor.all.ts
++++ b/src/vs/editor/editor.all.ts
+@@ -19,6 +19,7 @@ import './contrib/cursorUndo/browser/cursorUndo.js';
+ import './contrib/dnd/browser/dnd.js';
+ import './contrib/dropOrPasteInto/browser/copyPasteContribution.js';
+ import './contrib/dropOrPasteInto/browser/dropIntoEditorContribution.js';
++import './contrib/eriInlineEdit/browser/eriInlineEdit.contribution.js';
+ import './contrib/find/browser/findController.js';
+ import './contrib/folding/browser/folding.js';
+ import './contrib/fontZoom/browser/fontZoom.js';
+diff --git a/src/vs/editor/contrib/eriInlineEdit/browser/eriInlineEdit.contribution.ts b/src/vs/editor/contrib/eriInlineEdit/browser/eriInlineEdit.contribution.ts
+new file mode 100644
+--- /dev/null
++++ b/src/vs/editor/contrib/eriInlineEdit/browser/eriInlineEdit.contribution.ts
+@@ -0,0 +1,137 @@
++/*---------------------------------------------------------------------------------------------
++ *  Copyright (c) eri. All rights reserved.
++ *  Licensed under the MIT License. See License.txt in the project root for license information.
++ *--------------------------------------------------------------------------------------------*/
++
++import { KeyCode, KeyMod } from '../../../../base/common/keyCodes.js';
++import { DisposableStore, IDisposable } from '../../../../base/common/lifecycle.js';
++import { localize, localize2 } from '../../../../nls.js';
++import { ContextKeyExpr, IContextKey, IContextKeyService, RawContextKey } from '../../../../platform/contextkey/common/contextkey.js';
++import { KeybindingWeight } from '../../../../platform/keybinding/common/keybindingsRegistry.js';
++import { ICodeEditor } from '../../../browser/editorBrowser.js';
++import {
++	EditorAction,
++	EditorContributionInstantiation,
++	ServicesAccessor,
++	registerEditorAction,
++	registerEditorContribution,
++} from '../../../browser/editorExtensions.js';
++import { IEditorContribution } from '../../../common/editorCommon.js';
++import { EditorContextKeys } from '../../../common/editorContextKeys.js';
++import { EriInlineEditWidget } from './eriInlineEditWidget.js';
++
++export const EriInlineEditVisible = new RawContextKey<boolean>('eriInlineEditVisible', false, localize('eriInlineEditVisible', "Whether the eri inline edit widget is visible"));
++
++export class EriInlineEditController implements IEditorContribution {
++
++	public static readonly ID = 'editor.contrib.eriInlineEdit';
++
++	static get(editor: ICodeEditor): EriInlineEditController | null {
++		return editor.getContribution<EriInlineEditController>(EriInlineEditController.ID);
++	}
++
++	private readonly _disposables = new DisposableStore();
++	private readonly _visibleContextKey: IContextKey<boolean>;
++	private _widget: EriInlineEditWidget | undefined;
++	private _widgetListener: IDisposable | undefined;
++
++	constructor(
++		private readonly _editor: ICodeEditor,
++		@IContextKeyService contextKeyService: IContextKeyService,
++	) {
++		this._visibleContextKey = EriInlineEditVisible.bindTo(contextKeyService);
++		this._disposables.add(this._editor.onDidChangeModel(() => this.hide()));
++	}
++
++	dispose(): void {
++		this.hide();
++		this._disposables.dispose();
++	}
++
++	show(): void {
++		if (!this._editor.hasModel()) {
++			return;
++		}
++		const position = this._editor.getPosition();
++		if (!position) {
++			return;
++		}
++
++		if (this._widget) {
++			this._widget.dispose();
++			this._widget = undefined;
++		}
++
++		const widget = new EriInlineEditWidget(this._editor, {
++			onAccept: (prompt) => {
++				// Stub: the bundled eri-ai-panel extension overrides this via the
++				// `eri.inlineEdit` command. Log so the chrome is verifiable standalone.
++				console.log('[eri] inline edit prompt:', prompt);
++				this.hide();
++			},
++			onCancel: () => this.hide(),
++		});
++		widget.create();
++		widget.show(position, 3);
++		widget.focus();
++
++		this._widget = widget;
++		this._widgetListener = widget.onDidClose(() => this.hide());
++		this._visibleContextKey.set(true);
++	}
++
++	hide(): void {
++		this._widgetListener?.dispose();
++		this._widgetListener = undefined;
++		if (this._widget) {
++			this._widget.dispose();
++			this._widget = undefined;
++		}
++		this._visibleContextKey.reset();
++		this._editor.focus();
++	}
++}
++
++class EriInlineEditAction extends EditorAction {
++	constructor() {
++		super({
++			id: 'eri.inlineEdit',
++			label: localize2('eri.inlineEdit', "eri: Inline Edit"),
++			alias: 'eri: Inline Edit',
++			precondition: EditorContextKeys.writable,
++			kbOpts: {
++				kbExpr: EditorContextKeys.editorTextFocus,
++				primary: KeyMod.CtrlCmd | KeyCode.KeyK,
++				weight: KeybindingWeight.EditorContrib,
++			},
++		});
++	}
++
++	override run(_accessor: ServicesAccessor, editor: ICodeEditor): void {
++		EriInlineEditController.get(editor)?.show();
++	}
++}
++
++class EriInlineEditCancelAction extends EditorAction {
++	constructor() {
++		super({
++			id: 'eri.inlineEdit.cancel',
++			label: localize2('eri.inlineEdit.cancel', "eri: Cancel Inline Edit"),
++			alias: 'eri: Cancel Inline Edit',
++			precondition: ContextKeyExpr.and(EriInlineEditVisible),
++			kbOpts: {
++				kbExpr: ContextKeyExpr.and(EriInlineEditVisible),
++				primary: KeyCode.Escape,
++				weight: KeybindingWeight.EditorContrib + 10,
++			},
++		});
++	}
++
++	override run(_accessor: ServicesAccessor, editor: ICodeEditor): void {
++		EriInlineEditController.get(editor)?.hide();
++	}
++}
++
++registerEditorContribution(EriInlineEditController.ID, EriInlineEditController, EditorContributionInstantiation.Lazy);
++registerEditorAction(EriInlineEditAction);
++registerEditorAction(EriInlineEditCancelAction);
+diff --git a/src/vs/editor/contrib/eriInlineEdit/browser/eriInlineEditWidget.ts b/src/vs/editor/contrib/eriInlineEdit/browser/eriInlineEditWidget.ts
+new file mode 100644
+--- /dev/null
++++ b/src/vs/editor/contrib/eriInlineEdit/browser/eriInlineEditWidget.ts
+@@ -0,0 +1,125 @@
++/*---------------------------------------------------------------------------------------------
++ *  Copyright (c) eri. All rights reserved.
++ *  Licensed under the MIT License. See License.txt in the project root for license information.
++ *--------------------------------------------------------------------------------------------*/
++
++import * as dom from '../../../../base/browser/dom.js';
++import { Emitter, Event } from '../../../../base/common/event.js';
++import { KeyCode } from '../../../../base/common/keyCodes.js';
++import { localize } from '../../../../nls.js';
++import { ICodeEditor } from '../../../browser/editorBrowser.js';
++import { ZoneWidget } from '../../zoneWidget/browser/zoneWidget.js';
++import './media/eriInlineEdit.css';
++
++export interface IEriInlineEditWidgetCallbacks {
++	onAccept: (prompt: string) => void;
++	onCancel: () => void;
++}
++
++const ROOT_CLASS = 'eri-inline-edit-widget';
++const MIN_WIDTH = 560;
++
++/**
++ * Cursor-style Cmd-K inline edit overlay. A ZoneWidget inserted at the cursor row.
++ * This patch supplies the chrome only — the bundled `eri-ai-panel` extension
++ * overrides `eri.inlineEdit` with the real model invocation.
++ */
++export class EriInlineEditWidget extends ZoneWidget {
++
++	private readonly _onDidClose = new Emitter<void>();
++	readonly onDidClose: Event<void> = this._onDidClose.event;
++
++	private readonly _callbacks: IEriInlineEditWidgetCallbacks;
++
++	private _input: HTMLInputElement | undefined;
++	private _modelPill: HTMLElement | undefined;
++
++	constructor(editor: ICodeEditor, callbacks: IEriInlineEditWidgetCallbacks) {
++		super(editor, {
++			showArrow: false,
++			showFrame: false,
++			isAccessible: true,
++			keepEditorSelection: true,
++			className: ROOT_CLASS,
++			ordinal: 10000,
++		});
++		this._callbacks = callbacks;
++		this._disposables.add(this._onDidClose);
++	}
++
++	protected _fillContainer(container: HTMLElement): void {
++		container.classList.add(`${ROOT_CLASS}-container`);
++		container.style.minWidth = `${MIN_WIDTH}px`;
++
++		const shell = dom.append(container, dom.$(`.${ROOT_CLASS}-shell`));
++
++		const row = dom.append(shell, dom.$(`.${ROOT_CLASS}-row`));
++
++		const input = document.createElement('input');
++		input.type = 'text';
++		input.spellcheck = false;
++		input.className = `${ROOT_CLASS}-input`;
++		input.placeholder = localize('eriInlineEdit.placeholder', "Edit selection — describe the change…");
++		input.setAttribute('aria-label', localize('eriInlineEdit.ariaLabel', "Inline edit prompt"));
++		row.appendChild(input);
++		this._input = input;
++
++		const pill = document.createElement('div');
++		pill.className = `${ROOT_CLASS}-model-pill`;
++		pill.textContent = 'mercury-coder';
++		pill.title = localize('eriInlineEdit.modelTitle', "Active model");
++		row.appendChild(pill);
++		this._modelPill = pill;
++
++		const footer = dom.append(shell, dom.$(`.${ROOT_CLASS}-footer`));
++
++		const hintEnter = dom.append(footer, dom.$(`span.${ROOT_CLASS}-hint`));
++		const enterKey = dom.append(hintEnter, dom.$(`kbd.${ROOT_CLASS}-kbd`));
++		enterKey.textContent = '⏎';
++		const enterLabel = dom.append(hintEnter, dom.$('span'));
++		enterLabel.textContent = ' ' + localize('eriInlineEdit.submit', "submit");
++
++		const hintEsc = dom.append(footer, dom.$(`span.${ROOT_CLASS}-hint`));
++		const escKey = dom.append(hintEsc, dom.$(`kbd.${ROOT_CLASS}-kbd`));
++		escKey.textContent = 'esc';
++		const escLabel = dom.append(hintEsc, dom.$('span'));
++		escLabel.textContent = ' ' + localize('eriInlineEdit.dismiss', "dismiss");
++
++		this._disposables.add(dom.addStandardDisposableListener(input, 'keydown', (e) => {
++			if (e.equals(KeyCode.Enter)) {
++				e.preventDefault();
++				e.stopPropagation();
++				const value = input.value.trim();
++				if (value.length === 0) {
++					return;
++				}
++				this._callbacks.onAccept(value);
++			} else if (e.equals(KeyCode.Escape)) {
++				e.preventDefault();
++				e.stopPropagation();
++				this._callbacks.onCancel();
++				this._onDidClose.fire();
++			}
++		}));
++
++		this._disposables.add(dom.addDisposableListener(container, 'mousedown', (e) => {
++			// Prevent the click from blurring out of the widget.
++			e.stopPropagation();
++		}));
++	}
++
++	focus(): void {
++		this._input?.focus();
++	}
++
++	setModelLabel(label: string): void {
++		if (this._modelPill) {
++			this._modelPill.textContent = label;
++		}
++	}
++
++	override dispose(): void {
++		this._onDidClose.fire();
++		super.dispose();
++	}
++}
+diff --git a/src/vs/editor/contrib/eriInlineEdit/browser/media/eriInlineEdit.css b/src/vs/editor/contrib/eriInlineEdit/browser/media/eriInlineEdit.css
+new file mode 100644
+--- /dev/null
++++ b/src/vs/editor/contrib/eriInlineEdit/browser/media/eriInlineEdit.css
+@@ -0,0 +1,98 @@
++/*---------------------------------------------------------------------------------------------
++ *  Copyright (c) eri. All rights reserved.
++ *  Licensed under the MIT License. See License.txt in the project root for license information.
++ *--------------------------------------------------------------------------------------------*/
++
++.monaco-editor .zone-widget.eri-inline-edit-widget {
++	z-index: 10;
++}
++
++.monaco-editor .eri-inline-edit-widget-container {
++	background: transparent;
++	border: none;
++	padding: 6px 8px 8px 8px;
++	box-sizing: border-box;
++}
++
++.monaco-editor .eri-inline-edit-widget-shell {
++	display: flex;
++	flex-direction: column;
++	background: #1d1d1d;
++	border: 1px solid #383838;
++	border-radius: 6px;
++	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
++	overflow: hidden;
++}
++
++.monaco-editor .eri-inline-edit-widget-row {
++	display: flex;
++	align-items: center;
++	gap: 8px;
++	padding: 6px 10px;
++	min-height: 32px;
++}
++
++.monaco-editor .eri-inline-edit-widget-input {
++	flex: 1 1 auto;
++	background: transparent;
++	border: none;
++	outline: none;
++	color: var(--vscode-input-foreground, #d6d6dd);
++	font-family: var(--vscode-font-family);
++	font-size: 13px;
++	line-height: 18px;
++	padding: 2px 0;
++}
++
++.monaco-editor .eri-inline-edit-widget-input::placeholder {
++	color: var(--vscode-input-placeholderForeground, #8a8a8a);
++}
++
++.monaco-editor .eri-inline-edit-widget-model-pill {
++	flex: 0 0 auto;
++	display: inline-flex;
++	align-items: center;
++	background: #232323;
++	color: var(--vscode-descriptionForeground, #9a9a9a);
++	border: 1px solid #2e2e2e;
++	border-radius: 9999px;
++	padding: 2px 8px;
++	font-family: var(--vscode-font-family);
++	font-size: 11px;
++	line-height: 14px;
++	user-select: none;
++	cursor: default;
++}
++
++.monaco-editor .eri-inline-edit-widget-footer {
++	display: flex;
++	gap: 14px;
++	padding: 4px 10px 6px 10px;
++	border-top: 1px solid #232323;
++	color: var(--vscode-descriptionForeground, #9a9a9a);
++	font-family: var(--vscode-font-family);
++	font-size: 11px;
++	line-height: 14px;
++}
++
++.monaco-editor .eri-inline-edit-widget-hint {
++	display: inline-flex;
++	align-items: center;
++	gap: 4px;
++}
++
++.monaco-editor .eri-inline-edit-widget-kbd {
++	display: inline-flex;
++	align-items: center;
++	justify-content: center;
++	min-width: 16px;
++	height: 16px;
++	padding: 0 4px;
++	background: #262626;
++	border: 1px solid #383838;
++	border-radius: 3px;
++	color: var(--vscode-descriptionForeground, #c0c0c0);
++	font-family: var(--vscode-font-family);
++	font-size: 10px;
++	line-height: 14px;
++}

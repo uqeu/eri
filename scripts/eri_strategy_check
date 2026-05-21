@@ -1,0 +1,193 @@
+#!/usr/bin/env zsh
+# eri strategy check — "hey, how do I make eri better than Cursor / Zed / Lovable
+# / v0 / Bolt, and is it the diffusion IDE Khai wants?"
+#
+# Runs every signal we have on the current state of eri and tells you (a) what's
+# shipped, (b) what's in flight, (c) what's broken, (d) what the next move
+# probably is. Use it before every session so you don't repeat work or miss
+# regressions.
+#
+# Usage:
+#   script/eri_strategy_check                 # full report
+#   script/eri_strategy_check --quick         # tests + build only
+#   script/eri_strategy_check --vision        # rebuild the YC pitch doc
+
+set -uo pipefail
+
+ROOT_DIR="${0:A:h}/.."
+cd "$ROOT_DIR"
+
+MODE="${1:-full}"
+
+# ---------- colours ----------
+if [[ -t 1 ]]; then
+  BOLD=$'\e[1m'; DIM=$'\e[2m'; OFF=$'\e[0m'
+  RED=$'\e[31m'; GRN=$'\e[32m'; YLW=$'\e[33m'; BLU=$'\e[34m'; CYN=$'\e[36m'
+else
+  BOLD=''; DIM=''; OFF=''; RED=''; GRN=''; YLW=''; BLU=''; CYN=''
+fi
+
+hdr() { print -P "\n${BOLD}${CYN}== $1 ==${OFF}"; }
+ok()  { print -P "${GRN}✓${OFF} $1"; }
+warn(){ print -P "${YLW}!${OFF} $1"; }
+bad() { print -P "${RED}✗${OFF} $1"; }
+note(){ print -P "${DIM}  $1${OFF}"; }
+
+# ---------- 1. shipped surface ----------
+hdr "what's shipped (crates)"
+for crate in crates/eri_core crates/eri_inference crates/eri_iterator \
+             crates/eri_ui crates/eri_voice crates/eri_telemetry \
+             crates/eri_git crates/eri_mcp crates/eri_preview; do
+  if [[ -d "$crate" ]]; then
+    loc=$(find "$crate/src" -name '*.rs' 2>/dev/null | xargs wc -l 2>/dev/null | tail -1 | awk '{print $1}')
+    ok "${crate##*/} (${loc:-?} loc)"
+  else
+    note "${crate##*/} not yet created"
+  fi
+done
+
+# ---------- 2. sidecars ----------
+hdr "sidecars + scripts"
+for s in script/eri_tts_sidecar script/eri_brain_sidecar \
+         script/eri_gaze_sidecar script/eri_record_sidecar \
+         script/eri_preview script/eri_mcp_test \
+         script/eri_vision_sidecar script/eri_embed_sidecar \
+         script/eri_hw_check script/eri_lite_setup; do
+  if [[ -x "$s" ]]; then
+    ok "${s##*/}"
+  elif [[ -f "$s" ]]; then
+    warn "${s##*/} present but not executable"
+  else
+    note "${s##*/} not yet created"
+  fi
+done
+
+# ---------- 2b. tier inventory ----------
+hdr "model tiers"
+if [[ -x "$ROOT_DIR/script/eri_hw_check" ]]; then
+  hwline="$($ROOT_DIR/script/eri_hw_check 2>/dev/null || echo 'tier=? arch=? ram_gb=? gpu=?')"
+  note "host: $hwline"
+fi
+if [[ -d "$ROOT_DIR/.venv-brain" ]]; then
+  if "$ROOT_DIR/.venv-brain/bin/python" -c 'import mlx_lm' >/dev/null 2>&1; then
+    ok "mlx tier installed (.venv-brain, Llama-3.2-1B-Instruct-4bit)"
+  else
+    warn ".venv-brain exists but mlx_lm not importable"
+  fi
+else
+  note "mlx tier not installed — run script/eri_brain_setup"
+fi
+if [[ -d "$ROOT_DIR/.venv-lite" ]]; then
+  lite_missing=""
+  for mod in llama_cpp transformers sentence_transformers; do
+    if ! "$ROOT_DIR/.venv-lite/bin/python" -c "import $mod" >/dev/null 2>&1; then
+      lite_missing+=" $mod"
+    fi
+  done
+  if [[ -z "$lite_missing" ]]; then
+    ok "lite tier installed (.venv-lite: SmolLM2 + SmolVLM + bge-small)"
+  else
+    warn "lite tier partial — missing:$lite_missing (run script/eri_lite_setup)"
+  fi
+else
+  note "lite tier not installed — run script/eri_lite_setup"
+fi
+
+# ---------- 3. compile health ----------
+if [[ "$MODE" != "--vision" ]]; then
+  hdr "compile health"
+  if cargo check --workspace --quiet 2>/tmp/eri_check.err; then
+    ok "cargo check --workspace clean"
+  else
+    bad "cargo check failed — see /tmp/eri_check.err"
+    grep -E '^(error|  --> )' /tmp/eri_check.err | head -10
+  fi
+fi
+
+# ---------- 4. tests ----------
+if [[ "$MODE" != "--vision" && "$MODE" != "--quick-build" ]]; then
+  hdr "test health"
+  if cargo test --workspace --quiet 2>/tmp/eri_test.err >/tmp/eri_test.out; then
+    passed=$(grep -c 'test result: ok' /tmp/eri_test.out || true)
+    ok "$passed test suites passing"
+  else
+    bad "tests failing — see /tmp/eri_test.err"
+    grep -E 'FAILED|failures:' /tmp/eri_test.err | head -10
+  fi
+fi
+
+# ---------- 5. integration markers (do we have the YC-grade pieces?) ----------
+hdr "YC-readiness checklist"
+check_feature() {
+  local label="$1"; shift
+  if grep -rq "$@" crates/ 2>/dev/null; then
+    ok "$label"
+  else
+    bad "$label not found"
+  fi
+}
+check_feature "Mercury 2 tool calling (edit_html)"  "edit_html_tool_spec"
+check_feature "Mercury Edit 2 apply path"           "iterate_apply_stream"
+check_feature "diffusing visualization"             "diffusing"
+check_feature "ElevenLabs TTS"                      "ELEVENLABS_API_KEY"
+if grep -q "Llama-3.2" script/eri_brain_sidecar.py 2>/dev/null; then
+  ok "Local SLM brain (mlx Llama)"
+else
+  bad "Local SLM brain (mlx Llama) not found"
+fi
+check_feature "Vercel deploy"                       "deploy_to_vercel"
+check_feature "Project persistence"                 "projects::ensure_project_dir"
+check_feature "Iteration scrubber"                  "render_iteration_scrubber"
+check_feature "Cost telemetry"                      "session_mercury_cost"
+check_feature "Sentry/Posthog telemetry"            "eri_telemetry"
+check_feature "Onboarding flow"                     "OnboardingState"
+check_feature "Auto-commit per iteration"           "commit_iteration"
+check_feature "Inline editor rewrites"              "rewrite_selection_stream"
+check_feature "Project templates"                   "match_template"
+check_feature "Demo recording"                      "start_recording"
+check_feature "MCP integration"                     "McpServerConfig"
+check_feature "Discord bot"                         "eri-discord"
+check_feature "Goose backend (2nd lane)"            "GooseCliBackend"
+check_feature "Cost guards (spending limits)"       "CostGuard"
+check_feature "Mobile/responsive preview"           "PreviewWidth"
+check_feature "Theme palettes (12 styles)"          "THEME_PALETTES"
+check_feature "Motion presets"                      "MOTION_PRESETS"
+check_feature "shadcn component hints"              "SHADCN_COMPONENT_HINTS"
+check_feature "Voice cloning wizard"                "CloneMyVoice"
+check_feature "SEO + a11y ship-it polish"           "SHIP_IT_SEO_RULES"
+check_feature "Public iteration timelines"          "publish_project_to_website"
+check_feature "One-shot CLI (eri build/iterate/ship)" "eri_cli"
+check_feature "Slack bot"                           "eri-slack"
+check_feature "Image generation (Replicate Flux)"   "eri_images"
+check_feature "Auth/DB/Stripe scaffolding"          "build_auth0_setup_prompt"
+
+# ---------- 6. what's next (signal from ERI_ROADMAP.md) ----------
+hdr "next move signal"
+if [[ -f ERI_ROADMAP.md ]]; then
+  print -P "${DIM}top 3 from ERI_ROADMAP.md:${OFF}"
+  grep -E '^- \[ \]' ERI_ROADMAP.md | head -3
+else
+  warn "ERI_ROADMAP.md missing — can't recommend next move"
+fi
+
+# ---------- 7. the brutal question ----------
+hdr "brutal questions you should ask before YC"
+print -P "${DIM}1. Can a non-technical user install eri and ship a working app in <5 min?${OFF}"
+print -P "${DIM}2. Does the 90-second demo work flawlessly on the first try, every try?${OFF}"
+print -P "${DIM}3. Is there a moment in the demo where the audience visibly sits up?${OFF}"
+print -P "${DIM}4. Can you name one thing eri does that Cursor literally cannot copy in a weekend?${OFF}"
+print -P "${DIM}5. If Mercury 2 disappears tomorrow, does eri still work?${OFF}"
+print -P "${DIM}6. Do you have 10 alpha users? Daily active? Paying?${OFF}"
+
+# ---------- 8. vision rebuild ----------
+if [[ "$MODE" == "--vision" ]]; then
+  hdr "vision rebuild"
+  if [[ -f ERI_VISION.md ]]; then
+    ok "ERI_VISION.md present — read it before iterating"
+    note "$(wc -w < ERI_VISION.md) words, $(wc -l < ERI_VISION.md) lines"
+  else
+    warn "ERI_VISION.md missing — run a strategy agent to regenerate"
+  fi
+fi
+
+print -P "\n${BOLD}${BLU}strategy check complete.${OFF} run again after each big change."

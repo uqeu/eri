@@ -1,0 +1,15 @@
+#!/usr/bin/env zsh
+# Quick smoke test for the local TTS sidecar.
+# Usage: script/test_tts ["text to speak"]
+set -euo pipefail
+
+TEXT="${1:-hello, this is eri}"
+VOICE="${ERI_TTS_VOICE:-gJx1vCzNCD1EQHT212Ls}"
+PORT="${ERI_TTS_PORT:-8766}"
+
+BODY=$(printf '{"text":"%s","voice":"%s"}' "$TEXT" "$VOICE")
+echo "POST http://127.0.0.1:${PORT}/speak  text=${TEXT}  voice=${VOICE}"
+curl -sS -X POST "http://127.0.0.1:${PORT}/speak" \
+  -H 'content-type: application/json' \
+  -d "$BODY"
+echo

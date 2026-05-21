@@ -1,0 +1,18 @@
+#!/usr/bin/env zsh
+set -euo pipefail
+
+ROOT_DIR="${0:A:h}/.."
+PYTHON="$ROOT_DIR/.venv-tts/bin/python"
+SIDECAR="$ROOT_DIR/script/eri_tts_sidecar.py"
+
+if [[ ! -x "$PYTHON" ]]; then
+  printf '%s\n' '{"type":"error","message":"tts venv missing. Run: script/eri_tts_setup"}' >&2
+  exit 127
+fi
+
+if [[ ! -f "$SIDECAR" ]]; then
+  printf '%s\n' '{"type":"error","message":"tts sidecar python module missing"}' >&2
+  exit 127
+fi
+
+exec "$PYTHON" "$SIDECAR" "$@"

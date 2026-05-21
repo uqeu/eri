@@ -1,0 +1,20 @@
+[package]
+name = "eri_git"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+license = "LicenseRef-Proprietary"
+
+[lints]
+workspace = true
+
+[lib]
+path = "src/eri_git.rs"
+
+[dependencies]
+log.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

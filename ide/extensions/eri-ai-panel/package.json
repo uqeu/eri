@@ -1,0 +1,210 @@
+{
+  "name": "eri-ai-panel",
+  "displayName": "eri",
+  "description": "Voice-driven diffusion AI panel for eri",
+  "version": "0.1.0",
+  "publisher": "eri",
+  "private": true,
+  "license": "SEE LICENSE IN ../../LICENSE",
+  "engines": {
+    "vscode": "^1.116.0"
+  },
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "categories": [
+    "Other"
+  ],
+  "contributes": {
+    "viewsContainers": {
+      "auxiliaryBar": [
+        {
+          "id": "eriPanel",
+          "title": "eri",
+          "icon": "$(sparkle)"
+        }
+      ],
+      "activitybar": [
+        {
+          "id": "eriIterations",
+          "title": "Iterations",
+          "icon": "$(history)"
+        }
+      ]
+    },
+    "views": {
+      "eriPanel": [
+        {
+          "type": "webview",
+          "id": "eri.panel",
+          "name": "eri",
+          "visibility": "visible"
+        },
+        {
+          "id": "eri.mcp",
+          "name": "MCP Servers",
+          "visibility": "collapsed"
+        }
+      ],
+      "eriIterations": [
+        {
+          "id": "eri.iterations",
+          "name": "Iterations"
+        }
+      ]
+    },
+    "commands": [
+      { "command": "eri.openPreview",       "title": "eri: Open Diffusion Preview" },
+      { "command": "eri.toggleMic",         "title": "eri: Toggle Voice" },
+      { "command": "eri.inlineEdit",        "title": "eri: Inline Edit" },
+      { "command": "eri.openChat",          "title": "eri: Open Chat Panel" },
+      { "command": "eri.openComposer",      "title": "eri: Open Composer",        "enablement": "eri.feature.composer" },
+      { "command": "eri.openAgentLayout",   "title": "eri: Open Agent Layout",    "enablement": "eri.feature.agentMode" },
+      { "command": "eri.cycleModel",        "title": "eri: Cycle Model" },
+      { "command": "eri.modeMenu",          "title": "eri: Mode Menu" },
+      { "command": "eri.acceptIteration",   "title": "eri: Accept Iteration" },
+      { "command": "eri.rejectIteration",   "title": "eri: Reject Iteration" },
+      { "command": "eri.stopGeneration",    "title": "eri: Stop Generation" },
+      { "command": "eri.setDiffusionFire",  "title": "eri: Set Diffusion Fire State" },
+      { "command": "eri.tab.acceptWord",    "title": "eri: Accept Next Word of Inline Suggestion" },
+      { "command": "eri.tab.acceptLine",    "title": "eri: Accept Next Line of Inline Suggestion" },
+      { "command": "eri.mentions.openPicker",   "title": "eri: Mention Context" },
+      { "command": "eri.mentions.pickFile",     "title": "eri: Mention File" },
+      { "command": "eri.mentions.pickFolder",   "title": "eri: Mention Folder" },
+      { "command": "eri.mentions.pickSymbol",   "title": "eri: Mention Symbol" },
+      { "command": "eri.mentions.pickWeb",      "title": "eri: Mention Web Search" },
+      { "command": "eri.mentions.pickDocs",     "title": "eri: Mention Docs" },
+      { "command": "eri.mentions.pickCodebase", "title": "eri: Mention Codebase" },
+      { "command": "eri.mcp.openConfig",   "title": "eri: Open MCP Config",         "icon": "$(gear)",     "enablement": "eri.feature.mcp" },
+      { "command": "eri.mcp.restart",      "title": "eri: Restart MCP Server",      "icon": "$(refresh)",  "enablement": "eri.feature.mcp" },
+      { "command": "eri.mcp.viewTools",    "title": "eri: View MCP Server Tools",   "icon": "$(tools)",    "enablement": "eri.feature.mcp" },
+      { "command": "eri.composer.applyAll", "title": "eri: Composer Apply All",                          "enablement": "eri.feature.composer" },
+      { "command": "eri.composer.discard",  "title": "eri: Composer Discard",                            "enablement": "eri.feature.composer" },
+      { "command": "eri.gaze.recalibrate",  "title": "eri: Recalibrate Gaze Tracker" },
+      { "command": "eri.gaze.toggle",       "title": "eri: Toggle Gaze Tracking" }
+    ],
+    "menus": {
+      "view/title": [
+        { "command": "eri.mcp.openConfig", "when": "view == eri.mcp", "group": "navigation@1" },
+        { "command": "eri.mcp.restart",    "when": "view == eri.mcp", "group": "navigation@2" }
+      ],
+      "view/item/context": [
+        { "command": "eri.mcp.viewTools",  "when": "view == eri.mcp && viewItem =~ /^eri\\.mcp\\.server\\./", "group": "inline@1" },
+        { "command": "eri.mcp.restart",    "when": "view == eri.mcp && viewItem =~ /^eri\\.mcp\\.server\\./", "group": "inline@2" },
+        { "command": "eri.mcp.openConfig", "when": "view == eri.mcp && viewItem =~ /^eri\\.mcp\\.server\\./", "group": "navigation@1" }
+      ]
+    },
+    "keybindings": [
+      { "command": "eri.inlineEdit",       "key": "cmd+k",              "mac": "cmd+k",              "when": "editorTextFocus && !suggestWidgetVisible" },
+      { "command": "eri.openChat",         "key": "cmd+l",              "mac": "cmd+l" },
+      { "command": "eri.openComposer",     "key": "cmd+i",              "mac": "cmd+i" },
+      { "command": "eri.openAgentLayout",  "key": "cmd+e",              "mac": "cmd+e" },
+      { "command": "eri.modeMenu",         "key": "cmd+.",              "mac": "cmd+." },
+      { "command": "eri.cycleModel",       "key": "cmd+/",              "mac": "cmd+/" },
+      { "command": "eri.toggleMic",        "key": "cmd+shift+space",    "mac": "cmd+shift+space" },
+      { "command": "eri.acceptIteration",  "key": "cmd+enter",          "mac": "cmd+enter",          "when": "eri.previewVisible" },
+      { "command": "eri.rejectIteration",  "key": "cmd+backspace",      "mac": "cmd+backspace",      "when": "eri.previewVisible" },
+      { "command": "eri.stopGeneration",   "key": "cmd+shift+backspace","mac": "cmd+shift+backspace","when": "eri.streaming" },
+      { "command": "eri.tab.acceptWord",   "key": "cmd+right",          "mac": "cmd+right",          "when": "inlineSuggestionVisible && editorTextFocus" },
+      { "command": "eri.tab.acceptLine",   "key": "cmd+down",           "mac": "cmd+down",           "when": "inlineSuggestionVisible && editorTextFocus" },
+      { "command": "eri.mentions.openPicker", "key": "cmd+shift+2",     "mac": "cmd+shift+2" }
+    ],
+    "configuration": {
+      "title": "eri",
+      "properties": {
+        "eri.coreutilsPath": {
+          "type": "string",
+          "default": "",
+          "description": "Override path to the eri-coreutils sidecar binary. Defaults to the bundled binary in the app's Resources/bin/ directory."
+        },
+        "eri.apiBaseUrl": {
+          "type": "string",
+          "default": "https://eri.dev",
+          "description": "Base URL for the eri website API used to fetch the current user's tier and feature flags."
+        },
+        "eri.model": {
+          "type": "string",
+          "enum": ["mercury-2", "mercury-2-coder", "claude-opus-4-7", "claude-sonnet-4-6", "gpt-5", "gemini-2.5-pro"],
+          "enumDescriptions": [
+            "eri Engine",
+            "eri Engine (coder)",
+            "Claude Opus 4.7",
+            "Claude Sonnet 4.6",
+            "GPT-5",
+            "Gemini 2.5 Pro"
+          ],
+          "default": "mercury-2",
+          "description": "Default model for diffusion iteration"
+        },
+        "eri.voice.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable voice input (push-to-talk on Cmd-L)"
+        },
+        "eri.voice.hotMic": {
+          "type": "boolean",
+          "default": false,
+          "description": "Keep the mic open continuously (vs push-to-talk)"
+        },
+        "eri.voice.preset": {
+          "type": "string",
+          "enum": ["lumen", "marrow", "sable", "vesper", "kiln"],
+          "default": "lumen",
+          "description": "ElevenLabs preset voice eri uses to speak responses."
+        },
+        "eri.preview.autoOpen": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically open the diffusion preview beside the editor on new builds"
+        },
+        "eri.tab.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable eri Tab inline completions (predictive multi-line suggestions)."
+        },
+        "eri.tab.minPrefixLength": {
+          "type": "number",
+          "default": 2,
+          "minimum": 0,
+          "description": "Minimum number of characters before the cursor required before eri Tab requests a suggestion."
+        },
+        "eri.tab.modelOverride": {
+          "type": "string",
+          "default": "",
+          "description": "Optional model identifier passed to the sidecar for eri Tab completions. Leave blank to use the default routing."
+        },
+        "eri.mcp.configPath": {
+          "type": "string",
+          "default": "",
+          "description": "Absolute path to the MCP servers config (JSON). Leave blank to use ~/.eri/mcp.json."
+        },
+        "eri.gaze.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable gaze tracking integration with the editor."
+        },
+        "eri.gaze.decorationsEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Draw a subtle accent on the line the user is currently fixated on."
+        },
+        "eri.gaze.contextRadius": {
+          "type": "number",
+          "default": 5,
+          "minimum": 0,
+          "description": "Number of lines around the gaze point that count as the user's working context."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "20.x",
+    "@types/vscode": "^1.116.0",
+    "typescript": "^5.4.0"
+  }
+}

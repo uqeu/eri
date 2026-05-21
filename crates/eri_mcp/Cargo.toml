@@ -1,0 +1,25 @@
+[package]
+name = "eri_mcp"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+license = "LicenseRef-Proprietary"
+
+[lints]
+workspace = true
+
+[lib]
+path = "src/eri_mcp.rs"
+
+[[example]]
+name = "list_tools"
+path = "examples/list_tools.rs"
+
+[dependencies]
+log.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

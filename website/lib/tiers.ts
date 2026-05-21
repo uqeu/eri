@@ -1,0 +1,109 @@
+import {
+  countTurnsThisDay,
+  countTurnsThisHour,
+  countTurnsThisMonth,
+  countTurnsThisWeek,
+} from "./usage";
+
+/**
+ * Display-cased tier names matching `scripts/pricing_model.py`. The DB
+ * stores lowercase slugs (`free`, `starter`, `pro`, `pro_plus`, `teams`)
+ * so the public boundary is `normalizeTier()` below.
+ */
+export type TierName = "Free" | "Starter" | "Pro" | "Pro+" | "Teams";
+
+export interface TierLimits {
+  perMonth: number;
+  perWeek: number;
+  perDay: number;
+  perHour: number;
+}
+
+/**
+ * Numbers come directly from `scripts/pricing_model.py` (cache_hit_rate=0.5,
+ * target_margin=0.35). Keep these in sync if pricing assumptions change —
+ * the marketing site, the billing layer, and this gate must all agree.
+ */
+export const TIER_LIMITS: Record<TierName, TierLimits> = {
+  Free:      { perMonth: 50,    perWeek: 20,   perDay: 5,   perHour: 2 },
+  Starter:   { perMonth: 1839,  perWeek: 459,  perDay: 65,  perHour: 8 },
+  Pro:       { perMonth: 3254,  perWeek: 813,  perDay: 116, perHour: 14 },
+  "Pro+":    { perMonth: 6084,  perWeek: 1521, perDay: 217, perHour: 27 },
+  Teams:     { perMonth: 3961,  perWeek: 990,  perDay: 141, perHour: 17 },
+};
+
+export interface Remaining {
+  month: number;
+  week: number;
+  day: number;
+  hour: number;
+}
+
+export interface AllowanceDecision {
+  allowed: boolean;
+  reason?: string;
+  remaining: Remaining;
+}
+
+/**
+ * Accepts either the DB slug (`free`, `pro_plus`, …) or the display name
+ * (`Free`, `Pro+`, …). Anything unrecognized — including `enterprise`,
+ * which has no published limits — falls back to Free.
+ */
+export function normalizeTier(value: string | null | undefined): TierName {
+  if (!value) return "Free";
+  const lower = value.toLowerCase();
+  switch (lower) {
+    case "free":
+      return "Free";
+    case "starter":
+      return "Starter";
+    case "pro":
+      return "Pro";
+    case "pro+":
+    case "pro_plus":
+    case "proplus":
+      return "Pro+";
+    case "teams":
+      return "Teams";
+    default:
+      return "Free";
+  }
+}
+
+export async function decideAllowance(
+  userId: string,
+  tierName: TierName,
+): Promise<AllowanceDecision> {
+  const limits = TIER_LIMITS[tierName];
+  const [monthUsed, weekUsed, dayUsed, hourUsed] = await Promise.all([
+    countTurnsThisMonth(userId),
+    countTurnsThisWeek(userId),
+    countTurnsThisDay(userId),
+    countTurnsThisHour(userId),
+  ]);
+
+  const remaining: Remaining = {
+    month: Math.max(0, limits.perMonth - monthUsed),
+    week: Math.max(0, limits.perWeek - weekUsed),
+    day: Math.max(0, limits.perDay - dayUsed),
+    hour: Math.max(0, limits.perHour - hourUsed),
+  };
+
+  // Monthly quota is the hard "QUOTA_EXCEEDED" billing signal — paywall,
+  // not retry. Week/day/hour are rolling "RATE_LIMIT" — wait then retry.
+  if (monthUsed >= limits.perMonth) {
+    return { allowed: false, reason: "QUOTA_EXCEEDED", remaining };
+  }
+  if (hourUsed >= limits.perHour) {
+    return { allowed: false, reason: "RATE_LIMIT", remaining };
+  }
+  if (dayUsed >= limits.perDay) {
+    return { allowed: false, reason: "RATE_LIMIT", remaining };
+  }
+  if (weekUsed >= limits.perWeek) {
+    return { allowed: false, reason: "RATE_LIMIT", remaining };
+  }
+
+  return { allowed: true, remaining };
+}

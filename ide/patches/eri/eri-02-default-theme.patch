@@ -1,0 +1,204 @@
+From: eri <noreply@eri.dev>
+Subject: [PATCH] eri-02 default theme
+
+Adds the Eri Dark color theme (Anysphere-style flat #181818 chrome with
+blue #228df2 accent and white #d6d6dd active-tab top border), registers
+it as a contribution in the theme-defaults extension, and promotes it to
+the OOTB default by repointing ThemeSettingDefaults.COLOR_THEME_DARK at
+"Eri Dark".
+
+Covers RESKIN_PUNCH_LIST.md §1.
+
+---
+ extensions/theme-defaults/package.json             |   6 +
+ extensions/theme-defaults/package.nls.json         |   1 +
+ .../themes/eri-dark-color-theme.json               | 142 +++++++++++++++++++++
+ .../themes/common/workbenchThemeService.ts         |   2 +-
+ 4 files changed, 150 insertions(+), 1 deletion(-)
+ create mode 100644 extensions/theme-defaults/themes/eri-dark-color-theme.json
+
+diff --git a/extensions/theme-defaults/package.json b/extensions/theme-defaults/package.json
+--- a/extensions/theme-defaults/package.json
++++ b/extensions/theme-defaults/package.json
+@@ -13,6 +13,12 @@
+   },
+   "contributes": {
+     "themes": [
++      {
++        "id": "Eri Dark",
++        "label": "%eriDarkThemeLabel%",
++        "uiTheme": "vs-dark",
++        "path": "./themes/eri-dark-color-theme.json"
++      },
+       {
+         "id": "Light 2026",
+         "label": "%light2026ThemeLabel%",
+diff --git a/extensions/theme-defaults/package.nls.json b/extensions/theme-defaults/package.nls.json
+--- a/extensions/theme-defaults/package.nls.json
++++ b/extensions/theme-defaults/package.nls.json
+@@ -1,6 +1,7 @@
+ {
+ 	"displayName": "Default Themes",
+ 	"description": "The default Visual Studio light and dark themes",
++	"eriDarkThemeLabel": "Eri Dark",
+ 	"light2026ThemeLabel": "Light 2026",
+ 	"dark2026ThemeLabel": "Dark 2026",
+ 	"darkPlusColorThemeLabel": "Dark+",
+diff --git a/extensions/theme-defaults/themes/eri-dark-color-theme.json b/extensions/theme-defaults/themes/eri-dark-color-theme.json
+new file mode 100644
+--- /dev/null
++++ b/extensions/theme-defaults/themes/eri-dark-color-theme.json
+@@ -0,0 +1,141 @@
++{
++	"$schema": "vscode://schemas/color-theme",
++	"name": "Eri Dark",
++	"include": "./dark_plus.json",
++	"colors": {
++		"focusBorder": "#00000000",
++		"foreground": "#d6d6dd",
++		"descriptionForeground": "#8a8a8e",
++		"errorForeground": "#f48771",
++		"icon.foreground": "#d6d6dd",
++		"selection.background": "#163761",
++
++		"editor.background": "#181818",
++		"editor.foreground": "#d6d6dd",
++		"editor.lineHighlightBackground": "#1f1f1f",
++		"editor.selectionBackground": "#163761",
++		"editor.inactiveSelectionBackground": "#163761aa",
++		"editor.findMatchBackground": "#228df280",
++		"editor.findMatchHighlightBackground": "#228df240",
++		"editorLineNumber.foreground": "#535353",
++		"editorLineNumber.activeForeground": "#d6d6dd",
++		"editorCursor.foreground": "#d6d6dd",
++		"editorWhitespace.foreground": "#333333",
++		"editorIndentGuide.background1": "#252525",
++		"editorIndentGuide.activeBackground1": "#3a3a3a",
++		"editorWidget.background": "#1d1d1d",
++		"editorWidget.border": "#383838",
++		"editorHoverWidget.background": "#1d1d1d",
++		"editorHoverWidget.border": "#383838",
++		"editorGroup.border": "#292929",
++		"editorGroupHeader.tabsBackground": "#181818",
++		"editorGroupHeader.tabsBorder": "#292929",
++		"editorGroupHeader.noTabsBackground": "#181818",
++
++		"activityBar.background": "#181818",
++		"activityBar.foreground": "#e3e1e3",
++		"activityBar.inactiveForeground": "#7a7a7a",
++		"activityBar.border": "#292929",
++		"activityBar.activeBorder": "#228df2",
++		"activityBarBadge.background": "#228df2",
++		"activityBarBadge.foreground": "#ffffff",
++
++		"sideBar.background": "#181818",
++		"sideBar.foreground": "#d6d6dd",
++		"sideBar.border": "#292929",
++		"sideBarTitle.foreground": "#d6d6dd",
++		"sideBarSectionHeader.background": "#18181800",
++		"sideBarSectionHeader.foreground": "#8a8a8e",
++		"sideBarSectionHeader.border": "#18181800",
++
++		"list.activeSelectionBackground": "#163761",
++		"list.activeSelectionForeground": "#ffffff",
++		"list.inactiveSelectionBackground": "#262626",
++		"list.inactiveSelectionForeground": "#d6d6dd",
++		"list.hoverBackground": "#1f1f1f",
++		"list.focusBackground": "#163761",
++		"list.focusOutline": "#00000000",
++		"list.highlightForeground": "#228df2",
++
++		"tab.activeBackground": "#181818",
++		"tab.activeForeground": "#ffffff",
++		"tab.activeBorder": "#181818",
++		"tab.activeBorderTop": "#d6d6dd",
++		"tab.inactiveBackground": "#181818",
++		"tab.inactiveForeground": "#8a8a8e",
++		"tab.hoverBackground": "#1f1f1f",
++		"tab.unfocusedActiveBorderTop": "#3a3a3a",
++		"tab.border": "#292929",
++		"tab.lastPinnedBorder": "#292929",
++
++		"statusBar.background": "#181818",
++		"statusBar.foreground": "#d6d6dd",
++		"statusBar.border": "#292929",
++		"statusBar.debuggingBackground": "#228df2",
++		"statusBar.debuggingForeground": "#ffffff",
++		"statusBar.noFolderBackground": "#181818",
++		"statusBarItem.hoverBackground": "#262626",
++		"statusBarItem.remoteBackground": "#228df2",
++		"statusBarItem.remoteForeground": "#ffffff",
++		"statusBarItem.prominentBackground": "#262626",
++
++		"titleBar.activeBackground": "#181818",
++		"titleBar.activeForeground": "#d6d6dd",
++		"titleBar.inactiveBackground": "#181818",
++		"titleBar.inactiveForeground": "#8a8a8e",
++		"titleBar.border": "#292929",
++
++		"menu.background": "#1d1d1d",
++		"menu.foreground": "#d6d6dd",
++		"menu.selectionBackground": "#163761",
++		"menu.separatorBackground": "#292929",
++		"menubar.selectionBackground": "#262626",
++
++		"panel.background": "#181818",
++		"panel.border": "#383838",
++		"panelTitle.activeBorder": "#228df2",
++		"panelTitle.activeForeground": "#d6d6dd",
++		"panelTitle.inactiveForeground": "#8a8a8e",
++		"panelInput.border": "#292929",
++
++		"button.background": "#228df2",
++		"button.foreground": "#ffffff",
++		"button.hoverBackground": "#1f7fdb",
++		"button.secondaryBackground": "#262626",
++		"button.secondaryForeground": "#d6d6dd",
++		"button.secondaryHoverBackground": "#2f2f2f",
++
++		"input.background": "#1d1d1d",
++		"input.foreground": "#d6d6dd",
++		"input.border": "#292929",
++		"input.placeholderForeground": "#6a6a6e",
++		"inputOption.activeBackground": "#228df233",
++		"inputOption.activeBorder": "#228df2",
++		"inputOption.activeForeground": "#ffffff",
++
++		"dropdown.background": "#1d1d1d",
++		"dropdown.foreground": "#d6d6dd",
++		"dropdown.border": "#292929",
++		"dropdown.listBackground": "#1d1d1d",
++
++		"badge.background": "#228df2",
++		"badge.foreground": "#ffffff",
++		"progressBar.background": "#228df2",
++
++		"scrollbar.shadow": "#00000000",
++		"scrollbarSlider.background": "#3a3a3a55",
++		"scrollbarSlider.hoverBackground": "#3a3a3a99",
++		"scrollbarSlider.activeBackground": "#4a4a4a",
++
++		"textLink.foreground": "#228df2",
++		"textLink.activeForeground": "#4fa3ff",
++
++		"terminal.background": "#181818",
++		"terminal.foreground": "#d6d6dd",
++		"terminalCursor.foreground": "#d6d6dd",
++
++		"quickInput.background": "#1d1d1d",
++		"quickInput.foreground": "#d6d6dd",
++		"quickInputTitle.background": "#1d1d1d"
++	}
++}
+diff --git a/src/vs/workbench/services/themes/common/workbenchThemeService.ts b/src/vs/workbench/services/themes/common/workbenchThemeService.ts
+--- a/src/vs/workbench/services/themes/common/workbenchThemeService.ts
++++ b/src/vs/workbench/services/themes/common/workbenchThemeService.ts
+@@ -39,7 +39,7 @@ export const enum ThemeSettings {
+ }
+
+ export namespace ThemeSettingDefaults {
+-	export const COLOR_THEME_DARK = 'Dark 2026';
++	export const COLOR_THEME_DARK = 'Eri Dark';
+ 	export const COLOR_THEME_LIGHT = 'Light 2026';
+ 	export const COLOR_THEME_HC_DARK = 'Default High Contrast';
+ 	export const COLOR_THEME_HC_LIGHT = 'Default High Contrast Light';

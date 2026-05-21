@@ -1,0 +1,18 @@
+[package]
+name = "eri_tokens"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+license = "LicenseRef-Proprietary"
+
+[lints]
+workspace = true
+
+[lib]
+path = "src/eri_tokens.rs"
+
+[dependencies]
+log.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+tiktoken-rs.workspace = true

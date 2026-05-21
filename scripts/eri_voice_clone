@@ -1,0 +1,18 @@
+#!/usr/bin/env zsh
+set -euo pipefail
+
+ROOT_DIR="${0:A:h}/.."
+PYTHON="$ROOT_DIR/.venv-tts/bin/python"
+SCRIPT="$ROOT_DIR/script/eri_voice_clone.py"
+
+if [[ ! -x "$PYTHON" ]]; then
+  printf '%s\n' '{"type":"error","message":"tts venv missing. Run: script/eri_tts_setup"}' >&2
+  exit 127
+fi
+
+if [[ ! -f "$SCRIPT" ]]; then
+  printf '%s\n' '{"type":"error","message":"voice clone script missing"}' >&2
+  exit 127
+fi
+
+exec "$PYTHON" "$SCRIPT" "$@"

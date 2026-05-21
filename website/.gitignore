@@ -1,0 +1,20 @@
+node_modules
+.next
+out
+.env.local
+.env*.local
+.vercel
+.DS_Store
+*.tsbuildinfo
+
+# Waitlist data — never commit captured emails
+.waitlist.json
+
+# Published projects — local JSON store, swapped for Postgres later
+.published/
+
+# SQLite database for auth/billing/usage
+.eri.sqlite
+.eri.sqlite-journal
+.eri.sqlite-shm
+.eri.sqlite-wal

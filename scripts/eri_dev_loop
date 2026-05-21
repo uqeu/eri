@@ -1,0 +1,65 @@
+#!/usr/bin/env zsh
+# eri dev loop — run before each agent batch.
+# 1. quick health (build, tests, dead code)
+# 2. strategy_check summary
+# 3. top backlog from ERI_ROADMAP.md
+# 4. prints the agent-dispatch templates so the next session can copy/paste
+#
+# Goal: spend the LEAST possible tokens reorienting between batches.
+# Run: script/eri_dev_loop
+
+set -uo pipefail
+ROOT_DIR="${0:A:h}/.."
+cd "$ROOT_DIR"
+
+if [[ -t 1 ]]; then
+  BOLD=$'\e[1m'; DIM=$'\e[2m'; OFF=$'\e[0m'; CYN=$'\e[36m'; YLW=$'\e[33m'
+else
+  BOLD=''; DIM=''; OFF=''; CYN=''; YLW=''
+fi
+
+print -P "${BOLD}${CYN}== eri dev loop ==${OFF}"
+print -P "${DIM}$(date)  ·  $(git rev-parse --short HEAD 2>/dev/null || echo no-git)${OFF}"
+
+# 1. quick health
+print -P "\n${BOLD}1. health${OFF}"
+if cargo check --workspace --quiet 2>/dev/null; then
+  print -P "  ${CYN}✓${OFF} cargo check clean"
+else
+  print -P "  ${YLW}✗${OFF} cargo check has errors — RUN: cargo check --workspace 2>&1 | head -30"
+fi
+
+eri_crates=(eri_core eri_inference eri_ui eri_voice eri_telemetry eri_git eri_mcp eri_cli eri_discord eri_slack eri_images eri_iterator)
+print -nP "  tests: "
+if cargo test --quiet ${eri_crates[@]/#/-p } 2>/dev/null >/tmp/eri_dev_loop_test.out; then
+  passed=$(grep "test result:" /tmp/eri_dev_loop_test.out | awk -F'passed' '{split($1,a,"ok. "); s+=a[2]} END {print s}')
+  print -P "${CYN}${passed} passing${OFF}"
+else
+  print -P "${YLW}some failing${OFF} — see /tmp/eri_dev_loop_test.out"
+fi
+
+# 2. strategy_check feature count
+print -P "\n${BOLD}2. YC readiness${OFF}"
+green=$(script/eri_strategy_check --quick 2>/dev/null | grep -c "^✓" || true)
+red=$(script/eri_strategy_check --quick 2>/dev/null | grep -c "^✗" || true)
+print -P "  ${CYN}${green}${OFF} features shipped  ·  ${YLW}${red}${OFF} gaps"
+
+# 3. top backlog
+print -P "\n${BOLD}3. top backlog (from ERI_ROADMAP.md)${OFF}"
+grep -E '^- \[ \]' ERI_ROADMAP.md 2>/dev/null | head -6 | sed 's/^/  /'
+
+# 4. dispatch templates
+print -P "\n${BOLD}4. parallel-safe areas (no eri_ui.rs conflicts)${OFF}"
+print -P "  ${DIM}each new crate is isolated; max one agent per eri_ui.rs at a time${OFF}"
+print -P "  - new crate at crates/eri_<name>/  → fully isolated"
+print -P "  - new script in script/             → fully isolated"
+print -P "  - website/ extensions               → fully isolated"
+print -P "  - ERI_*.md edits                    → fully isolated"
+print -P "  - eri_inference system prompt       → one agent at a time"
+print -P "  - eri_ui.rs (handlers/state)        → one agent at a time"
+
+# 5. dead-code surface to clean up someday
+print -P "\n${BOLD}5. lingering warnings${OFF}"
+cargo check --workspace 2>&1 | grep -E "(unused|dead_code|never used|never read)" | sort -u | head -8 | sed 's/^/  /'
+
+print -P "\n${BOLD}${CYN}dev loop complete${OFF} — next: read ERI_ROADMAP.md and dispatch."

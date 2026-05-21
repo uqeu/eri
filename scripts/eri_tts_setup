@@ -1,0 +1,36 @@
+#!/usr/bin/env zsh
+# Bootstrap the ElevenLabs TTS sidecar venv for eri.
+# No model download — ElevenLabs is cloud-hosted. Just the Python SDK.
+set -euo pipefail
+
+ROOT_DIR="${0:A:h}/.."
+VENV_DIR="$ROOT_DIR/.venv-tts"
+UV_CACHE="$ROOT_DIR/.uv-cache"
+
+if ! command -v uv >/dev/null 2>&1; then
+  echo "uv is required (https://docs.astral.sh/uv). Install with: brew install uv"
+  exit 1
+fi
+
+mkdir -p "$UV_CACHE"
+
+if [[ ! -d "$VENV_DIR" ]]; then
+  echo "Creating TTS venv at $VENV_DIR (Python 3.12)"
+  uv --cache-dir "$UV_CACHE" venv --python 3.12 "$VENV_DIR"
+fi
+
+echo "Installing ElevenLabs SDK + audio playback deps."
+uv --cache-dir "$UV_CACHE" pip install \
+  --python "$VENV_DIR/bin/python" \
+  --upgrade \
+  elevenlabs \
+  sounddevice \
+  numpy \
+  python-dotenv
+
+echo
+echo "TTS environment ready."
+echo "Make sure ELEVENLABS_API_KEY is set (export it or add to .env):"
+echo "  echo 'ELEVENLABS_API_KEY=sk_...' >> .env"
+echo
+echo "Run: script/eri_tts_sidecar --run"

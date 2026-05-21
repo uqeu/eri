@@ -1,0 +1,93 @@
+#!/usr/bin/env zsh
+# One-shot installer for eri's "lite tier" — runs on ANY laptop (Intel Mac,
+# low-RAM Linux, no GPU). Installs llama-cpp-python, transformers (CPU torch),
+# sentence-transformers and pre-warms the three default models.
+#
+# Total disk after this completes: ~600 MB.
+#   - SmolLM2-360M-Instruct Q4 GGUF (~210 MB)
+#   - SmolVLM-256M-Instruct           (~150 MB)
+#   - BAAI/bge-small-en-v1.5          (~90 MB)
+#   - libs + tokenizers + torch CPU   (~150 MB)
+#
+# Idempotent: re-running just refreshes deps and re-validates model cache.
+set -euo pipefail
+
+ROOT_DIR="${0:A:h}/.."
+VENV_DIR="$ROOT_DIR/.venv-lite"
+UV_CACHE="$ROOT_DIR/.uv-cache"
+HF_CACHE="$ROOT_DIR/.cache/huggingface"
+
+if ! command -v uv >/dev/null 2>&1; then
+  echo "uv is required (https://docs.astral.sh/uv). Install with: brew install uv  (or:  pipx install uv)"
+  exit 1
+fi
+
+mkdir -p "$UV_CACHE" "$HF_CACHE"
+export HF_HOME="$HF_CACHE"
+export TRANSFORMERS_CACHE="$HF_CACHE"
+
+if [[ ! -d "$VENV_DIR" ]]; then
+  echo "Creating lite venv at $VENV_DIR"
+  uv --cache-dir "$UV_CACHE" venv --python 3.11 "$VENV_DIR"
+fi
+
+echo "Installing lite deps (CPU-only torch, transformers, llama-cpp-python, sentence-transformers, huggingface_hub)"
+# We pin to the CPU torch index so this works on Intel Macs and any Linux
+# without dragging in CUDA wheels.
+uv --cache-dir "$UV_CACHE" pip install \
+  --python "$VENV_DIR/bin/python" \
+  --upgrade \
+  --extra-index-url https://download.pytorch.org/whl/cpu \
+  "torch" \
+  "transformers>=4.44" \
+  "sentence-transformers>=3.0" \
+  "llama-cpp-python>=0.2.90" \
+  "huggingface_hub>=0.24" \
+  "pillow" \
+  "numpy"
+
+PYTHON="$VENV_DIR/bin/python"
+
+echo "Pre-warming SmolLM2-360M-Instruct GGUF (brain, ~210 MB)"
+"$PYTHON" - <<'PY'
+import os
+from huggingface_hub import hf_hub_download
+
+path = hf_hub_download(
+    repo_id="HuggingFaceTB/SmolLM2-360M-Instruct-GGUF",
+    filename="smollm2-360m-instruct-q4_k_m.gguf",
+)
+print(f"  brain model cached: {path}")
+PY
+
+echo "Pre-warming SmolVLM-256M-Instruct (vision, ~150 MB)"
+"$PYTHON" - <<'PY'
+import os
+os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
+from transformers import AutoProcessor, AutoModelForVision2Seq
+
+model_id = "HuggingFaceTB/SmolVLM-256M-Instruct"
+AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
+AutoModelForVision2Seq.from_pretrained(model_id, trust_remote_code=True)
+print(f"  vision model cached: {model_id}")
+PY
+
+echo "Pre-warming BAAI/bge-small-en-v1.5 (embeddings, ~90 MB)"
+"$PYTHON" - <<'PY'
+from sentence_transformers import SentenceTransformer
+
+model = SentenceTransformer("BAAI/bge-small-en-v1.5", device="cpu")
+dim = model.get_sentence_embedding_dimension()
+print(f"  embed model cached: dim={dim}")
+PY
+
+echo ""
+echo "Lite tier ready. Opt in by exporting:"
+echo "  export ERI_TIER=lite"
+echo ""
+echo "Or start the sidecars individually:"
+echo "  script/eri_brain_sidecar   --run --port 8767     # brain  (SmolLM2-360M GGUF)"
+echo "  script/eri_vision_sidecar  --run --port 8768     # vision (SmolVLM-256M)"
+echo "  script/eri_embed_sidecar   --run --port 8769     # embed  (bge-small)"
+echo ""
+echo "See script/LITE_TIER.md for the full picture."

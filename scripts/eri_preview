@@ -1,0 +1,11 @@
+#!/usr/bin/env zsh
+set -euo pipefail
+
+ROOT_DIR="${0:A:h}/.."
+
+if [[ $# -lt 1 ]]; then
+  echo "Usage: $0 <html-path>" >&2
+  exit 1
+fi
+
+exec /usr/bin/env swift "$ROOT_DIR/script/eri_preview.swift" "$1"

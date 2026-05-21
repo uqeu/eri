@@ -1,0 +1,301 @@
+From: eri reskin <noreply@eri.dev>
+Subject: [PATCH] eri-08: status bar mic / diffusion-fire indicator
+
+Adds a leftmost status bar entry showing eri's microphone state with a
+CSS-only animated waveform when listening, and a pulsing blue dot when
+the diffusion runtime is firing. Clicking the entry triggers the
+`eri.toggleMic` command.
+
+Implements RESKIN_PUNCH_LIST.md §2.4 + §8.
+
+---
+ src/vs/workbench/contrib/eriStatusBar/browser/eriStatusBar.contribution.ts |  168 +++++++
+ src/vs/workbench/contrib/eriStatusBar/browser/media/eriStatusBar.css       |  118 +++++
+ src/vs/workbench/workbench.common.main.ts                                  |    3 +
+ 3 files changed, 289 insertions(+)
+ create mode 100644 src/vs/workbench/contrib/eriStatusBar/browser/eriStatusBar.contribution.ts
+ create mode 100644 src/vs/workbench/contrib/eriStatusBar/browser/media/eriStatusBar.css
+
+diff --git a/src/vs/workbench/contrib/eriStatusBar/browser/eriStatusBar.contribution.ts b/src/vs/workbench/contrib/eriStatusBar/browser/eriStatusBar.contribution.ts
+new file mode 100644
+index 0000000000..e7c0a1b8a1
+--- /dev/null
++++ b/src/vs/workbench/contrib/eriStatusBar/browser/eriStatusBar.contribution.ts
+@@ -0,0 +1,168 @@
++/*---------------------------------------------------------------------------------------------
++ *  Copyright (c) eri. All rights reserved.
++ *  Licensed under the MIT License. See License.txt in the project root for license information.
++ *--------------------------------------------------------------------------------------------*/
++
++import './media/eriStatusBar.css';
++import { Disposable, DisposableStore } from '../../../../base/common/lifecycle.js';
++import { localize } from '../../../../nls.js';
++import { CommandsRegistry } from '../../../../platform/commands/common/commands.js';
++import { Registry } from '../../../../platform/registry/common/platform.js';
++import { IWorkbenchContribution, WorkbenchPhase, registerWorkbenchContribution2 } from '../../../common/contributions.js';
++import { IStatusbarEntry, IStatusbarEntryAccessor, IStatusbarService, StatusbarAlignment } from '../../../services/statusbar/browser/statusbar.js';
++
++const ERI_MIC_ENTRY_ID = 'eri.mic';
++const ERI_TOGGLE_MIC_COMMAND = 'eri.toggleMic';
++const ERI_SET_DIFFUSION_COMMAND = 'eri.setDiffusionFire';
++
++type EriMicState = 'idle' | 'listening';
++
++/**
++ * Tracks mic + diffusion-fire state and mirrors it onto `document.body` as
++ * data-attributes so the CSS-only animations can light up. We use the body
++ * rather than the status bar entry container because IStatusbarEntry does
++ * not expose its DOM node, and querying by id would be brittle across
++ * auxiliary status bars.
++ */
++class EriStatusBarContribution extends Disposable implements IWorkbenchContribution {
++
++	static readonly ID = 'workbench.contrib.eriStatusBar';
++
++	private readonly entryDisposables = this._register(new DisposableStore());
++	private accessor: IStatusbarEntryAccessor | undefined;
++
++	private micState: EriMicState = 'idle';
++	private diffusionFire = false;
++
++	constructor(
++		@IStatusbarService private readonly statusbarService: IStatusbarService,
++	) {
++		super();
++
++		this.registerCommands();
++		this.renderEntry();
++		this.applyBodyState();
++	}
++
++	private registerCommands(): void {
++		this._register(CommandsRegistry.registerCommand(ERI_TOGGLE_MIC_COMMAND, () => {
++			this.micState = this.micState === 'idle' ? 'listening' : 'idle';
++			this.applyBodyState();
++			this.renderEntry();
++		}));
++
++		this._register(CommandsRegistry.registerCommand(ERI_SET_DIFFUSION_COMMAND, (_accessor, on?: boolean) => {
++			this.diffusionFire = typeof on === 'boolean' ? on : !this.diffusionFire;
++			this.applyBodyState();
++			this.renderEntry();
++		}));
++	}
++
++	private renderEntry(): void {
++		const entry = this.buildEntry();
++
++		if (this.accessor) {
++			this.accessor.update(entry);
++			return;
++		}
++
++		// High priority -> leftmost on the LEFT-aligned cluster.
++		this.accessor = this.statusbarService.addEntry(
++			entry,
++			ERI_MIC_ENTRY_ID,
++			StatusbarAlignment.LEFT,
++			Number.MAX_SAFE_INTEGER,
++		);
++		this.entryDisposables.add(this.accessor);
++	}
++
++	private buildEntry(): IStatusbarEntry {
++		// We intentionally render a single static glyph here; the waveform
++		// bars + diffusion dot are CSS pseudo-elements attached to the
++		// entry container by id (`#eri\\.mic`). Their visibility is driven
++		// by data-attributes mirrored onto `document.body`.
++		const tooltip = this.diffusionFire
++			? localize('eri.mic.tooltip.diffusion', "eri is generating (diffusion fire)")
++			: this.micState === 'listening'
++				? localize('eri.mic.tooltip.listening', "eri is listening — click to mute")
++				: localize('eri.mic.tooltip.idle', "Talk to eri (click to start voice)");
++
++		return {
++			name: localize('eri.mic.name', "eri Mic"),
++			text: '🎤', // 🎤 — codicon syntax is avoided so we keep the literal mic for theming.
++			ariaLabel: tooltip,
++			tooltip,
++			command: ERI_TOGGLE_MIC_COMMAND,
++		};
++	}
++
++	private applyBodyState(): void {
++		const body = typeof document !== 'undefined' ? document.body : undefined;
++		if (!body) {
++			return;
++		}
++
++		body.classList.toggle('eri-mic-listening', this.micState === 'listening');
++		body.classList.toggle('eri-mic-idle', this.micState === 'idle');
++		body.classList.toggle('eri-diffusion-fire', this.diffusionFire);
++	}
++}
++
++registerWorkbenchContribution2(
++	EriStatusBarContribution.ID,
++	EriStatusBarContribution,
++	WorkbenchPhase.AfterRestored,
++);
++
++// Make sure the command is resolvable even before the contribution has run
++// (e.g. when a keybinding fires it during early startup). The contribution
++// will re-register the real handler once instantiated; CommandsRegistry
++// allows last-writer-wins for the same id.
++CommandsRegistry.registerCommand({
++	id: ERI_TOGGLE_MIC_COMMAND,
++	handler: () => { /* no-op until contribution instantiates */ },
++	metadata: {
++		description: localize('eri.toggleMic.desc', "Toggle eri voice listening"),
++		args: [],
++	},
++});
++
++// Re-export ids for use by other patches (chat panel, voice sidecar bridge).
++export const ERI_STATUSBAR_IDS = Object.freeze({
++	entry: ERI_MIC_ENTRY_ID,
++	toggleMic: ERI_TOGGLE_MIC_COMMAND,
++	setDiffusionFire: ERI_SET_DIFFUSION_COMMAND,
++});
++
++// Ensure the Registry import is retained even when tree-shaken builds drop
++// unused symbols (some bundlers strip side-effect-free imports otherwise).
++// eslint-disable-next-line @typescript-eslint/no-unused-vars
++const _keepRegistry = Registry;
+diff --git a/src/vs/workbench/contrib/eriStatusBar/browser/media/eriStatusBar.css b/src/vs/workbench/contrib/eriStatusBar/browser/media/eriStatusBar.css
+new file mode 100644
+index 0000000000..d4f1c7b7e2
+--- /dev/null
++++ b/src/vs/workbench/contrib/eriStatusBar/browser/media/eriStatusBar.css
+@@ -0,0 +1,118 @@
++/*---------------------------------------------------------------------------------------------
++ *  Copyright (c) eri. All rights reserved.
++ *  Licensed under the MIT License. See License.txt in the project root for license information.
++ *--------------------------------------------------------------------------------------------*/
++
++/* eri status bar mic indicator.
++ *
++ * The status bar entry is registered with id `eri.mic`. Each status bar
++ * item gets a DOM element whose `id` matches the entry id; we escape the
++ * dot in CSS selectors as `\.` so `#eri\.mic` resolves cleanly.
++ *
++ * State is mirrored onto `document.body`:
++ *   .eri-mic-idle        -> dim glyph
++ *   .eri-mic-listening   -> accent glyph + animated 4-bar waveform
++ *   .eri-diffusion-fire  -> pulsing blue dot overlay
++ */
++
++.monaco-workbench .part.statusbar .statusbar-item#eri\.mic {
++	display: inline-flex;
++	align-items: center;
++	gap: 6px;
++	padding: 0 8px;
++	position: relative;
++}
++
++.monaco-workbench .part.statusbar .statusbar-item#eri\.mic > a {
++	display: inline-flex;
++	align-items: center;
++	gap: 6px;
++	color: var(--vscode-statusBar-foreground);
++	opacity: 0.6;
++	transition: opacity 120ms ease, color 120ms ease;
++}
++
++/* Listening: accent + animated waveform bars after the glyph. */
++body.eri-mic-listening .monaco-workbench .part.statusbar .statusbar-item#eri\.mic > a {
++	color: #e0ff4f;
++	opacity: 1;
++}
++
++.monaco-workbench .part.statusbar .statusbar-item#eri\.mic > a::after {
++	content: '';
++	display: inline-block;
++	width: 22px;
++	height: 10px;
++	margin-left: 2px;
++	background-image:
++		linear-gradient(currentColor, currentColor),
++		linear-gradient(currentColor, currentColor),
++		linear-gradient(currentColor, currentColor),
++		linear-gradient(currentColor, currentColor);
++	background-repeat: no-repeat;
++	background-position: 0 50%, 6px 50%, 12px 50%, 18px 50%;
++	background-size: 3px 30%, 3px 30%, 3px 30%, 3px 30%;
++	opacity: 0; /* hidden in idle */
++	transition: opacity 120ms ease;
++}
++
++body.eri-mic-listening .monaco-workbench .part.statusbar .statusbar-item#eri\.mic > a::after {
++	opacity: 1;
++	animation: eri-mic-waveform 0.3s ease-in-out infinite alternate;
++}
++
++/* 4-bar waveform: each "bar" is one of the four background gradients above.
++ * We can't animate background-size per layer with stagger in pure CSS without
++ * SVG, so we modulate the whole element's background-size and offset the
++ * apparent stagger by varying the size of each band via a step keyframe
++ * applied to nested pseudo-elements. */
++@keyframes eri-mic-waveform {
++	0%   { background-size: 3px 20%, 3px 70%, 3px 35%, 3px 90%; }
++	25%  { background-size: 3px 55%, 3px 30%, 3px 80%, 3px 45%; }
++	50%  { background-size: 3px 85%, 3px 60%, 3px 25%, 3px 70%; }
++	75%  { background-size: 3px 40%, 3px 90%, 3px 55%, 3px 30%; }
++	100% { background-size: 3px 70%, 3px 25%, 3px 90%, 3px 55%; }
++}
++
++/* Diffusion-fire: a small pulsing blue dot rendered as a ::before. Overrides
++ * the listening color if both are active (diffusion takes visual priority). */
++.monaco-workbench .part.statusbar .statusbar-item#eri\.mic > a::before {
++	content: '';
++	display: inline-block;
++	width: 6px;
++	height: 6px;
++	border-radius: 50%;
++	background: #228df2;
++	opacity: 0;
++	transform: scale(0.8);
++	transition: opacity 120ms ease;
++}
++
++body.eri-diffusion-fire .monaco-workbench .part.statusbar .statusbar-item#eri\.mic > a::before {
++	opacity: 1;
++	animation: eri-diffusion-pulse 1.2s ease-in-out infinite;
++}
++
++body.eri-diffusion-fire .monaco-workbench .part.statusbar .statusbar-item#eri\.mic > a {
++	color: #228df2;
++	opacity: 1;
++}
++
++@keyframes eri-diffusion-pulse {
++	0%, 100% { transform: scale(0.8); opacity: 0.55; box-shadow: 0 0 0 0 rgba(34, 141, 242, 0.45); }
++	50%      { transform: scale(1.15); opacity: 1;    box-shadow: 0 0 0 4px rgba(34, 141, 242, 0); }
++}
++
++/* Respect users who ask for reduced motion. */
++@media (prefers-reduced-motion: reduce) {
++	.monaco-workbench .part.statusbar .statusbar-item#eri\.mic > a::after,
++	.monaco-workbench .part.statusbar .statusbar-item#eri\.mic > a::before {
++		animation: none !important;
++	}
++}
++
++/* Hover affordance — slight lift, no background flip (theme is already flat). */
++.monaco-workbench .part.statusbar .statusbar-item#eri\.mic:hover > a {
++	opacity: 1;
++}
+diff --git a/src/vs/workbench/workbench.common.main.ts b/src/vs/workbench/workbench.common.main.ts
+index 0000000000..0000000001 100644
+--- a/src/vs/workbench/workbench.common.main.ts
++++ b/src/vs/workbench/workbench.common.main.ts
+@@ -213,6 +213,9 @@ import './contrib/mcp/browser/mcp.contribution.js';
+ import './contrib/chat/browser/chatSessions/chatSessions.contribution.js';
+ import './contrib/chat/browser/contextContrib/chatContext.contribution.js';
+ import './contrib/imageCarousel/browser/imageCarousel.contribution.js';
++
++// eri status bar mic / diffusion-fire indicator
++import './contrib/eriStatusBar/browser/eriStatusBar.contribution.js';
+
+ // Interactive
+ import './contrib/interactive/browser/interactive.contribution.js';

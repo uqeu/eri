@@ -1,0 +1,35 @@
+#!/usr/bin/env zsh
+# Wrapper that locates a usable python and execs the recording sidecar.
+#
+# The sidecar is stdlib-only — it just orchestrates the system `ffmpeg`
+# binary — so we don't need a dedicated venv. We prefer `.venv-tts` (already
+# present on every eri install) for consistency with the other sidecars, but
+# fall back to whatever python3 is on PATH so a fresh checkout works without
+# running `script/eri_tts_setup` first.
+set -euo pipefail
+
+ROOT_DIR="${0:A:h}/.."
+SIDECAR="$ROOT_DIR/script/eri_record_sidecar.py"
+
+if [[ ! -f "$SIDECAR" ]]; then
+  printf '%s\n' '{"type":"error","message":"record sidecar python module missing"}' >&2
+  exit 127
+fi
+
+# Prefer the existing tts venv; fall back to a record-specific venv if the
+# user pre-created one; fall back to system python3 last.
+for candidate in \
+  "$ROOT_DIR/.venv-record/bin/python" \
+  "$ROOT_DIR/.venv-tts/bin/python" \
+  "$ROOT_DIR/.venv-brain/bin/python"; do
+  if [[ -x "$candidate" ]]; then
+    exec "$candidate" "$SIDECAR" "$@"
+  fi
+done
+
+if command -v python3 >/dev/null 2>&1; then
+  exec python3 "$SIDECAR" "$@"
+fi
+
+printf '%s\n' '{"type":"error","message":"no python3 available for record sidecar"}' >&2
+exit 127

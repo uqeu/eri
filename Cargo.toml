@@ -1,0 +1,81 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/eri_auth",
+    "crates/eri_billing",
+    "crates/eri_cache",
+    "crates/eri_caveman",
+    "crates/eri_cli",
+    "crates/eri_control",
+    "crates/eri_core",
+    "crates/eri_coreutils",
+    "crates/eri_discord",
+    "crates/eri_git",
+    "crates/eri_graph",
+    "crates/eri_images",
+    "crates/eri_index",
+    "crates/eri_inference",
+    "crates/eri_iterator",
+    "crates/eri_mcp",
+    "crates/eri_router",
+    "crates/eri_settings",
+    "crates/eri_slack",
+    "crates/eri_telemetry",
+    "crates/eri_tokens",
+    "crates/eri_voice",
+]
+
+[workspace.package]
+edition = "2024"
+publish = false
+
+[workspace.dependencies]
+# Inter-crate path dependencies — the eri sidecar's surface area.
+eri_core = { path = "crates/eri_core" }
+eri_git = { path = "crates/eri_git" }
+eri_inference = { path = "crates/eri_inference" }
+eri_iterator = { path = "crates/eri_iterator" }
+eri_tokens = { path = "crates/eri_tokens" }
+
+# Third-party — kept minimal. Versions track current crates.io stable.
+anyhow = "1.0"
+clap = { version = "4.5", features = ["derive"] }
+cpal = "0.15"
+dotenvy = "0.15"
+log = "0.4"
+parking_lot = "0.12"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0", features = ["preserve_order"] }
+tempfile = "3.10"
+thiserror = "1.0"
+tiktoken-rs = "0.5"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-std", "io-util", "sync", "signal", "time", "fs", "process"] }
+toml = "0.8"
+tracing = "0.1"
+ureq = { version = "2.10", features = ["json", "tls"] }
+url = "2.5"
+uuid = { version = "1.10", features = ["v4"] }
+whisper-rs = "0.13"
+
+[profile.dev]
+opt-level = 0
+debug = "limited"
+incremental = true
+codegen-units = 256
+
+[profile.release]
+opt-level = 3
+debug = false
+lto = "thin"
+codegen-units = 1
+strip = true
+
+# Workspace-wide lints inherited via `[lints] workspace = true` in each crate.
+# Keep this minimal — strict warnings, no clippy bans beyond the obvious.
+[workspace.lints.rust]
+unused_must_use = "warn"
+
+[workspace.lints.clippy]
+dbg_macro = "warn"
+todo = "warn"

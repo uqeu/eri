@@ -1,0 +1,70 @@
+#!/usr/bin/env zsh
+# eri hardware tier auto-detect.
+#
+# Probes the host (arch, RAM, GPU) and prints a single line that the other
+# sidecars parse to pick which model to load. We keep this dirt-simple — no
+# JSON, no flags — so a shell script can parse it without a Python interp.
+#
+# Output format (single line):
+#   tier=<high|medium|low> arch=<arm64|x86_64> ram_gb=<N> gpu=<metal|cuda|none>
+#
+# Tier heuristic:
+#   high   = arm64 with metal AND ram >= 16        → full mlx Llama-3.2-1B
+#   medium = ram >= 8                               → lite tier OK, room to spare
+#   low    = ram < 8                                → lite tier required
+#
+# This is deliberately conservative: an Intel Mac with 32GB still maps to
+# "medium" because it can't run mlx, only the CPU GGUF path.
+
+set -uo pipefail
+
+# ---------- arch ----------
+arch="$(uname -m 2>/dev/null || echo unknown)"
+case "$arch" in
+  arm64|aarch64) arch="arm64" ;;
+  x86_64|amd64)  arch="x86_64" ;;
+  *)             arch="unknown" ;;
+esac
+
+# ---------- ram (integer GB, rounded down) ----------
+ram_gb=0
+case "$(uname -s)" in
+  Darwin)
+    if bytes="$(sysctl -n hw.memsize 2>/dev/null)"; then
+      ram_gb=$(( bytes / 1024 / 1024 / 1024 ))
+    fi
+    ;;
+  Linux)
+    if kb="$(awk '/^MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null)"; then
+      ram_gb=$(( kb / 1024 / 1024 ))
+    fi
+    ;;
+esac
+[[ -z "$ram_gb" || "$ram_gb" -lt 1 ]] && ram_gb=0
+
+# ---------- gpu ----------
+gpu="none"
+if command -v nvidia-smi >/dev/null 2>&1; then
+  if nvidia-smi -L >/dev/null 2>&1; then
+    gpu="cuda"
+  fi
+fi
+if [[ "$gpu" == "none" && "$(uname -s)" == "Darwin" ]]; then
+  # Apple Silicon → Metal. Intel Macs report "Metal" too but their iGPU is
+  # too weak for mlx; we only flag metal when the arch is arm64.
+  if [[ "$arch" == "arm64" ]]; then
+    if system_profiler SPDisplaysDataType 2>/dev/null | grep -qi 'metal'; then
+      gpu="metal"
+    fi
+  fi
+fi
+
+# ---------- tier ----------
+tier="low"
+if [[ "$arch" == "arm64" && "$gpu" == "metal" && "$ram_gb" -ge 16 ]]; then
+  tier="high"
+elif [[ "$ram_gb" -ge 8 ]]; then
+  tier="medium"
+fi
+
+printf 'tier=%s arch=%s ram_gb=%d gpu=%s\n' "$tier" "$arch" "$ram_gb" "$gpu"

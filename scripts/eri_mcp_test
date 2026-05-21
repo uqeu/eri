@@ -1,0 +1,10 @@
+#!/usr/bin/env zsh
+# List every tool exposed by the user's configured MCP servers.
+# Reads ~/.eri/mcp.json (created on first run) and runs the eri_mcp
+# `list_tools` example, which spawns each server, performs the MCP
+# `initialize` handshake, calls `tools/list`, and prints the results.
+
+set -euo pipefail
+
+cd "${0:A:h:h}"
+exec cargo run --quiet -p eri_mcp --example list_tools "$@"

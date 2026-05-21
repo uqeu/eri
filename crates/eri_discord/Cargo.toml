@@ -1,0 +1,29 @@
+[package]
+name = "eri_discord"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+license = "LicenseRef-Proprietary"
+description = "Discord bot for eri — @-mention or slash-command to trigger Mercury 2 builds and Vercel deploys directly from any Discord channel."
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "eri-discord"
+path = "src/eri_discord.rs"
+
+[dependencies]
+anyhow.workspace = true
+eri_core.workspace = true
+eri_inference.workspace = true
+eri_iterator.workspace = true
+log.workspace = true
+serenity = { version = "0.12", default-features = false, features = [
+    "client",
+    "gateway",
+    "model",
+    "cache",
+    "rustls_backend",
+] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time"] }

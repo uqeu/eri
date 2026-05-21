@@ -1,0 +1,91 @@
+import type { Metadata } from "next";
+import Link from "next/link";
+import { SiteHeader } from "@/components/SiteHeader";
+import { Footer } from "@/components/Footer";
+import { CapabilityGrid } from "@/components/CapabilityGrid";
+
+export const metadata: Metadata = {
+  title: "Features — eri",
+  description:
+    "The complete eri feature catalog — 28 capabilities spanning Cursor parity, voice, gaze, diffusion edits, and iteration history.",
+};
+
+interface MarqueeStat {
+  value: string;
+  label: string;
+}
+
+const MARQUEE_STATS: ReadonlyArray<MarqueeStat> = [
+  { value: "28", label: "Total capabilities" },
+  { value: "4", label: "eri-only differentiators" },
+  { value: "24", label: "Cursor-parity surfaces" },
+  { value: "<2s", label: "Median edit latency" },
+];
+
+export default function FeaturesPage(): React.ReactElement {
+  return (
+    <main>
+      <SiteHeader variant="solid" />
+
+      <section className="border-b border-white/[0.08]">
+        <div className="mx-auto max-w-7xl px-6 py-20 sm:py-28">
+          <p className="text-xs uppercase tracking-[0.25em] text-accent">
+            Features
+          </p>
+          <h1 className="mt-5 font-display text-4xl sm:text-6xl tracking-tight max-w-3xl text-balance font-normal">
+            Every reflex of the modern IDE,{" "}
+            <span className="italic text-accent">spoken to.</span>
+          </h1>
+          <p className="mt-6 max-w-xl text-lg text-paper/70 leading-relaxed">
+            eri ships Cursor-grade tab completion, inline edit, composer, agent
+            mode, and codebase chat. Then it adds voice, gaze, diffusion preview,
+            and iteration history — the parts a keyboard alone can&apos;t reach.
+          </p>
+
+          <div className="mt-12 grid gap-px overflow-hidden rounded-lg border border-white/[0.08] bg-white/[0.06] sm:grid-cols-4">
+            {MARQUEE_STATS.map((stat) => (
+              <div key={stat.label} className="bg-ink p-6">
+                <div className="font-display text-3xl text-accent font-normal">
+                  {stat.value}
+                </div>
+                <div className="mt-2 text-xs uppercase tracking-[0.18em] text-muted">
+                  {stat.label}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <CapabilityGrid />
+
+      <section className="border-t border-white/[0.08]">
+        <div className="mx-auto max-w-7xl px-6 py-20 sm:py-28">
+          <div className="flex flex-col items-start gap-6 sm:flex-row sm:items-end sm:justify-between">
+            <div className="max-w-2xl">
+              <p className="text-xs uppercase tracking-[0.25em] text-muted">
+                Next
+              </p>
+              <h2 className="mt-3 font-display text-3xl sm:text-4xl tracking-tight font-normal text-balance">
+                See the loop in motion.
+              </h2>
+              <p className="mt-4 text-paper/65 leading-relaxed">
+                Features are easier to feel than to read. The demo walks the full
+                surface in under three minutes.
+              </p>
+            </div>
+            <Link
+              href="/demo"
+              className="inline-flex items-center gap-2 rounded-md border border-accent/40 bg-accent/[0.06] px-5 py-3 text-sm text-accent transition hover:border-accent hover:bg-accent/10"
+            >
+              <span aria-hidden>▶</span>
+              Watch the demo
+            </Link>
+          </div>
+        </div>
+      </section>
+
+      <Footer />
+    </main>
+  );
+}

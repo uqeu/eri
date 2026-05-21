@@ -1,0 +1,17 @@
+[package]
+name = "eri_caveman"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+license = "LicenseRef-Proprietary"
+
+[lints]
+workspace = true
+
+[lib]
+path = "src/eri_caveman.rs"
+
+[dependencies]
+eri_tokens.workspace = true
+serde.workspace = true
+thiserror.workspace = true
