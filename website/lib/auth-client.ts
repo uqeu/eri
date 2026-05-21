@@ -8,6 +8,8 @@ export interface PublicUser {
   display_name: string | null;
   tier: string;
   created_at: number;
+  oauth_provider: string | null;
+  has_password: boolean;
 }
 
 interface AuthState {

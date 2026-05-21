@@ -145,6 +145,8 @@ export function publicUser(row: UserRow): {
   display_name: string | null;
   tier: string;
   created_at: number;
+  oauth_provider: string | null;
+  has_password: boolean;
 } {
   return {
     id: row.id,
@@ -152,6 +154,8 @@ export function publicUser(row: UserRow): {
     display_name: row.display_name,
     tier: row.tier,
     created_at: row.created_at,
+    oauth_provider: row.oauth_provider,
+    has_password: row.password_hash !== null,
   };
 }
 
