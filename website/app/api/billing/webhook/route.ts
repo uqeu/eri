@@ -15,6 +15,17 @@ import {
   sendSubscriptionConfirmationEmail,
 } from "@/lib/email";
 
+// Vercel serverless functions have a 10s timeout on Hobby / 60s on Pro.
+// Email rendering + Resend round-trips can eat most of that budget on cold
+// starts, so we kick emails off without awaiting and log failures. The
+// critical Postgres updates still run synchronously before we respond — so
+// a failed/delayed email never blocks Stripe from getting a 200.
+function fireAndForget(name: string, promise: Promise<unknown>): void {
+  promise.catch((error) => {
+    console.error(`stripe.webhook.${name}.email_failed`, error);
+  });
+}
+
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -117,11 +128,14 @@ async function handleSubscriptionCreated(
   const isPaid = (value: string): value is PaidTier =>
     (PAID_TIERS as ReadonlyArray<string>).includes(value);
   if (!isPaid(user.tier)) return;
-  await sendSubscriptionConfirmationEmail({
-    to: user.email,
-    tier: user.tier,
-    manageUrl: billingPortalUrl(),
-  });
+  fireAndForget(
+    "subscription_confirmation",
+    sendSubscriptionConfirmationEmail({
+      to: user.email,
+      tier: user.tier,
+      manageUrl: billingPortalUrl(),
+    }),
+  );
 }
 
 async function handlePaymentSucceeded(invoice: Stripe.Invoice): Promise<void> {
@@ -133,14 +147,17 @@ async function handlePaymentSucceeded(invoice: Stripe.Invoice): Promise<void> {
   const line = invoice.lines.data[0];
   const periodStart = line?.period?.start ?? invoice.period_start;
   const periodEnd = line?.period?.end ?? invoice.period_end;
-  await sendPaymentReceiptEmail({
-    to: user.email,
-    amountUsd,
-    tier: tierFromInvoice(invoice),
-    periodStart,
-    periodEnd,
-    manageUrl: billingPortalUrl(),
-  });
+  fireAndForget(
+    "payment_receipt",
+    sendPaymentReceiptEmail({
+      to: user.email,
+      amountUsd,
+      tier: tierFromInvoice(invoice),
+      periodStart,
+      periodEnd,
+      manageUrl: billingPortalUrl(),
+    }),
+  );
 }
 
 async function handlePaymentFailed(invoice: Stripe.Invoice): Promise<void> {
@@ -148,10 +165,13 @@ async function handlePaymentFailed(invoice: Stripe.Invoice): Promise<void> {
   if (!customerId) return;
   const user = await userForCustomer(customerId);
   if (!user) return;
-  await sendPaymentFailedEmail({
-    to: user.email,
-    retryUrl: billingPortalUrl(),
-  });
+  fireAndForget(
+    "payment_failed",
+    sendPaymentFailedEmail({
+      to: user.email,
+      retryUrl: billingPortalUrl(),
+    }),
+  );
 }
 
 // SCA/3DS authentication required on a recurring charge. Stripe keeps the
