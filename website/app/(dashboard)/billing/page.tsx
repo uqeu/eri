@@ -78,6 +78,9 @@ interface PlanDef {
   blurb: string;
 }
 
+// Self-serve plans only. Teams is sales-led — users can land on the Teams
+// tier in DB if we provision it manually, but they can't pick it themselves
+// from the in-app picker.
 const PLAN_DEFS: ReadonlyArray<PlanDef> = [
   {
     slug: "free",
@@ -90,39 +93,56 @@ const PLAN_DEFS: ReadonlyArray<PlanDef> = [
   {
     slug: "starter",
     name: "Starter",
-    priceMonthly: 20,
-    priceYearly: 200,
+    priceMonthly: 15,
+    priceYearly: 144,
     cadenceSuffix: "",
     blurb: "For solo developers",
   },
   {
     slug: "pro",
     name: "Pro",
-    priceMonthly: 30,
-    priceYearly: 300,
+    priceMonthly: 25,
+    priceYearly: 240,
     cadenceSuffix: "",
     blurb: "For daily eri use",
   },
   {
     slug: "pro_plus",
     name: "Pro+",
-    priceMonthly: 60,
-    priceYearly: 600,
+    priceMonthly: 45,
+    priceYearly: 432,
     cadenceSuffix: "",
     blurb: "Power user tier",
   },
-  {
-    slug: "teams",
-    name: "Teams",
-    priceMonthly: 40,
-    priceYearly: 400,
-    cadenceSuffix: "per seat",
-    blurb: "For teams up to 50",
-  },
 ];
 
+// Used only for resolving the hero display when a user has a sales-provisioned
+// tier (Teams, Enterprise) that isn't shown in the self-serve picker.
+const NON_SELF_SERVE_PLANS: Record<string, PlanDef> = {
+  teams: {
+    slug: "teams" as PlanSlug,
+    name: "Teams",
+    priceMonthly: 0,
+    priceYearly: 0,
+    cadenceSuffix: "",
+    blurb: "Provisioned by our team",
+  },
+  enterprise: {
+    slug: "free" as PlanSlug,
+    name: "Enterprise",
+    priceMonthly: 0,
+    priceYearly: 0,
+    cadenceSuffix: "",
+    blurb: "Custom contract",
+  },
+};
+
 function planDefFor(slug: string): PlanDef {
-  return PLAN_DEFS.find((p) => p.slug === slug) ?? PLAN_DEFS[0];
+  return (
+    PLAN_DEFS.find((p) => p.slug === slug) ??
+    NON_SELF_SERVE_PLANS[slug] ??
+    PLAN_DEFS[0]
+  );
 }
 
 function formatPrice(n: number): string {
@@ -550,6 +570,16 @@ export default function BillingPage() {
                 );
               })}
             </ul>
+            <p className="mt-4 text-[12px] text-muted leading-relaxed">
+              Need Teams or Enterprise?{" "}
+              <a
+                href="mailto:sales@tryeri.ca?subject=Teams%20plan"
+                className="text-accent hover:underline"
+              >
+                Contact sales
+              </a>
+              .
+            </p>
           </div>
         )}
 
