@@ -14,12 +14,11 @@ interface Fact {
 }
 
 const FACTS: ReadonlyArray<Fact> = [
-  { label: "Founded", value: "2025" },
-  { label: "Headquarters", value: "San Francisco, California" },
-  { label: "Team size", value: "Under twenty" },
-  { label: "Stage", value: "Privately held" },
-  { label: "Product", value: "eri — voice-first IDE for macOS" },
-  { label: "Current build", value: "0.4.1" },
+  { label: "Started", value: "2025" },
+  { label: "Based in", value: "Ontario, Canada" },
+  { label: "Team size", value: "One person" },
+  { label: "Stage", value: "Independent, self-funded" },
+  { label: "Product", value: "eri — voice-first IDE" },
 ];
 
 interface Asset {
@@ -78,14 +77,14 @@ export default function PressPage() {
           </h2>
           <p className="mt-6 text-paper/90 leading-relaxed">
             eri is a voice-first IDE for solo founders and small product teams.
-            Native to macOS, built in Rust, and powered by a diffusion code
-            model, eri turns spoken intent into a working diff in under four
-            seconds. Voice, gaze, and the editor run locally; only model calls
-            leave the device.
+            Built on VSCodium with a Rust sidecar, and powered by a diffusion
+            code model, eri turns spoken intent into a working diff in under
+            four seconds. Voice, gaze, and the editor run locally; only model
+            calls leave the device.
           </p>
           <p className="mt-5 text-paper/90 leading-relaxed">
-            The company was founded in 2025 in San Francisco and is privately
-            held.
+            eri is an independent project started in 2025, operated from
+            Ontario, Canada by a solo developer.
           </p>
         </div>
       </section>
@@ -120,10 +119,10 @@ export default function PressPage() {
             Downloads will be linked here once the press kit lands on the CDN.
             In the meantime, email{" "}
             <a
-              href="mailto:press@eri.dev"
+              href="mailto:press@tryeri.ca"
               className="text-accent underline underline-offset-4"
             >
-              press@eri.dev
+              press@tryeri.ca
             </a>{" "}
             and we'll send a zip.
           </p>
@@ -156,10 +155,10 @@ export default function PressPage() {
           <p className="mt-4 text-muted leading-relaxed">
             Reach the press team at{" "}
             <a
-              href="mailto:press@eri.dev"
+              href="mailto:press@tryeri.ca"
               className="text-accent underline underline-offset-4"
             >
-              press@eri.dev
+              press@tryeri.ca
             </a>
             . We try to reply within one business day. For deadline coverage,
             put the deadline in the subject line and we'll prioritize.

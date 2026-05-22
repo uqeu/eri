@@ -148,14 +148,13 @@ export default function AboutPage() {
             Who we are
           </h2>
           <p className="mt-6 text-paper/90 leading-relaxed">
-            A small team building in public. We post the weeks that went well
-            and the weeks that didn't. We answer email. We ship on Fridays
-            anyway. If that sounds like a place you'd want to work, the
-            careers page is one click away.
+            One person building in public. The weeks that went well and the
+            weeks that didn&apos;t both get posted. Email gets answered.
+            Fridays ship anyway.
           </p>
           <p className="mt-5 text-muted leading-relaxed">
-            Headquartered in San Francisco. Distributed across four time
-            zones. Hiring in two more.
+            Based in Ontario, Canada. Independent. Self-funded. Provided
+            as-is.
           </p>
         </div>
       </section>

@@ -279,7 +279,7 @@ const FAQ: ReadonlyArray<FaqItem> = [
   },
   {
     q: "Do you offer student, non-profit, or open-source discounts?",
-    a: "Yes. Email hello@eri.dev with a .edu address, a non-profit registration, or a link to your OSS project and we'll set you up. Case-by-case, real conversation, no coupon code.",
+    a: "Yes. Email hello@tryeri.ca with a .edu address, a non-profit registration, or a link to your OSS project and the operator will set you up. Case-by-case, real conversation, no coupon code.",
   },
   {
     q: "Refund policy?",
@@ -865,30 +865,20 @@ export function PricingContent(): React.ReactElement {
     <>
       <section className="relative overflow-hidden border-b border-white/10">
         <div
-          className="absolute inset-0 pointer-events-none mesh-bg opacity-60"
+          className="absolute inset-0 pointer-events-none mesh-bg opacity-50"
           aria-hidden
         />
-        <div className="relative mx-auto max-w-7xl px-6 py-20 sm:py-24">
-          <p className="font-mono text-xs uppercase tracking-[0.25em] text-accent">
-            Pricing
-          </p>
-          <h1 className="mt-5 font-display text-4xl sm:text-6xl lg:text-7xl tracking-tight max-w-4xl text-balance leading-[1.02]">
+        <div className="relative mx-auto max-w-6xl px-6 pt-20 sm:pt-24 pb-10 text-center">
+          <h1 className="font-display text-4xl sm:text-6xl lg:text-7xl tracking-tight text-balance leading-[1.02] mx-auto max-w-4xl">
             Start free. Grow into{" "}
             <span className="italic accent-text">your own Eri.</span>
           </h1>
-          <p className="mt-6 max-w-2xl text-lg text-muted leading-relaxed">
-            Four tiers. Three depths of personalization — Adaptive, Frontier,
-            Personalized. Monthly or yearly. Cancel any time.
-          </p>
-          <p className="mt-3 max-w-2xl text-sm text-paper/70 leading-relaxed">
-            Every paid tier is{" "}
-            <span className="text-accent">hard-capped at the headline price.</span>{" "}
-            When you reach the monthly turn limit, eri pauses cloud turns and
-            keeps working on your own keys. No metered overage, no surprise
-            invoice.
+          <p className="mt-6 mx-auto max-w-2xl text-lg text-muted leading-relaxed">
+            Four tiers — Stock, Adaptive, Frontier, Personalized. Monthly or
+            yearly. Hard-capped, cancel any time.
           </p>
 
-          <div className="mt-10 flex items-center gap-4">
+          <div className="mt-8 flex items-center justify-center gap-4">
             <div
               role="tablist"
               aria-label="Billing cadence"
@@ -899,7 +889,7 @@ export function PricingContent(): React.ReactElement {
                 role="tab"
                 aria-selected={cadence === "monthly"}
                 onClick={() => setCadence("monthly")}
-                className={`relative z-10 px-4 py-2 text-sm rounded-full transition-colors ${
+                className={`relative z-10 px-5 py-2 text-sm rounded-full transition-colors ${
                   cadence === "monthly"
                     ? "text-paper"
                     : "text-muted hover:text-paper"
@@ -912,13 +902,16 @@ export function PricingContent(): React.ReactElement {
                 role="tab"
                 aria-selected={cadence === "yearly"}
                 onClick={() => setCadence("yearly")}
-                className={`relative z-10 px-4 py-2 text-sm rounded-full transition-colors ${
+                className={`relative z-10 px-5 py-2 text-sm rounded-full transition-colors ${
                   cadence === "yearly"
                     ? "text-paper"
                     : "text-muted hover:text-paper"
                 }`}
               >
                 Yearly
+                <span className="ml-1.5 font-mono text-[10px] text-paper/60">
+                  · save 2mo
+                </span>
               </button>
               <span
                 className="absolute top-1 bottom-1 rounded-full bg-white/[0.08] border border-white/10 transition-transform duration-300 ease-out"
@@ -931,41 +924,40 @@ export function PricingContent(): React.ReactElement {
                 aria-hidden
               />
             </div>
-            <span
-              className={`font-mono text-[10px] uppercase tracking-[0.22em] transition-opacity ${
-                cadence === "yearly" ? "text-accent opacity-100" : "opacity-0"
-              }`}
-            >
-              Save 2 months
-            </span>
           </div>
         </div>
       </section>
 
       <section className="border-b border-white/10">
-        <div className="mx-auto max-w-7xl px-6 py-16 sm:py-20">
-          <div className="mb-10 rounded-xl border border-white/10 bg-white/[0.02] p-6 sm:p-7">
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:gap-8">
-              <div className="sm:w-44 flex-shrink-0">
-                <p className="font-mono text-[10px] uppercase tracking-[0.25em] text-accent">
-                  What's a turn?
-                </p>
-              </div>
-              <div className="flex-1">
-                <p className="text-paper/90 leading-relaxed">
-                  A <span className="text-accent">voice turn</span> is one round-trip with eri's engine: one push-to-talk submission, one Cmd-K inline edit, or one Composer multi-file plan. Each turn averages 15K input and 3K output tokens.
-                </p>
-                <p className="mt-2 text-muted leading-relaxed text-sm">
-                  Tab completions don't count — they're metered separately. Daily caps are soft (occasional overruns are fine); hourly caps stop a runaway agent from draining your month in five minutes.
-                </p>
-              </div>
-            </div>
-          </div>
-
+        <div className="mx-auto max-w-6xl px-6 pt-10 sm:pt-12 pb-16 sm:pb-20">
           <div className="grid gap-5 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 items-stretch">
             {PLANS.map((plan) => (
               <PlanTile key={plan.slug} plan={plan} cadence={cadence} />
             ))}
+          </div>
+
+          <div className="mt-12 rounded-xl border border-white/10 bg-white/[0.02] p-6 sm:p-7">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:gap-8">
+              <div className="sm:w-44 flex-shrink-0">
+                <p className="font-mono text-[10px] uppercase tracking-[0.25em] text-paper/60">
+                  What's a turn?
+                </p>
+              </div>
+              <div className="flex-1">
+                <p className="text-paper/85 leading-relaxed">
+                  A <span className="text-paper">voice turn</span> is one
+                  round-trip with eri's engine: one push-to-talk submission, one
+                  Cmd-K inline edit, or one Composer multi-file plan. Each turn
+                  averages 15K input and 3K output tokens.
+                </p>
+                <p className="mt-2 text-muted leading-relaxed text-sm">
+                  Tab completions don't count — they're metered separately.
+                  Daily caps are soft (occasional overruns are fine); hourly
+                  caps stop a runaway agent from draining your month in five
+                  minutes.
+                </p>
+              </div>
+            </div>
           </div>
 
           <div className="mt-14 rounded-xl border border-white/10 bg-white/[0.02] p-6 sm:p-8">

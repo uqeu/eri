@@ -26,6 +26,8 @@ const COLUMNS: ReadonlyArray<FooterColumn> = [
     heading: "Resources",
     links: [
       { href: "/docs", label: "Docs" },
+      { href: "/help", label: "Help" },
+      { href: "/status", label: "Status" },
       { href: "/forum", label: "Forum" },
     ],
   },
@@ -42,8 +44,12 @@ const COLUMNS: ReadonlyArray<FooterColumn> = [
   {
     heading: "Legal",
     links: [
-      { href: "/privacy", label: "Privacy" },
       { href: "/terms", label: "Terms" },
+      { href: "/privacy", label: "Privacy" },
+      { href: "/legal/acceptable-use", label: "Acceptable use" },
+      { href: "/legal/ai-policy", label: "AI policy" },
+      { href: "/legal/sub-processors", label: "Sub-processors" },
+      { href: "/legal/cookies", label: "Cookies" },
       { href: "/security", label: "Security" },
       { href: "/trust", label: "Trust" },
     ],
@@ -201,24 +207,32 @@ export function FooterBig(): React.ReactElement {
 
         <div className="mt-6 flex flex-col gap-3 border-t border-white/[0.05] pt-6 font-mono text-[12px] text-paper/40 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-            <span>© {year} eri labs, inc.</span>
+            <span>© {year} eri</span>
             <span aria-hidden className="text-paper/20">
               ·
             </span>
-            <span>made in san francisco</span>
+            <span>independent project · ontario, canada</span>
           </div>
           <div className="flex items-center gap-4">
-            <span className="inline-flex items-center gap-2">
+            <Link
+              href="/status"
+              className="inline-flex items-center gap-2 hover:text-paper transition"
+            >
               <span
                 aria-hidden
                 className="h-1.5 w-1.5 rounded-full bg-[#41d57c] shadow-[0_0_8px_rgba(65,213,124,0.7)]"
               />
-              status: nominal
-            </span>
+              status
+            </Link>
             <span aria-hidden className="text-paper/20">
               ·
             </span>
-            <span>build 0.4.1 · macOS 13+</span>
+            <Link
+              href="/legal/disclaimer"
+              className="hover:text-paper transition"
+            >
+              provided as-is
+            </Link>
           </div>
         </div>
       </div>

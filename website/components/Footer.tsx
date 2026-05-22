@@ -233,9 +233,9 @@ export function Footer(): React.ReactElement {
 
         <div className="mt-6 flex flex-col gap-6 border-t border-white/[0.06] pt-8 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex flex-col gap-1 font-mono text-[12px] text-paper/40">
-            <span>© {year} eri labs, inc. all rights reserved.</span>
+            <span>© {year} eri</span>
             <span className="text-paper/30">
-              made in san francisco · native macOS 13+
+              independent project · ontario, canada · provided as-is
             </span>
           </div>
           <div className="flex items-center gap-2">

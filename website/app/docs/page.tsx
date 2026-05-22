@@ -8,36 +8,48 @@ export const metadata: Metadata = {
   description: "Documentation for the eri voice-first IDE. Coming soon.",
 };
 
-interface QuickLink {
+interface DocLink {
+  readonly href: string;
   readonly title: string;
   readonly description: string;
   readonly status: string;
 }
 
-const QUICK_LINKS: ReadonlyArray<QuickLink> = [
+const DOC_LINKS: ReadonlyArray<DocLink> = [
   {
-    title: "Voice setup",
+    href: "/docs/quickstart",
+    title: "Quickstart",
     description:
-      "Pick a microphone, calibrate the wakeword, and tune push-to-talk versus lazy listening to the rhythm of your day.",
-    status: "Draft · 12 sections",
+      "Install, sign in, and run your first AI-assisted edit. Ten-minute path from download to working diff.",
+    status: "Draft",
   },
   {
-    title: "Cmd-K keymap",
+    href: "/docs/ide",
+    title: "The IDE",
     description:
-      "Every Cmd-K action in eri, with the spoken alias next to the chord. Includes the rebind config for vim-style users.",
-    status: "Draft · 47 actions",
+      "Layout, panels, the composer, the apply step, keymaps, and how to make eri behave like the editor you already use.",
+    status: "Draft",
   },
   {
-    title: "MCP servers",
+    href: "/docs/sidecar",
+    title: "The Rust sidecar",
     description:
-      "How to register Model Context Protocol servers, scope their tool surface, and audit what the agent called and when.",
-    status: "Draft · 8 sections",
+      "How the eri_coreutils sidecar talks to the IDE, what each crate does, and the protocol between them.",
+    status: "Draft",
   },
   {
+    href: "/docs/mcp",
+    title: "MCP integration",
+    description:
+      "Registering Model Context Protocol servers, scoping their tools, and reviewing what the agent called.",
+    status: "Draft",
+  },
+  {
+    href: "/docs/byok",
     title: "Bring your own keys",
     description:
-      "Wire up Anthropic, OpenAI, Google, or any OpenAI-compatible endpoint. Storage, rotation, and team-level sharing.",
-    status: "Draft · 6 sections",
+      "Connecting Anthropic, OpenAI, Google, or an OpenAI-compatible endpoint with your own API key.",
+    status: "Draft",
   },
 ];
 
@@ -52,52 +64,54 @@ export default function DocsPage() {
             Docs
           </p>
           <h1 className="mt-5 font-display text-4xl sm:text-6xl tracking-tight text-balance">
-            Coming soon.
+            Docs.
           </h1>
           <p className="mt-5 text-lg text-muted leading-relaxed">
-            We're polishing the full docs site — search, code samples, the
-            works. In the meantime, here are the four guides most teams reach
-            for first. Email{" "}
+            Working documentation for eri — the IDE, the Rust sidecar, MCP
+            integration, BYOK. The pages below are drafts that grow as the
+            product does. If a topic isn&apos;t covered yet, email{" "}
             <a
-              href="mailto:hello@eri.dev"
+              href="mailto:hello@tryeri.ca"
               className="text-accent underline underline-offset-4"
             >
-              hello@eri.dev
+              hello@tryeri.ca
             </a>{" "}
-            and we'll send the current drafts.
+            and the operator will point you at the answer or write the
+            missing page.
           </p>
-          <div className="mt-8">
-            <a
-              href="mailto:hello@eri.dev?subject=Docs%20preview"
-              className="btn-primary inline-flex items-center gap-2 px-5 py-2.5 text-sm"
-            >
-              Request the drafts <span aria-hidden>→</span>
-            </a>
-          </div>
         </div>
       </section>
 
       <section className="border-b border-white/10">
         <div className="mx-auto max-w-5xl px-6 py-16 sm:py-24">
           <h2 className="font-display text-3xl sm:text-4xl tracking-tight">
-            Quick links
+            Start here
           </h2>
           <div className="mt-10 grid gap-4 sm:grid-cols-2">
-            {QUICK_LINKS.map((link) => (
-              <div
-                key={link.title}
-                className="flex h-full flex-col rounded-lg border border-white/10 bg-white/[0.02] p-6 transition hover:border-white/20"
+            {DOC_LINKS.map((link) => (
+              <Link
+                key={link.href}
+                href={link.href}
+                className="group flex h-full flex-col rounded-lg border border-white/10 bg-white/[0.02] p-6 transition hover:border-white/20"
               >
-                <h3 className="font-display text-xl tracking-tight text-paper">
-                  {link.title}
-                </h3>
+                <div className="flex items-baseline justify-between gap-3">
+                  <h3 className="font-display text-xl tracking-tight text-paper group-hover:text-accent transition">
+                    {link.title}
+                  </h3>
+                  <span
+                    aria-hidden
+                    className="text-paper/40 group-hover:text-accent transition"
+                  >
+                    →
+                  </span>
+                </div>
                 <p className="mt-3 flex-1 text-muted leading-relaxed">
                   {link.description}
                 </p>
                 <p className="mt-5 font-mono text-[11px] uppercase tracking-wider text-paper/40">
                   {link.status}
                 </p>
-              </div>
+              </Link>
             ))}
           </div>
         </div>

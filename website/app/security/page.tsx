@@ -22,44 +22,34 @@ const VENDORS: ReadonlyArray<Vendor> = [
     href: "https://stripe.com/privacy-center/legal",
   },
   {
-    name: "Resend",
-    purpose: "Transactional email",
-    href: "https://resend.com/legal/privacy-policy",
-  },
-  {
     name: "Supabase",
-    purpose: "Postgres + auth (EU region)",
+    purpose: "Postgres + auth",
     href: "https://supabase.com/privacy",
   },
   {
-    name: "Sentry",
-    purpose: "Crash reporting (opt-out)",
-    href: "https://sentry.io/trust/privacy/",
-  },
-  {
-    name: "PostHog",
-    purpose: "Product analytics (events, no PII)",
-    href: "https://posthog.com/privacy",
-  },
-  {
     name: "Vercel",
-    purpose: "Web hosting + deploy hooks",
+    purpose: "Web hosting",
     href: "https://vercel.com/legal/privacy-policy",
+  },
+  {
+    name: "Resend",
+    purpose: "Transactional email",
+    href: "https://resend.com/legal/privacy-policy",
   },
 ];
 
 const COLLECTED: ReadonlyArray<string> = [
   "Email address (for sign-in and billing receipts)",
-  "Bcrypt-hashed password (cost factor 12 — we can never recover the original)",
-  "Subscription state from Stripe (tier, status, renewal date)",
-  "Usage counters (number of iterations, deploys — no content)",
-  "Sentry crash reports (opt-out in settings)",
+  "Salted password hash, or your OAuth identifier if you signed in with Google",
+  "Subscription state from Stripe (plan, status, renewal date)",
+  "Usage counters (aggregate, no content)",
+  "Anonymous crash reports, if you leave telemetry on",
 ];
 
 const NOT_COLLECTED: ReadonlyArray<string> = [
   "Your prompts or what you said out loud",
   "Your code — written, generated, or otherwise",
-  "Your voice recordings (TTS is one-shot, never stored)",
+  "Your voice recordings (transcription is local; audio is never uploaded)",
   "Your gaze data (it never leaves your machine)",
   "Your API keys (BYOK keys are stored encrypted in your OS keychain)",
 ];
@@ -78,10 +68,10 @@ export default function SecurityPage() {
             Your code stays on your machine.
           </h1>
           <p className="mt-5 text-lg text-muted leading-relaxed">
-            eri is a desktop app. The model calls go from your machine straight
-            to the provider (eri's engine, Anthropic, OpenAI, or your local
-            Llama). Our servers handle billing and account state — nothing
-            else.
+            eri is a desktop app. Model calls go from your machine to the
+            provider (eri inference, Anthropic, OpenAI, or a local endpoint).
+            The cloud side handles accounts and billing — that&apos;s it. This
+            page is the honest version of how the pieces fit together.
           </p>
         </div>
       </section>
@@ -92,13 +82,13 @@ export default function SecurityPage() {
             How requests flow
           </h2>
           <div className="mt-8 rounded-lg border border-white/10 bg-white/[0.02] p-6 font-mono text-xs leading-relaxed text-paper/90">
-            <pre>{`your machine ─────────────► eri's engine (diffusion)
+            <pre>{`your machine ─────────────► eri inference (default)
               │
-              ├──────────► Anthropic (Claude polish)
+              ├──────────► Anthropic / OpenAI / Google (BYOK)
               │
-              ├──────────► OpenAI / Gemini (if configured)
+              ├──────────► local endpoint (Ollama, etc.)
               │
-              └──────────► eri-cloud (auth + billing only)
+              └──────────► tryeri.ca (auth + billing only)
                               ↑
                               │ never receives:
                               │ - prompts
@@ -107,10 +97,11 @@ export default function SecurityPage() {
                               │ - gaze`}</pre>
           </div>
           <p className="mt-6 text-muted leading-relaxed">
-            On the Free plan, you provide your own keys and eri-cloud is
-            essentially invisible. On Starter/Pro, we proxy billing-bound
-            requests so we can count your usage, but the request body still
-            goes provider-to-you — we sign the call without seeing it.
+            With BYOK, the request goes from your machine to the provider you
+            chose — the operator does not see the body. With the default eri
+            inference proxy, requests are forwarded to the upstream model
+            without retaining request or response bodies; only the metadata
+            needed to count usage is recorded.
           </p>
         </div>
       </section>
@@ -124,29 +115,31 @@ export default function SecurityPage() {
             <li className="flex gap-3">
               <span className="text-accent" aria-hidden>—</span>
               <span>
-                Passwords hashed with <strong>bcrypt</strong>, cost factor 12.
-                We never see plaintext.
+                Passwords stored as <strong>salted hashes</strong>. The
+                plaintext is never written down. OAuth sign-in (Google) skips
+                passwords entirely.
               </span>
             </li>
             <li className="flex gap-3">
               <span className="text-accent" aria-hidden>—</span>
               <span>
-                Session tokens are <strong>JWT HS256</strong>, 7-day expiry,
-                rotated on sign-in.
+                Sessions are signed tokens with a finite lifetime, rotated on
+                sign-in.
               </span>
             </li>
             <li className="flex gap-3">
               <span className="text-accent" aria-hidden>—</span>
               <span>
-                All traffic encrypted in transit via <strong>TLS 1.3</strong>.
-                HSTS preloaded on eri.dev.
+                All traffic uses <strong>TLS</strong> in transit. tryeri.ca
+                serves over HTTPS only.
               </span>
             </li>
             <li className="flex gap-3">
               <span className="text-accent" aria-hidden>—</span>
               <span>
-                BYOK API keys stored in your OS keychain (macOS Keychain,
-                Windows Credential Manager, GNOME Keyring).
+                BYOK API keys live in your OS keychain (macOS Keychain,
+                Windows Credential Manager, Secret Service on Linux). They are
+                never sent to the operator&apos;s servers.
               </span>
             </li>
           </ul>
@@ -187,8 +180,16 @@ export default function SecurityPage() {
             Vendors
           </h2>
           <p className="mt-4 text-muted leading-relaxed">
-            These are the third parties eri-cloud talks to. Each one has a DPA
-            on file. Click through for their compliance pages.
+            The third parties the cloud side talks to. The full sub-processor
+            list, including model providers and what data each one touches,
+            lives at{" "}
+            <Link
+              href="/legal/sub-processors"
+              className="text-paper underline underline-offset-4 decoration-white/30 transition hover:text-accent"
+            >
+              /legal/sub-processors
+            </Link>
+            .
           </p>
           <ul className="mt-8 divide-y divide-white/10 border-y border-white/10">
             {VENDORS.map((vendor) => (
@@ -217,41 +218,20 @@ export default function SecurityPage() {
       <section className="border-b border-white/10">
         <div className="mx-auto max-w-3xl px-6 py-16 sm:py-24">
           <h2 className="font-display text-3xl sm:text-4xl tracking-tight">
-            Compliance
+            Compliance, honestly
           </h2>
           <p className="mt-4 text-muted leading-relaxed">
-            We&apos;re a startup, so let&apos;s be honest about where we are.
+            eri is an indie project. The compliance posture page lives at{" "}
+            <Link
+              href="/trust"
+              className="text-paper underline underline-offset-4 decoration-white/30 transition hover:text-accent"
+            >
+              /trust
+            </Link>
+            . The short version: GDPR / PIPEDA / CCPA-style requests are
+            handled; SOC 2, ISO 27001, and HIPAA are not in place. If your
+            review needs those today, eri is not the tool.
           </p>
-          <dl className="mt-8 grid gap-6 sm:grid-cols-2">
-            <div className="rounded-lg border border-white/10 bg-white/[0.02] p-6">
-              <dt className="font-display text-lg">SOC 2 Type II</dt>
-              <dd className="mt-2 text-sm text-muted">
-                In progress. Target: Q3 2026. We&apos;re working with Vanta on
-                the audit window.
-              </dd>
-            </div>
-            <div className="rounded-lg border border-white/10 bg-white/[0.02] p-6">
-              <dt className="font-display text-lg">GDPR</dt>
-              <dd className="mt-2 text-sm text-muted">
-                Data export and deletion endpoints live now. Email
-                privacy@eri.dev or use the dashboard.
-              </dd>
-            </div>
-            <div className="rounded-lg border border-white/10 bg-white/[0.02] p-6">
-              <dt className="font-display text-lg">HIPAA</dt>
-              <dd className="mt-2 text-sm text-muted">
-                Not supported. Don&apos;t put PHI through eri until we tell you
-                otherwise.
-              </dd>
-            </div>
-            <div className="rounded-lg border border-white/10 bg-white/[0.02] p-6">
-              <dt className="font-display text-lg">Data residency</dt>
-              <dd className="mt-2 text-sm text-muted">
-                Account data stored in Supabase EU (Frankfurt). Model providers
-                handle their own regions.
-              </dd>
-            </div>
-          </dl>
         </div>
       </section>
 
@@ -263,14 +243,20 @@ export default function SecurityPage() {
           <p className="mt-4 text-muted leading-relaxed">
             Found something? Email{" "}
             <a
-              href="mailto:security@eri.dev"
+              href="mailto:security@tryeri.ca"
               className="text-accent underline underline-offset-4"
             >
-              security@eri.dev
+              security@tryeri.ca
             </a>{" "}
-            with a description and reproduction steps. We respond within 48
-            hours, fix critical issues within 7 days, and publicly credit
-            researchers who want it.
+            with what you found and how to reproduce it. The full disclosure
+            policy, including safe harbour, lives at{" "}
+            <Link
+              href="/security/disclosure"
+              className="text-paper underline underline-offset-4 decoration-white/30 transition hover:text-accent"
+            >
+              /security/disclosure
+            </Link>
+            .
           </p>
         </div>
       </section>

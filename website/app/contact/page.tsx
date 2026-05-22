@@ -15,34 +15,52 @@ interface Channel {
 
 const CHANNELS: ReadonlyArray<Channel> = [
   {
-    email: "hello@eri.dev",
+    email: "hello@tryeri.ca",
     purpose: "Anything else",
     detail:
-      "General questions, partnership ideas, hellos, hate mail. A real human reads this inbox.",
+      "General questions, partnership ideas, feedback, hate mail. The operator reads this inbox.",
   },
   {
-    email: "sales@eri.dev",
-    purpose: "Teams & enterprise",
-    detail:
-      "Pricing for 10+ seats, procurement questions, custom data residency, security review requests.",
-  },
-  {
-    email: "press@eri.dev",
-    purpose: "Press & media",
-    detail:
-      "Interview requests, brand assets, embargoed briefings, on-the-record commentary.",
-  },
-  {
-    email: "support@eri.dev",
+    email: "support@tryeri.ca",
     purpose: "Product support",
     detail:
-      "Bug reports, account help, billing questions. Include your eri build number if you can.",
+      "Bugs, account help, install issues. Include your eri build number and operating system if you can.",
   },
   {
-    email: "security@eri.dev",
+    email: "billing@tryeri.ca",
+    purpose: "Billing & refunds",
+    detail:
+      "Subscription, invoice, tax, refund. For card-level issues, Stripe support is faster than this inbox.",
+  },
+  {
+    email: "privacy@tryeri.ca",
+    purpose: "Privacy & data requests",
+    detail:
+      "Access, deletion, correction, export. PIPEDA / GDPR / CCPA — same address, same person, same response time.",
+  },
+  {
+    email: "security@tryeri.ca",
     purpose: "Vulnerability reports",
     detail:
-      "We respond within 48 hours and credit researchers who want it. PGP key on request.",
+      "Responsible disclosure with safe harbour at /security/disclosure. PGP key on request.",
+  },
+  {
+    email: "abuse@tryeri.ca",
+    purpose: "Abuse reports",
+    detail:
+      "Saw eri being misused? Saw something that violates the acceptable-use policy? Send it here.",
+  },
+  {
+    email: "legal@tryeri.ca",
+    purpose: "Legal & DMCA",
+    detail:
+      "Terms questions, IP notices, takedown requests, regulator inquiries.",
+  },
+  {
+    email: "press@tryeri.ca",
+    purpose: "Press & media",
+    detail:
+      "Interview requests, brand assets, on-the-record commentary.",
   },
 ];
 
@@ -60,15 +78,16 @@ export default function ContactPage() {
             Email beats forms.
           </h1>
           <p className="mt-5 text-lg text-muted leading-relaxed">
-            We don't run a contact form. Pick the inbox that matches what you
-            need and we'll write back.
+            No contact form. Pick the inbox that matches what you need and the
+            operator will write back. Most things land within a couple of
+            business days.
           </p>
           <div className="mt-8">
             <a
-              href="mailto:hello@eri.dev"
+              href="mailto:hello@tryeri.ca"
               className="btn-primary inline-flex items-center gap-2 px-5 py-2.5 text-sm"
             >
-              hello@eri.dev <span aria-hidden>→</span>
+              hello@tryeri.ca <span aria-hidden>→</span>
             </a>
           </div>
         </div>
@@ -108,16 +127,19 @@ export default function ContactPage() {
       <section>
         <div className="mx-auto max-w-3xl px-6 py-16">
           <h2 className="font-display text-3xl tracking-tight">
-            Mailing address
+            Where the operator is
           </h2>
           <p className="mt-4 text-muted leading-relaxed">
-            eri labs, inc.
-            <br />
-            548 Market St, PMB 41284
-            <br />
-            San Francisco, CA 94104
-            <br />
-            United States
+            Ontario, Canada. There is no public mailing address — eri is an
+            indie project, not an office. For anything that genuinely needs a
+            postal address (legal service, certified mail), email{" "}
+            <a
+              href="mailto:legal@tryeri.ca"
+              className="text-accent underline underline-offset-4"
+            >
+              legal@tryeri.ca
+            </a>{" "}
+            first and the operator will sort it out.
           </p>
         </div>
       </section>

@@ -10,41 +10,41 @@ export const metadata: Metadata = {
 };
 
 interface Posture {
-  readonly status: "live" | "in-progress" | "available";
+  readonly status: "live" | "in-progress" | "available" | "not-yet";
   readonly title: string;
   readonly body: string;
 }
 
 const POSTURE: ReadonlyArray<Posture> = [
   {
-    status: "in-progress",
-    title: "SOC 2 Type II",
-    body: "We're mid-audit with Vanta. Target attestation window closes Q3 2026. We can share the latest auditor letter under NDA today.",
+    status: "live",
+    title: "PIPEDA (Canada)",
+    body: "eri is operated from Ontario and follows PIPEDA principles for the small amount of personal data the cloud side handles — consent on sign-up, access and deletion on request, breach notification where required.",
   },
   {
     status: "live",
-    title: "GDPR",
-    body: "Account data lives in Supabase's Frankfurt region. Export and deletion endpoints are live in the dashboard. Standard Contractual Clauses cover transfers out of the EEA.",
+    title: "GDPR / UK GDPR",
+    body: "Access, rectification, deletion, and export are honoured for any account regardless of region. Standard Contractual Clauses cover transfers out of the EEA where sub-processors require them. Sub-processor list is at /legal/sub-processors.",
   },
   {
     status: "live",
-    title: "CCPA",
-    body: "California residents can exercise the right to know, delete, and opt out of any sale of personal information. We don't sell personal information — there's nothing to opt out of, but the channel is open.",
+    title: "CCPA / CPRA",
+    body: "California residents can exercise the right to know, delete, correct, and opt out of any sale or sharing of personal information. The operator does not sell personal information — there is nothing to opt out of, but the channel is open at privacy@tryeri.ca.",
   },
   {
     status: "available",
     title: "Data residency",
-    body: "Enterprise accounts can pin account data to EU, US-East, or US-West regions. Model calls follow the provider you configure — that's a separate setting.",
+    body: "Account data lives wherever the operator's database provider stores it (currently configurable per project). Model calls follow whichever provider you configure — that is a separate setting in the app.",
   },
   {
-    status: "in-progress",
-    title: "ISO 27001",
-    body: "On the roadmap once SOC 2 lands. We'll share a target date publicly when the gap analysis finishes.",
+    status: "not-yet",
+    title: "SOC 2 / ISO 27001",
+    body: "eri is run by one person. Formal audits like SOC 2 Type II or ISO 27001 are not in place and are not on a committed timeline. If your security review needs them, eri is not the right tool for you today. Honest.",
   },
   {
-    status: "live",
-    title: "Penetration testing",
-    body: "Annual third-party pentest. Latest report available under NDA. Remediation timelines tracked publicly in the security changelog.",
+    status: "not-yet",
+    title: "HIPAA",
+    body: "eri does not sign BAAs and is not designed for protected health information. Don't put PHI through eri.",
   },
 ];
 
@@ -52,12 +52,14 @@ const STATUS_STYLES: Record<Posture["status"], string> = {
   live: "border-[#41d57c]/40 bg-[#41d57c]/[0.08] text-[#9deec5]",
   "in-progress": "border-accent/40 bg-accent/[0.08] text-accent",
   available: "border-white/15 bg-white/[0.04] text-paper/75",
+  "not-yet": "border-white/15 bg-white/[0.03] text-paper/55",
 };
 
 const STATUS_LABEL: Record<Posture["status"], string> = {
   live: "live",
   "in-progress": "in progress",
   available: "available",
+  "not-yet": "not yet",
 };
 
 export default function TrustPage() {
@@ -71,11 +73,13 @@ export default function TrustPage() {
             Trust
           </p>
           <h1 className="mt-5 font-display text-4xl sm:text-6xl tracking-tight text-balance">
-            Boring promises, kept on schedule.
+            Trust, honestly.
           </h1>
           <p className="mt-5 text-lg text-muted leading-relaxed">
-            Security and compliance posture for eri labs. We try to over-share
-            here so your security review is short.
+            eri is an independent project run from Ontario. There is no
+            compliance theatre on this page — what is true is marked live,
+            what is not, is marked not yet. If your procurement checklist
+            requires SOC 2 today, save us both the time.
           </p>
         </div>
       </section>
@@ -116,14 +120,15 @@ export default function TrustPage() {
           <p className="mt-6 text-paper/90 leading-relaxed">
             The eri desktop app keeps your project files, voice frames, gaze
             data, and shell history on the machine they originated on. The
-            eri-cloud control plane runs in Supabase's Frankfurt region by
-            default. Enterprise customers can pin to US-East or US-West with
-            one config change.
+            cloud side — accounts and billing — lives with the operator&apos;s
+            database and hosting providers (see /legal/sub-processors for the
+            current list and regions).
           </p>
           <p className="mt-5 text-muted leading-relaxed">
-            Model calls follow whatever provider you've configured. The eri
-            Engine runs in US-East with EU mirroring on the roadmap. BYOK
-            providers are between you and them.
+            Model calls follow whichever provider you connect. With BYOK, the
+            request goes from your machine to that provider and the operator
+            does not see it. With the default eri inference proxy, requests
+            are forwarded without retaining request or response bodies.
           </p>
         </div>
       </section>
@@ -131,24 +136,31 @@ export default function TrustPage() {
       <section>
         <div className="mx-auto max-w-3xl px-6 py-16 sm:py-24">
           <h2 className="font-display text-3xl sm:text-4xl tracking-tight">
-            Get the documents
+            Asking the operator
           </h2>
           <p className="mt-4 text-muted leading-relaxed">
-            We share our latest SOC 2 letter, pentest report, sub-processor
-            list, and DPA under NDA. Email{" "}
+            There is no NDA package, no auditor letter, and no compliance
+            portal. There is one inbox:{" "}
             <a
-              href="mailto:trust@eri.dev"
+              href="mailto:trust@tryeri.ca"
               className="text-accent underline underline-offset-4"
             >
-              trust@eri.dev
-            </a>{" "}
-            and we'll send a package the same business day. The full security
-            architecture lives on the{" "}
+              trust@tryeri.ca
+            </a>
+            . The operator will answer your security questions honestly. The
+            full architecture lives on the{" "}
             <Link
               href="/security"
               className="text-paper underline underline-offset-4 decoration-white/30 transition hover:text-accent"
             >
               security page
+            </Link>
+            , and the vulnerability disclosure policy is at{" "}
+            <Link
+              href="/security/disclosure"
+              className="text-paper underline underline-offset-4 decoration-white/30 transition hover:text-accent"
+            >
+              /security/disclosure
             </Link>
             .
           </p>
