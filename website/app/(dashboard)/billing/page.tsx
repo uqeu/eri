@@ -573,7 +573,7 @@ export default function BillingPage() {
             <p className="mt-4 text-[12px] text-muted leading-relaxed">
               Need Teams or Enterprise?{" "}
               <a
-                href="mailto:sales@tryeri.ca?subject=Teams%20plan"
+                href="mailto:phlotu@gmail.com?subject=Teams%20plan"
                 className="text-accent hover:underline"
               >
                 Contact sales
