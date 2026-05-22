@@ -20,20 +20,31 @@ interface UsageSummary {
   tokens: number;
 }
 
+interface RawUsageSummary {
+  this_month_usd?: unknown;
+  this_month_tokens?: unknown;
+  limit_usd?: unknown;
+}
+
+function asNumber(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  return null;
+}
+
 function isSubscription(value: unknown): value is SubscriptionSummary {
   if (typeof value !== "object" || value === null) return false;
   const obj = value as Record<string, unknown>;
   return typeof obj.tier === "string";
 }
 
-function isUsageSummary(value: unknown): value is UsageSummary {
-  if (typeof value !== "object" || value === null) return false;
-  const obj = value as Record<string, unknown>;
-  return (
-    typeof obj.spend_usd === "number" &&
-    typeof obj.budget_usd === "number" &&
-    typeof obj.tokens === "number"
-  );
+function readUsageSummary(value: unknown): UsageSummary | null {
+  if (typeof value !== "object" || value === null) return null;
+  const raw = value as RawUsageSummary;
+  const spend = asNumber(raw.this_month_usd);
+  const budget = asNumber(raw.limit_usd);
+  const tokens = asNumber(raw.this_month_tokens);
+  if (spend === null || budget === null || tokens === null) return null;
+  return { spend_usd: spend, budget_usd: budget, tokens };
 }
 
 function extractUrl(value: unknown): string | null {
@@ -271,7 +282,8 @@ export default function BillingPage() {
           }
           if (usageRes.ok) {
             const body: unknown = await usageRes.json();
-            if (isUsageSummary(body)) setUsage(body);
+            const parsed = readUsageSummary(body);
+            if (parsed) setUsage(parsed);
           }
         }
       } catch {

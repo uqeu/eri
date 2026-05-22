@@ -106,7 +106,9 @@ export async function POST(request: Request): Promise<NextResponse> {
       if (switchable && existingItem) {
         if (existingItem.price.id === newPriceId) {
           return NextResponse.json(
-            { url: `${baseUrl}/billing/success?action=unchanged` },
+            {
+              url: `${baseUrl}/billing/success?action=unchanged&plan=${body.plan}`,
+            },
             { status: 200 },
           );
         }
@@ -125,7 +127,9 @@ export async function POST(request: Request): Promise<NextResponse> {
           },
         });
         return NextResponse.json(
-          { url: `${baseUrl}/billing/success?action=updated` },
+          {
+            url: `${baseUrl}/billing/success?action=updated&plan=${body.plan}`,
+          },
           { status: 200 },
         );
       }

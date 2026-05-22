@@ -27,10 +27,18 @@ function CheckIcon() {
   );
 }
 
+function prettyTier(slug: string): string {
+  return slug.replace("_", " ");
+}
+
 function SuccessInner() {
   const params = useSearchParams();
   const sessionId = params?.get("session_id") ?? null;
   const action = params?.get("action") ?? null;
+  // Target plan from the API redirect — we use this for the success copy and
+  // as the goal for polling. Without it we'd show the user's old/cached tier
+  // until the webhook catches up.
+  const targetPlan = params?.get("plan") ?? null;
   const { user, reload } = useUser();
   const [pollCount, setPollCount] = useState(0);
 
@@ -38,21 +46,29 @@ function SuccessInner() {
   const isNoop = action === "unchanged";
 
   // Webhooks usually finalize within a few seconds, but to be safe we poll
-  // the user record a few times so the tier badge updates without a manual
-  // refresh.
+  // /api/auth/me until the user's tier matches the target. useUser's reload
+  // pushes the new user object to every subscriber (sidebar, /billing, etc.)
+  // so once polling completes the rest of the app stays in sync without a
+  // hard refresh.
   useEffect(() => {
     if (!user) return;
     if (isNoop) return;
-    if (user.tier && user.tier !== "free") return;
-    if (pollCount > 6) return;
+    if (pollCount > 12) return;
+    if (targetPlan && user.tier === targetPlan) return;
+    if (!targetPlan && user.tier !== "free") return;
     const id = window.setTimeout(() => {
       void reload();
       setPollCount((n) => n + 1);
     }, 1500);
     return () => window.clearTimeout(id);
-  }, [user, pollCount, reload, isNoop]);
+  }, [user, pollCount, reload, isNoop, targetPlan]);
 
-  const upgraded = user?.tier && user.tier !== "free";
+  const matched = targetPlan
+    ? user?.tier === targetPlan
+    : Boolean(user?.tier && user.tier !== "free");
+
+  const displayPlan = targetPlan ?? user?.tier ?? null;
+  const displayPlanLabel = displayPlan ? prettyTier(displayPlan) : null;
 
   const heading = isNoop
     ? "Already on this plan"
@@ -61,7 +77,7 @@ function SuccessInner() {
       : "Payment successful";
   const subHeading = isNoop
     ? "No changes were made"
-    : upgraded
+    : matched
       ? "Your plan is active"
       : "Activating your plan…";
 
@@ -84,7 +100,7 @@ function SuccessInner() {
                 <>
                   You&apos;re already subscribed to{" "}
                   <span className="text-paper capitalize">
-                    {user?.tier.replace("_", " ")}
+                    {displayPlanLabel ?? "this plan"}
                   </span>
                   . Nothing was charged.
                 </>
@@ -92,16 +108,26 @@ function SuccessInner() {
                 <>
                   Your subscription is now{" "}
                   <span className="text-paper capitalize">
-                    {user?.tier.replace("_", " ") ?? "updating"}
+                    {displayPlanLabel ?? "updating"}
                   </span>
-                  . We&apos;ve prorated the difference — any credit or charge
-                  appears on your next invoice.
+                  .{" "}
+                  {matched ? (
+                    <>
+                      We&apos;ve prorated the difference — any credit or
+                      charge appears on your next invoice.
+                    </>
+                  ) : (
+                    <>
+                      We&apos;re finalizing the change — this usually takes a
+                      few seconds.
+                    </>
+                  )}
                 </>
-              ) : upgraded ? (
+              ) : matched ? (
                 <>
                   Welcome to{" "}
                   <span className="text-paper capitalize">
-                    {user?.tier.replace("_", " ")}
+                    {displayPlanLabel}
                   </span>
                   . A receipt has been sent to{" "}
                   <span className="text-paper">{user?.email}</span>.
