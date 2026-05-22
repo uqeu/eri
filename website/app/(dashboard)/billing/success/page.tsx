@@ -113,8 +113,8 @@ function SuccessInner() {
                   .{" "}
                   {matched ? (
                     <>
-                      We&apos;ve prorated the difference — any credit or
-                      charge appears on your next invoice.
+                      The prorated difference has been billed to your card
+                      now. Your next monthly invoice will be a clean charge.
                     </>
                   ) : (
                     <>

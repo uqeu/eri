@@ -114,7 +114,13 @@ export async function POST(request: Request): Promise<NextResponse> {
         }
         await client.subscriptions.update(sub.id, {
           items: [{ id: existingItem.id, price: newPriceId }],
-          proration_behavior: "create_prorations",
+          // Bill the proration immediately so upgrades create a clean small
+          // invoice now rather than stacking onto next month's bill. For
+          // downgrades Stripe issues a credit to the customer's balance which
+          // auto-applies to the next regular invoice. This matches the
+          // Customer Portal config ("Charge full difference, invoice
+          // immediately"), so portal and in-app switches behave identically.
+          proration_behavior: "always_invoice",
           // Cancel any prior "schedule to cancel at period end" — if the user
           // is upgrading after clicking cancel, they almost certainly want
           // their subscription to keep running.
