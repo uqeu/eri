@@ -168,6 +168,23 @@ export async function ensureSession(): Promise<PublicUser | null> {
   return refreshSession();
 }
 
+/**
+ * Force a server round-trip to refetch the current user, bypassing the
+ * in-memory cache that `ensureSession` short-circuits on. Use this after a
+ * server-side mutation that can change user state (plan changes, profile
+ * updates, etc.) so every subscriber to `useUser` re-renders with fresh data.
+ */
+export async function refreshUser(): Promise<PublicUser | null> {
+  if (state.access_token) {
+    const user = await fetchMe(state.access_token);
+    if (user) {
+      setState({ user });
+      return user;
+    }
+  }
+  return refreshSession();
+}
+
 export interface AuthedFetchOptions {
   method?: string;
   body?: unknown;
@@ -246,11 +263,15 @@ export function useUser(): UseUserResult {
   const [loading, setLoading] = useState<boolean>(state.user === null);
   const [error, setError] = useState<string | null>(null);
 
+  // `reload` always hits the server — useUser callers invoke it when they
+  // know something server-side has changed (plan switch, profile save) and
+  // need every subscriber to see the new state. The first-paint bootstrap
+  // path still uses ensureSession so we don't hammer the network on mount.
   const reload = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const next = await ensureSession();
+      const next = await refreshUser();
       setUser(next);
       if (!next) {
         setError("Not authenticated.");
@@ -270,11 +291,24 @@ export function useUser(): UseUserResult {
       setUser(next.user);
     };
     listeners.add(listener);
-    void reload();
+    void (async () => {
+      setLoading(true);
+      try {
+        const next = await ensureSession();
+        setUser(next);
+        if (!next) {
+          setError("Not authenticated.");
+        }
+      } catch {
+        setUser(null);
+      } finally {
+        setLoading(false);
+      }
+    })();
     return () => {
       listeners.delete(listener);
     };
-  }, [reload]);
+  }, []);
 
   return { user, loading, error, reload };
 }
