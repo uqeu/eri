@@ -23,7 +23,7 @@ export function HeroDemo(): React.ReactElement {
       {scene === 0 ? (
         <>
           <HeroWindow
-            title="eri Desktop"
+            title="eri · workspace"
             initial={{ x: 60, y: 60 }}
             width={760}
             height={460}
@@ -33,7 +33,7 @@ export function HeroDemo(): React.ReactElement {
             <IDEWindow />
           </HeroWindow>
           <HeroWindow
-            title="Voice · Gaze"
+            title="voice · gaze"
             initial={{ x: 540, y: 320 }}
             width={360}
             height={300}
@@ -48,7 +48,7 @@ export function HeroDemo(): React.ReactElement {
       {scene === 1 ? (
         <>
           <HeroWindow
-            title="eri Desktop"
+            title="eri · workspace"
             initial={{ x: 60, y: 60 }}
             width={760}
             height={460}
@@ -58,7 +58,7 @@ export function HeroDemo(): React.ReactElement {
             <IDEWindow />
           </HeroWindow>
           <HeroWindow
-            title="eri CLI"
+            title="eri · cli"
             initial={{ x: 540, y: 320 }}
             width={420}
             height={300}
@@ -78,9 +78,9 @@ export function HeroDemo(): React.ReactElement {
       {scene === 2 ? (
         <HeroWindow
           title="eri · prompt pipeline"
-          initial={{ x: 60, y: 40 }}
-          width={900}
-          height={580}
+          initial={{ x: 16, y: 16 }}
+          width={10000}
+          height={10000}
           z={10}
           resetSignal={resetSignal}
         >

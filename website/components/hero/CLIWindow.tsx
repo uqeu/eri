@@ -57,7 +57,7 @@ export function CLIWindow(): React.ReactElement {
           ) : null}
         </div>
         <div className="mt-1 flex items-center gap-2 text-[10px] text-white/45">
-          <span>Composer 2.5</span>
+          <span>eri engine</span>
           <span>·</span>
           <span>/ for commands · @ for files</span>
         </div>

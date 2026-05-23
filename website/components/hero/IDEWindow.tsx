@@ -69,15 +69,15 @@ export function IDEWindow(): React.ReactElement {
             <input
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="Plan, search, build anything..."
+              placeholder="Speak or type what to build..."
               className="w-full bg-transparent text-[12px] outline-none placeholder:text-white/35"
               spellCheck={false}
               autoCorrect="off"
             />
             <div className="mt-2 flex items-center justify-between">
               <div className="flex items-center gap-2 text-[11px] text-white/55">
-                <span className="rounded-full bg-white/[0.06] px-2 py-0.5">Agent</span>
-                <span>Composer 2.5</span>
+                <span className="rounded-full bg-white/[0.06] px-2 py-0.5">Voice</span>
+                <span>eri engine · diffusion</span>
               </div>
               <button type="submit" className="flex h-5 w-5 items-center justify-center rounded-full bg-white/10 text-white/70 hover:bg-white/15">↑</button>
             </div>
