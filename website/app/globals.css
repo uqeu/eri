@@ -3,32 +3,28 @@
 @tailwind utilities;
 
 :root {
-  color-scheme: dark;
+  color-scheme: light dark;
 
-  /* Surface palette — refined dark stack */
-  --bg-primary: #0a0a0a;
-  --bg-secondary: #131311;
-  --bg-tertiary: #1a1a18;
-  --bg-elevated: #1f1f1d;
+  /* Default (system): light tokens */
+  --bg:        #f7f4ef;
+  --bg-card:   #efeae0;
+  --bg-card-2: #e7e1d4;
+  --border:    rgba(42, 38, 32, 0.08);
+  --border-strong: rgba(42, 38, 32, 0.16);
 
-  /* Borders — hairlines that match Notion/Cursor */
-  --border-default: rgba(245, 242, 236, 0.08);
-  --border-hover: rgba(245, 242, 236, 0.16);
-  --border-strong: rgba(245, 242, 236, 0.24);
+  --text:     #2a2620;
+  --text-sec: rgba(42, 38, 32, 0.6);
+  --text-ter: rgba(42, 38, 32, 0.4);
 
-  /* Text */
-  --text-primary: #f5f2ec;
-  --text-secondary: rgba(245, 242, 236, 0.6);
-  --text-tertiary: rgba(245, 242, 236, 0.4);
-  --text-quaternary: rgba(245, 242, 236, 0.24);
+  --sage:        #bfd7c1;
+  --sage-deep:   #8fb592;
+  --blue:        #c9dcea;
+  --blue-deep:   #9bb7cd;
+  --focus-ring:  var(--sage-deep);
 
-  /* Accent */
-  --accent: #e0ff4f;
-  --accent-bright: #f0ff7f;
-  --accent-muted: rgba(224, 255, 79, 0.12);
-  --accent-faint: rgba(224, 255, 79, 0.04);
+  /* Demo-only — lime survives inside the engine */
+  --demo-accent: #e0ff4f;
 
-  /* Type scale — Cursor-style fluid sizing */
   --text-display: clamp(3rem, 8vw, 6.5rem);
   --text-h1: clamp(2.5rem, 5vw, 4rem);
   --text-h2: clamp(2rem, 3.5vw, 3rem);
@@ -36,13 +32,11 @@
   --text-body: 1.0625rem;
   --text-mono-cap: 0.75rem;
 
-  /* Radii */
   --r-sm: 6px;
   --r-md: 10px;
   --r-lg: 14px;
   --r-xl: 20px;
 
-  /* Motion */
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
   --dur-fast: 120ms;
@@ -50,17 +44,55 @@
   --dur-slow: 400ms;
 }
 
-html,
-body {
-  background: var(--bg-primary);
-  color: var(--text-primary);
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg:        #1a1814;
+    --bg-card:   #221f19;
+    --bg-card-2: #2a2620;
+    --border:    rgba(236, 232, 223, 0.08);
+    --border-strong: rgba(236, 232, 223, 0.16);
+
+    --text:     #ece8df;
+    --text-sec: rgba(236, 232, 223, 0.6);
+    --text-ter: rgba(236, 232, 223, 0.4);
+
+    --sage:       #a8c4ab;
+    --sage-deep:  #cfe1d1;
+    --blue:       #b0c4d6;
+    --blue-deep:  #d0dde7;
+    --focus-ring: var(--blue-deep);
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg:        #1a1814;
+  --bg-card:   #221f19;
+  --bg-card-2: #2a2620;
+  --border:    rgba(236, 232, 223, 0.08);
+  --border-strong: rgba(236, 232, 223, 0.16);
+
+  --text:     #ece8df;
+  --text-sec: rgba(236, 232, 223, 0.6);
+  --text-ter: rgba(236, 232, 223, 0.4);
+
+  --sage:       #a8c4ab;
+  --sage-deep:  #cfe1d1;
+  --blue:       #b0c4d6;
+  --blue-deep:  #d0dde7;
+  --focus-ring: var(--blue-deep);
+}
+
+html, body {
+  background: var(--bg);
+  color: var(--text);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  transition: background var(--dur-base) var(--ease-out), color var(--dur-base) var(--ease-out);
 }
 
 ::selection {
-  background: var(--accent);
-  color: var(--bg-primary);
+  background: var(--sage);
+  color: var(--text);
 }
 
 @layer utilities {
@@ -107,30 +139,30 @@ body {
 
   /* Borders */
   .hairline {
-    border-color: var(--border-default);
+    border-color: var(--border);
   }
 
   .hairline-strong {
-    border-color: var(--border-hover);
+    border-color: var(--border-strong);
   }
 
   /* Surfaces */
   .surface-1 {
-    background: var(--bg-primary);
+    background: var(--bg);
   }
 
   .surface-2 {
-    background: var(--bg-secondary);
+    background: var(--bg-card);
   }
 
   .surface-3 {
-    background: var(--bg-tertiary);
+    background: var(--bg-card-2);
   }
 
   /* Primary CTA — ChatGPT-style minimal accent button */
   .btn-primary {
-    background: var(--accent);
-    color: var(--bg-primary);
+    background: var(--sage-deep);
+    color: var(--bg);
     border-radius: var(--r-sm);
     font-weight: 500;
     transition: background var(--dur-base) var(--ease-out),
@@ -138,7 +170,7 @@ body {
   }
 
   .btn-primary:hover {
-    background: var(--accent-bright);
+    background: var(--sage);
     box-shadow: 0 0 32px rgba(224, 255, 79, 0.32);
   }
 
@@ -164,8 +196,8 @@ body {
   /* Secondary CTA — Cursor/ChatGPT ghost */
   .btn-ghost {
     background: transparent;
-    color: var(--text-primary);
-    border: 1px solid var(--border-default);
+    color: var(--text);
+    border: 1px solid var(--border);
     border-radius: var(--r-sm);
     font-weight: 500;
     transition: border-color var(--dur-base) var(--ease-out),
@@ -173,7 +205,7 @@ body {
   }
 
   .btn-ghost:hover {
-    border-color: var(--border-hover);
+    border-color: var(--border-strong);
     background: rgba(245, 242, 236, 0.03);
   }
 
@@ -207,7 +239,7 @@ body {
 
   /* Cursor-style stat divider */
   .stat-divider > * + * {
-    border-left: 1px solid var(--border-default);
+    border-left: 1px solid var(--border);
     padding-left: 1.5rem;
   }
 
@@ -220,7 +252,7 @@ body {
   }
 
   .card-lift:hover {
-    border-color: var(--border-hover);
+    border-color: var(--border-strong);
     background: rgba(245, 242, 236, 0.03);
     transform: translateY(-2px);
   }
