@@ -33,12 +33,12 @@ border        rgba(42,38,32,.08)    border        rgba(236,232,223,.08)
 text          #2a2620  warm ink     text          #ece8df  warm paper
 text-sec      rgba(42,38,32,.6)     text-sec      rgba(236,232,223,.6)
 accent-sage   #bfd7c1               accent-sage   #a8c4ab  (deeper)
-accent-lilac  #cfc4e0               accent-lilac  #b8acd0
-focus-ring    #8fb592  sage-700     focus-ring    #b8a8d8  lilac-200
+accent-blue   #c9dcea  powder       accent-blue   #b0c4d6  (deeper)
+focus-ring    #8fb592  sage-700     focus-ring    #9bb7cd  blue-300
 ```
 
 - **Sage** = primary identity, focus rings, "active" indicators, primary button.
-- **Lilac** = secondary, hover surfaces, decorative chips.
+- **Powder blue** = secondary, hover surfaces, decorative chips, "info" tone.
 - **Lime (#e0ff4f)** stays only inside demo canvases (PromptPipeline, EngineRoom, HeroBig's prototype). It becomes the engine's color, not the brand's.
 - Theme toggle pill (System / Light / Dark) lives in the footer, like Cursor's.
 
