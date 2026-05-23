@@ -29,11 +29,11 @@ const ENTRIES: ReadonlyArray<Entry> = [
   },
   {
     date: "2026-05-16",
-    title: "eri's engine apply path, eri voice picker, eri.dev",
+    title: "eri's engine apply path, eri voice picker, tryeri.ca",
     items: [
       "Switched edit path to eri's engine — average iteration down to 1.7s",
       "eri voice picker via ElevenLabs presets for Starter+ tiers",
-      "eri.dev landing page launched",
+      "tryeri.ca landing page launched",
       "BYOK flow for Free tier (eri's engine + ElevenLabs keys)",
       "Iteration timelines shareable at /p/[slug]",
     ],

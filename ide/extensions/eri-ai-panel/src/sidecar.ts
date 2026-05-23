@@ -9,10 +9,21 @@ export interface SidecarNotification {
   params: unknown;
 }
 
+export interface SidecarIncomingRequest {
+  readonly id: number | string;
+  readonly method: string;
+  readonly params: unknown;
+}
+
+export type SidecarRequestHandler = (
+  request: SidecarIncomingRequest,
+) => Promise<unknown> | unknown;
+
 export interface SidecarOptions {
   binaryPath: string;
   onNotification: (notification: SidecarNotification) => void;
   onExit: (code: number | null) => void;
+  onRequest?: SidecarRequestHandler;
 }
 
 type Pending = {
@@ -25,8 +36,15 @@ export class Sidecar {
   private buffer: Buffer = Buffer.alloc(0);
   private nextId = 1;
   private pending = new Map<number, Pending>();
+  private requestHandler: SidecarRequestHandler | null;
 
-  constructor(private readonly options: SidecarOptions) {}
+  constructor(private readonly options: SidecarOptions) {
+    this.requestHandler = options.onRequest ?? null;
+  }
+
+  setRequestHandler(handler: SidecarRequestHandler | null): void {
+    this.requestHandler = handler;
+  }
 
   start(): void {
     if (this.childProcess) {
@@ -130,13 +148,27 @@ export class Sidecar {
   }
 
   private dispatchIncoming(message: {
-    id?: number;
+    id?: number | string;
     method?: string;
     params?: unknown;
     result?: unknown;
     error?: { code: number; message: string };
   }): void {
-    if (typeof message.id === "number") {
+    const hasId = typeof message.id === "number" || typeof message.id === "string";
+    const hasMethod = typeof message.method === "string";
+
+    // Sidecar -> extension request (has both id and method). We respond
+    // with a JSON-RPC result/error.
+    if (hasId && hasMethod) {
+      const id = message.id as number | string;
+      const method = message.method as string;
+      const params = message.params ?? {};
+      void this.handleIncomingRequest({ id, method, params });
+      return;
+    }
+
+    // Response to a request the extension made.
+    if (hasId && typeof message.id === "number") {
       const pending = this.pending.get(message.id);
       if (!pending) {
         return;
@@ -149,10 +181,37 @@ export class Sidecar {
       }
       return;
     }
-    if (typeof message.method === "string") {
+
+    // Notification from sidecar.
+    if (hasMethod) {
       this.options.onNotification({
-        method: message.method,
+        method: message.method as string,
         params: message.params ?? {},
+      });
+    }
+  }
+
+  private async handleIncomingRequest(
+    request: SidecarIncomingRequest,
+  ): Promise<void> {
+    const handler = this.requestHandler;
+    if (!handler) {
+      this.write({
+        jsonrpc: "2.0",
+        id: request.id,
+        error: { code: -32601, message: "method not found" },
+      });
+      return;
+    }
+    try {
+      const result = await handler(request);
+      this.write({ jsonrpc: "2.0", id: request.id, result: result ?? null });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "internal error";
+      this.write({
+        jsonrpc: "2.0",
+        id: request.id,
+        error: { code: -32603, message },
       });
     }
   }

@@ -42,7 +42,7 @@ export function PasswordResetEmail({
 }
 
 PasswordResetEmail.PreviewProps = {
-  resetUrl: "https://eri.dev/reset?token=preview",
+  resetUrl: "https://www.tryeri.ca/reset?token=preview",
 } satisfies PasswordResetEmailProps;
 
 export default PasswordResetEmail;

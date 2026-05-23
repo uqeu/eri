@@ -46,8 +46,8 @@ export function WelcomeEmail({
 
 WelcomeEmail.PreviewProps = {
   displayName: "Khai",
-  downloadUrl: "https://eri.dev/download",
-  unsubscribeUrl: "https://eri.dev/unsubscribe?token=preview",
+  downloadUrl: "https://www.tryeri.ca/download",
+  unsubscribeUrl: "https://www.tryeri.ca/unsubscribe?token=preview",
 } satisfies WelcomeEmailProps;
 
 export default WelcomeEmail;

@@ -42,7 +42,7 @@ const ARTICLES: ReadonlyArray<Article> = [
   {
     question: "Where do I find the docs?",
     answer:
-      "Product docs live at /docs. They're skeletal right now and growing. If you can't find a topic, email support@tryeri.ca and the operator will either point you at the answer or write the missing page.",
+      "Product docs live at /docs. They're skeletal right now and growing. If you can't find a topic, email phlotu@gmail.com and the operator will either point you at the answer or write the missing page.",
   },
 ];
 

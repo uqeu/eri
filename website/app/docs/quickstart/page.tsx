@@ -60,7 +60,7 @@ export default function QuickstartPage() {
           <p className="mt-5 text-lg text-muted leading-relaxed">
             The shortest path from a fresh download to a working
             AI-assisted edit. If anything below diverges from what you see
-            in the app, the app wins — email support@tryeri.ca and the
+            in the app, the app wins — email phlotu@gmail.com and the
             operator will update this page.
           </p>
         </div>

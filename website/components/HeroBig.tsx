@@ -661,21 +661,20 @@ function Prototype({
                 target === "toggle"
                   ? "rgba(224,255,79,0.45)"
                   : "rgba(255,255,255,0.10)",
-              background: flags.annualPrice
+              background: flags.toggleGlow
                 ? "rgba(224,255,79,0.18)"
                 : "rgba(255,255,255,0.06)",
-              animation:
-                flags.toggleGlow && flags.annualPrice
-                  ? "annualGlow 1.8s ease-in-out infinite"
-                  : "none",
+              animation: flags.toggleGlow
+                ? "annualGlow 1.8s ease-in-out infinite"
+                : "none",
             }}
           >
             <span
               className="absolute top-1 left-1 h-4 w-4 rounded-full"
               style={{
-                transform: flags.annualPrice ? "translateX(24px)" : "translateX(0)",
+                transform: flags.toggleGlow ? "translateX(24px)" : "translateX(0)",
                 transition: "transform 220ms cubic-bezier(0.32, 0.72, 0, 1), background 220ms ease",
-                background: flags.annualPrice
+                background: flags.toggleGlow
                   ? "var(--accent)"
                   : "rgba(245,242,236,0.85)",
               }}

@@ -279,7 +279,7 @@ const FAQ: ReadonlyArray<FaqItem> = [
   },
   {
     q: "Do you offer student, non-profit, or open-source discounts?",
-    a: "Yes. Email hello@tryeri.ca with a .edu address, a non-profit registration, or a link to your OSS project and the operator will set you up. Case-by-case, real conversation, no coupon code.",
+    a: "Yes. Email phlotu@gmail.com with a .edu address, a non-profit registration, or a link to your OSS project and the operator will set you up. Case-by-case, real conversation, no coupon code.",
   },
   {
     q: "Refund policy?",

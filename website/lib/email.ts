@@ -11,10 +11,10 @@ import { PaymentFailedEmail } from "@/emails/payment-failed";
 import { PaymentReceiptEmail } from "@/emails/payment-receipt";
 import { UsageThresholdEmail } from "@/emails/usage-threshold";
 
-const FROM = "eri <noreply@eri.dev>";
+const FROM = "eri <phlotu@gmail.com>";
 
 function baseUrl(): string {
-  return process.env.NEXT_PUBLIC_BASE_URL ?? "https://eri.dev";
+  return process.env.NEXT_PUBLIC_BASE_URL ?? "https://www.tryeri.ca";
 }
 
 function unsubscribeUrl(email: string): string {

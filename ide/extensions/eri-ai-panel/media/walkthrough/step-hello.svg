@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+  <rect x="50" y="60" width="300" height="180" rx="10"/>
+  <path d="M50 90h300"/>
+  <circle cx="68" cy="75" r="3" fill="currentColor" stroke="none"/>
+  <circle cx="80" cy="75" r="3" fill="currentColor" stroke="none"/>
+  <circle cx="92" cy="75" r="3" fill="currentColor" stroke="none"/>
+  <path d="M70 118h120"/>
+  <path d="M70 138h180"/>
+  <path d="M70 158h150"/>
+  <path d="M70 178h200"/>
+  <path d="M70 198h100"/>
+  <rect x="240" y="180" width="90" height="40" rx="8"/>
+  <path d="M260 200l8 6 16-14"/>
+  <text x="200" y="276" text-anchor="middle" font-family="ui-monospace, monospace" font-size="13" stroke="none" fill="currentColor" opacity="0.7">"hello, build me a coffee shop landing page"</text>
+</svg>

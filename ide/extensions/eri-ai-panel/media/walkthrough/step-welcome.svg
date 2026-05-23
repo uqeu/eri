@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+  <circle cx="200" cy="150" r="92" opacity="0.18"/>
+  <circle cx="200" cy="150" r="64" opacity="0.4"/>
+  <circle cx="200" cy="150" r="36"/>
+  <path d="M200 110v80"/>
+  <path d="M170 150h60"/>
+  <path d="M104 60l24 20"/>
+  <path d="M296 60l-24 20"/>
+  <path d="M104 240l24-20"/>
+  <path d="M296 240l-24-20"/>
+  <text x="200" y="278" text-anchor="middle" font-family="ui-monospace, monospace" font-size="14" stroke="none" fill="currentColor" opacity="0.7">voice · gaze · diffusion</text>
+</svg>

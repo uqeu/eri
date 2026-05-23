@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+  <rect x="180" y="80" width="40" height="80" rx="20"/>
+  <path d="M156 142a44 44 0 0 0 88 0"/>
+  <path d="M200 186v28"/>
+  <path d="M176 214h48"/>
+  <path d="M96 142h24"/>
+  <path d="M76 122h24"/>
+  <path d="M76 162h24"/>
+  <path d="M280 142h24"/>
+  <path d="M300 122h24"/>
+  <path d="M300 162h24"/>
+  <text x="200" y="260" text-anchor="middle" font-family="ui-monospace, monospace" font-size="13" stroke="none" fill="currentColor" opacity="0.7">on-device whisper</text>
+</svg>

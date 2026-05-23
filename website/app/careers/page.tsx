@@ -42,10 +42,10 @@ export default function CareersPage() {
             experiments, open-source patches on the parts that live in
             public. If you&apos;d like to help, email{" "}
             <a
-              href="mailto:hello@tryeri.ca"
+              href="mailto:phlotu@gmail.com"
               className="text-accent underline underline-offset-4"
             >
-              hello@tryeri.ca
+              phlotu@gmail.com
             </a>{" "}
             with one paragraph about what you&apos;d work on.
           </p>

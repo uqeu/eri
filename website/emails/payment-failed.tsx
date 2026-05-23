@@ -56,9 +56,9 @@ export function PaymentFailedEmail({
 }
 
 PaymentFailedEmail.PreviewProps = {
-  retryUrl: "https://eri.dev/billing/portal",
-  manageUrl: "https://eri.dev/billing/portal",
-  unsubscribeUrl: "https://eri.dev/unsubscribe?token=preview",
+  retryUrl: "https://www.tryeri.ca/billing/portal",
+  manageUrl: "https://www.tryeri.ca/billing/portal",
+  unsubscribeUrl: "https://www.tryeri.ca/unsubscribe?token=preview",
 } satisfies PaymentFailedEmailProps;
 
 export default PaymentFailedEmail;

@@ -48,7 +48,7 @@ const SECTIONS: ReadonlyArray<Section> = [
   },
   {
     heading: "9. Reporting model behaviour",
-    body: "If a model output in eri is dangerously wrong, biased, or rule-breaking in a way that matters, email abuse@tryeri.ca with the prompt, the output, and what you'd expect instead. The operator can't fix the underlying model, but feedback shapes the prompts and guardrails the eri client wraps around it.",
+    body: "If a model output in eri is dangerously wrong, biased, or rule-breaking in a way that matters, email phlotu@gmail.com with the prompt, the output, and what you'd expect instead. The operator can't fix the underlying model, but feedback shapes the prompts and guardrails the eri client wraps around it.",
   },
 ];
 

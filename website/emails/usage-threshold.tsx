@@ -47,8 +47,8 @@ export function UsageThresholdEmail({
 
 UsageThresholdEmail.PreviewProps = {
   percentage: 82,
-  upgradeUrl: "https://eri.dev/billing",
-  unsubscribeUrl: "https://eri.dev/unsubscribe?token=preview",
+  upgradeUrl: "https://www.tryeri.ca/billing",
+  unsubscribeUrl: "https://www.tryeri.ca/unsubscribe?token=preview",
 } satisfies UsageThresholdEmailProps;
 
 export default UsageThresholdEmail;

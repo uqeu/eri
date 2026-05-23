@@ -11,46 +11,41 @@
   },
   "main": "./out/extension.js",
   "activationEvents": [
-    "onStartupFinished"
+    "onStartupFinished",
+    "onView:eri.panel",
+    "onView:eri.iterations",
+    "onView:eri.mcp"
   ],
   "categories": [
     "Other"
   ],
   "contributes": {
     "viewsContainers": {
-      "auxiliaryBar": [
-        {
-          "id": "eriPanel",
-          "title": "eri",
-          "icon": "$(sparkle)"
-        }
-      ],
       "activitybar": [
         {
-          "id": "eriIterations",
-          "title": "Iterations",
-          "icon": "$(history)"
+          "id": "eri-activitybar",
+          "title": "eri",
+          "icon": "media/eri-icon.svg"
         }
       ]
     },
     "views": {
-      "eriPanel": [
+      "eri-activitybar": [
         {
           "type": "webview",
           "id": "eri.panel",
-          "name": "eri",
+          "name": "eri Chat",
           "visibility": "visible"
+        },
+        {
+          "id": "eri.iterations",
+          "name": "Iterations",
+          "visibility": "collapsed"
         },
         {
           "id": "eri.mcp",
           "name": "MCP Servers",
           "visibility": "collapsed"
-        }
-      ],
-      "eriIterations": [
-        {
-          "id": "eri.iterations",
-          "name": "Iterations"
         }
       ]
     },

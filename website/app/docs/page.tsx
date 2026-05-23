@@ -71,10 +71,10 @@ export default function DocsPage() {
             integration, BYOK. The pages below are drafts that grow as the
             product does. If a topic isn&apos;t covered yet, email{" "}
             <a
-              href="mailto:hello@tryeri.ca"
+              href="mailto:phlotu@gmail.com"
               className="text-accent underline underline-offset-4"
             >
-              hello@tryeri.ca
+              phlotu@gmail.com
             </a>{" "}
             and the operator will point you at the answer or write the
             missing page.

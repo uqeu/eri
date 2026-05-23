@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+  <circle cx="148" cy="150" r="38"/>
+  <circle cx="148" cy="150" r="10" fill="currentColor" stroke="none"/>
+  <path d="M186 150h140"/>
+  <path d="M250 150v22"/>
+  <path d="M286 150v32"/>
+  <path d="M326 134v32"/>
+  <rect x="58" y="220" width="284" height="40" rx="8"/>
+  <text x="200" y="246" text-anchor="middle" font-family="ui-monospace, monospace" font-size="13" stroke="none" fill="currentColor" opacity="0.7">stored in OS Keychain</text>
+</svg>

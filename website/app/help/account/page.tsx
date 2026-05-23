@@ -22,7 +22,7 @@ const ARTICLES: ReadonlyArray<Article> = [
   {
     question: "I forgot my password.",
     answer:
-      "On the sign-in page, click Forgot password. Enter the email on your account; the operator will send a reset link that expires in one hour. If the email never arrives, check spam first, then email support@tryeri.ca with the email address on the account.",
+      "On the sign-in page, click Forgot password. Enter the email on your account; the operator will send a reset link that expires in one hour. If the email never arrives, check spam first, then email phlotu@gmail.com with the email address on the account.",
   },
   {
     question: "How do I change my email?",
@@ -32,7 +32,7 @@ const ARTICLES: ReadonlyArray<Article> = [
   {
     question: "How do I delete my account?",
     answer:
-      "Dashboard → Account → Delete account. The action is final: your account record, usage counters, and any cached data are removed within 30 days. Stripe billing records are retained for the period Canadian tax law requires (six years). If you can't sign in to do this yourself, email privacy@tryeri.ca and the operator will delete the account for you.",
+      "Dashboard → Account → Delete account. The action is final: your account record, usage counters, and any cached data are removed within 30 days. Stripe billing records are retained for the period Canadian tax law requires (six years). If you can't sign in to do this yourself, email phlotu@gmail.com and the operator will delete the account for you.",
   },
   {
     question: "How do I export my data?",

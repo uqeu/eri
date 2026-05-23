@@ -119,10 +119,10 @@ export default function PressPage() {
             Downloads will be linked here once the press kit lands on the CDN.
             In the meantime, email{" "}
             <a
-              href="mailto:press@tryeri.ca"
+              href="mailto:phlotu@gmail.com"
               className="text-accent underline underline-offset-4"
             >
-              press@tryeri.ca
+              phlotu@gmail.com
             </a>{" "}
             and we'll send a zip.
           </p>
@@ -155,10 +155,10 @@ export default function PressPage() {
           <p className="mt-4 text-muted leading-relaxed">
             Reach the press team at{" "}
             <a
-              href="mailto:press@tryeri.ca"
+              href="mailto:phlotu@gmail.com"
               className="text-accent underline underline-offset-4"
             >
-              press@tryeri.ca
+              phlotu@gmail.com
             </a>
             . We try to reply within one business day. For deadline coverage,
             put the deadline in the subject line and we'll prioritize.

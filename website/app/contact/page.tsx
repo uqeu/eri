@@ -15,49 +15,49 @@ interface Channel {
 
 const CHANNELS: ReadonlyArray<Channel> = [
   {
-    email: "hello@tryeri.ca",
+    email: "phlotu@gmail.com",
     purpose: "Anything else",
     detail:
       "General questions, partnership ideas, feedback, hate mail. The operator reads this inbox.",
   },
   {
-    email: "support@tryeri.ca",
+    email: "phlotu@gmail.com",
     purpose: "Product support",
     detail:
       "Bugs, account help, install issues. Include your eri build number and operating system if you can.",
   },
   {
-    email: "billing@tryeri.ca",
+    email: "phlotu@gmail.com",
     purpose: "Billing & refunds",
     detail:
       "Subscription, invoice, tax, refund. For card-level issues, Stripe support is faster than this inbox.",
   },
   {
-    email: "privacy@tryeri.ca",
+    email: "phlotu@gmail.com",
     purpose: "Privacy & data requests",
     detail:
       "Access, deletion, correction, export. PIPEDA / GDPR / CCPA — same address, same person, same response time.",
   },
   {
-    email: "security@tryeri.ca",
+    email: "phlotu@gmail.com",
     purpose: "Vulnerability reports",
     detail:
       "Responsible disclosure with safe harbour at /security/disclosure. PGP key on request.",
   },
   {
-    email: "abuse@tryeri.ca",
+    email: "phlotu@gmail.com",
     purpose: "Abuse reports",
     detail:
       "Saw eri being misused? Saw something that violates the acceptable-use policy? Send it here.",
   },
   {
-    email: "legal@tryeri.ca",
+    email: "phlotu@gmail.com",
     purpose: "Legal & DMCA",
     detail:
       "Terms questions, IP notices, takedown requests, regulator inquiries.",
   },
   {
-    email: "press@tryeri.ca",
+    email: "phlotu@gmail.com",
     purpose: "Press & media",
     detail:
       "Interview requests, brand assets, on-the-record commentary.",
@@ -84,10 +84,10 @@ export default function ContactPage() {
           </p>
           <div className="mt-8">
             <a
-              href="mailto:hello@tryeri.ca"
+              href="mailto:phlotu@gmail.com"
               className="btn-primary inline-flex items-center gap-2 px-5 py-2.5 text-sm"
             >
-              hello@tryeri.ca <span aria-hidden>→</span>
+              phlotu@gmail.com <span aria-hidden>→</span>
             </a>
           </div>
         </div>
@@ -134,10 +134,10 @@ export default function ContactPage() {
             indie project, not an office. For anything that genuinely needs a
             postal address (legal service, certified mail), email{" "}
             <a
-              href="mailto:legal@tryeri.ca"
+              href="mailto:phlotu@gmail.com"
               className="text-accent underline underline-offset-4"
             >
-              legal@tryeri.ca
+              phlotu@gmail.com
             </a>{" "}
             first and the operator will sort it out.
           </p>

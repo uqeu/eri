@@ -28,7 +28,7 @@ const ARTICLES: ReadonlyArray<Article> = [
   {
     question: "Can I get a refund?",
     answer:
-      "Monthly plans: cancel any time and you stop being billed; the operator does not refund the current month after it has started. Annual plans: within 14 days of payment, email billing@tryeri.ca and the operator will refund the unused remainder. Past 14 days, the operator has discretion and will be reasonable. Usage-based overages are not refundable.",
+      "Monthly plans: cancel any time and you stop being billed; the operator does not refund the current month after it has started. Annual plans: within 14 days of payment, email phlotu@gmail.com and the operator will refund the unused remainder. Past 14 days, the operator has discretion and will be reasonable. Usage-based overages are not refundable.",
   },
   {
     question: "Where are my invoices?",
@@ -77,7 +77,7 @@ export default function HelpBillingPage() {
           <p className="mt-5 text-lg text-muted leading-relaxed">
             Subscriptions run through Stripe. The customer portal handles
             invoices, card updates, taxes, and cancellation. For anything the
-            portal can&apos;t do, billing@tryeri.ca.
+            portal can&apos;t do, phlotu@gmail.com.
           </p>
         </div>
       </section>

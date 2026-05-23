@@ -243,10 +243,10 @@ export default function SecurityPage() {
           <p className="mt-4 text-muted leading-relaxed">
             Found something? Email{" "}
             <a
-              href="mailto:security@tryeri.ca"
+              href="mailto:phlotu@gmail.com"
               className="text-accent underline underline-offset-4"
             >
-              security@tryeri.ca
+              phlotu@gmail.com
             </a>{" "}
             with what you found and how to reproduce it. The full disclosure
             policy, including safe harbour, lives at{" "}

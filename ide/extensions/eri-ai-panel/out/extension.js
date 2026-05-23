@@ -58,7 +58,8 @@ function activate(context) {
             vscode.window.showInformationMessage("eri inline edit — widget contribution missing");
         });
     }), vscode.commands.registerCommand("eri.openChat", () => {
-        vscode.commands.executeCommand("workbench.view.extension.eriPanel");
+        // Reveal the eri activity-bar container and focus the chat view inside it.
+        vscode.commands.executeCommand("workbench.view.extension.eri-activitybar").then(() => vscode.commands.executeCommand("eri.panel.focus"), () => undefined);
     }), vscode.commands.registerCommand("eri.openComposer", () => {
         composer?.open();
     }), vscode.commands.registerCommand("eri.openAgentLayout", () => {

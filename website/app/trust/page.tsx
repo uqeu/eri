@@ -29,7 +29,7 @@ const POSTURE: ReadonlyArray<Posture> = [
   {
     status: "live",
     title: "CCPA / CPRA",
-    body: "California residents can exercise the right to know, delete, correct, and opt out of any sale or sharing of personal information. The operator does not sell personal information — there is nothing to opt out of, but the channel is open at privacy@tryeri.ca.",
+    body: "California residents can exercise the right to know, delete, correct, and opt out of any sale or sharing of personal information. The operator does not sell personal information — there is nothing to opt out of, but the channel is open at phlotu@gmail.com.",
   },
   {
     status: "available",
@@ -142,10 +142,10 @@ export default function TrustPage() {
             There is no NDA package, no auditor letter, and no compliance
             portal. There is one inbox:{" "}
             <a
-              href="mailto:trust@tryeri.ca"
+              href="mailto:phlotu@gmail.com"
               className="text-accent underline underline-offset-4"
             >
-              trust@tryeri.ca
+              phlotu@gmail.com
             </a>
             . The operator will answer your security questions honestly. The
             full architecture lives on the{" "}

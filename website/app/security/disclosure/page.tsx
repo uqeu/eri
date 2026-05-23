@@ -16,7 +16,7 @@ interface Section {
 const SECTIONS: ReadonlyArray<Section> = [
   {
     heading: "1. How to report",
-    body: "Email security@tryeri.ca with a clear description, reproduction steps, and the impact you observed. If the issue is sensitive, you can ask for a PGP key — the operator will reply with one. Please don't use the bug to access more data than necessary to demonstrate it.",
+    body: "Email phlotu@gmail.com with a clear description, reproduction steps, and the impact you observed. If the issue is sensitive, you can ask for a PGP key — the operator will reply with one. Please don't use the bug to access more data than necessary to demonstrate it.",
   },
   {
     heading: "2. What you can expect",
@@ -65,10 +65,10 @@ export default function DisclosurePage() {
           </p>
           <div className="mt-8">
             <a
-              href="mailto:security@tryeri.ca?subject=Vulnerability%20report"
+              href="mailto:phlotu@gmail.com?subject=Vulnerability%20report"
               className="btn-primary inline-flex items-center gap-2 px-5 py-2.5 text-sm"
             >
-              security@tryeri.ca <span aria-hidden>→</span>
+              phlotu@gmail.com <span aria-hidden>→</span>
             </a>
           </div>
         </div>

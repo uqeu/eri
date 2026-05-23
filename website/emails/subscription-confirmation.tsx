@@ -84,8 +84,8 @@ export function SubscriptionConfirmationEmail({
 
 SubscriptionConfirmationEmail.PreviewProps = {
   tier: "pro",
-  manageUrl: "https://eri.dev/billing/portal",
-  unsubscribeUrl: "https://eri.dev/unsubscribe?token=preview",
+  manageUrl: "https://www.tryeri.ca/billing/portal",
+  unsubscribeUrl: "https://www.tryeri.ca/unsubscribe?token=preview",
 } satisfies SubscriptionConfirmationEmailProps;
 
 export default SubscriptionConfirmationEmail;

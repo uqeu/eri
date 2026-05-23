@@ -18,7 +18,7 @@ const ARTICLES: ReadonlyArray<Article> = [
   {
     question: "Sign-in keeps failing on the website.",
     answer:
-      "Three usual causes: (1) the email exists with a different sign-in method — try Sign in with Google; (2) the password is wrong — use Forgot password; (3) a browser extension or strict tracking-protection setting is blocking the session cookie — try a private/incognito window. If none of those work, email support@tryeri.ca with the email on the account and the operator will check the logs.",
+      "Three usual causes: (1) the email exists with a different sign-in method — try Sign in with Google; (2) the password is wrong — use Forgot password; (3) a browser extension or strict tracking-protection setting is blocking the session cookie — try a private/incognito window. If none of those work, email phlotu@gmail.com with the email on the account and the operator will check the logs.",
   },
   {
     question: "The Google sign-in popup closes and nothing happens.",
@@ -48,7 +48,7 @@ const ARTICLES: ReadonlyArray<Article> = [
   {
     question: "Where do I find logs to attach to a bug report?",
     answer:
-      "Help → Reveal logs in the app menu opens the log directory. Zip the most recent log file and attach it to your email to support@tryeri.ca, along with the eri build number (Help → About) and a description of what you were doing. The logs are local; nothing is uploaded unless you attach them.",
+      "Help → Reveal logs in the app menu opens the log directory. Zip the most recent log file and attach it to your email to phlotu@gmail.com, along with the eri build number (Help → About) and a description of what you were doing. The logs are local; nothing is uploaded unless you attach them.",
   },
 ];
 
@@ -76,7 +76,7 @@ export default function HelpTroubleshootingPage() {
           </h1>
           <p className="mt-5 text-lg text-muted leading-relaxed">
             The fixes for the things that go wrong most. If you don&apos;t see
-            your problem here, email support@tryeri.ca with a description and
+            your problem here, email phlotu@gmail.com with a description and
             your build number.
           </p>
         </div>

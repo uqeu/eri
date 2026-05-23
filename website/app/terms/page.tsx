@@ -44,7 +44,7 @@ const SECTIONS: ReadonlyArray<Section> = [
   },
   {
     heading: "8. Refunds",
-    body: "Monthly plans: cancel any time; access continues until the end of the current period. Annual plans: within 14 days of payment, email billing@tryeri.ca for a prorated refund. Past 14 days, the operator has discretion and will be reasonable. Usage-based overages are not refundable.",
+    body: "Monthly plans: cancel any time; access continues until the end of the current period. Annual plans: within 14 days of payment, email phlotu@gmail.com for a prorated refund. Past 14 days, the operator has discretion and will be reasonable. Usage-based overages are not refundable.",
   },
   {
     heading: "9. Third-party model providers",
@@ -75,12 +75,36 @@ const SECTIONS: ReadonlyArray<Section> = [
     body: "These terms are governed by the laws of the Province of Ontario and the federal laws of Canada that apply there, without regard to conflict-of-laws rules. Disputes that can't be resolved by writing each other a polite email go to the courts of Ontario, sitting in Toronto, and you and the operator both consent to that venue. Nothing here waives consumer-protection rights you have where you live.",
   },
   {
-    heading: "16. Changes to these terms",
-    body: "The operator may update these terms when the product, the law, or reality changes. Material changes get a 30-day heads-up by email to accounts with an active subscription. Cosmetic edits happen in place. The revision date below always reflects the current version.",
+    heading: "16. Beta and experimental features",
+    body: "Anything labelled beta, preview, experimental, alpha, or research is even more as-is than the rest of the product. Beta features may break, change behaviour without notice, lose your data, or be withdrawn at any time. Do not use beta features for anything that matters to you. Limitations of liability and warranty disclaimers in these terms apply with extra force to beta features.",
   },
   {
-    heading: "17. Contact",
-    body: "Questions about these terms go to legal@tryeri.ca. For anything else, see the contact page.",
+    heading: "17. Changes to the service",
+    body: "The operator may add, remove, change, or discontinue features at any time, including those on paid tiers, with reasonable notice where the change is material. Pricing for paid plans may change with at least 30 days' email notice to active subscribers; the new price takes effect on the next renewal after that notice. You can cancel any time before the new price applies. Free-tier limits, model availability, and rate limits may change without notice.",
+  },
+  {
+    heading: "18. Changes to these terms",
+    body: "The operator may update these terms when the product, the law, or reality changes. Material changes get a 30-day heads-up by email to accounts with an active subscription. Cosmetic edits happen in place. The revision date below always reflects the current version. Continued use after the effective date counts as acceptance.",
+  },
+  {
+    heading: "19. Force majeure",
+    body: "The operator is not liable for delays or failures caused by events outside of reasonable control — including but not limited to power outages, internet outages, hosting-provider incidents, model-provider outages, natural disasters, fires, floods, pandemics, war, terrorism, civil unrest, government action, or labour disputes affecting the operator or any sub-processor.",
+  },
+  {
+    heading: "20. Export, sanctions, and compliance",
+    body: "You may not use eri if you are located in, or are a national or resident of, a country subject to a comprehensive Canadian, U.S., UK, or EU embargo, or if you appear on a relevant sanctions or restricted-party list. You agree to use eri in compliance with all applicable laws, including export-control and anti-corruption laws. You will not use eri to develop weapons, surveillance tools, or any technology prohibited by the laws of your jurisdiction.",
+  },
+  {
+    heading: "21. Survival",
+    body: "Sections covering your code ownership, our license, refunds, third-party providers, no warranty, limitation of liability, indemnification, governing law, the misc clause below, and any other section that by its nature should survive, survive any termination or expiration of these terms.",
+  },
+  {
+    heading: "22. Misc legal stuff",
+    body: "These terms, plus the privacy policy and any policies linked here, are the entire agreement between you and the operator about eri and supersede any prior agreement. If any part of these terms is found unenforceable, the rest stays in force. Failure to enforce any right is not a waiver of it. You may not assign or transfer these terms without written consent; the operator may assign them to a successor entity. Notices to you may be given by email to the address on your account or by posting on the website. Nothing in these terms creates a partnership, joint venture, employment, or agency relationship.",
+  },
+  {
+    heading: "23. Contact",
+    body: "Questions about these terms go to phlotu@gmail.com. For anything else, see the contact page.",
   },
 ];
 
@@ -102,7 +126,7 @@ export default function TermsPage() {
             Indie project. Provided as-is. Section one is the TL;DR.
           </p>
           <p className="mt-6 font-mono text-[11px] uppercase tracking-wider text-paper/40">
-            Last updated · May 21, 2026
+            Last updated · May 23, 2026
           </p>
         </div>
       </section>

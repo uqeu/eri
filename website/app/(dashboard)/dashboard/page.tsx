@@ -239,7 +239,7 @@ export default function DashboardPage() {
             </div>
           </Link>
           <a
-            href="mailto:support@tryeri.ca"
+            href="mailto:phlotu@gmail.com"
             className="border border-white/10 rounded-lg p-5 hover:border-accent transition group"
           >
             <div className="text-sm text-muted">Help</div>

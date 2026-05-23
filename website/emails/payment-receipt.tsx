@@ -92,7 +92,7 @@ PaymentReceiptEmail.PreviewProps = {
   tier: "pro",
   periodStart: Math.floor(Date.now() / 1000),
   periodEnd: Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 30,
-  manageUrl: "https://eri.dev/billing/portal",
+  manageUrl: "https://www.tryeri.ca/billing/portal",
 } satisfies PaymentReceiptEmailProps;
 
 export default PaymentReceiptEmail;

@@ -80,10 +80,10 @@ export default function HelpPage() {
             Short articles for the questions that come up most. If you
             don&apos;t see what you need here, email{" "}
             <a
-              href="mailto:support@tryeri.ca"
+              href="mailto:phlotu@gmail.com"
               className="text-accent underline underline-offset-4"
             >
-              support@tryeri.ca
+              phlotu@gmail.com
             </a>{" "}
             — a real person reads that inbox.
           </p>

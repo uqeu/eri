@@ -15,7 +15,7 @@ const THRESHOLD_PERCENT = 80;
 const THRESHOLD_DEBOUNCE_SECONDS = 60 * 60 * 24 * 7;
 
 function baseUrl(): string {
-  return process.env.NEXT_PUBLIC_BASE_URL ?? "https://eri.dev";
+  return process.env.NEXT_PUBLIC_BASE_URL ?? "https://www.tryeri.ca";
 }
 
 function startOfMonthSeconds(now: Date): number {

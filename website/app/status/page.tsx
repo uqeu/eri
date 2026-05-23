@@ -72,10 +72,10 @@ export default function StatusPage() {
             not yet an automated monitoring page — if eri feels broken and
             this page is still green, treat that as a signal to email{" "}
             <a
-              href="mailto:support@tryeri.ca"
+              href="mailto:phlotu@gmail.com"
               className="text-accent underline underline-offset-4"
             >
-              support@tryeri.ca
+              phlotu@gmail.com
             </a>
             .
           </p>

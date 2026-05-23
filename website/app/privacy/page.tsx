@@ -20,7 +20,7 @@ const SECTIONS: ReadonlyArray<Section> = [
   },
   {
     heading: "2. Who is collecting your data",
-    body: "eri is an independent project operated by a solo developer in Ontario, Canada. There is no corporate entity. \"The operator\" in this policy means that person. Contact: privacy@tryeri.ca.",
+    body: "eri is an independent project operated by a solo developer in Ontario, Canada. There is no corporate entity. \"The operator\" in this policy means that person. Contact: phlotu@gmail.com.",
   },
   {
     heading: "3. What the cloud side collects",
@@ -44,7 +44,7 @@ const SECTIONS: ReadonlyArray<Section> = [
   },
   {
     heading: "8. Your rights",
-    body: "If you're in Canada, the EU/UK, California, or anywhere with comparable laws, you have the right to access, correct, delete, and export the personal data the operator holds about you. Use the dashboard to delete your account, or email privacy@tryeri.ca. The operator will respond within 30 days. PIPEDA, GDPR, UK GDPR, and CCPA-style requests all route to the same address.",
+    body: "If you're in Canada, the EU/UK, California, or anywhere with comparable laws, you have the right to access, correct, delete, and export the personal data the operator holds about you. Use the dashboard to delete your account, or email phlotu@gmail.com. The operator will respond within 30 days. PIPEDA, GDPR, UK GDPR, and CCPA-style requests all route to the same address.",
   },
   {
     heading: "9. International transfers",
@@ -68,15 +68,31 @@ const SECTIONS: ReadonlyArray<Section> = [
   },
   {
     heading: "14. Children",
-    body: "eri is not intended for users under 13 (or under 16 in jurisdictions with a higher age of digital consent). The operator does not knowingly collect data from children. If you believe a child has signed up, email privacy@tryeri.ca and the account will be removed.",
+    body: "eri is not intended for users under 13 (or under 16 in jurisdictions with a higher age of digital consent). The operator does not knowingly collect data from children. If you believe a child has signed up, email phlotu@gmail.com and the account will be removed.",
   },
   {
-    heading: "15. Changes to this policy",
-    body: "If the operator makes a material change, accounts with an active subscription get an email at least 30 days before the change takes effect. Cosmetic edits are made in place. The revision date below always reflects the current version.",
+    heading: "15. Automated decision-making",
+    body: "The operator does not make decisions about you that produce legal or similarly significant effects based solely on automated processing. Model output is a tool to help you write code; we do not use it to grant or deny access, set pricing tiers, or evaluate you in any way that has a meaningful real-world impact.",
   },
   {
-    heading: "16. Contact",
-    body: "Privacy questions, access requests, and deletion requests all go to privacy@tryeri.ca. For everything else, see /contact.",
+    heading: "16. Breach notification",
+    body: "If the operator discovers a security incident that compromises personal data, affected accounts will be notified by email without undue delay and, where applicable laws require it, within 72 hours of discovery. The notice will explain what happened, what data was involved, what's been done about it, and steps you can take. The operator also notifies the Office of the Privacy Commissioner of Canada when required under PIPEDA.",
+  },
+  {
+    heading: "17. Data minimization",
+    body: "The operator collects only what's needed to run eri. There are no behavioural advertising profiles, no third-party advertising cookies, no data brokers, no cross-site tracking, and no \"shadow\" telemetry that records what you type or build. If a feature can ship without collecting data, that's how it ships.",
+  },
+  {
+    heading: "18. Do Not Track and Global Privacy Control",
+    body: "The website honours the Global Privacy Control signal where applicable: receiving GPC is treated as a deletion-of-cookies and opt-out-of-analytics request for that browser. Do Not Track headers are also respected as a signal even though the standard is informal.",
+  },
+  {
+    heading: "19. Changes to this policy",
+    body: "If the operator makes a material change, accounts with an active subscription get an email at least 30 days before the change takes effect. Cosmetic edits are made in place. The revision date below always reflects the current version. Continued use after the effective date counts as acceptance.",
+  },
+  {
+    heading: "20. Contact",
+    body: "Privacy questions, access requests, and deletion requests all go to phlotu@gmail.com. For everything else, see /contact.",
   },
 ];
 
@@ -99,7 +115,7 @@ export default function PrivacyPage() {
             there is doesn't get trained on.
           </p>
           <p className="mt-6 font-mono text-[11px] uppercase tracking-wider text-paper/40">
-            Last updated · May 21, 2026
+            Last updated · May 23, 2026
           </p>
         </div>
       </section>

@@ -204,10 +204,10 @@ export default function SubProcessorsPage() {
             subscription get an email at least 30 days before the change takes
             effect. Questions go to{" "}
             <a
-              href="mailto:privacy@tryeri.ca"
+              href="mailto:phlotu@gmail.com"
               className="text-accent underline underline-offset-4"
             >
-              privacy@tryeri.ca
+              phlotu@gmail.com
             </a>
             .
           </p>

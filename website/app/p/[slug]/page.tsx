@@ -17,7 +17,7 @@ function siteOrigin(): string {
     return explicit.replace(/\/$/, "");
   }
   const h = headers();
-  const host = h.get("host") ?? "eri.dev";
+  const host = h.get("host") ?? "tryeri.ca";
   const proto = h.get("x-forwarded-proto") ?? "https";
   return `${proto}://${host}`;
 }

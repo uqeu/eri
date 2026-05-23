@@ -24,7 +24,7 @@ const FORBIDDEN: ReadonlyArray<string> = [
   "Generate deceptive content for fraud, impersonation, election interference, defamation, or other deceptive practices that target real people or institutions.",
   "Evade lawful sanctions, export controls, or the terms of service of a model provider you have connected via BYOK.",
   "Scrape, mirror, decompile, or reverse-engineer eri to clone it or to build a directly competing product. Studying it to learn from it is fine.",
-  "Probe, scan, or stress-test the operator's infrastructure without permission. Responsible vulnerability reports go to security@tryeri.ca — there's a safe-harbour policy at /security/disclosure.",
+  "Probe, scan, or stress-test the operator's infrastructure without permission. Responsible vulnerability reports go to phlotu@gmail.com — there's a safe-harbour policy at /security/disclosure.",
   "Send abusive, spammy, or load-generating traffic to eri's services. One human, one account, normal use.",
   "Use eri to make life-critical or safety-critical decisions without a qualified human in the loop. Medical, legal, financial, emergency response — these are not what AI-assisted code generation is for.",
 ];
@@ -44,7 +44,7 @@ const SECTIONS: ReadonlyArray<Section> = [
   },
   {
     heading: "4. Reporting abuse",
-    body: "Saw something you think violates this policy? Email abuse@tryeri.ca with what you saw and a way to reach you. The operator will respond within a few business days. Good-faith reports do not get retaliated against.",
+    body: "Saw something you think violates this policy? Email phlotu@gmail.com with what you saw and a way to reach you. The operator will respond within a few business days. Good-faith reports do not get retaliated against.",
   },
   {
     heading: "5. Changes",
