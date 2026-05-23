@@ -96,6 +96,25 @@ html, body {
 }
 
 @layer utilities {
+  .container {
+    width: 100%;
+    max-width: 1280px;
+    margin-inline: auto;
+    padding-inline: 1.5rem;
+  }
+
+  @media (min-width: 768px) {
+    .container {
+      padding-inline: 2rem;
+    }
+  }
+
+  @media (min-width: 1280px) {
+    .container {
+      padding-inline: 2.5rem;
+    }
+  }
+
   .text-balance {
     text-wrap: balance;
   }

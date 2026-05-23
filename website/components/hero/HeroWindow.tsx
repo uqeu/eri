@@ -56,7 +56,13 @@ export function HeroWindow({
   return (
     <div
       className="absolute select-none rounded-[10px] bg-[#221f19] text-[#ece8df] shadow-[0_28px_70px_rgba(0,0,0,0.45),0_14px_32px_rgba(0,0,0,0.25),0_0_0_1px_rgba(236,232,223,0.06)] overflow-hidden flex flex-col"
-      style={{ left: pos.x, top: pos.y, width, height, zIndex: z }}
+      style={{
+        left: `min(${pos.x}px, calc(100% - ${Math.min(width, 320)}px - 16px))`,
+        top: `min(${pos.y}px, calc(100% - ${Math.min(height, 200)}px - 16px))`,
+        width: `min(${width}px, calc(100% - 32px))`,
+        height: `min(${height}px, calc(100% - 32px))`,
+        zIndex: z,
+      }}
     >
       <div
         className="relative flex h-7 items-center justify-between border-b border-white/[0.06] px-2 cursor-grab active:cursor-grabbing"

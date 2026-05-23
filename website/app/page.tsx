@@ -21,8 +21,7 @@ export default function HomePage(): React.ReactElement {
         body="Local Whisper transcribes voice in sub-second; an optional MediaPipe gaze layer tells eri exactly which element you're pointing at. The camera frame never leaves your laptop."
         ctaHref="/features"
         ctaLabel="Learn about voice + gaze"
-        mediaSide="right"
-        media={<div className="h-full w-full bg-[#14120b]"><EngineRoom /></div>}
+        media={<EngineRoom />}
       />
 
       <FeatureCard
@@ -31,8 +30,7 @@ export default function HomePage(): React.ReactElement {
         body="eri's engine denoises a working patch while you finish your sentence. The preview becomes the answer — no waiting on a cursor."
         ctaHref="/features"
         ctaLabel="How diffusion works"
-        mediaSide="left"
-        media={<div className="h-full w-full bg-[#14120b]"><HeroBig /></div>}
+        media={<HeroBig />}
       />
 
       <FeatureCard
@@ -41,13 +39,12 @@ export default function HomePage(): React.ReactElement {
         body="Every prompt becomes a node. Fork it, replay it, send the whole branch through a different model. The thing you tried yesterday is one click away."
         ctaHref="/features"
         ctaLabel="See iteration history"
-        mediaSide="right"
-        media={<div className="h-full w-full bg-[#14120b]"><EriDemo /></div>}
+        media={<EriDemo />}
       />
 
       <Testimonials />
 
-      <section className="container mb-16 lg:mb-24">
+      <section className="container mb-20 lg:mb-28">
         <h2 className="text-h2 mb-8 text-balance text-text">Stay on the frontier</h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <FrontierCard
@@ -57,14 +54,14 @@ export default function HomePage(): React.ReactElement {
             cta="Explore models"
           />
           <FrontierCard
-            title="Complete codebase understanding"
-            body="eri reads your repo the same way Cursor does — semantic search, grep, AST awareness — so prompts ground in your code, not generic patterns."
+            title="Codebase context, not just chat history"
+            body="eri reads your repo — semantic search, grep, AST awareness — so prompts ground in your code, not generic patterns from training data."
             href="/docs/context"
-            cta="Codebase indexing"
+            cta="How context works"
           />
           <FrontierCard
-            title="Local-first, BYOK, enduring"
-            body="Your key, your machine, your transcripts. No data leaves your laptop unless you point a model call at a remote provider."
+            title="Local-first, BYOK"
+            body="Voice and gaze run on your machine. Model calls go to the provider you choose with the key you hold. Your transcripts never leave the laptop."
             href="/security"
             cta="Read the security model"
           />
@@ -77,9 +74,22 @@ export default function HomePage(): React.ReactElement {
   );
 }
 
-function FrontierCard({ title, body, href, cta }: { title: string; body: string; href: string; cta: string }): React.ReactElement {
+function FrontierCard({
+  title,
+  body,
+  href,
+  cta,
+}: {
+  title: string;
+  body: string;
+  href: string;
+  cta: string;
+}): React.ReactElement {
   return (
-    <a href={href} className="block rounded-2xl border border-border bg-bg-card p-6 hover:border-border-strong transition-colors">
+    <a
+      href={href}
+      className="block rounded-2xl border border-border bg-bg-card p-6 hover:border-border-strong transition-colors"
+    >
       <h3 className="text-h3 mb-2 text-balance text-text">{title}</h3>
       <p className="text-body text-text-sec mb-4">{body}</p>
       <span className="text-sage-deep text-[14px]">{cta} →</span>

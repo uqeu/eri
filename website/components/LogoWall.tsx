@@ -186,43 +186,31 @@ const LOGOS: ReadonlyArray<Logo> = [
 
 export function LogoWall(): React.ReactElement {
   return (
-    <section className="border-t border-white/[0.08]">
-      <div className="mx-auto max-w-7xl px-6 py-16 sm:py-20">
-        <div className="flex flex-col items-start gap-10 lg:flex-row lg:items-center lg:gap-14">
-          <div className="flex-shrink-0 lg:max-w-[18rem]">
-            <p className="mono-cap text-paper/40">Pedigree</p>
-            <p className="mt-3 text-balance text-[15px] leading-snug text-paper">
-              Built by engineers from
-              <span aria-hidden className="ml-2 text-accent">
-                →
-              </span>
-            </p>
-            <p className="mt-2 font-mono text-[11px] uppercase tracking-wider text-paper/40">
-              prior shipping experience, not endorsements
-            </p>
-          </div>
-
-          <div className="relative w-full overflow-hidden">
-            <div
-              aria-hidden
-              className="pointer-events-none absolute inset-y-0 left-0 w-12 bg-gradient-to-r from-bg-1 to-transparent z-10"
-            />
-            <div
-              aria-hidden
-              className="pointer-events-none absolute inset-y-0 right-0 w-12 bg-gradient-to-l from-bg-1 to-transparent z-10"
-            />
-            <div className="grid grid-cols-2 items-center gap-x-8 gap-y-8 sm:grid-cols-4">
-              {LOGOS.map((logo) => (
-                <div
-                  key={logo.label}
-                  className="flex items-center justify-start text-paper/45 transition-colors duration-200 hover:text-paper"
-                  aria-label={logo.label}
-                  title={logo.label}
-                >
-                  {logo.glyph}
-                </div>
-              ))}
-            </div>
+    <section className="border-t border-border">
+      <div className="container py-12 sm:py-16">
+        <p className="mono-cap text-text-sec mb-6 text-center">
+          eri ships from engineers who&apos;ve built at
+        </p>
+        <div className="relative">
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-y-0 left-0 w-12 bg-gradient-to-r from-bg to-transparent z-10"
+          />
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-y-0 right-0 w-12 bg-gradient-to-l from-bg to-transparent z-10"
+          />
+          <div className="grid grid-cols-2 items-center gap-x-8 gap-y-6 sm:grid-cols-4 lg:grid-cols-7">
+            {LOGOS.map((logo) => (
+              <div
+                key={logo.label}
+                className="flex items-center justify-center text-text-sec transition-colors duration-200 hover:text-text"
+                aria-label={logo.label}
+                title={logo.label}
+              >
+                {logo.glyph}
+              </div>
+            ))}
           </div>
         </div>
       </div>
