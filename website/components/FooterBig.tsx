@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { ThemeToggle } from "./ThemeToggle";
 
 interface FooterColumn {
   readonly heading: string;
@@ -83,22 +84,18 @@ export function FooterBig(): React.ReactElement {
   const year = new Date().getFullYear();
 
   return (
-    <footer className="relative overflow-hidden border-t border-white/[0.08] bg-bg-2">
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0 opacity-[0.18] mesh-bg"
-      />
-      <div className="relative mx-auto max-w-7xl px-6 py-20 sm:py-24">
+    <footer className="relative overflow-hidden border-t border-border bg-bg-card text-text px-6 pt-20 pb-12">
+      <div className="relative mx-auto max-w-7xl">
         <div className="grid gap-14 lg:grid-cols-[1.6fr_1fr_repeat(4,_minmax(0,_0.9fr))]">
           <div>
             <Link href="/" className="inline-flex items-center gap-2.5">
-              <span className="font-display text-3xl text-paper">eri</span>
+              <span className="font-display text-3xl text-text">eri</span>
               <span
                 aria-hidden
-                className="inline-block h-2 w-2 rounded-full bg-accent shadow-[0_0_14px_rgba(224,255,79,0.7)]"
+                className="inline-block h-2 w-2 rounded-full bg-sage-deep"
               />
             </Link>
-            <p className="mt-6 max-w-sm text-[14px] leading-relaxed text-paper/55">
+            <p className="mt-6 max-w-sm text-[14px] leading-relaxed text-text-sec">
               The voice-first IDE for solo founders and small teams. Native
               macOS, diffusion edits, your keys, your repo, your shape of work.
             </p>
@@ -110,7 +107,7 @@ export function FooterBig(): React.ReactElement {
                   target="_blank"
                   rel="noreferrer noopener"
                   aria-label={s.label}
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/[0.08] text-paper/45 transition hover:border-white/20 hover:bg-white/[0.03] hover:text-paper"
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border text-text-ter transition-colors hover:border-border-strong hover:bg-bg-card-2 hover:text-text"
                 >
                   <svg
                     viewBox="0 0 24 24"
@@ -126,8 +123,8 @@ export function FooterBig(): React.ReactElement {
           </div>
 
           <div className="lg:col-span-1">
-            <p className="mono-cap text-paper/40">Newsletter</p>
-            <p className="mt-4 text-[13px] leading-relaxed text-paper/55">
+            <p className="text-text-sec text-[13px] pb-3 uppercase tracking-wider">Newsletter</p>
+            <p className="mt-1 text-[13px] leading-relaxed text-text-sec">
               One short note when something ships. No drip campaigns.
             </p>
             <form
@@ -142,24 +139,24 @@ export function FooterBig(): React.ReactElement {
                 type="email"
                 required
                 placeholder="you@studio.dev"
-                className="w-full rounded-md border border-white/[0.08] bg-white/[0.02] px-3 py-2.5 font-mono text-[12px] text-paper placeholder:text-paper/30 outline-none transition focus:border-accent/50 focus:bg-white/[0.04]"
+                className="w-full rounded-md border border-border bg-bg-card-2 px-3 py-2.5 font-mono text-[12px] text-text placeholder:text-text-ter outline-none transition-colors focus:border-sage-deep"
               />
               <button
                 type="submit"
-                className="inline-flex items-center justify-center gap-1.5 rounded-md border border-white/[0.08] bg-white/[0.03] px-3 py-2 font-mono text-[11px] uppercase tracking-wider text-paper transition hover:border-accent/30 hover:bg-accent/[0.08] hover:text-accent"
+                className="inline-flex items-center justify-center gap-1.5 rounded-md bg-sage-deep px-3 py-2 font-mono text-[11px] uppercase tracking-wider font-medium text-bg transition-colors hover:bg-sage"
               >
                 Subscribe <span aria-hidden>→</span>
               </button>
             </form>
-            <p className="mt-3 font-mono text-[10px] text-paper/30">
+            <p className="mt-3 font-mono text-[10px] text-text-ter">
               No spam. Unsubscribe in one click.
             </p>
           </div>
 
           {COLUMNS.map((col) => (
             <div key={col.heading}>
-              <p className="mono-cap text-paper/40">{col.heading}</p>
-              <ul className="mt-4 space-y-2.5">
+              <p className="text-text-sec text-[13px] pb-3 uppercase tracking-wider">{col.heading}</p>
+              <ul className="mt-1 space-y-1">
                 {col.links.map((link) =>
                   link.external ? (
                     <li key={link.href + link.label}>
@@ -167,12 +164,12 @@ export function FooterBig(): React.ReactElement {
                         href={link.href}
                         target="_blank"
                         rel="noreferrer noopener"
-                        className="group inline-flex items-center gap-1 text-[13px] text-paper/65 transition hover:text-paper"
+                        className="group inline-flex items-center gap-1 text-[14px] text-text-sec hover:text-text py-1.5 transition-colors"
                       >
                         {link.label}
                         <span
                           aria-hidden
-                          className="text-paper/25 transition group-hover:text-paper/60"
+                          className="text-text-ter transition-colors group-hover:text-text-sec"
                         >
                           ↗
                         </span>
@@ -182,7 +179,7 @@ export function FooterBig(): React.ReactElement {
                     <li key={link.href + link.label}>
                       <Link
                         href={link.href}
-                        className="text-[13px] text-paper/65 transition hover:text-paper"
+                        className="text-text-sec hover:text-text text-[14px] py-1.5 inline-block transition-colors"
                       >
                         {link.label}
                       </Link>
@@ -194,29 +191,29 @@ export function FooterBig(): React.ReactElement {
           ))}
         </div>
 
-        <div className="mt-16 flex flex-col gap-2 border-t border-white/[0.05] pt-6 font-mono text-[11px] text-paper/55 sm:flex-row sm:items-start sm:justify-between">
+        <div className="mt-16 flex flex-col gap-2 border-t border-border pt-6 font-mono text-[11px] text-text-sec sm:flex-row sm:items-start sm:justify-between">
           <span className="inline-flex items-center gap-2">
             <span
               aria-hidden
-              className="h-1.5 w-1.5 rounded-full bg-accent shadow-[0_0_8px_rgba(224,255,79,0.5)]"
+              className="h-1.5 w-1.5 rounded-full bg-sage-deep"
             />
             BYOK keys never leave your machine — stored in OS Keychain, never
             synced to our servers.
           </span>
         </div>
 
-        <div className="mt-6 flex flex-col gap-3 border-t border-white/[0.05] pt-6 font-mono text-[12px] text-paper/40 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+        <div className="container flex flex-col md:flex-row items-start md:items-center justify-between gap-4 mt-12 pt-6 border-t border-border text-text-sec text-[13px]">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[12px]">
             <span>© {year} eri</span>
-            <span aria-hidden className="text-paper/20">
+            <span aria-hidden className="text-text-ter">
               ·
             </span>
             <span>independent project · ontario, canada</span>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-4 font-mono text-[12px]">
             <Link
               href="/status"
-              className="inline-flex items-center gap-2 hover:text-paper transition"
+              className="inline-flex items-center gap-2 hover:text-text transition-colors"
             >
               <span
                 aria-hidden
@@ -224,15 +221,19 @@ export function FooterBig(): React.ReactElement {
               />
               status
             </Link>
-            <span aria-hidden className="text-paper/20">
+            <span aria-hidden className="text-text-ter">
               ·
             </span>
             <Link
               href="/legal/disclaimer"
-              className="hover:text-paper transition"
+              className="hover:text-text transition-colors"
             >
               provided as-is
             </Link>
+            <span aria-hidden className="text-text-ter">
+              ·
+            </span>
+            <ThemeToggle />
           </div>
         </div>
       </div>
@@ -241,7 +242,7 @@ export function FooterBig(): React.ReactElement {
         aria-hidden
         className="pointer-events-none relative -mt-2 select-none overflow-hidden text-center"
       >
-        <span className="font-display text-[clamp(72px,18vw,260px)] leading-[0.85] tracking-tight text-paper/[0.035]">
+        <span className="font-display text-[clamp(72px,18vw,260px)] leading-[0.85] tracking-tight text-text/[0.05]">
           eri.
         </span>
       </div>
