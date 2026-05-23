@@ -8,15 +8,34 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        ink: "#0A0A0A",
-        paper: "#F5F2EC",
-        accent: "#E0FF4F",
-        "accent-bright": "#F0FF7F",
-        muted: "#9A968F",
-        "bg-1": "#0A0A0A",
-        "bg-2": "#131311",
-        "bg-3": "#1A1A18",
-        "bg-4": "#1F1F1D",
+        // Semantic tokens (drive 99% of the site)
+        bg: "var(--bg)",
+        "bg-card": "var(--bg-card)",
+        "bg-card-2": "var(--bg-card-2)",
+        border: "var(--border)",
+        "border-strong": "var(--border-strong)",
+        text: "var(--text)",
+        "text-sec": "var(--text-sec)",
+        "text-ter": "var(--text-ter)",
+        sage: "var(--sage)",
+        "sage-deep": "var(--sage-deep)",
+        blue: "var(--blue)",
+        "blue-deep": "var(--blue-deep)",
+        // Demo-only accent
+        "demo-accent": "var(--demo-accent)",
+        // Legacy aliases (kept so existing components don't break — sweeps happen incrementally)
+        ink: "var(--text)",
+        paper: "var(--bg)",
+        accent: "var(--sage-deep)",
+        "accent-bright": "var(--sage)",
+        muted: "var(--text-sec)",
+        "bg-1": "var(--bg)",
+        "bg-2": "var(--bg-card)",
+        "bg-3": "var(--bg-card-2)",
+        "bg-4": "var(--bg-card-2)",
+      },
+      gridTemplateColumns: {
+        "24": "repeat(24, minmax(0, 1fr))",
       },
       fontFamily: {
         display: ["var(--font-fraunces)", "serif"],
