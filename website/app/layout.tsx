@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Fraunces, Space_Grotesk, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
+import { ThemeProvider } from "@/components/ThemeProvider";
 
 const fraunces = Fraunces({
   subsets: ["latin"],
@@ -39,9 +40,9 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={`${fraunces.variable} ${grotesk.variable} ${mono.variable}`}>
+    <html lang="en" suppressHydrationWarning className={`${fraunces.variable} ${grotesk.variable} ${mono.variable}`}>
       <body className="font-sans bg-ink text-paper min-h-screen">
-        {children}
+        <ThemeProvider>{children}</ThemeProvider>
       </body>
     </html>
   );
