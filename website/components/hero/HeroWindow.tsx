@@ -30,10 +30,14 @@ export function HeroWindow({
 }: HeroWindowProps): React.ReactElement {
   const [pos, setPos] = useState<WindowPos>(initial);
   const dragOffset = useRef<WindowPos | null>(null);
+  const initialRef = useRef<WindowPos>(initial);
 
+  // Only snap back when resetSignal changes — `initial` is a fresh object every
+  // parent render so depending on it would constantly reset position mid-drag.
   useEffect(() => {
-    setPos(initial);
-  }, [resetSignal, initial]);
+    setPos(initialRef.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resetSignal]);
 
   const onMouseDown = useCallback(
     (e: React.MouseEvent) => {

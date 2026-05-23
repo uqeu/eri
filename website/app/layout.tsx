@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Fraunces, Space_Grotesk, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "@/components/ThemeProvider";
+import { SiteHeader } from "@/components/SiteHeader";
 
 const fraunces = Fraunces({
   subsets: ["latin"],
@@ -41,8 +42,11 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" suppressHydrationWarning className={`${fraunces.variable} ${grotesk.variable} ${mono.variable}`}>
-      <body className="font-sans bg-ink text-paper min-h-screen">
-        <ThemeProvider>{children}</ThemeProvider>
+      <body className="font-sans bg-bg text-text min-h-screen">
+        <ThemeProvider>
+          <SiteHeader />
+          {children}
+        </ThemeProvider>
       </body>
     </html>
   );
