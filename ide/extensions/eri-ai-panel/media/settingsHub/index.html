@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${cspSource}; script-src ${cspSource}; img-src ${cspSource} data:;">
+  <link rel="stylesheet" href="${styleUri}">
+  <title>eri Settings</title>
+</head>
+<body>
+  <header class="hub-header">
+    <h1>eri</h1>
+    <p class="hub-subtitle">Adaptive workspace controls</p>
+  </header>
+
+  <main class="hub-sections">
+    <details class="section" data-section="account" open>
+      <summary><span class="title">Account</span><span class="hint" data-bind="account.summary"></span></summary>
+      <div class="body">
+        <div class="row"><span class="label">Status</span><span class="value" data-bind="account.status"></span></div>
+        <div class="row"><span class="label">Tier</span><span class="value" data-bind="account.tier"></span></div>
+        <div class="actions">
+          <button class="btn primary" data-action="signIn" data-hide-when="account.signedIn">Sign In</button>
+          <button class="btn" data-action="openBilling">Manage Billing</button>
+        </div>
+      </div>
+    </details>
+
+    <details class="section" data-section="byok">
+      <summary><span class="title">Bring Your Own Keys</span><span class="hint" data-bind="byok.summary"></span></summary>
+      <div class="body">
+        <p class="muted">Configure provider API keys. Stored in the OS keychain.</p>
+        <ul class="provider-list" data-bind="byok.providers"></ul>
+        <div class="actions">
+          <button class="btn" data-action="manageKeys">Manage Keys</button>
+        </div>
+      </div>
+    </details>
+
+    <details class="section" data-section="voice">
+      <summary><span class="title">Voice</span><span class="hint" data-bind="voice.summary"></span></summary>
+      <div class="body">
+        <div class="row">
+          <label class="label" for="voice-enabled">Voice input</label>
+          <label class="switch"><input id="voice-enabled" type="checkbox" data-config="voice.enabled"><span class="track"></span></label>
+        </div>
+        <div class="row">
+          <label class="label" for="voice-preset">Voice preset</label>
+          <select id="voice-preset" data-workspace="eri.voice.preset">
+            <option value="lumen">Lumen</option>
+            <option value="marrow">Marrow</option>
+            <option value="sable">Sable</option>
+            <option value="vesper">Vesper</option>
+            <option value="kiln">Kiln</option>
+          </select>
+        </div>
+        <div class="row"><span class="label">Mic permission</span><span class="value" data-bind="voice.micPermission"></span></div>
+      </div>
+    </details>
+
+    <details class="section" data-section="gaze">
+      <summary><span class="title">Gaze</span><span class="hint" data-bind="gaze.summary"></span></summary>
+      <div class="body">
+        <div class="row">
+          <label class="label" for="gaze-enabled">Gaze tracking</label>
+          <label class="switch"><input id="gaze-enabled" type="checkbox" data-config="gaze.enabled"><span class="track"></span></label>
+        </div>
+        <div class="row">
+          <label class="label" for="gaze-sensitivity">Sensitivity</label>
+          <div class="slider-wrap">
+            <input id="gaze-sensitivity" type="range" min="1" max="100" data-workspace="eri.gaze.sensitivity">
+            <span class="slider-value" data-bind="gaze.sensitivityValue">50</span>
+          </div>
+        </div>
+        <div class="row"><span class="label">Last calibration</span><span class="value" data-bind="gaze.lastCalibration"></span></div>
+        <div class="actions">
+          <button class="btn" data-action="recalibrate">Recalibrate</button>
+        </div>
+      </div>
+    </details>
+
+    <details class="section" data-section="model">
+      <summary><span class="title">Model</span><span class="hint" data-bind="model.summary"></span></summary>
+      <div class="body">
+        <div class="row">
+          <label class="label" for="model-default">Default model</label>
+          <select id="model-default" data-config="model.default">
+            <option value="auto">Auto</option>
+            <option value="mercury-2">eri Engine</option>
+            <option value="mercury-2-coder">eri Engine (Coder)</option>
+            <option value="claude-opus-4-7">Claude Opus 4.7</option>
+            <option value="claude-sonnet-4-6">Claude Sonnet 4.6</option>
+            <option value="gpt-5">GPT-5</option>
+            <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
+          </select>
+        </div>
+        <div class="row">
+          <label class="label" for="model-auto-routing">Auto routing</label>
+          <label class="switch"><input id="model-auto-routing" type="checkbox" data-config="model.autoRouting"><span class="track"></span></label>
+        </div>
+      </div>
+    </details>
+
+    <details class="section" data-section="index">
+      <summary><span class="title">Index</span><span class="hint" data-bind="index.summary"></span></summary>
+      <div class="body">
+        <div class="row">
+          <label class="label" for="index-enabled">Workspace indexing</label>
+          <label class="switch"><input id="index-enabled" type="checkbox" data-config="index.enabled"><span class="track"></span></label>
+        </div>
+        <div class="row"><span class="label">Files indexed</span><span class="value" data-bind="index.files"></span></div>
+        <div class="row"><span class="label">Chunks</span><span class="value" data-bind="index.chunks"></span></div>
+      </div>
+    </details>
+
+    <details class="section" data-section="mcp">
+      <summary><span class="title">MCP Servers</span><span class="hint" data-bind="mcp.summary"></span></summary>
+      <div class="body">
+        <ul class="provider-list" data-bind="mcp.list"></ul>
+        <div class="actions">
+          <button class="btn" data-action="openMcpConfig">Open Config</button>
+        </div>
+      </div>
+    </details>
+
+    <details class="section" data-section="rules">
+      <summary><span class="title">Rules</span><span class="hint" data-bind="rules.summary"></span></summary>
+      <div class="body">
+        <div class="row"><span class="label">Active rules</span><span class="value" data-bind="rules.count"></span></div>
+        <div class="actions">
+          <button class="btn" data-action="manageRules">Manage Rules</button>
+        </div>
+      </div>
+    </details>
+
+    <details class="section" data-section="privacy">
+      <summary><span class="title">Privacy</span><span class="hint" data-bind="privacy.summary"></span></summary>
+      <div class="body">
+        <div class="row">
+          <label class="label" for="privacy-telemetry">Anonymous telemetry</label>
+          <label class="switch"><input id="privacy-telemetry" type="checkbox" data-config="privacy.telemetry"><span class="track"></span></label>
+        </div>
+        <p class="muted">eri does not train models on your code. Diffusion runs use the Mercury 2 API under a paid wrap; voice and gaze stay local.</p>
+      </div>
+    </details>
+
+    <details class="section" data-section="appearance">
+      <summary><span class="title">Appearance</span><span class="hint" data-bind="appearance.summary"></span></summary>
+      <div class="body">
+        <div class="row">
+          <label class="label" for="appearance-theme">Theme</label>
+          <select id="appearance-theme" data-config="appearance.theme">
+            <option value="auto">Auto</option>
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+          </select>
+        </div>
+        <div class="row">
+          <label class="label" for="appearance-font-size">Font size</label>
+          <div class="slider-wrap">
+            <input id="appearance-font-size" type="range" min="10" max="20" data-config="appearance.fontSize">
+            <span class="slider-value" data-bind="appearance.fontSizeValue">13</span>
+          </div>
+        </div>
+      </div>
+    </details>
+
+    <details class="section" data-section="keybindings">
+      <summary><span class="title">Keybindings</span><span class="hint">Editor-managed</span></summary>
+      <div class="body">
+        <p class="muted">Open the keybindings editor to remap eri shortcuts.</p>
+        <div class="actions">
+          <button class="btn" data-action="openKeybindings">Open Keybindings</button>
+        </div>
+      </div>
+    </details>
+
+    <details class="section" data-section="about">
+      <summary><span class="title">About</span><span class="hint" data-bind="about.summary"></span></summary>
+      <div class="body">
+        <div class="row"><span class="label">Version</span><span class="value" data-bind="about.version"></span></div>
+        <div class="row"><span class="label">Build</span><span class="value" data-bind="about.buildDate"></span></div>
+        <div class="row"><span class="label">Channel</span><span class="value" data-bind="about.channel"></span></div>
+      </div>
+    </details>
+  </main>
+
+  <script src="${scriptUri}"></script>
+</body>
+</html>

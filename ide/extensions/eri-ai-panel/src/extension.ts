@@ -1,5 +1,10 @@
 import * as vscode from "vscode";
-import { resolveBinaryPath, Sidecar, SidecarNotification } from "./sidecar";
+import {
+  resolveBinaryPath,
+  Sidecar,
+  SidecarIncomingRequest,
+  SidecarNotification,
+} from "./sidecar";
 import { EriPanelProvider } from "./panel";
 import { PreviewManager } from "./preview";
 import { activateTab } from "./tab/tab";
@@ -10,6 +15,16 @@ import { McpServerState } from "./mcp/mcpView";
 import { activateComposer, ComposerHandle } from "./composer/composer";
 import { activateGaze, GazeHandle } from "./gaze/gaze";
 import { activateTierClient, TierClientHandle } from "./tier/tierClient";
+import { activateCheckpoints, CheckpointsHandle } from "./checkpoints";
+import { activateApply, ApplyHandle } from "./apply";
+import { SecretsStore } from "./settings/secrets";
+import { ByokSettingsView, BYOK_VIEW_ID } from "./settings/settingsView";
+import {
+  SECRET_REQUEST_METHOD,
+  handleSecretRequest,
+} from "./settings/sidecarBridge";
+import { activateOnboarding, OnboardingHandle } from "./onboarding";
+import { activateSettingsHub, SettingsHubHandle } from "./settingsHub";
 
 export { getCurrentTarget as getCurrentGazeTarget, getEditorGazeContext } from "./gaze/gaze";
 
@@ -21,9 +36,18 @@ let composer: ComposerHandle | null = null;
 let atMentions: AtMentionsHandle | null = null;
 let gaze: GazeHandle | null = null;
 let tierClient: TierClientHandle | null = null;
+let checkpoints: CheckpointsHandle | null = null;
+let apply: ApplyHandle | null = null;
+let byokView: ByokSettingsView | null = null;
+let secretsStore: SecretsStore | null = null;
+let onboarding: OnboardingHandle | null = null;
+let settingsHub: SettingsHubHandle | null = null;
 
 export function activate(context: vscode.ExtensionContext): void {
   const binaryPath = resolveBinaryPath(context);
+
+  secretsStore = new SecretsStore(context.secrets, context.globalState);
+  const localSecrets = secretsStore;
 
   sidecar = new Sidecar({
     binaryPath,
@@ -31,6 +55,12 @@ export function activate(context: vscode.ExtensionContext): void {
     onExit: (code) => {
       console.warn(`[eri] sidecar exited (code=${code})`);
       sidecar = null;
+    },
+    onRequest: async (request: SidecarIncomingRequest): Promise<unknown> => {
+      if (request.method === SECRET_REQUEST_METHOD) {
+        return handleSecretRequest(request, localSecrets);
+      }
+      throw new Error("method not found");
     },
   });
   sidecar.start();
@@ -53,6 +83,28 @@ export function activate(context: vscode.ExtensionContext): void {
   mcpRegistry = activateMcp(context, () => sidecar);
   gaze = activateGaze(context, () => sidecar);
   composer = activateComposer(context, () => sidecar, atMentions);
+  checkpoints = activateCheckpoints(context, () => sidecar);
+  apply = activateApply(context, () => sidecar);
+  onboarding = activateOnboarding(context, () => sidecar);
+  settingsHub = activateSettingsHub(context);
+
+  byokView = new ByokSettingsView(context, secretsStore);
+  const localView = byokView;
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(BYOK_VIEW_ID, byokView),
+    vscode.commands.registerCommand("eri.byok.setKey", async () => {
+      await localView.pickAndSet();
+    }),
+    vscode.commands.registerCommand("eri.byok.clearAll", async () => {
+      await localView.clearAll();
+    }),
+    vscode.commands.registerCommand("eri.settings.open", async () => {
+      await vscode.commands.executeCommand(
+        "workbench.view.extension.eri-activitybar",
+      );
+      await vscode.commands.executeCommand(`${BYOK_VIEW_ID}.focus`);
+    }),
+  );
 
   context.subscriptions.push(
     vscode.commands.registerCommand("eri.openPreview", () => {
@@ -114,6 +166,16 @@ export function deactivate(): void {
   gaze = null;
   tierClient?.dispose();
   tierClient = null;
+  checkpoints?.dispose();
+  checkpoints = null;
+  apply?.dispose();
+  apply = null;
+  onboarding?.dispose();
+  onboarding = null;
+  settingsHub?.dispose();
+  settingsHub = null;
+  byokView = null;
+  secretsStore = null;
 }
 
 function handleNotification(notification: SidecarNotification): void {

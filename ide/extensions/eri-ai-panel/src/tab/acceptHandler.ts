@@ -10,7 +10,7 @@ async function tryExecute(commandIds: readonly string[]): Promise<boolean> {
       await vscode.commands.executeCommand(id);
       return true;
     } catch (err) {
-      console.debug(`[eri.tab] command ${id} unavailable`, err);
+      void err;
     }
   }
   return false;

@@ -12,8 +12,13 @@ class Sidecar {
     buffer = Buffer.alloc(0);
     nextId = 1;
     pending = new Map();
+    requestHandler;
     constructor(options) {
         this.options = options;
+        this.requestHandler = options.onRequest ?? null;
+    }
+    setRequestHandler(handler) {
+        this.requestHandler = handler;
     }
     start() {
         if (this.childProcess) {
@@ -111,7 +116,19 @@ class Sidecar {
         return true;
     }
     dispatchIncoming(message) {
-        if (typeof message.id === "number") {
+        const hasId = typeof message.id === "number" || typeof message.id === "string";
+        const hasMethod = typeof message.method === "string";
+        // Sidecar -> extension request (has both id and method). We respond
+        // with a JSON-RPC result/error.
+        if (hasId && hasMethod) {
+            const id = message.id;
+            const method = message.method;
+            const params = message.params ?? {};
+            void this.handleIncomingRequest({ id, method, params });
+            return;
+        }
+        // Response to a request the extension made.
+        if (hasId && typeof message.id === "number") {
             const pending = this.pending.get(message.id);
             if (!pending) {
                 return;
@@ -125,10 +142,34 @@ class Sidecar {
             }
             return;
         }
-        if (typeof message.method === "string") {
+        // Notification from sidecar.
+        if (hasMethod) {
             this.options.onNotification({
                 method: message.method,
                 params: message.params ?? {},
+            });
+        }
+    }
+    async handleIncomingRequest(request) {
+        const handler = this.requestHandler;
+        if (!handler) {
+            this.write({
+                jsonrpc: "2.0",
+                id: request.id,
+                error: { code: -32601, message: "method not found" },
+            });
+            return;
+        }
+        try {
+            const result = await handler(request);
+            this.write({ jsonrpc: "2.0", id: request.id, result: result ?? null });
+        }
+        catch (err) {
+            const message = err instanceof Error ? err.message : "internal error";
+            this.write({
+                jsonrpc: "2.0",
+                id: request.id,
+                error: { code: -32603, message },
             });
         }
     }

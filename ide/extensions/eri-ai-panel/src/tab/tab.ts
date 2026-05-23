@@ -4,23 +4,26 @@ import { registerAcceptHandlers } from "./acceptHandler";
 
 const DEBOUNCE_MS = 150;
 
-interface SidecarRange {
-  start: { line: number; character: number };
-  end: { line: number; character: number };
+interface CompleteResult {
+  text?: string;
+  latencyMs?: number;
+  model?: string;
 }
 
-interface SidecarSuggestion {
-  insertText?: string;
-  range?: SidecarRange;
+interface HealthResult {
+  ok?: boolean;
+  model?: string;
+  baseUrl?: string;
 }
 
-interface SuggestParams {
-  uri: string;
-  languageId: string;
+interface CompleteParams {
+  filePath: string;
   prefix: string;
   suffix: string;
-  cursor: { line: number; character: number };
-  modelOverride?: string;
+  language?: string;
+  maxTokens?: number;
+  model?: string;
+  baseUrl?: string;
 }
 
 class DebounceGate {
@@ -49,20 +52,6 @@ class DebounceGate {
   }
 }
 
-function toRange(range: SidecarRange | undefined, fallback: vscode.Range): vscode.Range {
-  if (!range) {
-    return fallback;
-  }
-  try {
-    return new vscode.Range(
-      new vscode.Position(range.start.line, range.start.character),
-      new vscode.Position(range.end.line, range.end.character),
-    );
-  } catch {
-    return fallback;
-  }
-}
-
 class EriTabProvider implements vscode.InlineCompletionItemProvider {
   private readonly gate = new DebounceGate();
 
@@ -79,7 +68,9 @@ class EriTabProvider implements vscode.InlineCompletionItemProvider {
       return null;
     }
     const minPrefix = config.get<number>("minPrefixLength", 2);
-    const modelOverride = config.get<string>("modelOverride", "");
+    const model = config.get<string>("model", "qwen2.5-coder:1.5b");
+    const maxTokens = config.get<number>("maxTokens", 64);
+    const baseUrl = config.get<string>("baseUrl", "http://localhost:11434");
 
     const sidecar = this.sidecarRef();
     if (!sidecar) {
@@ -100,41 +91,68 @@ class EriTabProvider implements vscode.InlineCompletionItemProvider {
       return null;
     }
 
-    const params: SuggestParams = {
-      uri: document.uri.toString(),
-      languageId: document.languageId,
+    const params: CompleteParams = {
+      filePath: document.uri.fsPath,
       prefix,
       suffix,
-      cursor: { line: position.line, character: position.character },
+      language: document.languageId,
+      maxTokens,
+      model,
+      baseUrl,
     };
-    if (modelOverride && modelOverride.trim().length > 0) {
-      params.modelOverride = modelOverride;
-    }
 
-    let result: SidecarSuggestion;
+    let result: CompleteResult;
     try {
-      result = await sidecar.request<SidecarSuggestion>("eri/tab/suggest", params);
+      result = await sidecar.request<CompleteResult>("eri/tab/complete", params);
     } catch (err) {
-      console.debug("[eri.tab] suggest request failed", err);
+      void err;
       return null;
     }
 
     if (token.isCancellationRequested) {
       return null;
     }
-    const insertText = result?.insertText;
+    const insertText = result?.text;
     if (typeof insertText !== "string" || insertText.length === 0) {
       return null;
     }
 
-    const fallbackRange = new vscode.Range(position, position);
-    const range = toRange(result.range, fallbackRange);
-
+    const range = new vscode.Range(position, position);
     const item: vscode.InlineCompletionItem = {
       insertText,
       range,
     };
     return { items: [item] };
+  }
+}
+
+async function runHealthCheck(sidecarRef: () => Sidecar | null): Promise<void> {
+  const sidecar = sidecarRef();
+  if (!sidecar) {
+    void vscode.window.showWarningMessage("eri: sidecar not running");
+    return;
+  }
+  const config = vscode.workspace.getConfiguration("eri.tab");
+  const model = config.get<string>("model", "qwen2.5-coder:1.5b");
+  const baseUrl = config.get<string>("baseUrl", "http://localhost:11434");
+
+  try {
+    const result = await sidecar.request<HealthResult>("eri/tab/health", {
+      model,
+      baseUrl,
+    });
+    if (result?.ok === true) {
+      void vscode.window.showInformationMessage(
+        `eri tab: Ollama reachable at ${result.baseUrl ?? baseUrl} (model ${result.model ?? model})`,
+      );
+    } else {
+      void vscode.window.showWarningMessage(
+        `eri tab: Ollama not reachable at ${result?.baseUrl ?? baseUrl}`,
+      );
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "unknown error";
+    void vscode.window.showErrorMessage(`eri tab health check failed: ${msg}`);
   }
 }
 
@@ -146,6 +164,7 @@ export function activateTab(
   const selector: vscode.DocumentSelector = { scheme: "file" };
   context.subscriptions.push(
     vscode.languages.registerInlineCompletionItemProvider(selector, provider),
+    vscode.commands.registerCommand("eri.tab.health", () => runHealthCheck(sidecarRef)),
   );
   registerAcceptHandlers(context);
 }

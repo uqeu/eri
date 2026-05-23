@@ -28,17 +28,6 @@ class DebounceGate {
         });
     }
 }
-function toRange(range, fallback) {
-    if (!range) {
-        return fallback;
-    }
-    try {
-        return new vscode.Range(new vscode.Position(range.start.line, range.start.character), new vscode.Position(range.end.line, range.end.character));
-    }
-    catch {
-        return fallback;
-    }
-}
 class EriTabProvider {
     sidecarRef;
     gate = new DebounceGate();
@@ -51,7 +40,9 @@ class EriTabProvider {
             return null;
         }
         const minPrefix = config.get("minPrefixLength", 2);
-        const modelOverride = config.get("modelOverride", "");
+        const model = config.get("model", "qwen2.5-coder:1.5b");
+        const maxTokens = config.get("maxTokens", 64);
+        const baseUrl = config.get("baseUrl", "http://localhost:11434");
         const sidecar = this.sidecarRef();
         if (!sidecar) {
             return null;
@@ -69,32 +60,30 @@ class EriTabProvider {
             return null;
         }
         const params = {
-            uri: document.uri.toString(),
-            languageId: document.languageId,
+            filePath: document.uri.fsPath,
             prefix,
             suffix,
-            cursor: { line: position.line, character: position.character },
+            language: document.languageId,
+            maxTokens,
+            model,
+            baseUrl,
         };
-        if (modelOverride && modelOverride.trim().length > 0) {
-            params.modelOverride = modelOverride;
-        }
         let result;
         try {
-            result = await sidecar.request("eri/tab/suggest", params);
+            result = await sidecar.request("eri/tab/complete", params);
         }
         catch (err) {
-            console.debug("[eri.tab] suggest request failed", err);
+            void err;
             return null;
         }
         if (token.isCancellationRequested) {
             return null;
         }
-        const insertText = result?.insertText;
+        const insertText = result?.text;
         if (typeof insertText !== "string" || insertText.length === 0) {
             return null;
         }
-        const fallbackRange = new vscode.Range(position, position);
-        const range = toRange(result.range, fallbackRange);
+        const range = new vscode.Range(position, position);
         const item = {
             insertText,
             range,
@@ -102,10 +91,36 @@ class EriTabProvider {
         return { items: [item] };
     }
 }
+async function runHealthCheck(sidecarRef) {
+    const sidecar = sidecarRef();
+    if (!sidecar) {
+        void vscode.window.showWarningMessage("eri: sidecar not running");
+        return;
+    }
+    const config = vscode.workspace.getConfiguration("eri.tab");
+    const model = config.get("model", "qwen2.5-coder:1.5b");
+    const baseUrl = config.get("baseUrl", "http://localhost:11434");
+    try {
+        const result = await sidecar.request("eri/tab/health", {
+            model,
+            baseUrl,
+        });
+        if (result?.ok === true) {
+            void vscode.window.showInformationMessage(`eri tab: Ollama reachable at ${result.baseUrl ?? baseUrl} (model ${result.model ?? model})`);
+        }
+        else {
+            void vscode.window.showWarningMessage(`eri tab: Ollama not reachable at ${result?.baseUrl ?? baseUrl}`);
+        }
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : "unknown error";
+        void vscode.window.showErrorMessage(`eri tab health check failed: ${msg}`);
+    }
+}
 function activateTab(context, sidecarRef) {
     const provider = new EriTabProvider(sidecarRef);
     const selector = { scheme: "file" };
-    context.subscriptions.push(vscode.languages.registerInlineCompletionItemProvider(selector, provider));
+    context.subscriptions.push(vscode.languages.registerInlineCompletionItemProvider(selector, provider), vscode.commands.registerCommand("eri.tab.health", () => runHealthCheck(sidecarRef)));
     (0, acceptHandler_1.registerAcceptHandlers)(context);
 }
 //# sourceMappingURL=tab.js.map

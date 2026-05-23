@@ -18,6 +18,7 @@ pub mod checkpoints;
 pub mod index;
 pub mod mcp;
 pub mod rules;
+pub mod tab;
 pub mod web_docs;
 
 /// Long-lived per-workspace handles.

@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
+<title>eri BYOK</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: var(--vscode-sideBar-background, #181818);
+    --fg: var(--vscode-foreground, #d6d6dd);
+    --muted: #8b8b96;
+    --border: var(--vscode-panel-border, #2a2a2a);
+    --accent: var(--vscode-textLink-foreground, #228df2);
+    --ok: #4ec9b0;
+  }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--vscode-font-family, system-ui, sans-serif);
+    font-size: 12px;
+  }
+  header {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  header h1 { font-size: 12px; font-weight: 600; margin: 0; }
+  header button {
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 2px 8px;
+    cursor: pointer;
+    font: inherit;
+  }
+  header button:hover { color: var(--fg); }
+  ul { list-style: none; margin: 0; padding: 0; }
+  li.provider {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .provider-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .provider-name { font-weight: 500; }
+  .field-row {
+    margin-top: 6px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    padding-left: 8px;
+  }
+  .field-label { color: var(--muted); flex: 1; }
+  .status-set { color: var(--ok); margin-right: 6px; }
+  .status-unset { color: var(--muted); margin-right: 6px; }
+  .actions { display: flex; gap: 4px; }
+  .actions button {
+    background: transparent;
+    color: var(--accent);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 1px 6px;
+    cursor: pointer;
+    font: inherit;
+  }
+  .actions button:hover { background: rgba(255,255,255,0.05); }
+  .actions button.danger { color: #ff7b72; }
+</style>
+</head>
+<body>
+<header>
+  <h1>API Keys (BYOK)</h1>
+  <button id="clear-all" title="Remove all stored keys">Clear All</button>
+</header>
+<ul id="providers"></ul>
+<script>
+  const vscode = acquireVsCodeApi();
+  const root = document.getElementById("providers");
+
+  function render(state) {
+    root.replaceChildren();
+    for (const provider of state.providers) {
+      const li = document.createElement("li");
+      li.className = "provider";
+      const head = document.createElement("div");
+      head.className = "provider-row";
+      const name = document.createElement("span");
+      name.className = "provider-name";
+      name.textContent = provider.displayName;
+      head.appendChild(name);
+      li.appendChild(head);
+      for (const field of provider.fields) {
+        const row = document.createElement("div");
+        row.className = "field-row";
+        const label = document.createElement("span");
+        label.className = "field-label";
+        const status = document.createElement("span");
+        status.className = field.isSet ? "status-set" : "status-unset";
+        status.textContent = field.isSet ? "set" : "not set";
+        label.appendChild(status);
+        label.append(field.label);
+        const actions = document.createElement("span");
+        actions.className = "actions";
+        const setBtn = document.createElement("button");
+        setBtn.textContent = field.isSet ? "Edit" : "Add";
+        setBtn.addEventListener("click", () => {
+          vscode.postMessage({
+            type: "set",
+            providerId: provider.id,
+            fieldKey: field.key,
+          });
+        });
+        actions.appendChild(setBtn);
+        if (field.isSet) {
+          const rmBtn = document.createElement("button");
+          rmBtn.className = "danger";
+          rmBtn.textContent = "Remove";
+          rmBtn.addEventListener("click", () => {
+            vscode.postMessage({
+              type: "remove",
+              providerId: provider.id,
+              fieldKey: field.key,
+            });
+          });
+          actions.appendChild(rmBtn);
+        }
+        row.appendChild(label);
+        row.appendChild(actions);
+        li.appendChild(row);
+      }
+      root.appendChild(li);
+    }
+  }
+
+  document.getElementById("clear-all").addEventListener("click", () => {
+    vscode.postMessage({ type: "clearAll" });
+  });
+
+  window.addEventListener("message", (event) => {
+    const message = event.data;
+    if (message && message.type === "state") {
+      render(message.state);
+    }
+  });
+
+  vscode.postMessage({ type: "ready" });
+</script>
+</body>
+</html>

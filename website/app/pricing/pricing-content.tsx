@@ -730,7 +730,7 @@ function ComparisonTable(): React.ReactElement {
               >
                 <div className="font-display text-base tracking-tight leading-none">
                   {t.label === "I" || t.label === "II" || t.label === "III" ? (
-                    <span className="italic text-accent">{t.label}</span>
+                    <span className="italic text-paper">{t.label}</span>
                   ) : (
                     t.label
                   )}
@@ -747,7 +747,7 @@ function ComparisonTable(): React.ReactElement {
             <tr key={`cat-${category.title}`} className="bg-white/[0.04]">
               <td
                 colSpan={5}
-                className="px-5 py-3 font-mono text-[10px] uppercase tracking-[0.25em] text-accent"
+                className="px-5 py-3 font-mono text-[10px] uppercase tracking-[0.25em] text-paper/70"
               >
                 {category.title}
               </td>
@@ -1010,13 +1010,13 @@ export function PricingContent(): React.ReactElement {
       </section>
 
       <section className="border-b border-white/10 bg-white/[0.01]">
-        <div className="mx-auto max-w-7xl px-6 py-20 sm:py-24">
+        <div className="mx-auto max-w-6xl px-6 py-20 sm:py-24">
           <p className="font-mono text-xs uppercase tracking-[0.25em] text-muted">
             Compare
           </p>
           <h2 className="mt-4 font-display text-3xl sm:text-5xl tracking-tight max-w-3xl text-balance">
             Compare features{" "}
-            <span className="italic text-accent">across plans.</span>
+            <span className="italic text-paper">across plans.</span>
           </h2>
           <p className="mt-4 max-w-2xl text-muted leading-relaxed">
             Every feature, side by side. Categories group what Eri can do, how
@@ -1039,7 +1039,7 @@ export function PricingContent(): React.ReactElement {
           </p>
           <h2 className="mt-4 font-display text-3xl sm:text-5xl tracking-tight text-balance">
             The stuff people{" "}
-            <span className="italic text-accent">always ask.</span>
+            <span className="italic text-paper">always ask.</span>
           </h2>
 
           <div className="mt-12 border-y border-white/10">

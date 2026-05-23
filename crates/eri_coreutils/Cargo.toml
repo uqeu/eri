@@ -25,6 +25,7 @@ eri_apply = { path = "../eri_apply" }
 eri_index = { path = "../eri_index" }
 eri_mcp = { path = "../eri_mcp" }
 eri_git = { path = "../eri_git" }
+eri_tab = { path = "../eri_tab" }
 
 [dev-dependencies]
 tempfile = { workspace = true }

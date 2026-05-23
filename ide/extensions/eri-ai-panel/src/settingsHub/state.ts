@@ -147,7 +147,7 @@ export function buildSettingsHubState(input: BuildStateInput): SettingsHubState 
     },
     gaze: {
       enabled: readBool(config, "gaze.enabled", DEFAULTS.gazeEnabled),
-      sensitivity: readGazeSensitivity(workspaceState),
+      sensitivity: readNumber(workspaceState, "eri.gaze.sensitivity", DEFAULTS.gazeSensitivity, 1, 100),
       lastCalibration: readString(workspaceState, "eri.gaze.lastCalibration", "") || null,
     },
     model: {

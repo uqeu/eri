@@ -12,7 +12,7 @@ async function tryExecute(commandIds) {
             return true;
         }
         catch (err) {
-            console.debug(`[eri.tab] command ${id} unavailable`, err);
+            void err;
         }
     }
     return false;

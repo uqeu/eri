@@ -235,6 +235,14 @@ pub async fn dispatch(
         "eri/web/search" => services::web_docs::web_search(request.params.clone(), services).await,
         "eri/docs/fetch" => services::web_docs::docs_fetch(request.params.clone(), services).await,
 
+        // --- Tab inline completions (free tier; local Ollama) ---
+        "eri/tab/complete" => {
+            services::tab::handle_complete(request.params.clone(), services).await
+        }
+        "eri/tab/health" => {
+            services::tab::handle_health(request.params.clone(), services).await
+        }
+
         other => Err(DispatchError::Other(anyhow!(
             "method not implemented: {other}"
         ))),

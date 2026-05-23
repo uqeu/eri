@@ -683,6 +683,7 @@ dependencies = [
  "eri_index",
  "eri_mcp",
  "eri_rules",
+ "eri_tab",
  "serde",
  "serde_json",
  "tempfile",
@@ -849,6 +850,18 @@ dependencies = [
  "tokio",
  "tokio-tungstenite 0.28.0",
  "url",
+]
+
+[[package]]
+name = "eri_tab"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
 ]
 
 [[package]]

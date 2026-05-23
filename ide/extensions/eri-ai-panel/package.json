@@ -14,7 +14,12 @@
     "onStartupFinished",
     "onView:eri.panel",
     "onView:eri.iterations",
-    "onView:eri.mcp"
+    "onView:eri.mcp",
+    "onView:eri.checkpoints",
+    "onView:eri.byok",
+    "onView:eri.pendingEdits",
+    "onView:eri.settingsHub",
+    "onCommand:eri.settings.hub"
   ],
   "categories": [
     "Other"
@@ -46,6 +51,28 @@
           "id": "eri.mcp",
           "name": "MCP Servers",
           "visibility": "collapsed"
+        },
+        {
+          "id": "eri.checkpoints",
+          "name": "Checkpoints",
+          "visibility": "collapsed"
+        },
+        {
+          "id": "eri.pendingEdits",
+          "name": "Pending Edits",
+          "visibility": "collapsed"
+        },
+        {
+          "type": "webview",
+          "id": "eri.byok",
+          "name": "API Keys",
+          "visibility": "collapsed"
+        },
+        {
+          "type": "webview",
+          "id": "eri.settingsHub",
+          "name": "Settings",
+          "visibility": "collapsed"
         }
       ]
     },
@@ -64,6 +91,7 @@
       { "command": "eri.setDiffusionFire",  "title": "eri: Set Diffusion Fire State" },
       { "command": "eri.tab.acceptWord",    "title": "eri: Accept Next Word of Inline Suggestion" },
       { "command": "eri.tab.acceptLine",    "title": "eri: Accept Next Line of Inline Suggestion" },
+      { "command": "eri.tab.health",        "title": "eri: Check Tab Completion Health" },
       { "command": "eri.mentions.openPicker",   "title": "eri: Mention Context" },
       { "command": "eri.mentions.pickFile",     "title": "eri: Mention File" },
       { "command": "eri.mentions.pickFolder",   "title": "eri: Mention Folder" },
@@ -85,17 +113,116 @@
       { "command": "eri.composer.applyAll", "title": "eri: Composer Apply All",                          "enablement": "eri.feature.composer" },
       { "command": "eri.composer.discard",  "title": "eri: Composer Discard",                            "enablement": "eri.feature.composer" },
       { "command": "eri.gaze.recalibrate",  "title": "eri: Recalibrate Gaze Tracker" },
-      { "command": "eri.gaze.toggle",       "title": "eri: Toggle Gaze Tracking" }
+      { "command": "eri.gaze.toggle",       "title": "eri: Toggle Gaze Tracking" },
+      { "command": "eri.checkpoints.create",   "title": "eri: Create Checkpoint",    "icon": "$(add)" },
+      { "command": "eri.checkpoints.refresh",  "title": "eri: Refresh Checkpoints",  "icon": "$(refresh)" },
+      { "command": "eri.checkpoints.prune",    "title": "eri: Prune Checkpoints",    "icon": "$(trash)" },
+      { "command": "eri.checkpoints.restore",  "title": "eri: Restore Checkpoint" },
+      { "command": "eri.checkpoints.delete",   "title": "eri: Delete Checkpoint" },
+      { "command": "eri.checkpoints.diff",     "title": "eri: Diff Checkpoint Against HEAD" },
+      { "command": "eri.checkpoints.copySha",  "title": "eri: Copy Checkpoint SHA" },
+      { "command": "eri.checkpoints.openFile", "title": "eri: Open File At Checkpoint" },
+      { "command": "eri.checkpoints.diffFile", "title": "eri: Diff File Against Checkpoint" },
+      { "command": "eri.openWalkthrough",            "title": "eri: Open Welcome Walkthrough" },
+      { "command": "eri.onboarding.signIn",          "title": "eri: Sign in with Google" },
+      { "command": "eri.onboarding.skipSignIn",      "title": "eri: Skip Sign-in (use BYOK)" },
+      { "command": "eri.onboarding.testMic",         "title": "eri: Test Microphone" },
+      { "command": "eri.onboarding.calibrateGaze",   "title": "eri: Calibrate Gaze" },
+      { "command": "eri.onboarding.skipGaze",        "title": "eri: Skip Gaze Calibration" },
+      { "command": "eri.onboarding.openPanel",       "title": "eri: Open eri Panel" },
+      { "command": "eri.byok.setKey",                "title": "eri: Set Provider API Key" },
+      { "command": "eri.byok.clearAll",              "title": "eri: Clear All Provider API Keys" },
+      { "command": "eri.settings.open",              "title": "eri: Open Settings" },
+      { "command": "eri.settings.hub",                "title": "eri: Open Settings Hub" },
+      { "command": "eri.apply.acceptAll",      "title": "eri: Accept All Pending Edits",       "icon": "$(check-all)" },
+      { "command": "eri.apply.rejectAll",      "title": "eri: Reject All Pending Edits",       "icon": "$(close-all)" },
+      { "command": "eri.apply.applyAccepted",  "title": "eri: Apply Accepted Edits",           "icon": "$(rocket)" },
+      { "command": "eri.apply.discardAll",     "title": "eri: Discard All Pending Edits",      "icon": "$(trash)" },
+      { "command": "eri.apply.showDiff",       "title": "eri: Show Edit Diff",                 "icon": "$(diff)" },
+      { "command": "eri.apply.acceptBlock",    "title": "eri: Accept Edit Block",              "icon": "$(check)" },
+      { "command": "eri.apply.rejectBlock",    "title": "eri: Reject Edit Block",              "icon": "$(x)" },
+      { "command": "eri.apply.resetBlock",     "title": "eri: Reset Edit Block",               "icon": "$(discard)" },
+      { "command": "eri.apply.revert",         "title": "eri: Revert Last Apply",              "icon": "$(history)" }
+    ],
+    "walkthroughs": [
+      {
+        "id": "eriOnboarding",
+        "title": "Get started with eri",
+        "description": "Voice, gaze, and diffusion — set up eri in 60 seconds.",
+        "steps": [
+          {
+            "id": "welcome",
+            "title": "Welcome to eri",
+            "description": "eri listens, watches, and rewrites with you — locally by default.",
+            "media": { "markdown": "media/walkthrough/welcome.md" }
+          },
+          {
+            "id": "signin",
+            "title": "Sign in (optional)",
+            "description": "Sign in with Google to sync settings and unlock hosted features.\n[Sign in](command:eri.onboarding.signIn) · [Skip](command:eri.onboarding.skipSignIn)",
+            "media": { "svg": "media/walkthrough/step-signin.svg", "altText": "Sign in to eri" },
+            "completionEvents": ["onCommand:eri.onboarding.signIn", "onCommand:eri.onboarding.skipSignIn"]
+          },
+          {
+            "id": "byok",
+            "title": "Bring your own key",
+            "description": "Paste your provider API key for fully local routing.\n[Open settings](command:workbench.action.openSettings?%22eri%22)",
+            "media": { "markdown": "media/walkthrough/byok.md" },
+            "completionEvents": ["onSettingChanged:eri.apiBaseUrl"]
+          },
+          {
+            "id": "mic",
+            "title": "Test your microphone",
+            "description": "Make sure eri can hear you — we'll listen for 3 seconds.\n[Test microphone](command:eri.onboarding.testMic)",
+            "media": { "svg": "media/walkthrough/step-mic.svg", "altText": "Test microphone" },
+            "completionEvents": ["onCommand:eri.onboarding.testMic"]
+          },
+          {
+            "id": "gaze",
+            "title": "Calibrate gaze",
+            "description": "Follow five dots so eri knows where you're looking.\n[Calibrate](command:eri.onboarding.calibrateGaze) · [Skip](command:eri.onboarding.skipGaze)",
+            "media": { "svg": "media/walkthrough/step-gaze.svg", "altText": "Calibrate gaze" },
+            "completionEvents": ["onCommand:eri.onboarding.calibrateGaze", "onCommand:eri.onboarding.skipGaze"]
+          },
+          {
+            "id": "hello",
+            "title": "Say hello to eri",
+            "description": "Open the eri panel and try your first prompt.\n[Open eri](command:eri.onboarding.openPanel)",
+            "media": { "svg": "media/walkthrough/step-hello.svg", "altText": "Open eri" },
+            "completionEvents": ["onCommand:eri.onboarding.openPanel"]
+          }
+        ]
+      }
     ],
     "menus": {
       "view/title": [
-        { "command": "eri.mcp.openConfig", "when": "view == eri.mcp", "group": "navigation@1" },
-        { "command": "eri.mcp.restart",    "when": "view == eri.mcp", "group": "navigation@2" }
+        { "command": "eri.mcp.openConfig",      "when": "view == eri.mcp",         "group": "navigation@1" },
+        { "command": "eri.mcp.restart",         "when": "view == eri.mcp",         "group": "navigation@2" },
+        { "command": "eri.checkpoints.create",  "when": "view == eri.checkpoints", "group": "navigation@1" },
+        { "command": "eri.checkpoints.refresh", "when": "view == eri.checkpoints", "group": "navigation@2" },
+        { "command": "eri.checkpoints.prune",   "when": "view == eri.checkpoints", "group": "navigation@3" },
+        { "command": "eri.apply.applyAccepted", "when": "view == eri.pendingEdits", "group": "navigation@1" },
+        { "command": "eri.apply.acceptAll",     "when": "view == eri.pendingEdits", "group": "navigation@2" },
+        { "command": "eri.apply.rejectAll",     "when": "view == eri.pendingEdits", "group": "navigation@3" },
+        { "command": "eri.apply.discardAll",    "when": "view == eri.pendingEdits", "group": "navigation@4" },
+        { "command": "eri.apply.revert",        "when": "view == eri.pendingEdits", "group": "navigation@5" }
       ],
       "view/item/context": [
         { "command": "eri.mcp.viewTools",  "when": "view == eri.mcp && viewItem =~ /^eri\\.mcp\\.server\\./", "group": "inline@1" },
         { "command": "eri.mcp.restart",    "when": "view == eri.mcp && viewItem =~ /^eri\\.mcp\\.server\\./", "group": "inline@2" },
-        { "command": "eri.mcp.openConfig", "when": "view == eri.mcp && viewItem =~ /^eri\\.mcp\\.server\\./", "group": "navigation@1" }
+        { "command": "eri.mcp.openConfig", "when": "view == eri.mcp && viewItem =~ /^eri\\.mcp\\.server\\./", "group": "navigation@1" },
+        { "command": "eri.checkpoints.restore", "when": "view == eri.checkpoints && viewItem == eri.checkpoint", "group": "1_restore@1" },
+        { "command": "eri.checkpoints.diff",    "when": "view == eri.checkpoints && viewItem == eri.checkpoint", "group": "2_inspect@1" },
+        { "command": "eri.checkpoints.copySha", "when": "view == eri.checkpoints && viewItem == eri.checkpoint", "group": "2_inspect@2" },
+        { "command": "eri.checkpoints.delete",  "when": "view == eri.checkpoints && viewItem == eri.checkpoint", "group": "9_destructive@1" },
+        { "command": "eri.checkpoints.openFile", "when": "view == eri.checkpoints && viewItem == eri.checkpoint.file", "group": "1_open@1" },
+        { "command": "eri.checkpoints.diffFile", "when": "view == eri.checkpoints && viewItem == eri.checkpoint.file", "group": "1_open@2" },
+        { "command": "eri.apply.showDiff",    "when": "view == eri.pendingEdits && viewItem =~ /^eri\\.apply\\.block/", "group": "inline@1" },
+        { "command": "eri.apply.acceptBlock", "when": "view == eri.pendingEdits && viewItem == eri.apply.block.pending", "group": "inline@2" },
+        { "command": "eri.apply.rejectBlock", "when": "view == eri.pendingEdits && viewItem == eri.apply.block.pending", "group": "inline@3" },
+        { "command": "eri.apply.acceptBlock", "when": "view == eri.pendingEdits && viewItem == eri.apply.block.rejected", "group": "inline@2" },
+        { "command": "eri.apply.rejectBlock", "when": "view == eri.pendingEdits && viewItem == eri.apply.block.accepted", "group": "inline@2" },
+        { "command": "eri.apply.resetBlock",  "when": "view == eri.pendingEdits && viewItem =~ /^eri\\.apply\\.block\\.(accepted|rejected)$/", "group": "inline@3" }
       ]
     },
     "keybindings": [
@@ -143,7 +270,7 @@
         "eri.voice.enabled": {
           "type": "boolean",
           "default": true,
-          "description": "Enable voice input (push-to-talk on Cmd-L)"
+          "markdownDescription": "Enable **voice input** (push-to-talk on `Cmd+L`). Toggle live in the Settings Hub."
         },
         "eri.voice.hotMic": {
           "type": "boolean",
@@ -154,7 +281,7 @@
           "type": "string",
           "enum": ["lumen", "marrow", "sable", "vesper", "kiln"],
           "default": "lumen",
-          "description": "ElevenLabs preset voice eri uses to speak responses."
+          "markdownDescription": "ElevenLabs **preset voice** eri uses to speak responses. Pick one in the Settings Hub for an instant preview."
         },
         "eri.preview.autoOpen": {
           "type": "boolean",
@@ -177,6 +304,22 @@
           "default": "",
           "description": "Optional model identifier passed to the sidecar for eri Tab completions. Leave blank to use the default routing."
         },
+        "eri.tab.model": {
+          "type": "string",
+          "default": "qwen2.5-coder:1.5b",
+          "description": "Ollama model name used for eri Tab completions."
+        },
+        "eri.tab.maxTokens": {
+          "type": "number",
+          "default": 64,
+          "minimum": 1,
+          "description": "Maximum tokens to generate per eri Tab completion."
+        },
+        "eri.tab.baseUrl": {
+          "type": "string",
+          "default": "http://localhost:11434",
+          "description": "Base URL of the local Ollama server used for eri Tab completions."
+        },
         "eri.mcp.configPath": {
           "type": "string",
           "default": "",
@@ -185,7 +328,7 @@
         "eri.gaze.enabled": {
           "type": "boolean",
           "default": true,
-          "description": "Enable gaze tracking integration with the editor."
+          "markdownDescription": "Enable **gaze tracking** integration with the editor. Disable to stop the camera-based attention signal."
         },
         "eri.gaze.decorationsEnabled": {
           "type": "boolean",
@@ -197,6 +340,46 @@
           "default": 5,
           "minimum": 0,
           "description": "Number of lines around the gaze point that count as the user's working context."
+        },
+        "eri.gaze.sensitivity": {
+          "type": "number",
+          "default": 50,
+          "minimum": 1,
+          "maximum": 100,
+          "markdownDescription": "Gaze tracking sensitivity (`1`–`100`). Higher values make gaze events fire more eagerly. Tune via the **Settings Hub** for a live slider."
+        },
+        "eri.model.default": {
+          "type": "string",
+          "default": "auto",
+          "markdownDescription": "Default model identifier used by eri when no explicit model is selected. Use `auto` to defer to **auto routing**."
+        },
+        "eri.model.autoRouting": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "When `true`, eri picks the cheapest capable model for each turn instead of always using `#eri.model.default#`."
+        },
+        "eri.index.enabled": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Build and maintain the local workspace **index** used for retrieval-augmented prompts. Disabling stops new indexing but keeps the existing database."
+        },
+        "eri.privacy.telemetry": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Send anonymous, aggregate **telemetry** (no code, no prompts) to help improve eri. Off by default."
+        },
+        "eri.appearance.theme": {
+          "type": "string",
+          "enum": ["auto", "light", "dark"],
+          "default": "auto",
+          "markdownDescription": "Color theme used by eri webviews. `auto` follows the editor theme."
+        },
+        "eri.appearance.fontSize": {
+          "type": "number",
+          "default": 13,
+          "minimum": 10,
+          "maximum": 20,
+          "markdownDescription": "Font size in pixels for eri webviews. Range: `10`–`20`."
         }
       }
     }

@@ -14,6 +14,13 @@ const mcpRegistry_1 = require("./mcp/mcpRegistry");
 const composer_1 = require("./composer/composer");
 const gaze_1 = require("./gaze/gaze");
 const tierClient_1 = require("./tier/tierClient");
+const checkpoints_1 = require("./checkpoints");
+const apply_1 = require("./apply");
+const secrets_1 = require("./settings/secrets");
+const settingsView_1 = require("./settings/settingsView");
+const sidecarBridge_1 = require("./settings/sidecarBridge");
+const onboarding_1 = require("./onboarding");
+const settingsHub_1 = require("./settingsHub");
 var gaze_2 = require("./gaze/gaze");
 Object.defineProperty(exports, "getCurrentGazeTarget", { enumerable: true, get: function () { return gaze_2.getCurrentTarget; } });
 Object.defineProperty(exports, "getEditorGazeContext", { enumerable: true, get: function () { return gaze_2.getEditorGazeContext; } });
@@ -25,14 +32,28 @@ let composer = null;
 let atMentions = null;
 let gaze = null;
 let tierClient = null;
+let checkpoints = null;
+let apply = null;
+let byokView = null;
+let secretsStore = null;
+let onboarding = null;
+let settingsHub = null;
 function activate(context) {
     const binaryPath = (0, sidecar_1.resolveBinaryPath)(context);
+    secretsStore = new secrets_1.SecretsStore(context.secrets, context.globalState);
+    const localSecrets = secretsStore;
     sidecar = new sidecar_1.Sidecar({
         binaryPath,
         onNotification: handleNotification,
         onExit: (code) => {
             console.warn(`[eri] sidecar exited (code=${code})`);
             sidecar = null;
+        },
+        onRequest: async (request) => {
+            if (request.method === sidecarBridge_1.SECRET_REQUEST_METHOD) {
+                return (0, sidecarBridge_1.handleSecretRequest)(request, localSecrets);
+            }
+            throw new Error("method not found");
         },
     });
     sidecar.start();
@@ -49,6 +70,20 @@ function activate(context) {
     mcpRegistry = (0, mcpRegistry_1.activateMcp)(context, () => sidecar);
     gaze = (0, gaze_1.activateGaze)(context, () => sidecar);
     composer = (0, composer_1.activateComposer)(context, () => sidecar, atMentions);
+    checkpoints = (0, checkpoints_1.activateCheckpoints)(context, () => sidecar);
+    apply = (0, apply_1.activateApply)(context, () => sidecar);
+    onboarding = (0, onboarding_1.activateOnboarding)(context, () => sidecar);
+    settingsHub = (0, settingsHub_1.activateSettingsHub)(context);
+    byokView = new settingsView_1.ByokSettingsView(context, secretsStore);
+    const localView = byokView;
+    context.subscriptions.push(vscode.window.registerWebviewViewProvider(settingsView_1.BYOK_VIEW_ID, byokView), vscode.commands.registerCommand("eri.byok.setKey", async () => {
+        await localView.pickAndSet();
+    }), vscode.commands.registerCommand("eri.byok.clearAll", async () => {
+        await localView.clearAll();
+    }), vscode.commands.registerCommand("eri.settings.open", async () => {
+        await vscode.commands.executeCommand("workbench.view.extension.eri-activitybar");
+        await vscode.commands.executeCommand(`${settingsView_1.BYOK_VIEW_ID}.focus`);
+    }));
     context.subscriptions.push(vscode.commands.registerCommand("eri.openPreview", () => {
         previewManager?.open();
     }), vscode.commands.registerCommand("eri.toggleMic", () => {
@@ -92,6 +127,16 @@ function deactivate() {
     gaze = null;
     tierClient?.dispose();
     tierClient = null;
+    checkpoints?.dispose();
+    checkpoints = null;
+    apply?.dispose();
+    apply = null;
+    onboarding?.dispose();
+    onboarding = null;
+    settingsHub?.dispose();
+    settingsHub = null;
+    byokView = null;
+    secretsStore = null;
 }
 function handleNotification(notification) {
     composer?.forward(notification);
