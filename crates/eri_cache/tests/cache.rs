@@ -43,8 +43,8 @@ fn fresh_cache() -> (Cache, TempDir) {
 
 fn fresh_cache_with_clock(clock: Arc<FakeClock>) -> (Cache, TempDir) {
     let dir = TempDir::new().expect("tempdir");
-    let cache = Cache::open_with(&dir.path().join("cache.sled"), clock)
-        .expect("open cache with clock");
+    let cache =
+        Cache::open_with(&dir.path().join("cache.sled"), clock).expect("open cache with clock");
     (cache, dir)
 }
 
@@ -106,7 +106,10 @@ fn list_returns_keys_in_namespace_only() {
         .list(Namespace::IntentClassification, None)
         .expect("list intent");
     intent_keys.sort();
-    assert_eq!(intent_keys, vec!["make blue".to_string(), "make red".into()]);
+    assert_eq!(
+        intent_keys,
+        vec!["make blue".to_string(), "make red".into()]
+    );
 
     let prefixed = cache
         .list(Namespace::IntentClassification, Some("make r"))

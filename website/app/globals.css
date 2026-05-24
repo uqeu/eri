@@ -5,21 +5,20 @@
 :root {
   color-scheme: light dark;
 
-  /* Default (system): light tokens */
-  --bg:        #f7f4ef;
-  --bg-card:   #efeae0;
-  --bg-card-2: #e7e1d4;
-  --border:    rgba(42, 38, 32, 0.08);
-  --border-strong: rgba(42, 38, 32, 0.16);
+  /* Default (system): light tokens — warmer parchment */
+  --bg:        #f5f1e8;
+  --bg-card:   #ede7d8;
+  --bg-card-2: #e3dcc8;
+  --border:    rgba(31, 27, 22, 0.08);
+  --border-strong: rgba(31, 27, 22, 0.16);
 
-  --text:     #2a2620;
-  --text-sec: rgba(42, 38, 32, 0.6);
-  --text-ter: rgba(42, 38, 32, 0.4);
+  --text:     #1f1b16;
+  --text-sec: rgba(31, 27, 22, 0.6);
+  --text-ter: rgba(31, 27, 22, 0.4);
 
   --sage:        #bfd7c1;
-  --sage-deep:   #8fb592;
-  --blue:        #c9dcea;
-  --blue-deep:   #9bb7cd;
+  --sage-deep:   #6f9676;
+  --accent-clay: #c97a3f;
   --focus-ring:  var(--sage-deep);
 
   /* Demo-only — lime survives inside the engine. Aliases for legacy callsites
@@ -63,9 +62,8 @@
 
     --sage:       #a8c4ab;
     --sage-deep:  #cfe1d1;
-    --blue:       #b0c4d6;
-    --blue-deep:  #d0dde7;
-    --focus-ring: var(--blue-deep);
+    --accent-clay: #d8956b;
+    --focus-ring: var(--sage-deep);
   }
 }
 
@@ -82,9 +80,8 @@
 
   --sage:       #a8c4ab;
   --sage-deep:  #cfe1d1;
-  --blue:       #b0c4d6;
-  --blue-deep:  #d0dde7;
-  --focus-ring: var(--blue-deep);
+  --accent-clay: #d8956b;
+  --focus-ring: var(--sage-deep);
 }
 
 html, body {
@@ -106,6 +103,19 @@ html, body {
     max-width: 1280px;
     margin-inline: auto;
     padding-inline: 1.5rem;
+  }
+
+  /* Editorial narrow text column — magazine voice */
+  .text-prose-narrow {
+    max-width: 56ch;
+  }
+
+  /* Restrained subhead voice in the Anthropic register */
+  .lead {
+    font-family: var(--font-fraunces), Georgia, serif;
+    font-size: 1.25rem;
+    line-height: 1.5;
+    color: var(--text-sec);
   }
 
   @media (min-width: 768px) {

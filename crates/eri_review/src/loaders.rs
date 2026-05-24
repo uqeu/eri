@@ -17,7 +17,7 @@ use std::process::Command;
 // calls. Loaders run inside the JSON-RPC dispatcher's worker thread, which
 // already serialises per workspace.
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 
 use crate::diff::{DiffBundle, DiffSource};
 use crate::parser::parse_unified_diff;
@@ -95,11 +95,16 @@ fn validate_revision(rev: &str) -> Result<()> {
     if rev.is_empty() {
         return Err(anyhow!("empty git revision"));
     }
-    let bad = rev
-        .chars()
-        .any(|c| matches!(c, ' ' | '\t' | '\n' | ';' | '|' | '&' | '$' | '`' | '"' | '\''));
+    let bad = rev.chars().any(|c| {
+        matches!(
+            c,
+            ' ' | '\t' | '\n' | ';' | '|' | '&' | '$' | '`' | '"' | '\''
+        )
+    });
     if bad {
-        return Err(anyhow!("git revision contains forbidden character: {rev:?}"));
+        return Err(anyhow!(
+            "git revision contains forbidden character: {rev:?}"
+        ));
     }
     Ok(())
 }
@@ -130,7 +135,7 @@ impl DiffLoader for GithubApiLoader {
             other => {
                 return Err(anyhow!(
                     "GithubApiLoader expects DiffSource::Github, got {other:?}"
-                ))
+                ));
             }
         };
         validate_segment(owner)?;
@@ -180,7 +185,7 @@ impl DiffLoader for GitlabApiLoader {
             other => {
                 return Err(anyhow!(
                     "GitlabApiLoader expects DiffSource::Gitlab, got {other:?}"
-                ))
+                ));
             }
         };
         validate_segment(project)?;
@@ -237,7 +242,7 @@ impl DiffLoader for ForgejoApiLoader {
             other => {
                 return Err(anyhow!(
                     "ForgejoApiLoader expects DiffSource::Forgejo, got {other:?}"
-                ))
+                ));
             }
         };
         validate_url(instance_url)?;
@@ -303,7 +308,7 @@ impl DiffLoader for PatchLoader {
             other => {
                 return Err(anyhow!(
                     "PatchLoader expects DiffSource::Patch, got {other:?}"
-                ))
+                ));
             }
         };
         let files = parse_unified_diff(raw)?;
@@ -370,7 +375,9 @@ fn validate_url(s: &str) -> Result<()> {
     if !(s.starts_with("http://") || s.starts_with("https://")) {
         return Err(anyhow!("Forgejo instance URL must be http(s)://: {s:?}"));
     }
-    if s.chars().any(|c| matches!(c, ' ' | '\t' | '\n' | '"' | '\'' | '`' | '$')) {
+    if s.chars()
+        .any(|c| matches!(c, ' ' | '\t' | '\n' | '"' | '\'' | '`' | '$'))
+    {
         return Err(anyhow!("Forgejo URL contains forbidden character: {s:?}"));
     }
     Ok(())
@@ -441,9 +448,7 @@ mod tests {
     fn github_loader_rejects_wrong_source() {
         let loader = GithubApiLoader::new();
         let err = loader
-            .load(&DiffSource::Patch {
-                raw: String::new(),
-            })
+            .load(&DiffSource::Patch { raw: String::new() })
             .expect_err("must reject");
         assert!(err.to_string().contains("expects DiffSource::Github"));
     }

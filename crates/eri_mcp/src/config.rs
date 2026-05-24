@@ -36,7 +36,7 @@ pub enum TransportKind {
 
 /// A single MCP server entry. Field set is the union of Claude Desktop and
 /// Cursor schemas so an existing `mcp.json` from either tool loads as-is.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct ServerConfig {
     /// Server name, used to namespace tools and surface status in the UI.
     /// Populated from the surrounding object key when the config uses the
@@ -107,11 +107,11 @@ struct ConfigFile {
 pub fn load(workspace: &Path) -> Result<Vec<ServerConfig>, McpError> {
     let mut merged: BTreeMap<String, ServerConfig> = BTreeMap::new();
 
-    if let Some(global_path) = global_path() {
-        if global_path.exists() {
-            for server in load_file(&global_path)? {
-                merged.insert(server.name.clone(), server);
-            }
+    if let Some(global_path) = global_path()
+        && global_path.exists()
+    {
+        for server in load_file(&global_path)? {
+            merged.insert(server.name.clone(), server);
         }
     }
 
@@ -156,7 +156,8 @@ pub(crate) fn parse(raw: &str, path: &Path) -> Result<Vec<ServerConfig>, McpErro
             source,
         })?;
 
-    let mut out: Vec<ServerConfig> = Vec::with_capacity(file.mcp_servers.len() + file.servers.len());
+    let mut out: Vec<ServerConfig> =
+        Vec::with_capacity(file.mcp_servers.len() + file.servers.len());
 
     // Populate name from the map key, preserving any explicit name set in the
     // value (the map key wins on disagreement — that's the visible identity).
@@ -385,20 +386,5 @@ mod tests {
         let active = active_servers(&all);
         assert_eq!(active.len(), 1);
         assert_eq!(active[0].name, "a");
-    }
-}
-
-impl Default for ServerConfig {
-    fn default() -> Self {
-        Self {
-            name: String::new(),
-            command: None,
-            args: Vec::new(),
-            env: BTreeMap::new(),
-            url: None,
-            headers: BTreeMap::new(),
-            transport: None,
-            disabled: false,
-        }
     }
 }

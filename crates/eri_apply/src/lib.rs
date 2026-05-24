@@ -11,7 +11,7 @@ mod apply;
 mod matcher;
 mod parse;
 
-pub use apply::{apply, ApplyKind, ApplyReport, Applied, Failed, FailureReason};
+pub use apply::{Applied, ApplyKind, ApplyReport, Failed, FailureReason, apply};
 pub use parse::{parse, parse_streaming};
 
 /// A single search/replace edit extracted from model output.

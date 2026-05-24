@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- eri app icon: stylized 'e' that doubles as an eye (gaze), with a soundwave arc (voice) -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FFF299"/>
+      <stop offset="55%" stop-color="#F5E867"/>
+      <stop offset="100%" stop-color="#E8D84A"/>
+    </linearGradient>
+    <linearGradient id="ink" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1A1A1A"/>
+      <stop offset="100%" stop-color="#000000"/>
+    </linearGradient>
+  </defs>
+
+  <!-- rounded-square background (Big Sur safe area ~824 of 1024) -->
+  <rect x="0" y="0" width="1024" height="1024" rx="224" ry="224" fill="url(#bg)"/>
+
+  <!-- subtle inner sheen -->
+  <rect x="0" y="0" width="1024" height="1024" rx="224" ry="224" fill="white" fill-opacity="0.06"/>
+
+  <!-- The 'e' / eye glyph, centered around (512, 530) within ~640px safe glyph area -->
+  <!-- Outer 'e' stroke: open at the right, the opening forms the eye's lash line -->
+  <g transform="translate(512 530)">
+    <!-- e ring: thick stroke C-shape rotated so the gap points right -->
+    <path d="
+      M 220 -40
+      A 260 260 0 1 0 220 80
+      L 60 80
+      L 60 -40
+      Z"
+      fill="url(#ink)"/>
+
+    <!-- white cut: removes inner core to create the 'e' counter -->
+    <path d="
+      M 140 -10
+      A 160 160 0 1 0 140 50
+      L 60 50
+      L 60 -10
+      Z"
+      fill="url(#bg)"/>
+
+    <!-- pupil: solid disc, eye gaze -->
+    <circle cx="60" cy="20" r="58" fill="url(#ink)"/>
+    <!-- catchlight on pupil -->
+    <circle cx="42" cy="2" r="16" fill="#FFFFFF" fill-opacity="0.9"/>
+
+    <!-- soundwave arcs to the right of the eye: voice motif -->
+    <g fill="none" stroke="url(#ink)" stroke-linecap="round">
+      <path d="M 200 -10 Q 250 20 200 50" stroke-width="26"/>
+      <path d="M 270 -50 Q 360 20 270 90" stroke-width="26" stroke-opacity="0.65"/>
+      <path d="M 340 -90 Q 470 20 340 130" stroke-width="26" stroke-opacity="0.35"/>
+    </g>
+  </g>
+</svg>

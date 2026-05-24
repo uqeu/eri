@@ -46,7 +46,7 @@ pub enum TokenError {
 /// instead of forcing a synthetic token count.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(dead_code)] // P50kBase is wired through but not yet hit by MODEL_TABLE;
-                    // kept so the encoder set is complete for future additions.
+// kept so the encoder set is complete for future additions.
 enum Encoder {
     O200kBase,
     Cl100kBase,

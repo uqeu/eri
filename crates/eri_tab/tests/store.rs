@@ -4,9 +4,7 @@
 
 use std::fs;
 
-use eri_tab::model_store::{
-    cached_path, default_cache_dir, ensure_model, is_cached, lookup,
-};
+use eri_tab::model_store::{cached_path, default_cache_dir, ensure_model, is_cached, lookup};
 
 const TEST_REPO: &str = "test/Mock-GGUF";
 const TEST_FILE: &str = "mock-1b-q4_k_m.gguf";

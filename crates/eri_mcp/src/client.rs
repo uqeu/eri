@@ -190,8 +190,8 @@ impl Connection {
         let init = self
             .request_inner("initialize", Some(params), REQUEST_TIMEOUT)
             .await?;
-        let parsed: InitializeResult = serde_json::from_value(init.clone())
-            .unwrap_or_else(|_| InitializeResult::default());
+        let parsed: InitializeResult =
+            serde_json::from_value(init.clone()).unwrap_or_else(|_| InitializeResult::default());
         *self.server_capabilities.write().await = parsed.capabilities;
 
         // Notify initialized.

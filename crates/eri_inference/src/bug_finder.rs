@@ -146,10 +146,10 @@ pub fn parse_bug_finder_response(response: &str) -> Vec<Bug> {
     if let Some(parsed) = try_parse_json(trimmed) {
         return parsed;
     }
-    if let Some(extracted) = extract_first_json_object(trimmed) {
-        if let Some(parsed) = try_parse_json(extracted) {
-            return parsed;
-        }
+    if let Some(extracted) = extract_first_json_object(trimmed)
+        && let Some(parsed) = try_parse_json(extracted)
+    {
+        return parsed;
     }
     fallback_single_bug(trimmed)
 }

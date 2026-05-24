@@ -82,9 +82,7 @@ impl BudgetPart {
 /// Errors that can occur when fitting prompt parts to a model's context.
 #[derive(Debug, Error)]
 pub enum BudgetError {
-    #[error(
-        "mandatory prompt parts exceed input budget: {required} > {budget} (model {model:?})"
-    )]
+    #[error("mandatory prompt parts exceed input budget: {required} > {budget} (model {model:?})")]
     MandatoryOverflow {
         required: usize,
         budget: usize,
@@ -171,20 +169,18 @@ impl Budgeter {
                 continue;
             }
             // Doesn't fit at full size — try truncating to min_keep_tokens.
-            if let Some(min_keep) = indexed[i].1.min_keep_tokens {
-                if min_keep > 0 && min_keep <= remaining {
-                    let truncated = truncate_to_tokens(
-                        &self.model.tokenizer,
-                        &indexed[i].1.text,
-                        min_keep,
-                    );
-                    indexed[i].1.text = truncated;
-                    let new_cost = self.count(&indexed[i].1.text);
-                    if new_cost <= remaining {
-                        keep[i] = true;
-                        remaining -= new_cost;
-                        continue;
-                    }
+            if let Some(min_keep) = indexed[i].1.min_keep_tokens
+                && min_keep > 0
+                && min_keep <= remaining
+            {
+                let truncated =
+                    truncate_to_tokens(&self.model.tokenizer, &indexed[i].1.text, min_keep);
+                indexed[i].1.text = truncated;
+                let new_cost = self.count(&indexed[i].1.text);
+                if new_cost <= remaining {
+                    keep[i] = true;
+                    remaining -= new_cost;
+                    continue;
                 }
             }
             // Drop entirely.
@@ -211,9 +207,7 @@ fn count_tokens(kind: &TokenizerKind, text: &str) -> usize {
             // Route through eri_tokens with a known cl100k model.
             eri_tokens::tokens_or_fallback(text, "claude-3.5-sonnet") as usize
         }
-        TokenizerKind::Tiktoken(model) => {
-            eri_tokens::tokens_or_fallback(text, model) as usize
-        }
+        TokenizerKind::Tiktoken(model) => eri_tokens::tokens_or_fallback(text, model) as usize,
         TokenizerKind::Llama3 | TokenizerKind::Estimate => estimate_chars_over_four(text),
     }
 }
@@ -407,10 +401,17 @@ mod tests {
         ];
         let kept = b.fit(parts).expect("ok");
         let labels: Vec<&str> = kept.iter().map(|p| p.label.as_str()).collect();
-        assert!(labels.contains(&"ctx"), "ctx should survive truncation: {labels:?}");
+        assert!(
+            labels.contains(&"ctx"),
+            "ctx should survive truncation: {labels:?}"
+        );
         let ctx = kept.iter().find(|p| p.label == "ctx").unwrap();
         // Truncated text must be much smaller than the original 160 chars.
-        assert!(ctx.text.len() < 80, "expected truncation, got {}", ctx.text.len());
+        assert!(
+            ctx.text.len() < 80,
+            "expected truncation, got {}",
+            ctx.text.len()
+        );
     }
 
     #[test]
@@ -440,7 +441,9 @@ mod tests {
         let parts = vec![BudgetPart::new("sys", 0, huge)];
         let err = b.fit(parts).expect_err("should fail");
         match err {
-            BudgetError::MandatoryOverflow { required, budget, .. } => {
+            BudgetError::MandatoryOverflow {
+                required, budget, ..
+            } => {
                 assert!(required > budget);
             }
         }
@@ -453,9 +456,9 @@ mod tests {
         profile.max_output = 4; // budget = 12 tokens (~48 chars)
         let b = Budgeter::new(profile);
         let parts = vec![
-            BudgetPart::new("p5", 5, "x".repeat(40)),  // 10 tokens
-            BudgetPart::new("p1", 1, "y".repeat(20)),  // 5 tokens
-            BudgetPart::new("p2", 2, "z".repeat(8)),   // 2 tokens
+            BudgetPart::new("p5", 5, "x".repeat(40)), // 10 tokens
+            BudgetPart::new("p1", 1, "y".repeat(20)), // 5 tokens
+            BudgetPart::new("p2", 2, "z".repeat(8)),  // 2 tokens
         ];
         let kept = b.fit(parts).expect("ok");
         let labels: Vec<&str> = kept.iter().map(|p| p.label.as_str()).collect();

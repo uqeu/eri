@@ -72,8 +72,7 @@ pub fn apply_patch_to_disk(
         ));
     }
     let updated = current.replacen(&patch.old_text, &patch.new_text, 1);
-    fs::write(&path, &updated)
-        .with_context(|| format!("writing patched {}", path.display()))?;
+    fs::write(&path, &updated).with_context(|| format!("writing patched {}", path.display()))?;
     Ok(AppliedPatchOnDisk {
         path,
         original_text: current,
@@ -92,12 +91,8 @@ pub fn undo_patch_on_disk(applied: &AppliedPatchOnDisk) -> Result<()> {
 /// needed). Returns the absolute path of `root` plus the absolute path of
 /// every file written. Existing files are overwritten — callers should pick
 /// a fresh directory if that matters.
-pub fn write_build_files(
-    files: &[(PathBuf, String)],
-    root: &Path,
-) -> Result<Vec<PathBuf>> {
-    fs::create_dir_all(root)
-        .with_context(|| format!("creating build root {}", root.display()))?;
+pub fn write_build_files(files: &[(PathBuf, String)], root: &Path) -> Result<Vec<PathBuf>> {
+    fs::create_dir_all(root).with_context(|| format!("creating build root {}", root.display()))?;
     let mut written = Vec::with_capacity(files.len());
     for (relative_path, content) in files {
         let resolved = if relative_path.is_absolute() {
@@ -106,11 +101,9 @@ pub fn write_build_files(
             root.join(relative_path)
         };
         if let Some(parent) = resolved.parent() {
-            fs::create_dir_all(parent)
-                .with_context(|| format!("creating {}", parent.display()))?;
+            fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
         }
-        fs::write(&resolved, content)
-            .with_context(|| format!("writing {}", resolved.display()))?;
+        fs::write(&resolved, content).with_context(|| format!("writing {}", resolved.display()))?;
         written.push(resolved);
     }
     Ok(written)
@@ -180,13 +173,7 @@ pub fn spawn_server(server: &DetectedServer) -> Result<std::process::Child> {
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
-        .with_context(|| {
-            format!(
-                "spawning {} {}",
-                server.command,
-                server.path.display()
-            )
-        })?;
+        .with_context(|| format!("spawning {} {}", server.command, server.path.display()))?;
     Ok(child)
 }
 

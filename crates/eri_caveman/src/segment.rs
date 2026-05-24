@@ -26,14 +26,14 @@ pub(crate) fn split<'a>(input: &'a str, user_blocks: &[&'static str]) -> Vec<Seg
 
     while i < bytes.len() {
         // 1. Fenced code blocks at line start (allowing leading whitespace).
-        if at_line_start(bytes, i) {
-            if let Some((fence_start, fence_end)) = match_fence(input, i) {
-                flush_prose(input, prose_start, fence_start, &mut out);
-                out.push(Segment::Preserved(&input[fence_start..fence_end]));
-                i = fence_end;
-                prose_start = fence_end;
-                continue;
-            }
+        if at_line_start(bytes, i)
+            && let Some((fence_start, fence_end)) = match_fence(input, i)
+        {
+            flush_prose(input, prose_start, fence_start, &mut out);
+            out.push(Segment::Preserved(&input[fence_start..fence_end]));
+            i = fence_end;
+            prose_start = fence_end;
+            continue;
         }
 
         let ch = bytes[i];
@@ -51,47 +51,48 @@ pub(crate) fn split<'a>(input: &'a str, user_blocks: &[&'static str]) -> Vec<Seg
         }
 
         // 3. Inline backtick code spans.
-        if ch == b'`' {
-            if let Some(end) = match_inline_code(input, i) {
-                flush_prose(input, prose_start, i, &mut out);
-                out.push(Segment::Preserved(&input[i..end]));
-                i = end;
-                prose_start = end;
-                continue;
-            }
+        if ch == b'`'
+            && let Some(end) = match_inline_code(input, i)
+        {
+            flush_prose(input, prose_start, i, &mut out);
+            out.push(Segment::Preserved(&input[i..end]));
+            i = end;
+            prose_start = end;
+            continue;
         }
 
         // 4. HTML tags.
-        if ch == b'<' {
-            if let Some(end) = match_html_tag(input, i) {
-                flush_prose(input, prose_start, i, &mut out);
-                out.push(Segment::Preserved(&input[i..end]));
-                i = end;
-                prose_start = end;
-                continue;
-            }
+        if ch == b'<'
+            && let Some(end) = match_html_tag(input, i)
+        {
+            flush_prose(input, prose_start, i, &mut out);
+            out.push(Segment::Preserved(&input[i..end]));
+            i = end;
+            prose_start = end;
+            continue;
         }
 
         // 5. Template placeholders `{{...}}`.
-        if ch == b'{' && bytes.get(i + 1) == Some(&b'{') {
-            if let Some(end) = match_placeholder(input, i) {
-                flush_prose(input, prose_start, i, &mut out);
-                out.push(Segment::Preserved(&input[i..end]));
-                i = end;
-                prose_start = end;
-                continue;
-            }
+        if ch == b'{'
+            && bytes.get(i + 1) == Some(&b'{')
+            && let Some(end) = match_placeholder(input, i)
+        {
+            flush_prose(input, prose_start, i, &mut out);
+            out.push(Segment::Preserved(&input[i..end]));
+            i = end;
+            prose_start = end;
+            continue;
         }
 
         // 6. Quoted string literals (single-line).
-        if ch == b'"' || ch == b'\'' {
-            if let Some(end) = match_quoted(input, i, ch) {
-                flush_prose(input, prose_start, i, &mut out);
-                out.push(Segment::Preserved(&input[i..end]));
-                i = end;
-                prose_start = end;
-                continue;
-            }
+        if (ch == b'"' || ch == b'\'')
+            && let Some(end) = match_quoted(input, i, ch)
+        {
+            flush_prose(input, prose_start, i, &mut out);
+            out.push(Segment::Preserved(&input[i..end]));
+            i = end;
+            prose_start = end;
+            continue;
         }
 
         i += 1;

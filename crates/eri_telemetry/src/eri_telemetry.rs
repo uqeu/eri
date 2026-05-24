@@ -15,8 +15,8 @@ const ERI_HOME_DIR: &str = ".eri";
 
 /// Cached distinct ID — generated once per process from disk (or freshly minted
 /// + persisted on first run). `None` means we couldn't read or write the file
-/// and have given up; subsequent `track()` calls will fall back to a synthetic
-/// per-process ID so events still flow.
+///   and have given up; subsequent `track()` calls will fall back to a synthetic
+///   per-process ID so events still flow.
 static DISTINCT_ID: OnceLock<String> = OnceLock::new();
 
 /// Resolve `~/.eri/telemetry-id`. Returns None if no home dir is available.
@@ -40,14 +40,14 @@ fn load_or_create_distinct_id() -> String {
     }
 
     let fresh = Uuid::new_v4().to_string();
-    if let Some(parent) = path.parent() {
-        if let Err(error) = std::fs::create_dir_all(parent) {
-            log::warn!(
-                "[eri.telemetry] could not create {}: {error}",
-                parent.display()
-            );
-            return fresh;
-        }
+    if let Some(parent) = path.parent()
+        && let Err(error) = std::fs::create_dir_all(parent)
+    {
+        log::warn!(
+            "[eri.telemetry] could not create {}: {error}",
+            parent.display()
+        );
+        return fresh;
     }
     if let Err(error) = std::fs::write(&path, &fresh) {
         log::warn!(

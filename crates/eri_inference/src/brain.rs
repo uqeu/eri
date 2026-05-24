@@ -126,8 +126,7 @@ impl Brain {
 
         // 3. Fit the parts. Track which labels we asked for vs. what survived
         //    so we can report dropped labels back to the caller.
-        let requested_labels: Vec<String> =
-            parts.iter().map(|p| p.label.clone()).collect();
+        let requested_labels: Vec<String> = parts.iter().map(|p| p.label.clone()).collect();
         let kept = budgeter.fit(parts)?;
         let kept_label_set: std::collections::HashSet<&str> =
             kept.iter().map(|p| p.label.as_str()).collect();
@@ -240,8 +239,15 @@ mod tests {
         assert!(plan.budgeted_prompt.user.contains("vector"));
         // Reasoning amendment landed in the system half.
         assert!(
-            plan.budgeted_prompt.system.to_lowercase().contains("concise")
-                || plan.budgeted_prompt.system.to_lowercase().contains("step by step"),
+            plan.budgeted_prompt
+                .system
+                .to_lowercase()
+                .contains("concise")
+                || plan
+                    .budgeted_prompt
+                    .system
+                    .to_lowercase()
+                    .contains("step by step"),
             "expected reasoning amendment in system: {}",
             plan.budgeted_prompt.system
         );
@@ -255,7 +261,9 @@ mod tests {
         // tiktoken encoding of a multi-MB string).
         let prev = std::env::var("ERI_ROUTE_EDIT").ok();
         // SAFETY: we restore the previous value at the end of the test.
-        unsafe { std::env::set_var("ERI_ROUTE_EDIT", "local:tiny-test"); }
+        unsafe {
+            std::env::set_var("ERI_ROUTE_EDIT", "local:tiny-test");
+        }
         let router = Router::from_env();
         let mut brain = Brain::with_router(router);
         let parts = vec![
@@ -270,7 +278,9 @@ mod tests {
             .plan("change the button color", &pc, parts)
             .expect("plans");
         assert!(
-            plan.budgeted_prompt.dropped_parts.contains(&"ctx:huge".to_string()),
+            plan.budgeted_prompt
+                .dropped_parts
+                .contains(&"ctx:huge".to_string()),
             "expected ctx:huge dropped, got {:?}",
             plan.budgeted_prompt.dropped_parts
         );

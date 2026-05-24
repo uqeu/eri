@@ -198,7 +198,9 @@ fn indentation_shifted(haystack: &str, search: &str, replace: &str) -> Option<Ma
     let dedented_search = dedent(search, search_indent);
     let dedented_replace = dedent(replace, search_indent);
 
-    let candidates = ["", " ", "  ", "   ", "    ", "      ", "        ", "\t", "\t\t"];
+    let candidates = [
+        "", " ", "  ", "   ", "    ", "      ", "        ", "\t", "\t\t",
+    ];
     let mut matches: Vec<((usize, usize), &str)> = Vec::new();
     for prefix in candidates {
         // Skip the no-op case — it's just the exact match already tried.

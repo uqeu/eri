@@ -35,7 +35,9 @@ impl HandoffFile {
 fn serialize_markdown(ctx: &PromptCtx) -> String {
     let mut buf = String::new();
     buf.push_str("# eri handoff\n\n");
-    buf.push_str("This is an eri-built prompt. Implement the request below in the project root.\n\n");
+    buf.push_str(
+        "This is an eri-built prompt. Implement the request below in the project root.\n\n",
+    );
 
     buf.push_str("## Target\n");
     buf.push_str(&format_gaze_target(ctx.gaze_target()));
@@ -101,7 +103,11 @@ fn serialize_markdown(ctx: &PromptCtx) -> String {
     if !ctx.open_files().is_empty() {
         buf.push_str("## Open files\n");
         for file in ctx.open_files() {
-            buf.push_str(&format!("### {}\n```\n{}\n```\n", file.path.display(), file.text));
+            buf.push_str(&format!(
+                "### {}\n```\n{}\n```\n",
+                file.path.display(),
+                file.text
+            ));
         }
     }
 
@@ -127,7 +133,10 @@ fn format_gaze_target(target: &GazeTarget) -> String {
                     confidence * 100.0
                 )
             } else {
-                format!("Preview `{element}` · confidence {:.0}%", confidence * 100.0)
+                format!(
+                    "Preview `{element}` · confidence {:.0}%",
+                    confidence * 100.0
+                )
             }
         }
         GazeTarget::Editor {
@@ -169,7 +178,10 @@ mod tests {
     fn handoff_markdown_includes_turns_target_and_patch() -> Result<()> {
         let dir = tempdir()?;
         let mut ctx = PromptCtx::default();
-        ctx.set_file_context(PathBuf::from("App.tsx"), "button { background: blue; }".into());
+        ctx.set_file_context(
+            PathBuf::from("App.tsx"),
+            "button { background: blue; }".into(),
+        );
         ctx.set_gaze_target(GazeTarget::Preview {
             element_label: Some("Subscribe".into()),
             bounds: Bounds::new(10.0, 20.0, 120.0, 36.0),

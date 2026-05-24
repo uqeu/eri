@@ -1,6 +1,4 @@
-use eri_billing::{
-    feature_allowed, BillingClient, Feature, Plan, SubscriptionTier,
-};
+use eri_billing::{BillingClient, Feature, Plan, SubscriptionTier, feature_allowed};
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::sync::mpsc;
@@ -13,7 +11,10 @@ fn feature_allowed_free_user_is_locked_out_of_paid_features() {
         SubscriptionTier::Free,
         Feature::UnlimitedMercuryEdits
     ));
-    assert!(!feature_allowed(SubscriptionTier::Free, Feature::TeamSharing));
+    assert!(!feature_allowed(
+        SubscriptionTier::Free,
+        Feature::TeamSharing
+    ));
     assert!(!feature_allowed(
         SubscriptionTier::Free,
         Feature::CustomMcpServers
@@ -23,7 +24,10 @@ fn feature_allowed_free_user_is_locked_out_of_paid_features() {
         Feature::PriorityClaudeOpus
     ));
     // Free users have the eri branding forced on.
-    assert!(feature_allowed(SubscriptionTier::Free, Feature::EriBranding));
+    assert!(feature_allowed(
+        SubscriptionTier::Free,
+        Feature::EriBranding
+    ));
 }
 
 #[test]
@@ -43,10 +47,7 @@ fn starter_unlocks_one_shot_ship() {
         Feature::OneShotShip,
     ));
     // And it inherits up.
-    assert!(feature_allowed(
-        SubscriptionTier::Pro,
-        Feature::OneShotShip,
-    ));
+    assert!(feature_allowed(SubscriptionTier::Pro, Feature::OneShotShip,));
     assert!(feature_allowed(
         SubscriptionTier::ProPlus,
         Feature::OneShotShip,
@@ -99,10 +100,7 @@ fn feature_allowed_starter_basic_tier_features() {
 
 #[test]
 fn bug_finder_unlocks_at_starter() {
-    assert!(!feature_allowed(
-        SubscriptionTier::Free,
-        Feature::BugFinder,
-    ));
+    assert!(!feature_allowed(SubscriptionTier::Free, Feature::BugFinder,));
     assert!(feature_allowed(
         SubscriptionTier::Starter,
         Feature::BugFinder,
@@ -125,7 +123,10 @@ fn bug_finder_pro_unlocks_at_pro() {
         SubscriptionTier::Starter,
         Feature::BugFinderPro,
     ));
-    assert!(feature_allowed(SubscriptionTier::Pro, Feature::BugFinderPro));
+    assert!(feature_allowed(
+        SubscriptionTier::Pro,
+        Feature::BugFinderPro
+    ));
     assert!(feature_allowed(
         SubscriptionTier::ProPlus,
         Feature::BugFinderPro,
@@ -150,8 +151,14 @@ fn feature_allowed_pro_unlocks_intelligence_layer() {
         SubscriptionTier::Pro,
         Feature::BranchingIterationTimeline
     ));
-    assert!(feature_allowed(SubscriptionTier::Pro, Feature::TestGenerator));
-    assert!(feature_allowed(SubscriptionTier::Pro, Feature::CodeExplainer));
+    assert!(feature_allowed(
+        SubscriptionTier::Pro,
+        Feature::TestGenerator
+    ));
+    assert!(feature_allowed(
+        SubscriptionTier::Pro,
+        Feature::CodeExplainer
+    ));
     assert!(feature_allowed(
         SubscriptionTier::Pro,
         Feature::EarlyAccessNewFeatures
@@ -160,9 +167,15 @@ fn feature_allowed_pro_unlocks_intelligence_layer() {
         SubscriptionTier::Pro,
         Feature::MarketplaceSkillsWrite
     ));
-    assert!(feature_allowed(SubscriptionTier::Pro, Feature::FrontierModels));
+    assert!(feature_allowed(
+        SubscriptionTier::Pro,
+        Feature::FrontierModels
+    ));
     assert!(feature_allowed(SubscriptionTier::Pro, Feature::CloudAgents));
-    assert!(!feature_allowed(SubscriptionTier::Pro, Feature::EriBranding));
+    assert!(!feature_allowed(
+        SubscriptionTier::Pro,
+        Feature::EriBranding
+    ));
     // Pro is NOT ProPlus.
     assert!(!feature_allowed(
         SubscriptionTier::Pro,
@@ -173,7 +186,10 @@ fn feature_allowed_pro_unlocks_intelligence_layer() {
         Feature::PriorityClaudeOpus,
     ));
     // TeamSharing remains Teams+.
-    assert!(!feature_allowed(SubscriptionTier::Pro, Feature::TeamSharing));
+    assert!(!feature_allowed(
+        SubscriptionTier::Pro,
+        Feature::TeamSharing
+    ));
 }
 
 #[test]
@@ -375,7 +391,10 @@ fn feature_allowed_teams_unlocks_sso() {
         );
     }
     // Pro tier does not get SSO.
-    assert!(!feature_allowed(SubscriptionTier::Pro, Feature::SsoSamlOidc));
+    assert!(!feature_allowed(
+        SubscriptionTier::Pro,
+        Feature::SsoSamlOidc
+    ));
 }
 
 #[test]
@@ -543,7 +562,13 @@ fn teams_inherits_all_three_brain_tiers() {
 
 #[test]
 fn plan_from_spoken_resolves_pro_plus_and_teams() {
-    for phrase in &["pro plus", "pro+", "pro_plus", "the pro plus plan", "pro plus plan"] {
+    for phrase in &[
+        "pro plus",
+        "pro+",
+        "pro_plus",
+        "the pro plus plan",
+        "pro plus plan",
+    ] {
         assert_eq!(
             Plan::from_spoken(phrase),
             Some(Plan::ProPlus),
@@ -636,9 +661,7 @@ fn start_capture_server(response: &'static str) -> (mpsc::Receiver<String>, Stri
                 return;
             }
         };
-        stream
-            .set_read_timeout(Some(Duration::from_secs(5)))
-            .ok();
+        stream.set_read_timeout(Some(Duration::from_secs(5))).ok();
         let mut buf = [0u8; 4096];
         let mut collected = Vec::new();
         // Read until we see end-of-headers, then consume Content-Length bytes.

@@ -117,9 +117,8 @@ pub async fn plan(
             .map_err(|err| DispatchError::Other(anyhow::anyhow!(err)))?
     };
 
-    Ok(serde_json::to_value(plan_to_wire(plan)).map_err(|err| {
-        DispatchError::Other(anyhow::anyhow!("serialise BrainPlan: {err}"))
-    })?)
+    serde_json::to_value(plan_to_wire(plan))
+        .map_err(|err| DispatchError::Other(anyhow::anyhow!("serialise BrainPlan: {err}")))
 }
 
 fn plan_to_wire(plan: BrainPlan) -> PlanResult {
@@ -189,10 +188,12 @@ mod tests {
         let value = plan(params, &services).await.expect("plan ok");
         assert_eq!(value["intent"], "chat");
         assert_eq!(value["model"]["vendor"], "claude");
-        assert!(value["budgetedPrompt"]["user"]
-            .as_str()
-            .unwrap()
-            .contains("consensus"));
+        assert!(
+            value["budgetedPrompt"]["user"]
+                .as_str()
+                .unwrap()
+                .contains("consensus")
+        );
     }
 
     #[tokio::test]

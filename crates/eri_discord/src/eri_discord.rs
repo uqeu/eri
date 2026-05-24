@@ -112,7 +112,10 @@ impl EventHandler for Handler {
         let decision = rate_limiter.check(&user_id, estimate_request_cost_usd(&prompt));
         if !decision.allow {
             if let Err(error) = msg
-                .react(&ctx.http, serenity::all::ReactionType::Unicode("❌".to_string()))
+                .react(
+                    &ctx.http,
+                    serenity::all::ReactionType::Unicode("❌".to_string()),
+                )
                 .await
             {
                 log::warn!("failed to react with x: {error}");
@@ -127,7 +130,10 @@ impl EventHandler for Handler {
         // shelling out to Mercury — this gives the user instant feedback that
         // the bot saw them, even if the build itself takes 10+ seconds.
         if let Err(error) = msg
-            .react(&ctx.http, serenity::all::ReactionType::Unicode("🔨".to_string()))
+            .react(
+                &ctx.http,
+                serenity::all::ReactionType::Unicode("🔨".to_string()),
+            )
             .await
         {
             log::warn!("failed to react with hammer: {error}");
@@ -146,7 +152,10 @@ impl EventHandler for Handler {
             };
 
             let mut status = match channel_id
-                .say(&http, format!("building... `{}`", truncate_for_status(&prompt)))
+                .say(
+                    &http,
+                    format!("building... `{}`", truncate_for_status(&prompt)),
+                )
                 .await
             {
                 Ok(message) => message,
@@ -192,8 +201,7 @@ impl EventHandler for Handler {
                 let _ = command
                     .create_followup(
                         &ctx.http,
-                        CreateInteractionResponseFollowup::new()
-                            .content(format!("⚠️ {error}")),
+                        CreateInteractionResponseFollowup::new().content(format!("⚠️ {error}")),
                     )
                     .await;
             }
@@ -216,21 +224,27 @@ async fn register_global_commands(ctx: &SerenityContext) -> Result<()> {
     .required(true);
     let cmd = CreateCommand::new("eri")
         .description("Build a webpage with eri")
-        .add_option(CreateCommandOption::new(
-            CommandOptionType::SubCommand,
-            "build",
-            "Generate and deploy a new page from a natural-language prompt",
-        ).add_sub_option(build_opt))
+        .add_option(
+            CreateCommandOption::new(
+                CommandOptionType::SubCommand,
+                "build",
+                "Generate and deploy a new page from a natural-language prompt",
+            )
+            .add_sub_option(build_opt),
+        )
         .add_option(CreateCommandOption::new(
             CommandOptionType::SubCommand,
             "list-templates",
             "List the bundled template slugs",
         ))
-        .add_option(CreateCommandOption::new(
-            CommandOptionType::SubCommand,
-            "scaffold",
-            "Scaffold and deploy a built-in template by slug",
-        ).add_sub_option(scaffold_opt));
+        .add_option(
+            CreateCommandOption::new(
+                CommandOptionType::SubCommand,
+                "scaffold",
+                "Scaffold and deploy a built-in template by slug",
+            )
+            .add_sub_option(scaffold_opt),
+        );
 
     Command::create_global_command(&ctx.http, cmd)
         .await
@@ -257,8 +271,7 @@ async fn dispatch_slash(
                 .create_response(
                     &ctx.http,
                     CreateInteractionResponse::Message(
-                        CreateInteractionResponseMessage::new()
-                            .content(render_template_list()),
+                        CreateInteractionResponseMessage::new().content(render_template_list()),
                     ),
                 )
                 .await
@@ -362,10 +375,7 @@ async fn dispatch_slash(
     }
 }
 
-fn string_option(
-    sub: &serenity::all::CommandDataOption,
-    name: &str,
-) -> Result<String> {
+fn string_option(sub: &serenity::all::CommandDataOption, name: &str) -> Result<String> {
     let options = match &sub.value {
         serenity::all::CommandDataOptionValue::SubCommand(opts) => opts,
         _ => return Err(anyhow!("subcommand `{}` had unexpected shape", sub.name)),
@@ -467,8 +477,7 @@ fn build_dir_for(request_id: u64) -> Result<PathBuf> {
 /// semantics to the CLI's `run_build` path so the same env vars
 /// (MERCURY_API_KEY, ERI_COST_LIMIT_USD, etc.) apply.
 fn generate_html(prompt: &str) -> Result<(String, f64)> {
-    let config = MercuryConfig::from_env()
-        .ok_or_else(|| anyhow!("MERCURY_API_KEY not set"))?;
+    let config = MercuryConfig::from_env().ok_or_else(|| anyhow!("MERCURY_API_KEY not set"))?;
     let backend = MercuryBackend::new(config);
 
     let mut ctx = PromptCtx::default();

@@ -13,8 +13,8 @@ use tokio::sync::Mutex;
 
 use eri_index::{ChunkKind, Index};
 
-use crate::services::Services;
 use crate::DispatchError;
+use crate::services::Services;
 
 const DEFAULT_TOP_K: usize = 10;
 
@@ -85,7 +85,7 @@ pub async fn sync(params: Value, services: &Services) -> Result<Value, DispatchE
         chunks_total: report.chunks_total,
         duration_ms: report.duration_ms,
     })
-        .map_err(|e| DispatchError::Other(e.into()))
+    .map_err(|e| DispatchError::Other(e.into()))
 }
 
 pub async fn search(params: Value, services: &Services) -> Result<Value, DispatchError> {
@@ -110,8 +110,7 @@ pub async fn search(params: Value, services: &Services) -> Result<Value, Dispatc
             score: r.score,
         })
         .collect();
-    serde_json::to_value(SearchResultOut { results })
-        .map_err(|e| DispatchError::Other(e.into()))
+    serde_json::to_value(SearchResultOut { results }).map_err(|e| DispatchError::Other(e.into()))
 }
 
 pub async fn stats(params: Value, services: &Services) -> Result<Value, DispatchError> {
@@ -127,7 +126,7 @@ pub async fn stats(params: Value, services: &Services) -> Result<Value, Dispatch
         chunks: stats.chunks,
         bytes_indexed: stats.bytes_indexed,
     })
-        .map_err(|e| DispatchError::Other(e.into()))
+    .map_err(|e| DispatchError::Other(e.into()))
 }
 
 async fn get_or_open(
@@ -138,8 +137,8 @@ async fn get_or_open(
     if let Some(existing) = map.get(workspace) {
         return Ok(existing.clone());
     }
-    let index = Index::open(workspace)
-        .map_err(|e| DispatchError::Other(anyhow::anyhow!(e.to_string())))?;
+    let index =
+        Index::open(workspace).map_err(|e| DispatchError::Other(anyhow::anyhow!(e.to_string())))?;
     let arc = Arc::new(Mutex::new(index));
     map.insert(workspace.clone(), arc.clone());
     Ok(arc)

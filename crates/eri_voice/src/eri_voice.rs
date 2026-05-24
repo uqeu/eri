@@ -25,9 +25,7 @@ use cpal::{
     traits::{DeviceTrait, HostTrait, StreamTrait},
 };
 use parking_lot::Mutex;
-use whisper_rs::{
-    FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters,
-};
+use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
 const TARGET_SAMPLE_RATE: u32 = 16_000;
 // 30s ring buffer + 30s transcription window so long sentences don't get
@@ -73,8 +71,7 @@ const DEFAULT_MODEL_KEY: &str = "large-v3-turbo-q5_0";
 /// - `small.en-q5_0`         ~4x faster, ok accuracy for short commands
 #[doc(hidden)]
 pub fn whisper_model_filename() -> String {
-    let key = std::env::var("ERI_WHISPER_MODEL")
-        .unwrap_or_else(|_| DEFAULT_MODEL_KEY.to_string());
+    let key = std::env::var("ERI_WHISPER_MODEL").unwrap_or_else(|_| DEFAULT_MODEL_KEY.to_string());
     match key.as_str() {
         "large-v3-q5_0" => "ggml-large-v3-q5_0.bin".to_string(),
         "large-v3-turbo-q5_0" => "ggml-large-v3-turbo-q5_0.bin".to_string(),
@@ -228,9 +225,7 @@ impl VoiceCapture {
     /// [`VoiceEvent`]s.
     pub fn start() -> Result<(Self, mpsc::Receiver<VoiceEvent>)> {
         let (sender, receiver) = mpsc::channel();
-        let _ = sender.send(VoiceEvent::Status(
-            "Resolving whisper model.".to_string(),
-        ));
+        let _ = sender.send(VoiceEvent::Status("Resolving whisper model.".to_string()));
 
         let model_path = match ensure_model_available(&sender) {
             Ok(path) => path,
@@ -250,9 +245,7 @@ impl VoiceCapture {
             WhisperContextParameters::default(),
         )
         .map_err(|error| anyhow!("whisper context init failed: {error}"))?;
-        let _ = sender.send(VoiceEvent::Status(
-            "Whisper model loaded.".to_string(),
-        ));
+        let _ = sender.send(VoiceEvent::Status("Whisper model loaded.".to_string()));
 
         let host = cpal::default_host();
         let device = host
@@ -293,9 +286,8 @@ impl VoiceCapture {
                         });
                     },
                     move |error| {
-                        let _ = error_sender.send(VoiceEvent::Error(format!(
-                            "audio stream error: {error}"
-                        )));
+                        let _ = error_sender
+                            .send(VoiceEvent::Error(format!("audio stream error: {error}")));
                     },
                     None,
                 )
@@ -314,9 +306,8 @@ impl VoiceCapture {
                             });
                         },
                         move |error| {
-                            let _ = error_sender.send(VoiceEvent::Error(format!(
-                                "audio stream error: {error}"
-                            )));
+                            let _ = error_sender
+                                .send(VoiceEvent::Error(format!("audio stream error: {error}")));
                         },
                         None,
                     )
@@ -336,9 +327,8 @@ impl VoiceCapture {
                             });
                         },
                         move |error| {
-                            let _ = error_sender.send(VoiceEvent::Error(format!(
-                                "audio stream error: {error}"
-                            )));
+                            let _ = error_sender
+                                .send(VoiceEvent::Error(format!("audio stream error: {error}")));
                         },
                         None,
                     )
@@ -349,9 +339,7 @@ impl VoiceCapture {
         stream
             .play()
             .map_err(|error| anyhow!("audio stream play: {error}"))?;
-        let _ = sender.send(VoiceEvent::Status(
-            "Listening. Speak any time.".to_string(),
-        ));
+        let _ = sender.send(VoiceEvent::Status("Listening. Speak any time.".to_string()));
 
         let inference_stop = stop.clone();
         let inference_ring = ring.clone();
@@ -505,7 +493,7 @@ fn run_inference_loop(
             (guard.snapshot(), guard.idle_for())
         };
         if samples.len() < TARGET_SAMPLE_RATE as usize / 2 {
-            if tick % 10 == 0 {
+            if tick.is_multiple_of(10) {
                 eprintln!(
                     "[eri.voice] tick={tick} buffer={}s (waiting for >0.5s of audio)",
                     samples.len() as f32 / TARGET_SAMPLE_RATE as f32
@@ -532,7 +520,7 @@ fn run_inference_loop(
         let speech_present = energy > energy_threshold;
 
         if !speech_present {
-            if tick % 5 == 0 {
+            if tick.is_multiple_of(5) {
                 eprintln!(
                     "[eri.voice] tick={tick} energy={:.4} (below {:.4}) — silent",
                     energy, energy_threshold
@@ -569,9 +557,7 @@ fn run_inference_loop(
         params.set_no_speech_thold(0.6);
 
         if let Err(error) = state.full(params, &trailing) {
-            let _ = sender.send(VoiceEvent::Error(format!(
-                "whisper full() failed: {error}"
-            )));
+            let _ = sender.send(VoiceEvent::Error(format!("whisper full() failed: {error}")));
             continue;
         }
 
@@ -657,7 +643,10 @@ pub fn is_hallucination(text: &str) -> bool {
 
     // Rule 2: pure punctuation / ellipsis hallucinations. If no character
     // is alphanumeric, there's no command to act on.
-    if !normalized.chars().any(|character| character.is_alphanumeric()) {
+    if !normalized
+        .chars()
+        .any(|character| character.is_alphanumeric())
+    {
         return true;
     }
 
@@ -690,18 +679,16 @@ pub fn is_hallucination(text: &str) -> bool {
     // and it's a known filler — real one-word commands like "save" or
     // "run" must survive.
     const FILLERS: &[&str] = &[
-        "um", "uh", "umm", "uhh", "hmm", "mm", "mhm", "mmhm", "huh",
-        "okay", "ok", "yeah", "yep", "nope", "yup", "ah", "oh", "eh",
-        "like", "so", "well",
+        "um", "uh", "umm", "uhh", "hmm", "mm", "mhm", "mmhm", "huh", "okay", "ok", "yeah", "yep",
+        "nope", "yup", "ah", "oh", "eh", "like", "so", "well",
     ];
     let word_count = normalized
         .split_whitespace()
         .filter(|word| !word.is_empty())
         .count();
     if word_count == 1 {
-        let only = normalized
-            .trim_matches(|character: char| !character.is_alphanumeric());
-        if FILLERS.iter().any(|filler| *filler == only) {
+        let only = normalized.trim_matches(|character: char| !character.is_alphanumeric());
+        if FILLERS.contains(&only) {
             return true;
         }
     }
@@ -719,11 +706,14 @@ fn trailing_samples(samples: &[f32], window: usize) -> Vec<f32> {
 
 fn ensure_model_available(sender: &mpsc::Sender<VoiceEvent>) -> Result<PathBuf> {
     let dir = model_directory()?;
-    fs::create_dir_all(&dir)
-        .with_context(|| format!("creating {}", dir.display()))?;
+    fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
     let filename = whisper_model_filename();
     let path = dir.join(&filename);
-    if path.exists() && fs::metadata(&path).map(|meta| meta.len() > 1024 * 1024).unwrap_or(false) {
+    if path.exists()
+        && fs::metadata(&path)
+            .map(|meta| meta.len() > 1024 * 1024)
+            .unwrap_or(false)
+    {
         let _ = sender.send(VoiceEvent::Status(format!(
             "Whisper model cached at {}",
             path.display()

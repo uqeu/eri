@@ -179,9 +179,7 @@ async fn open_socket_url(http: &reqwest::Client, app_token: &str) -> Result<Stri
         .context("read apps.connections.open response body")?;
     let payload: Value = serde_json::from_str(&body_text)
         .with_context(|| format!("decode apps.connections.open response: {body_text}"))?;
-    if !status.is_success()
-        || payload.get("ok").and_then(Value::as_bool) != Some(true)
-    {
+    if !status.is_success() || payload.get("ok").and_then(Value::as_bool) != Some(true) {
         return Err(anyhow!(
             "apps.connections.open failed (HTTP {status}): {payload}"
         ));
@@ -287,8 +285,14 @@ async fn async_main() -> Result<()> {
     // (~hourly) and disconnects intermediate proxies; this loop keeps the
     // bot online indefinitely as long as the app token stays valid.
     loop {
-        if let Err(error) =
-            run_socket(&http, &app_token, &client, slots.clone(), rate_limiter.clone()).await
+        if let Err(error) = run_socket(
+            &http,
+            &app_token,
+            &client,
+            slots.clone(),
+            rate_limiter.clone(),
+        )
+        .await
         {
             log::warn!("socket loop ended: {error:#}; reconnecting in 3s");
             tokio::time::sleep(Duration::from_secs(3)).await;
@@ -581,11 +585,7 @@ async fn handle_slash(
             let decision = rate_limiter.check(&user_id, estimate_request_cost_usd(&rest));
             if !decision.allow {
                 client
-                    .post_response(
-                        &response_url,
-                        &format!(":x: {}", decision.reason),
-                        false,
-                    )
+                    .post_response(&response_url, &format!(":x: {}", decision.reason), false)
                     .await?;
                 return Ok(());
             }
@@ -625,21 +625,13 @@ async fn handle_slash(
             let decision = rate_limiter.check(&user_id, 0.0);
             if !decision.allow {
                 client
-                    .post_response(
-                        &response_url,
-                        &format!(":x: {}", decision.reason),
-                        false,
-                    )
+                    .post_response(&response_url, &format!(":x: {}", decision.reason), false)
                     .await?;
                 return Ok(());
             }
             let slug = rest;
             client
-                .post_response(
-                    &response_url,
-                    &format!("scaffolding `{slug}`..."),
-                    true,
-                )
+                .post_response(&response_url, &format!("scaffolding `{slug}`..."), true)
                 .await?;
             let _permit = slots.acquire_owned().await.context("semaphore closed")?;
             let result = scaffold_and_deploy(&slug, &trigger_id).await;
@@ -770,8 +762,7 @@ fn build_dir_for(request_id: &str) -> PathBuf {
 /// body. Identical semantics to the CLI and Discord bot's `run_build` paths so
 /// the same env vars (MERCURY_API_KEY, ERI_COST_LIMIT_USD, etc.) apply.
 fn generate_html(prompt: &str) -> Result<(String, f64)> {
-    let config = MercuryConfig::from_env()
-        .ok_or_else(|| anyhow!("MERCURY_API_KEY not set"))?;
+    let config = MercuryConfig::from_env().ok_or_else(|| anyhow!("MERCURY_API_KEY not set"))?;
     let backend = MercuryBackend::new(config);
 
     let mut ctx = PromptCtx::default();

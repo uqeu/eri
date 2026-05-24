@@ -85,8 +85,7 @@ fn parse_frontmatter(lines: &[&str]) -> ParsedFrontmatter {
                         let l = lines[j];
                         let ltrim = l.trim_start();
                         if ltrim.starts_with("- ") || ltrim.starts_with("-\t") {
-                            out.when
-                                .push(unquote(ltrim.trim_start_matches('-').trim()));
+                            out.when.push(unquote(ltrim.trim_start_matches('-').trim()));
                             j += 1;
                         } else if ltrim.is_empty() {
                             j += 1;

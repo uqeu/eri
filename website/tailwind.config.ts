@@ -19,8 +19,7 @@ const config: Config = {
         "text-ter": "var(--text-ter)",
         sage: "var(--sage)",
         "sage-deep": "var(--sage-deep)",
-        blue: "var(--blue)",
-        "blue-deep": "var(--blue-deep)",
+        "accent-clay": "var(--accent-clay)",
         // Demo-only accent
         "demo-accent": "var(--demo-accent)",
         // Legacy aliases — existing demo components (HeroBig/EriDemo/EngineRoom/

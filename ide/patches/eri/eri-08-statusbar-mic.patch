@@ -21,7 +21,7 @@ new file mode 100644
 index 0000000000..e7c0a1b8a1
 --- /dev/null
 +++ b/src/vs/workbench/contrib/eriStatusBar/browser/eriStatusBar.contribution.ts
-@@ -0,0 +1,168 @@
+@@ -0,0 +1,140 @@
 +/*---------------------------------------------------------------------------------------------
 + *  Copyright (c) eri. All rights reserved.
 + *  Licensed under the MIT License. See License.txt in the project root for license information.
@@ -167,7 +167,7 @@ new file mode 100644
 index 0000000000..d4f1c7b7e2
 --- /dev/null
 +++ b/src/vs/workbench/contrib/eriStatusBar/browser/media/eriStatusBar.css
-@@ -0,0 +1,118 @@
+@@ -0,0 +1,117 @@
 +/*---------------------------------------------------------------------------------------------
 + *  Copyright (c) eri. All rights reserved.
 + *  Licensed under the MIT License. See License.txt in the project root for license information.

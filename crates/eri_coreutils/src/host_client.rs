@@ -25,17 +25,17 @@
 use std::{
     collections::HashMap,
     sync::{
-        atomic::{AtomicU64, Ordering},
         Arc,
+        atomic::{AtomicU64, Ordering},
     },
     time::Duration,
 };
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use serde_json::Value;
 use tokio::{
     io::{AsyncWrite, AsyncWriteExt},
-    sync::{oneshot, Mutex},
+    sync::{Mutex, oneshot},
 };
 
 use crate::RpcError;
@@ -61,12 +61,14 @@ pub const SECRET_REQUEST_METHOD: &str = "settings/getSecret";
 /// Default time the sidecar will wait for a host response before giving up.
 const HOST_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
+type PendingMap = Arc<Mutex<HashMap<u64, oneshot::Sender<std::result::Result<Value, RpcError>>>>>;
+
 /// Reverse JSON-RPC client. Owns the stdout writer (shared with the main
 /// stdio loop) and the pending-response map keyed by outbound request id.
 pub struct HostClient {
     stdout: SharedWriter,
     next_id: AtomicU64,
-    pending: Arc<Mutex<HashMap<u64, oneshot::Sender<std::result::Result<Value, RpcError>>>>>,
+    pending: PendingMap,
 }
 
 impl HostClient {
@@ -102,7 +104,10 @@ impl HostClient {
             })?;
         // The bridge returns either `{ "value": "<string>" }` or
         // `{ "value": null }`; treat anything else as "no value".
-        let value = result.get("value").and_then(Value::as_str).map(str::to_string);
+        let value = result
+            .get("value")
+            .and_then(Value::as_str)
+            .map(str::to_string);
         Ok(value)
     }
 
@@ -332,7 +337,11 @@ mod tests {
     async fn cache_hit_skips_host_and_env() {
         let cache = SecretCache::new();
         cache
-            .insert("anthropic", "anthropic-api-key", Some("cached-value".into()))
+            .insert(
+                "anthropic",
+                "anthropic-api-key",
+                Some("cached-value".into()),
+            )
             .await;
 
         // host=None proves we did not need it.
@@ -420,7 +429,10 @@ mod tests {
         assert_eq!(env_var_for_provider("deepseek"), Some("DEEPSEEK_API_KEY"));
         assert_eq!(env_var_for_provider("mistral"), Some("MISTRAL_API_KEY"));
         assert_eq!(env_var_for_provider("together"), Some("TOGETHER_API_KEY"));
-        assert_eq!(env_var_for_provider("openrouter"), Some("OPENROUTER_API_KEY"));
+        assert_eq!(
+            env_var_for_provider("openrouter"),
+            Some("OPENROUTER_API_KEY")
+        );
         assert_eq!(env_var_for_provider("inception"), Some("INCEPTION_API_KEY"));
         assert_eq!(env_var_for_provider("nope"), None);
     }

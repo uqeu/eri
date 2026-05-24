@@ -11,7 +11,7 @@ use async_trait::async_trait;
 
 use crate::diff::DiffBundle;
 use crate::findings::{FindingCategory, ReviewFinding, ReviewReport, Severity};
-use crate::prompts::{build_file_prompt, FocusPass, SYSTEM_BASE};
+use crate::prompts::{FocusPass, SYSTEM_BASE, build_file_prompt};
 
 /// How aggressively to review. `High` does three focus passes per file
 /// (security, logic, performance) and merges.
@@ -118,9 +118,7 @@ impl Reviewer {
                             file: file.path.clone(),
                             line_range: (0, 0),
                             title: "review pass failed".to_string(),
-                            description: format!(
-                                "The model failed to review this file: {err}"
-                            ),
+                            description: format!("The model failed to review this file: {err}"),
                             suggested_fix: None,
                             confidence: 0.0,
                         });
@@ -149,10 +147,7 @@ impl Reviewer {
     }
 }
 
-fn apply_focus(
-    findings: Vec<ReviewFinding>,
-    focus: &[FindingCategory],
-) -> Vec<ReviewFinding> {
+fn apply_focus(findings: Vec<ReviewFinding>, focus: &[FindingCategory]) -> Vec<ReviewFinding> {
     if focus.is_empty() {
         return findings;
     }
@@ -208,11 +203,7 @@ fn load_project_rules(dir: Option<&std::path::Path>) -> Option<String> {
         }
         if let Ok(text) = std::fs::read_to_string(&path) {
             buf.push_str("# ");
-            buf.push_str(
-                path.file_stem()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("rule"),
-            );
+            buf.push_str(path.file_stem().and_then(|s| s.to_str()).unwrap_or("rule"));
             buf.push('\n');
             buf.push_str(&text);
             buf.push_str("\n\n");
@@ -223,11 +214,7 @@ fn load_project_rules(dir: Option<&std::path::Path>) -> Option<String> {
             break;
         }
     }
-    if buf.is_empty() {
-        None
-    } else {
-        Some(buf)
-    }
+    if buf.is_empty() { None } else { Some(buf) }
 }
 
 // ---------------------------------------------------------------------------
@@ -388,7 +375,10 @@ mod tests {
             focus: vec![FindingCategory::Security],
             ..Default::default()
         };
-        let report = reviewer.review(&one_file_bundle(), &opts).await.expect("review");
+        let report = reviewer
+            .review(&one_file_bundle(), &opts)
+            .await
+            .expect("review");
         assert_eq!(report.findings.len(), 1);
         assert_eq!(report.findings[0].category, FindingCategory::Security);
     }
@@ -420,12 +410,17 @@ mod tests {
             effort: Effort::High,
             ..Default::default()
         };
-        let report = reviewer.review(&one_file_bundle(), &opts).await.expect("review");
+        let report = reviewer
+            .review(&one_file_bundle(), &opts)
+            .await
+            .expect("review");
         // Three passes ran, one failed → one info finding.
-        assert!(report
-            .findings
-            .iter()
-            .any(|f| f.title == "review pass failed"));
+        assert!(
+            report
+                .findings
+                .iter()
+                .any(|f| f.title == "review pass failed")
+        );
     }
 
     #[test]

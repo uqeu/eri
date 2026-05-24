@@ -115,15 +115,11 @@ mod tests {
 
         let rules = Rules::load(ws).unwrap();
 
-        let active = rules.active_for(
-            &PromptContext::new().with_open_files(["src/app/main.ts"]),
-        );
+        let active = rules.active_for(&PromptContext::new().with_open_files(["src/app/main.ts"]));
         assert_eq!(active.len(), 1);
         assert_eq!(active[0].name(), "ts");
 
-        let inactive = rules.active_for(
-            &PromptContext::new().with_open_files(["docs/readme.md"]),
-        );
+        let inactive = rules.active_for(&PromptContext::new().with_open_files(["docs/readme.md"]));
         assert!(inactive.is_empty());
     }
 
@@ -164,8 +160,7 @@ mod tests {
         let none = rules.active_for(&PromptContext::new());
         assert!(none.is_empty());
 
-        let mentioned = rules
-            .active_for(&PromptContext::new().with_mentioned(["security"]));
+        let mentioned = rules.active_for(&PromptContext::new().with_mentioned(["security"]));
         assert_eq!(mentioned.len(), 1);
         assert_eq!(mentioned[0].name(), "security");
     }
@@ -195,9 +190,7 @@ mod tests {
         let rules = Rules::load(ws).unwrap();
         assert!(rules.active_for(&PromptContext::new()).is_empty());
 
-        let active = rules.active_for(
-            &PromptContext::new().with_agent_requested(["review"]),
-        );
+        let active = rules.active_for(&PromptContext::new().with_agent_requested(["review"]));
         assert_eq!(active.len(), 1);
         assert_eq!(active[0].description(), Some("Apply during PR review"));
     }

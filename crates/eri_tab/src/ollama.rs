@@ -10,7 +10,7 @@ use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{build_fim_prompt, clean_completion, TabError, TabRequest, TabSuggestion};
+use crate::{TabError, TabRequest, TabSuggestion, build_fim_prompt, clean_completion};
 
 /// Default Ollama base URL when nothing else is configured.
 pub const DEFAULT_BASE_URL: &str = "http://localhost:11434";

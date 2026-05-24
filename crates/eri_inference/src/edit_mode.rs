@@ -18,9 +18,9 @@
 
 use std::path::PathBuf;
 
+use crate::InferenceError;
 use crate::llm_provider::{LlmProvider, LlmResponse};
 use crate::templates::{edit_mode_system_prompt, edit_mode_user_prompt};
-use crate::InferenceError;
 
 /// Budget for the assistant's reply in tokens. Edit-block responses are
 /// dominated by SEARCH / REPLACE text, not prose; this leaves room for
@@ -324,9 +324,8 @@ mod tests {
     fn run_edit_mode_reports_apply_failures_without_erroring() {
         let dir = TempDir::new().unwrap();
         write_seed(dir.path(), "a.txt", "hello\n");
-        let canned = CannedProvider::new(
-            "<<<<<<< SEARCH a.txt\nNOPE\n=======\nX\n>>>>>>> REPLACE\n",
-        );
+        let canned =
+            CannedProvider::new("<<<<<<< SEARCH a.txt\nNOPE\n=======\nX\n>>>>>>> REPLACE\n");
         let req = EditModeRequest {
             user_text: "won't match".to_string(),
             language: None,
@@ -347,9 +346,8 @@ mod tests {
     fn streaming_emits_tokens_and_applied_events() {
         let dir = TempDir::new().unwrap();
         write_seed(dir.path(), "a.txt", "alpha\n");
-        let canned = CannedProvider::new(
-            "<<<<<<< SEARCH a.txt\nalpha\n=======\nALPHA\n>>>>>>> REPLACE\n",
-        );
+        let canned =
+            CannedProvider::new("<<<<<<< SEARCH a.txt\nalpha\n=======\nALPHA\n>>>>>>> REPLACE\n");
         let req = EditModeRequest {
             user_text: "uppercase".to_string(),
             language: None,

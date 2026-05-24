@@ -12,6 +12,11 @@ if [[ "${SHOULD_BUILD}" == "yes" ]]; then
 
   cd vscode || { echo "'vscode' dir not found"; exit 1; }
 
+  # eri rebrand — overwrite VSCodium identity and bundle our extension.
+  if [[ -x ../rebrand_eri.sh ]]; then
+    . ../rebrand_eri.sh
+  fi
+
   export NODE_OPTIONS="--max-old-space-size=8192"
   export VSCODE_PUBLISH_COUNTER=1
 

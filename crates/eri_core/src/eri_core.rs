@@ -345,11 +345,22 @@ impl IdeAction {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum IterEvent {
-    DraftToken { text: String },
-    DenoisingStep { step: u32, total: u32 },
-    TargetClarification { message: String },
-    CandidatePatch { patch: CandidatePatch },
-    CandidateAction { action: IdeAction },
+    DraftToken {
+        text: String,
+    },
+    DenoisingStep {
+        step: u32,
+        total: u32,
+    },
+    TargetClarification {
+        message: String,
+    },
+    CandidatePatch {
+        patch: CandidatePatch,
+    },
+    CandidateAction {
+        action: IdeAction,
+    },
     Usage {
         /// Identifies which paid endpoint produced this usage line so the
         /// panel can charge against the right pricing column. Examples:
@@ -363,7 +374,9 @@ pub enum IterEvent {
         total_tokens: u32,
     },
     Done,
-    Error { message: String },
+    Error {
+        message: String,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -833,7 +846,7 @@ impl ControlCommand {
     pub fn parse_with_selection(input: &str, has_editor_selection: bool) -> Option<Self> {
         // Normalize: lowercase, trim, drop trailing punctuation (whisper often
         // ends commands with "." or "!").
-        let trimmed = input.trim().trim_end_matches(|c: char| matches!(c, '.' | '!' | '?'));
+        let trimmed = input.trim().trim_end_matches(['.', '!', '?']);
         let lowered = trimmed.to_ascii_lowercase();
 
         // Git history view. Match before the scrubber jump arms so "show
@@ -1011,21 +1024,10 @@ impl ControlCommand {
         // "rebuild ...") so the user can refresh the @-mention index
         // without it being mistaken for a project name.
         match lowered.as_str() {
-            "rebuild index"
-            | "rebuild the index"
-            | "reindex"
-            | "re-index"
-            | "re index"
-            | "refresh index"
-            | "refresh the index"
-            | "update index"
-            | "update the index"
-            | "scan the project"
-            | "scan project"
-            | "rescan the project"
-            | "rescan project"
-            | "index the project"
-            | "index project" => return Some(Self::RebuildIndex),
+            "rebuild index" | "rebuild the index" | "reindex" | "re-index" | "re index"
+            | "refresh index" | "refresh the index" | "update index" | "update the index"
+            | "scan the project" | "scan project" | "rescan the project" | "rescan project"
+            | "index the project" | "index project" => return Some(Self::RebuildIndex),
             _ => {}
         }
 
@@ -1059,23 +1061,12 @@ impl ControlCommand {
         // these to `eri_auth::AuthClient` and the keychain helpers; here we
         // only parse them.
         match lowered.as_str() {
-            "log in"
-            | "login"
-            | "log me in"
-            | "sign in"
-            | "sign me in"
-            | "log into eri"
-            | "log into eri dev"
-            | "log into eri.dev"
-            | "sign into eri"
-            | "sign into eri dev"
-            | "sign into eri.dev"
-            | "log in to eri"
-            | "log in to eri dev"
-            | "log in to eri.dev"
-            | "sign in to eri"
-            | "sign in to eri dev"
-            | "sign in to eri.dev" => return Some(Self::Login),
+            "log in" | "login" | "log me in" | "sign in" | "sign me in" | "log into eri"
+            | "log into eri dev" | "log into eri.dev" | "sign into eri" | "sign into eri dev"
+            | "sign into eri.dev" | "log in to eri" | "log in to eri dev" | "log in to eri.dev"
+            | "sign in to eri" | "sign in to eri dev" | "sign in to eri.dev" => {
+                return Some(Self::Login);
+            }
             "sign up"
             | "signup"
             | "sign me up"
@@ -1131,14 +1122,10 @@ impl ControlCommand {
         // scrubber jump. The bare confirmation phrasings ("pause", "resume",
         // "go ahead") sit in the main match arm further down.
         match lowered.as_str() {
-            "pause spending"
-            | "stop spending"
-            | "pause the spending"
-            | "stop the spending"
-            | "pause spend"
-            | "pause cost"
-            | "pause costs"
-            | "halt spending" => return Some(Self::PauseSpending),
+            "pause spending" | "stop spending" | "pause the spending" | "stop the spending"
+            | "pause spend" | "pause cost" | "pause costs" | "halt spending" => {
+                return Some(Self::PauseSpending);
+            }
             "resume spending"
             | "resume the spending"
             | "resume cost"
@@ -1389,8 +1376,7 @@ impl ControlCommand {
                     if let Some(stripped) = name.strip_suffix(suffix) {
                         name = stripped.trim().to_string();
                         matched_suffix = true;
-                        suffix_was_theme =
-                            *suffix == " theme" || *suffix == " themes";
+                        suffix_was_theme = *suffix == " theme" || *suffix == " themes";
                         break;
                     }
                 }
@@ -1445,10 +1431,10 @@ impl ControlCommand {
             "increase budget to ",
         ];
         for prefix in RAISE_PREFIXES {
-            if let Some(rest) = lowered.strip_prefix(prefix) {
-                if let Some(amount) = parse_dollar_amount(rest) {
-                    return Some(Self::RaiseSpendingLimit(amount));
-                }
+            if let Some(rest) = lowered.strip_prefix(prefix)
+                && let Some(amount) = parse_dollar_amount(rest)
+            {
+                return Some(Self::RaiseSpendingLimit(amount));
             }
         }
 
@@ -1498,18 +1484,18 @@ impl ControlCommand {
             "revert to ",
         ];
         for prefix in JUMP_PREFIXES {
-            if let Some(rest) = lowered.strip_prefix(prefix) {
-                if let Ok(index) = rest.trim().parse::<u64>() {
-                    return Some(Self::GoToIteration(index));
-                }
+            if let Some(rest) = lowered.strip_prefix(prefix)
+                && let Ok(index) = rest.trim().parse::<u64>()
+            {
+                return Some(Self::GoToIteration(index));
             }
         }
         // "load N" — ambiguous against "load <project>"; only take it if the
         // suffix is a bare integer.
-        if let Some(rest) = lowered.strip_prefix("load ") {
-            if let Ok(index) = rest.trim().parse::<u64>() {
-                return Some(Self::GoToIteration(index));
-            }
+        if let Some(rest) = lowered.strip_prefix("load ")
+            && let Ok(index) = rest.trim().parse::<u64>()
+        {
+            return Some(Self::GoToIteration(index));
         }
 
         // Selection-scoped accept/reject vocabulary. When the panel has a
@@ -1520,15 +1506,14 @@ impl ControlCommand {
         // pre-existing `Accept` / `Reject` arms below or stay unrecognized.
         if has_editor_selection {
             match lowered.as_str() {
-                "accept" | "apply" | "apply it" | "apply this" | "apply patch"
-                | "keep it" | "keep this" | "keep that" | "yes" | "yeah" | "yep"
-                | "looks good" | "ship that" | "take it" => {
+                "accept" | "apply" | "apply it" | "apply this" | "apply patch" | "keep it"
+                | "keep this" | "keep that" | "yes" | "yeah" | "yep" | "looks good"
+                | "ship that" | "take it" => {
                     return Some(Self::AcceptPatch);
                 }
-                "reject" | "reject it" | "reject this" | "reject patch"
-                | "discard" | "discard it" | "discard this" | "cancel"
-                | "cancel it" | "cancel that" | "no" | "nope" | "nah"
-                | "throw it out" | "scrap it" | "scrap that" => {
+                "reject" | "reject it" | "reject this" | "reject patch" | "discard"
+                | "discard it" | "discard this" | "cancel" | "cancel it" | "cancel that" | "no"
+                | "nope" | "nah" | "throw it out" | "scrap it" | "scrap that" => {
                     return Some(Self::RejectPatch);
                 }
                 _ => {}
@@ -1653,47 +1638,21 @@ impl ControlCommand {
             // Demo recording: capture screen + mic + system audio to an MP4.
             // Matched before the project NEW_PREFIXES below so "start
             // recording" / "start demo" never get treated as new-project names.
-            "start recording"
-            | "record this"
-            | "record"
-            | "start demo"
-            | "start the demo"
-            | "begin recording"
-            | "begin demo" => return Some(Self::StartRecording),
-            "stop recording"
-            | "end recording"
-            | "stop demo"
-            | "end demo"
-            | "stop the demo"
-            | "finish recording"
-            | "finish demo" => return Some(Self::StopRecording),
+            "start recording" | "record this" | "record" | "start demo" | "start the demo"
+            | "begin recording" | "begin demo" => return Some(Self::StartRecording),
+            "stop recording" | "end recording" | "stop demo" | "end demo" | "stop the demo"
+            | "finish recording" | "finish demo" => return Some(Self::StopRecording),
             // Bug finder. Matched before SEO + ship-it so "audit my code"
             // and "what's broken" don't get swallowed by accessibility-audit
             // or the generic ship-it path. "fix all bugs" / "fix everything"
             // are literal-only here; the indexed "fix bug N" form is parsed
             // by the dedicated `parse_fix_bug_command` helper below.
-            "find bugs"
-            | "find the bugs"
-            | "find any bugs"
-            | "audit my code"
-            | "audit the code"
-            | "audit the build"
-            | "audit this"
-            | "audit this build"
-            | "audit this project"
-            | "what's broken"
-            | "whats broken"
-            | "what is broken"
-            | "look for problems"
-            | "look for bugs"
-            | "look for issues"
-            | "scan for bugs"
-            | "scan for issues"
-            | "check for bugs"
-            | "check for issues"
-            | "run the bug finder"
-            | "run bug finder"
-            | "bug finder" => return Some(Self::FindBugs),
+            "find bugs" | "find the bugs" | "find any bugs" | "audit my code"
+            | "audit the code" | "audit the build" | "audit this" | "audit this build"
+            | "audit this project" | "what's broken" | "whats broken" | "what is broken"
+            | "look for problems" | "look for bugs" | "look for issues" | "scan for bugs"
+            | "scan for issues" | "check for bugs" | "check for issues" | "run the bug finder"
+            | "run bug finder" | "bug finder" => return Some(Self::FindBugs),
             "fix all bugs"
             | "fix all the bugs"
             | "fix everything"
@@ -1778,10 +1737,9 @@ impl ControlCommand {
             | "show mobile preview"
             | "switch to phone"
             | "switch to mobile" => return Some(Self::SetPreviewWidth(PreviewWidth::Phone)),
-            "preview as tablet"
-            | "tablet preview"
-            | "show tablet preview"
-            | "switch to tablet" => return Some(Self::SetPreviewWidth(PreviewWidth::Tablet)),
+            "preview as tablet" | "tablet preview" | "show tablet preview" | "switch to tablet" => {
+                return Some(Self::SetPreviewWidth(PreviewWidth::Tablet));
+            }
             "preview as desktop"
             | "desktop preview"
             | "show desktop preview"
@@ -1791,23 +1749,9 @@ impl ControlCommand {
             // Ship-it / done / finalize: hand the whole session to Claude polish.
             // Mercury keeps doing fast iterations during the speak loop;
             // Claude only runs when the user explicitly asks to wrap up.
-            "send to builder"
-            | "ship it"
-            | "ship this"
-            | "ship"
-            | "done"
-            | "i'm done"
-            | "im done"
-            | "finalize"
-            | "finalize it"
-            | "finalize this"
-            | "polish"
-            | "polish it"
-            | "polish this"
-            | "wrap it up"
-            | "wrap this up"
-            | "deploy"
-            | "deploy it"
+            "send to builder" | "ship it" | "ship this" | "ship" | "done" | "i'm done"
+            | "im done" | "finalize" | "finalize it" | "finalize this" | "polish" | "polish it"
+            | "polish this" | "wrap it up" | "wrap this up" | "deploy" | "deploy it"
             | "deploy this" => return Some(Self::SendToBuilder),
             // Cursor-style code-assist literals. Matched here so "explain this"
             // never falls through to RewriteSelection's deictic intent path —
@@ -1862,10 +1806,7 @@ impl ControlCommand {
             | "generate the docs"
             | "write docs"
             | "write documentation" => return Some(Self::DocumentThis(String::new())),
-            "add jsdoc"
-            | "add jsdocs"
-            | "add jsdoc comments"
-            | "generate jsdoc"
+            "add jsdoc" | "add jsdocs" | "add jsdoc comments" | "generate jsdoc"
             | "generate jsdocs" => return Some(Self::DocumentThis("jsdoc".into())),
             "add docstring"
             | "add docstrings"
@@ -1981,8 +1922,7 @@ impl ControlCommand {
                 // appearing after a more specific prefix like
                 // "use the X template". This avoids hijacking unrelated
                 // voice commands.
-                let mentions_template = rest.contains("template")
-                    || prefix.contains("template");
+                let mentions_template = rest.contains("template") || prefix.contains("template");
                 if !mentions_template {
                     continue;
                 }
@@ -2022,7 +1962,6 @@ impl ControlCommand {
 /// "add stripe for 9.99 a month", or "add stripe at $5" extract the dollar
 /// amount. Bare "add stripe" / "add stripe checkout" parse with 0.0 so the
 /// handler falls back to the `STRIPE_PRICE_LABEL` env var.
-
 /// Parse a model-switch utterance into a canonical LLM model id.
 ///
 /// Recognized prefixes: `use`, `use the`, `switch to`, `switch back to`,
@@ -2078,7 +2017,13 @@ fn eri_inference_canonical(choice: &str) -> Option<&'static str> {
     }
     let normalized: String = lowered
         .chars()
-        .map(|c| if c == '-' || c == '.' || c == '_' { ' ' } else { c })
+        .map(|c| {
+            if c == '-' || c == '.' || c == '_' {
+                ' '
+            } else {
+                c
+            }
+        })
         .collect();
     let squashed: String = normalized.split_whitespace().collect::<Vec<_>>().join(" ");
     let s = squashed.as_str();
@@ -2096,10 +2041,7 @@ fn eri_inference_canonical(choice: &str) -> Option<&'static str> {
         "gemini-thinking-2",
     ];
     for &id in &canonical {
-        let id_norm: String = id
-            .chars()
-            .map(|c| if c == '-' { ' ' } else { c })
-            .collect();
+        let id_norm: String = id.chars().map(|c| if c == '-' { ' ' } else { c }).collect();
         if s == id_norm {
             return Some(id);
         }
@@ -2160,24 +2102,18 @@ fn parse_fix_bug_command(lowered: &str) -> Option<usize> {
     ];
     for prefix in NUMERIC_PREFIXES {
         if let Some(rest) = lowered.strip_prefix(prefix) {
-            let digits: String = rest
-                .chars()
-                .take_while(|c| c.is_ascii_digit())
-                .collect();
-            if let Ok(n) = digits.parse::<usize>() {
-                if n > 0 {
-                    return Some(n);
-                }
+            let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+            if let Ok(n) = digits.parse::<usize>()
+                && n > 0
+            {
+                return Some(n);
             }
             if let Some(ordinal) = ordinal_word_to_index(rest.trim()) {
                 return Some(ordinal);
             }
         }
     }
-    const ORDINAL_PREFIXES: &[&str] = &[
-        "fix the ",
-        "apply the ",
-    ];
+    const ORDINAL_PREFIXES: &[&str] = &["fix the ", "apply the "];
     for prefix in ORDINAL_PREFIXES {
         if let Some(rest) = lowered.strip_prefix(prefix) {
             let trimmed = rest.trim();
@@ -2395,7 +2331,7 @@ fn parse_integration_command(lowered: &str) -> Option<ControlCommand> {
         "add auth0 auth",
         "add auth0 authentication",
     ];
-    if AUTH0_PHRASES.iter().any(|p| lowered == *p) {
+    if AUTH0_PHRASES.contains(&lowered) {
         return Some(ControlCommand::AddAuth(AuthProviderKind::Auth0));
     }
     const CLERK_PHRASES: &[&str] = &[
@@ -2410,7 +2346,7 @@ fn parse_integration_command(lowered: &str) -> Option<ControlCommand> {
         "add clerk login",
         "add clerk authentication",
     ];
-    if CLERK_PHRASES.iter().any(|p| lowered == *p) {
+    if CLERK_PHRASES.contains(&lowered) {
         return Some(ControlCommand::AddAuth(AuthProviderKind::Clerk));
     }
     const SUPABASE_AUTH_PHRASES: &[&str] = &[
@@ -2426,7 +2362,7 @@ fn parse_integration_command(lowered: &str) -> Option<ControlCommand> {
         "use supabase for login",
         "integrate supabase auth",
     ];
-    if SUPABASE_AUTH_PHRASES.iter().any(|p| lowered == *p) {
+    if SUPABASE_AUTH_PHRASES.contains(&lowered) {
         return Some(ControlCommand::AddAuth(AuthProviderKind::SupabaseAuth));
     }
 
@@ -2450,7 +2386,7 @@ fn parse_integration_command(lowered: &str) -> Option<ControlCommand> {
         "set up supabase",
         "setup supabase",
     ];
-    if SUPABASE_DB_PHRASES.iter().any(|p| lowered == *p) {
+    if SUPABASE_DB_PHRASES.contains(&lowered) {
         return Some(ControlCommand::AddDatabase(DbProviderKind::Supabase));
     }
     const NEON_PHRASES: &[&str] = &[
@@ -2485,7 +2421,7 @@ fn parse_integration_command(lowered: &str) -> Option<ControlCommand> {
         "wire up a database",
         "wire up database",
     ];
-    if NEON_PHRASES.iter().any(|p| lowered == *p) {
+    if NEON_PHRASES.contains(&lowered) {
         return Some(ControlCommand::AddDatabase(DbProviderKind::Neon));
     }
 
@@ -2509,7 +2445,7 @@ fn parse_integration_command(lowered: &str) -> Option<ControlCommand> {
         "use stripe for payments",
         "use stripe for checkout",
     ];
-    if STRIPE_BARE_PHRASES.iter().any(|p| lowered == *p) {
+    if STRIPE_BARE_PHRASES.contains(&lowered) {
         return Some(ControlCommand::AddPayments(0.0));
     }
     // Priced stripe commands. Accept a handful of natural prefixes; trim a
@@ -2567,7 +2503,7 @@ fn parse_dollar_amount(input: &str) -> Option<f64> {
     // Strip optional currency words and `$` prefix.
     let stripped = trimmed
         .trim_start_matches('$')
-        .trim_end_matches(|c: char| c == '.' || c == '!' || c == '?')
+        .trim_end_matches(['.', '!', '?'])
         .trim();
     let without_unit = stripped
         .strip_suffix(" dollars")
@@ -2780,9 +2716,22 @@ fn looks_like_rewrite_intent(lowered: &str) -> bool {
     // fresh thing the user is asking to create, not to the selection. Treat
     // those as build intents.
     const BUILD_NOUNS: &[&str] = &[
-        "app", "site", "website", "page", "landing page", "demo", "game",
-        "timer", "tracker", "dashboard", "form", "shop", "store", "blog",
-        "portfolio", "calculator",
+        "app",
+        "site",
+        "website",
+        "page",
+        "landing page",
+        "demo",
+        "game",
+        "timer",
+        "tracker",
+        "dashboard",
+        "form",
+        "shop",
+        "store",
+        "blog",
+        "portfolio",
+        "calculator",
     ];
     if let Some(idx) = lowered.find("this ") {
         let after = &lowered[idx + 5..];

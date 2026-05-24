@@ -229,9 +229,7 @@ impl AuditLogger {
 
     /// Best-effort current size, in bytes, of the active log file.
     pub fn current_size_bytes(&self) -> u64 {
-        fs::metadata(self.path())
-            .map(|m| m.len())
-            .unwrap_or(0)
+        fs::metadata(self.path()).map(|m| m.len()).unwrap_or(0)
     }
 
     /// Append one entry. Returns immediately when disabled.
@@ -322,9 +320,7 @@ impl AuditLogger {
             *guard = Some(open_inner(&self.path())?);
         }
 
-        let inner = guard
-            .as_mut()
-            .expect("inner audit handle is opened above");
+        let inner = guard.as_mut().expect("inner audit handle is opened above");
         inner
             .writer
             .write_all(line.as_bytes())
@@ -361,10 +357,7 @@ fn open_inner(path: &Path) -> Result<Inner> {
         .append(true)
         .open(path)
         .with_context(|| format!("opening audit log {}", path.display()))?;
-    let bytes_written = file
-        .metadata()
-        .map(|m| m.len())
-        .unwrap_or(0);
+    let bytes_written = file.metadata().map(|m| m.len()).unwrap_or(0);
     Ok(Inner {
         writer: BufWriter::new(file),
         bytes_written,
@@ -391,15 +384,13 @@ fn rotate_files(path: &Path, max_files: usize) -> Result<()> {
             continue;
         }
         if src.exists() {
-            fs::rename(&src, &dst).with_context(|| {
-                format!("rotating {} -> {}", src.display(), dst.display())
-            })?;
+            fs::rename(&src, &dst)
+                .with_context(|| format!("rotating {} -> {}", src.display(), dst.display()))?;
         }
     }
     let first_backup = backup_path(path, 1);
-    fs::rename(path, &first_backup).with_context(|| {
-        format!("rotating {} -> {}", path.display(), first_backup.display())
-    })?;
+    fs::rename(path, &first_backup)
+        .with_context(|| format!("rotating {} -> {}", path.display(), first_backup.display()))?;
     Ok(())
 }
 
@@ -650,7 +641,10 @@ mod tests {
                 .await;
         }
         let beyond_cap = backup_path(&logger.path(), 5);
-        assert!(!beyond_cap.exists(), "no backup past max_files should exist");
+        assert!(
+            !beyond_cap.exists(),
+            "no backup past max_files should exist"
+        );
     }
 
     #[tokio::test]
@@ -762,9 +756,15 @@ mod tests {
 
     #[test]
     fn audit_error_kind_buckets_messages() {
-        assert_eq!(audit_error_kind("FEATURE_LOCKED: composer"), "feature_locked");
+        assert_eq!(
+            audit_error_kind("FEATURE_LOCKED: composer"),
+            "feature_locked"
+        );
         assert_eq!(audit_error_kind("invalid params"), "bad_params");
-        assert_eq!(audit_error_kind("method not implemented"), "not_implemented");
+        assert_eq!(
+            audit_error_kind("method not implemented"),
+            "not_implemented"
+        );
         assert_eq!(audit_error_kind("totally unexpected"), "other");
     }
 

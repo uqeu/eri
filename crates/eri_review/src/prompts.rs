@@ -59,12 +59,12 @@ pub fn build_file_prompt(file: &FileDiff, extra_rules: Option<&str>) -> String {
     });
     buf.push_str("\n\n");
 
-    if let Some(rules) = extra_rules {
-        if !rules.is_empty() {
-            buf.push_str("Project rules:\n");
-            buf.push_str(rules);
-            buf.push_str("\n\n");
-        }
+    if let Some(rules) = extra_rules
+        && !rules.is_empty()
+    {
+        buf.push_str("Project rules:\n");
+        buf.push_str(rules);
+        buf.push_str("\n\n");
     }
 
     buf.push_str("Unified diff:\n```diff\n");

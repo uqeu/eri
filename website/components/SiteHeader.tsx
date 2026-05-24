@@ -36,10 +36,6 @@ export function SiteHeader({ variant = "transparent" }: SiteHeaderProps) {
           >
             eri
           </span>
-          <span
-            className="inline-block h-1.5 w-1.5 rounded-full bg-sage-deep transition-transform group-hover:scale-125"
-            aria-hidden
-          />
         </Link>
 
         <nav className="hidden md:flex items-center gap-1">
@@ -76,7 +72,7 @@ export function SiteHeader({ variant = "transparent" }: SiteHeaderProps) {
               </button>
               <Link
                 href="/account"
-                className="inline-flex items-center gap-1.5 rounded-md bg-sage-deep px-3.5 py-1.5 text-[13px] font-medium text-bg hover:bg-sage transition-colors"
+                className="inline-flex items-center gap-1.5 rounded-md bg-text px-3.5 py-1.5 text-[13px] font-medium text-bg hover:opacity-90 transition-colors"
                 aria-label={`Account: ${user.email}`}
               >
                 {(user.display_name ?? user.email).split("@")[0]}
@@ -95,7 +91,7 @@ export function SiteHeader({ variant = "transparent" }: SiteHeaderProps) {
               </Link>
               <Link
                 href="/sign-up"
-                className="inline-flex items-center gap-1.5 rounded-md bg-sage-deep px-3.5 py-1.5 text-[13px] font-medium text-bg hover:bg-sage transition-colors"
+                className="inline-flex items-center gap-1.5 rounded-md bg-text px-3.5 py-1.5 text-[13px] font-medium text-bg hover:opacity-90 transition-colors"
               >
                 Try eri free
                 <span aria-hidden className="text-[10px]">

@@ -31,6 +31,7 @@ const audit_1 = require("./audit");
 const crash_1 = require("./crash");
 const visualEditor_1 = require("./visualEditor");
 const review_1 = require("./review");
+const statusBar_1 = require("./statusBar");
 var gaze_2 = require("./gaze/gaze");
 Object.defineProperty(exports, "getCurrentGazeTarget", { enumerable: true, get: function () { return gaze_2.getCurrentTarget; } });
 Object.defineProperty(exports, "getEditorGazeContext", { enumerable: true, get: function () { return gaze_2.getEditorGazeContext; } });
@@ -58,6 +59,7 @@ let audit = null;
 let crash = null;
 let visualEditor = null;
 let review = null;
+let statusBar = null;
 function activate(context) {
     const binaryPath = (0, sidecar_1.resolveBinaryPath)(context);
     secretsStore = new secrets_1.SecretsStore(context.secrets, context.globalState);
@@ -77,6 +79,7 @@ function activate(context) {
         },
     });
     sidecar.start();
+    statusBar = (0, statusBar_1.activateStatusBar)(context);
     panelProvider = new panel_1.EriPanelProvider(context, () => sidecar);
     context.subscriptions.push(vscode.window.registerWebviewViewProvider("eri.panel", panelProvider));
     previewManager = new preview_1.PreviewManager(context);
@@ -185,6 +188,8 @@ function deactivate() {
     visualEditor = null;
     review?.dispose();
     review = null;
+    statusBar?.dispose();
+    statusBar = null;
     byokView = null;
     secretsStore = null;
 }
@@ -205,11 +210,46 @@ function handleNotification(notification) {
             break;
         case "eri/inference/started":
             vscode.commands.executeCommand("eri.setDiffusionFire", true);
+            statusBar?.setState({ kind: "thinking" });
             break;
         case "eri/inference/done":
         case "eri/inference/cancelled":
             vscode.commands.executeCommand("eri.setDiffusionFire", false);
+            statusBar?.setState({ kind: "idle" });
             break;
+        case "eri/sidecar/state": {
+            // Sidecar broadcasts coarse runtime state for the status bar item.
+            // Params shape: { kind: "idle"|"listening"|"thinking"|"gazing"|"error", line?: number, message?: string }
+            const params = notification.params;
+            if (params && typeof params.kind === "string" && statusBar) {
+                switch (params.kind) {
+                    case "idle":
+                        statusBar.setState({ kind: "idle" });
+                        break;
+                    case "listening":
+                        statusBar.setState({ kind: "listening" });
+                        break;
+                    case "thinking":
+                        statusBar.setState({ kind: "thinking" });
+                        break;
+                    case "gazing":
+                        statusBar.setState(typeof params.line === "number"
+                            ? { kind: "gazing", line: params.line }
+                            : { kind: "gazing" });
+                        break;
+                    case "error":
+                        statusBar.setState({
+                            kind: "error",
+                            message: typeof params.message === "string" ? params.message : "unknown",
+                        });
+                        break;
+                    default:
+                        // unknown kind — keep current state
+                        break;
+                }
+            }
+            break;
+        }
         case "eri/preview/open":
             previewManager?.open(typeof notification.params === "object" && notification.params
                 ? notification.params.sessionPath

@@ -65,15 +65,61 @@
     "Other"
   ],
   "contributes": {
+    "themes": [
+      {
+        "label": "eri Dark",
+        "uiTheme": "vs-dark",
+        "path": "./themes/eri-dark.json"
+      }
+    ],
+    "configurationDefaults": {
+      "workbench.colorTheme": "eri Dark",
+      "workbench.startupEditor": "none",
+      "workbench.welcomePage.walkthroughs.openOnInstall": false,
+      "workbench.welcomePage.experimentalOnboarding": false,
+      "workbench.welcome.experimental.startupEditor": "none",
+      "workbench.enableExperiments": false,
+      "workbench.activityBar.location": "top",
+      "workbench.statusBar.visible": true,
+      "workbench.layoutControl.enabled": false,
+      "workbench.editor.showTabs": "single",
+      "workbench.tree.indent": 14,
+      "workbench.tree.renderIndentGuides": "always",
+      "explorer.compactFolders": false,
+      "breadcrumbs.enabled": true,
+      "window.titleBarStyle": "custom",
+      "window.customTitleBarVisibility": "auto",
+      "window.title": "${rootName} — eri",
+      "window.density.editorTabHeight": "compact",
+      "editor.fontFamily": "Berkeley Mono, JetBrains Mono, monospace",
+      "editor.fontSize": 13,
+      "editor.lineHeight": 1.6,
+      "editor.minimap.enabled": false,
+      "extensions.ignoreRecommendations": true,
+      "update.mode": "none",
+      "chat.commandCenter.enabled": false,
+      "telemetry.telemetryLevel": "off"
+    },
     "viewsContainers": {
       "activitybar": [
         {
           "id": "eri-activitybar",
           "title": "eri",
-          "icon": "media/eri-icon.svg"
+          "icon": "media/eri-icon.svg",
+          "order": -1
         }
       ]
     },
+    "viewsWelcome": [
+      {
+        "view": "eri.panel",
+        "contents": "Welcome to eri — voice-driven, local-first AI coding.\n[Open eri Chat](command:eri.openChat)"
+      },
+      {
+        "view": "eri.iterations",
+        "contents": "Iterations from eri's diffusion engine will appear here once you run a build.\n[Open eri Chat](command:eri.openChat)"
+      }
+    ],
     "views": {
       "eri-activitybar": [
         {

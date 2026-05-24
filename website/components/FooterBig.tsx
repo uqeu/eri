@@ -139,11 +139,11 @@ export function FooterBig(): React.ReactElement {
                 type="email"
                 required
                 placeholder="you@studio.dev"
-                className="w-full rounded-md border border-border bg-bg-card-2 px-3 py-2.5 font-mono text-[12px] text-text placeholder:text-text-ter outline-none transition-colors focus:border-sage-deep"
+                className="w-full rounded-md border border-border bg-bg-card-2 px-3 py-2.5 font-mono text-[12px] text-text placeholder:text-text-ter outline-none transition-colors focus:border-border-strong"
               />
               <button
                 type="submit"
-                className="inline-flex items-center justify-center gap-1.5 rounded-md bg-sage-deep px-3 py-2 font-mono text-[11px] uppercase tracking-wider font-medium text-bg transition-colors hover:bg-sage"
+                className="inline-flex items-center justify-center gap-1.5 rounded-md bg-text px-3 py-2 font-mono text-[11px] uppercase tracking-wider font-medium text-bg transition-opacity hover:opacity-90"
               >
                 Subscribe <span aria-hidden>→</span>
               </button>

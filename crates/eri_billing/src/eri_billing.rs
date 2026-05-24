@@ -97,19 +97,11 @@ impl Plan {
         match lowered.as_str() {
             "starter" | "the starter plan" | "starter plan" | "basic" => Some(Plan::Starter),
             "pro" | "the pro plan" | "pro plan" | "professional" | "premium" => Some(Plan::Pro),
-            "pro plus"
-            | "pro+"
-            | "pro_plus"
-            | "the pro plus plan"
-            | "pro plus plan"
-            | "the pro+ plan"
-            | "pro+ plan" => Some(Plan::ProPlus),
-            "teams"
-            | "team"
-            | "team plan"
-            | "the team plan"
-            | "teams plan"
-            | "the teams plan" => Some(Plan::Teams),
+            "pro plus" | "pro+" | "pro_plus" | "the pro plus plan" | "pro plus plan"
+            | "the pro+ plan" | "pro+ plan" => Some(Plan::ProPlus),
+            "teams" | "team" | "team plan" | "the team plan" | "teams plan" | "the teams plan" => {
+                Some(Plan::Teams)
+            }
             _ => None,
         }
     }
@@ -259,6 +251,7 @@ pub enum Feature {
 /// - ProPlus inherits Pro and unlocks the frontier-model lane.
 /// - Teams inherits Pro and unlocks the collaboration / SSO suite.
 /// - Enterprise inherits everything (ProPlus ∪ Teams).
+///
 /// EriBranding inverts: it's "must show eri branding"; Free is forced ON.
 pub const fn feature_allowed(tier: SubscriptionTier, feature: Feature) -> bool {
     match feature {
@@ -324,10 +317,9 @@ pub const fn feature_allowed(tier: SubscriptionTier, feature: Feature) -> bool {
         | Feature::TeamPluginMarketplace
         | Feature::AiCodeTracking
         | Feature::TeamSharing
-        | Feature::AuditLogs => matches!(
-            tier,
-            SubscriptionTier::Teams | SubscriptionTier::Enterprise,
-        ),
+        | Feature::AuditLogs => {
+            matches!(tier, SubscriptionTier::Teams | SubscriptionTier::Enterprise,)
+        }
 
         // Enterprise-only.
         Feature::PooledUsage
@@ -348,7 +340,7 @@ pub enum BillingError {
     #[error("not found")]
     NotFound,
     #[error("network error: {0}")]
-    Network(#[from] ureq::Error),
+    Network(#[from] Box<ureq::Error>),
     #[error("json error: {0}")]
     Json(#[from] serde_json::Error),
 }
@@ -512,6 +504,6 @@ fn handle_response<T: serde::de::DeserializeOwned>(
         }
         Err(ureq::Error::Status(401, _)) => Err(BillingError::Unauthorized),
         Err(ureq::Error::Status(404, _)) => Err(BillingError::NotFound),
-        Err(err) => Err(BillingError::Network(err)),
+        Err(err) => Err(BillingError::Network(Box::new(err))),
     }
 }

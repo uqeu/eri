@@ -138,10 +138,10 @@ impl Router {
     pub fn from_env() -> Self {
         let mut table = RouteTable::defaults();
         for (intent, var) in INTENT_ENV_VARS {
-            if let Ok(value) = std::env::var(var) {
-                if let Some(choice) = parse_model_choice(&value) {
-                    table.set(*intent, choice);
-                }
+            if let Ok(value) = std::env::var(var)
+                && let Some(choice) = parse_model_choice(&value)
+            {
+                table.set(*intent, choice);
             }
         }
         Self::new(table)
@@ -319,57 +319,126 @@ fn parse_model_choice(s: &str) -> Option<ModelChoice> {
 // ---------------------------------------------------------------------------
 
 const VOICE_SOCIAL_MARKERS: &[&str] = &[
-    "hi", "hey", "hello", "yo", "thanks", "thank you", "are you there", "are you alive",
-    "you up", "you there", "good morning", "good evening",
+    "hi",
+    "hey",
+    "hello",
+    "yo",
+    "thanks",
+    "thank you",
+    "are you there",
+    "are you alive",
+    "you up",
+    "you there",
+    "good morning",
+    "good evening",
 ];
 
 const EXPLAIN_MARKERS: &[&str] = &[
-    "explain ", "what does ", "what is ", "how does ", "why does ", "what's this",
-    "whats this", "walk me through", "summarize ", "summarise ",
+    "explain ",
+    "what does ",
+    "what is ",
+    "how does ",
+    "why does ",
+    "what's this",
+    "whats this",
+    "walk me through",
+    "summarize ",
+    "summarise ",
 ];
 
 const BUILD_MARKERS: &[&str] = &[
-    "build ", "build me ", "make a ", "make me a ", "scaffold ", "scaffold me ",
-    "generate a new ", "spin up a ", "create a new ", "start a new ", "design a ",
-    "set up ", "setup a ", "implement a ",
+    "build ",
+    "build me ",
+    "make a ",
+    "make me a ",
+    "scaffold ",
+    "scaffold me ",
+    "generate a new ",
+    "spin up a ",
+    "create a new ",
+    "start a new ",
+    "design a ",
+    "set up ",
+    "setup a ",
+    "implement a ",
 ];
 
 const DEBUG_MARKERS: &[&str] = &[
-    "fix ", "fix the ", "the error is", "this error", "stack trace", "panic ", "crashes",
-    "doesn't work", "doesnt work", "not working", "failing test", "test fails",
-    "why is this broken", "broken",
+    "fix ",
+    "fix the ",
+    "the error is",
+    "this error",
+    "stack trace",
+    "panic ",
+    "crashes",
+    "doesn't work",
+    "doesnt work",
+    "not working",
+    "failing test",
+    "test fails",
+    "why is this broken",
+    "broken",
 ];
 
 const REFACTOR_MARKERS: &[&str] = &[
-    "refactor", "extract ", "rename ", "inline ", "split this", "split the ",
-    "deduplicate", "dedupe", "consolidate", "reorganise", "reorganize", "move this to",
+    "refactor",
+    "extract ",
+    "rename ",
+    "inline ",
+    "split this",
+    "split the ",
+    "deduplicate",
+    "dedupe",
+    "consolidate",
+    "reorganise",
+    "reorganize",
+    "move this to",
     "move it to",
 ];
 
 const SEARCH_MARKERS: &[&str] = &[
-    "where is ", "find ", "search for", "locate ", "show me where", "what file",
+    "where is ",
+    "find ",
+    "search for",
+    "locate ",
+    "show me where",
+    "what file",
     "which file",
 ];
 
 const EDIT_MARKERS: &[&str] = &[
-    "change ", "update ", "tweak ", "adjust ", "add ", "remove ", "delete the ",
-    "swap ", "replace ", "make it ", "make the ",
+    "change ",
+    "update ",
+    "tweak ",
+    "adjust ",
+    "add ",
+    "remove ",
+    "delete the ",
+    "swap ",
+    "replace ",
+    "make it ",
+    "make the ",
 ];
 
 fn classify_intent(prompt: &str, ctx: &PromptContext) -> Intent {
     let trimmed = prompt.trim();
     if trimmed.is_empty() {
         // Empty prompt + voice = social ping. Otherwise unknown.
-        return if ctx.voice_input { Intent::Voice } else { Intent::Unknown };
+        return if ctx.voice_input {
+            Intent::Voice
+        } else {
+            Intent::Unknown
+        };
     }
     let lower = trimmed.to_ascii_lowercase();
 
     // 1. Voice social pings — only credit short utterances. "thanks for the
     //    explanation, can you also build me X" is not a voice ping.
-    if ctx.voice_input && trimmed.split_whitespace().count() <= 4 {
-        if VOICE_SOCIAL_MARKERS.iter().any(|m| lower.contains(m)) {
-            return Intent::Voice;
-        }
+    if ctx.voice_input
+        && trimmed.split_whitespace().count() <= 4
+        && VOICE_SOCIAL_MARKERS.iter().any(|m| lower.contains(m))
+    {
+        return Intent::Voice;
     }
 
     // 2. Strong, unambiguous markers in priority order.
@@ -498,7 +567,10 @@ mod tests {
     #[test]
     fn classifies_edit_with_open_files() {
         let r = Router::default();
-        let plan = r.decide("change the button color to teal", &ctx_with_files(&["x.tsx"]));
+        let plan = r.decide(
+            "change the button color to teal",
+            &ctx_with_files(&["x.tsx"]),
+        );
         assert_eq!(plan.intent, Intent::Edit);
         assert!(matches!(plan.model, ModelChoice::Mercury));
     }
@@ -529,7 +601,9 @@ mod tests {
         let prev = std::env::var("ERI_ROUTE_BUILD").ok();
         // SAFETY: tests in a single binary share env vars; this is the only
         // consumer of ERI_ROUTE_BUILD in this binary.
-        unsafe { std::env::set_var("ERI_ROUTE_BUILD", "claude:claude-opus-4-5"); }
+        unsafe {
+            std::env::set_var("ERI_ROUTE_BUILD", "claude:claude-opus-4-5");
+        }
         let r = Router::from_env();
         let plan = r.decide("build me a snake game", &ctx());
         assert_eq!(plan.intent, Intent::Build);
@@ -545,7 +619,10 @@ mod tests {
 
     #[test]
     fn parse_model_choice_handles_mercury_and_vendors() {
-        assert!(matches!(parse_model_choice("mercury"), Some(ModelChoice::Mercury)));
+        assert!(matches!(
+            parse_model_choice("mercury"),
+            Some(ModelChoice::Mercury)
+        ));
         assert!(matches!(
             parse_model_choice("claude:claude-sonnet-4-5"),
             Some(ModelChoice::Claude(id)) if id == "claude-sonnet-4-5"

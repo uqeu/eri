@@ -14,7 +14,10 @@ fn cooldown_blocks_repeat_request_within_window() {
     // 30s into the 60s cooldown — must be blocked.
     let mid = t0 + Duration::from_secs(30);
     let second = limiter.check_at("user-a", 0.01, mid);
-    assert!(!second.allow, "second request inside cooldown must be denied");
+    assert!(
+        !second.allow,
+        "second request inside cooldown must be denied"
+    );
     assert!(second.retry_after_seconds > 0);
     assert!(
         second.reason.contains("Slow down"),
@@ -99,7 +102,10 @@ fn day_resets_after_24h() {
         limiter.record_at("user-e", 0.40, now);
     }
     let blocked = limiter.check_at("user-e", 0.01, t0 + Duration::from_secs(60));
-    assert!(!blocked.allow, "user should be blocked after hitting daily count");
+    assert!(
+        !blocked.allow,
+        "user should be blocked after hitting daily count"
+    );
 
     // Jump past the 24h rolling window — counters reset and the next request
     // should be allowed again.

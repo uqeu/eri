@@ -37,9 +37,9 @@ pub mod walker;
 mod index;
 
 pub use chunker::{Chunk, ChunkKind};
-pub use embedder::{DummyEmbedder, Embedder, EmbedderError};
-#[cfg(feature = "ollama")]
-pub use embedder::OllamaEmbedder;
 #[cfg(feature = "candle")]
 pub use embedder::NomicCandleEmbedder;
+#[cfg(feature = "ollama")]
+pub use embedder::OllamaEmbedder;
+pub use embedder::{DummyEmbedder, Embedder, EmbedderError};
 pub use index::{Index, IndexError, IndexStats, SearchResult, SyncReport};

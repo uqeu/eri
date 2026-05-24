@@ -163,11 +163,7 @@ pub async fn dispatch(
     // Lifecycle methods skip the hook wrapper to avoid recursion.
     let is_meta = matches!(
         method,
-        "eri/ping"
-            | "eri/version"
-            | "eri/auth/setTier"
-            | "eri/hooks/list"
-            | "eri/hooks/fire"
+        "eri/ping" | "eri/version" | "eri/auth/setTier" | "eri/hooks/list" | "eri/hooks/fire"
     );
     let workspace = if is_meta {
         None
@@ -236,13 +232,12 @@ pub async fn dispatch(
         let duration_ms = started_at.elapsed().as_millis() as u64;
         let (status, error_kind) = match &result {
             Ok(_) => (AuditStatus::Ok, None),
-            Err(DispatchError::FeatureLocked(_)) => {
-                (AuditStatus::Skipped, Some("feature_locked"))
-            }
+            Err(DispatchError::FeatureLocked(_)) => (AuditStatus::Skipped, Some("feature_locked")),
             Err(DispatchError::BadParams(_)) => (AuditStatus::Error, Some("bad_params")),
-            Err(DispatchError::Other(e)) => {
-                (AuditStatus::Error, Some(audit::audit_error_kind(&e.to_string())))
-            }
+            Err(DispatchError::Other(e)) => (
+                AuditStatus::Error,
+                Some(audit::audit_error_kind(&e.to_string())),
+            ),
         };
         let mut metadata = serde_json::json!({
             "paramsShape": params_shape.unwrap_or(Value::Null),
@@ -456,12 +451,8 @@ async fn dispatch_inner(
             services::graph::insert_edge(request.params.clone(), services).await
         }
         "eri/graph/get" => services::graph::get(request.params.clone(), services).await,
-        "eri/graph/neighbors" => {
-            services::graph::neighbors(request.params.clone(), services).await
-        }
-        "eri/graph/traverse" => {
-            services::graph::traverse(request.params.clone(), services).await
-        }
+        "eri/graph/neighbors" => services::graph::neighbors(request.params.clone(), services).await,
+        "eri/graph/traverse" => services::graph::traverse(request.params.clone(), services).await,
         "eri/graph/query_kind" => {
             services::graph::query_kind(request.params.clone(), services).await
         }
@@ -470,29 +461,19 @@ async fn dispatch_inner(
         "eri/graph/export" => services::graph::export(request.params.clone(), services).await,
 
         // --- Codemaps (free tier; visual codebase artifacts) ---
-        "eri/codemaps/list" => {
-            services::codemaps::list(request.params.clone(), services).await
-        }
+        "eri/codemaps/list" => services::codemaps::list(request.params.clone(), services).await,
         "eri/codemaps/generate" => {
             services::codemaps::generate(request.params.clone(), services).await
         }
-        "eri/codemaps/load" => {
-            services::codemaps::load(request.params.clone(), services).await
-        }
-        "eri/codemaps/svg" => {
-            services::codemaps::svg(request.params.clone(), services).await
-        }
+        "eri/codemaps/load" => services::codemaps::load(request.params.clone(), services).await,
+        "eri/codemaps/svg" => services::codemaps::svg(request.params.clone(), services).await,
 
         // --- Tab inline completions (free tier; embedded llama.cpp) ---
         "eri/tab/complete" => {
             services::tab::handle_complete(request.params.clone(), services).await
         }
-        "eri/tab/health" => {
-            services::tab::handle_health(request.params.clone(), services).await
-        }
-        "eri/tab/preload" => {
-            services::tab::handle_preload(request.params.clone(), services).await
-        }
+        "eri/tab/health" => services::tab::handle_health(request.params.clone(), services).await,
+        "eri/tab/preload" => services::tab::handle_preload(request.params.clone(), services).await,
 
         // --- Review (free tier; forge-neutral PR review surface) ---
         "eri/review/local" => services::review::local(request.params.clone(), services).await,
@@ -507,26 +488,14 @@ async fn dispatch_inner(
         "eri/brain/plan" => services::brain::plan(request.params.clone(), services).await,
 
         // --- Audit log (free tier; local-only privacy primitive) ---
-        "eri/audit/status" => {
-            services::audit_svc::status(request.params.clone(), services).await
-        }
-        "eri/audit/enable" => {
-            services::audit_svc::enable(request.params.clone(), services).await
-        }
-        "eri/audit/disable" => {
-            services::audit_svc::disable(request.params.clone(), services).await
-        }
-        "eri/audit/recent" => {
-            services::audit_svc::recent(request.params.clone(), services).await
-        }
+        "eri/audit/status" => services::audit_svc::status(request.params.clone(), services).await,
+        "eri/audit/enable" => services::audit_svc::enable(request.params.clone(), services).await,
+        "eri/audit/disable" => services::audit_svc::disable(request.params.clone(), services).await,
+        "eri/audit/recent" => services::audit_svc::recent(request.params.clone(), services).await,
 
         // --- Crash + Sentry (free tier; local-only observability) ---
-        "eri/crash/recent" => {
-            services::crash::recent(request.params.clone(), services).await
-        }
-        "eri/crash/clear" => {
-            services::crash::clear(request.params.clone(), services).await
-        }
+        "eri/crash/recent" => services::crash::recent(request.params.clone(), services).await,
+        "eri/crash/clear" => services::crash::clear(request.params.clone(), services).await,
         "eri/sentry/status" => {
             services::crash::sentry_status(request.params.clone(), services).await
         }

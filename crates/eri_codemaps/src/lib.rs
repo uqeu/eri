@@ -23,7 +23,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use serde::{Deserialize, Serialize};
 
 use eri_index::Index;
@@ -183,8 +183,7 @@ impl CodemapStore {
     pub fn svg(&self, name: &str) -> Result<String> {
         validate_name(name)?;
         let path = self.root.join(format!("{name}.svg"));
-        fs::read_to_string(&path)
-            .with_context(|| format!("failed to read {}", path.display()))
+        fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))
     }
 
     /// List all saved codemaps, newest first.
@@ -196,7 +195,7 @@ impl CodemapStore {
             Err(err) => {
                 return Err(anyhow!(err)).with_context(|| {
                     format!("failed to read codemap dir {}", self.root.display())
-                })
+                });
             }
         };
         for entry in entries {
@@ -219,7 +218,7 @@ impl CodemapStore {
                 generated_at_ms: map.generated_at_ms,
             });
         }
-        out.sort_by(|a, b| b.generated_at_ms.cmp(&a.generated_at_ms));
+        out.sort_by_key(|b| std::cmp::Reverse(b.generated_at_ms));
         Ok(out)
     }
 
@@ -242,7 +241,7 @@ const MAX_CHUNKS_FOR_MAP: usize = 8_192;
 
 fn enumerate_chunks(index: &Index) -> Result<Vec<eri_index::Chunk>> {
     let stats = index.stats();
-    let want = stats.chunks.min(MAX_CHUNKS_FOR_MAP).max(1);
+    let want = stats.chunks.clamp(1, MAX_CHUNKS_FOR_MAP);
     let raw = index
         .search("", want)
         .map_err(|e| anyhow!("failed to enumerate index chunks: {e}"))?;
@@ -394,9 +393,22 @@ fn generate_hotspot_map(index: &Index) -> Result<(Vec<CodemapNode>, Vec<CodemapE
 /// works across languages without a tree-sitter dependency in this crate.
 fn extract_definition_idents(chunk: &eri_index::Chunk) -> Vec<String> {
     const KEYWORDS: &[&str] = &[
-        "fn ", "function ", "def ", "class ", "struct ", "enum ", "trait ", "interface ",
-        "type ", "pub fn ", "pub struct ", "pub enum ", "pub trait ", "pub type ",
-        "export function ", "export class ",
+        "fn ",
+        "function ",
+        "def ",
+        "class ",
+        "struct ",
+        "enum ",
+        "trait ",
+        "interface ",
+        "type ",
+        "pub fn ",
+        "pub struct ",
+        "pub enum ",
+        "pub trait ",
+        "pub type ",
+        "export function ",
+        "export class ",
     ];
     let mut out: Vec<String> = Vec::new();
     let body = &chunk.content;

@@ -7,9 +7,9 @@
 
 use std::path::PathBuf;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 
-use crate::diff::{infer_language, ChangeKind, DiffHunk, FileDiff};
+use crate::diff::{ChangeKind, DiffHunk, FileDiff, infer_language};
 
 /// Parse a unified diff into per-file `FileDiff`s.
 pub fn parse_unified_diff(input: &str) -> Result<Vec<FileDiff>> {
@@ -57,9 +57,7 @@ where
             let (a, b) = split_two_paths(rest);
             from_path = Some(strip_prefix("a/", &a));
             to_path = Some(strip_prefix("b/", &b));
-        } else if line == "new file mode 100644"
-            || line.starts_with("new file mode")
-        {
+        } else if line == "new file mode 100644" || line.starts_with("new file mode") {
             change_kind = ChangeKind::Added;
         } else if line.starts_with("deleted file mode") {
             change_kind = ChangeKind::Deleted;

@@ -89,10 +89,7 @@ pub fn ensure_git_repo(project_dir: &Path) -> Result<(), GitError> {
     run_git(project_dir, &["add", ERI_MARKER_FILENAME])?;
     // --allow-empty handles the case where the marker existed already (e.g.
     // a stray file from a previously-deleted .git).
-    run_git(
-        project_dir,
-        &["commit", "--allow-empty", "-m", "eri: init"],
-    )?;
+    run_git(project_dir, &["commit", "--allow-empty", "-m", "eri: init"])?;
     Ok(())
 }
 
@@ -133,10 +130,7 @@ pub fn commit_iteration(
         run_git(project_dir, &args)?;
     }
 
-    run_git(
-        project_dir,
-        &["commit", "--allow-empty", "-m", message],
-    )?;
+    run_git(project_dir, &["commit", "--allow-empty", "-m", message])?;
     let hash = run_git(project_dir, &["rev-parse", "HEAD"])?;
     Ok(hash.trim().to_string())
 }
@@ -392,16 +386,18 @@ fn show_file_at_commit(
 /// in a `chrono`/`time` dep. Negative or absurd values fall back to the
 /// epoch — the timestamp is informational on the website, never load-bearing.
 fn format_unix_iso8601(unix_seconds: i64) -> String {
-    let secs = if unix_seconds < 0 { 0 } else { unix_seconds as u64 };
+    let secs = if unix_seconds < 0 {
+        0
+    } else {
+        unix_seconds as u64
+    };
     let days_since_epoch = (secs / 86_400) as i64;
     let seconds_in_day = secs % 86_400;
     let hour = (seconds_in_day / 3600) as u32;
     let minute = ((seconds_in_day % 3600) / 60) as u32;
     let second = (seconds_in_day % 60) as u32;
     let (year, month, day) = days_to_ymd(days_since_epoch);
-    format!(
-        "{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}Z"
-    )
+    format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}Z")
 }
 
 /// Convert days since the Unix epoch (1970-01-01) to a Gregorian (Y, M, D).

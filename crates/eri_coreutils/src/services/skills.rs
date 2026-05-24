@@ -7,8 +7,8 @@ use serde_json::Value;
 
 use eri_skills::Skills;
 
-use crate::services::Services;
 use crate::DispatchError;
+use crate::services::Services;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -59,8 +59,7 @@ pub async fn list(params: Value, _services: &Services) -> Result<Value, Dispatch
             when: s.keywords().to_vec(),
         })
         .collect();
-    serde_json::to_value(ListResult { skills: entries })
-        .map_err(|e| DispatchError::Other(e.into()))
+    serde_json::to_value(ListResult { skills: entries }).map_err(|e| DispatchError::Other(e.into()))
 }
 
 pub async fn load(params: Value, _services: &Services) -> Result<Value, DispatchError> {

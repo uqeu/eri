@@ -14,8 +14,8 @@ use tokio::sync::Mutex;
 
 use eri_mcp::{ContentBlock, Mcp, ToolHandle, ToolResult};
 
-use crate::services::Services;
 use crate::DispatchError;
+use crate::services::Services;
 
 type McpSlot = Arc<Mutex<Option<Mcp>>>;
 
@@ -112,8 +112,7 @@ pub async fn connect(params: Value, services: &Services) -> Result<Value, Dispat
             last_error: s.last_error,
         })
         .collect();
-    serde_json::to_value(ConnectResult { servers })
-        .map_err(|e| DispatchError::Other(e.into()))
+    serde_json::to_value(ConnectResult { servers }).map_err(|e| DispatchError::Other(e.into()))
 }
 
 pub async fn tools(params: Value, services: &Services) -> Result<Value, DispatchError> {
@@ -136,8 +135,7 @@ pub async fn tools(params: Value, services: &Services) -> Result<Value, Dispatch
             input_schema: t.input_schema,
         })
         .collect();
-    serde_json::to_value(ToolsResult { tools: out })
-        .map_err(|e| DispatchError::Other(e.into()))
+    serde_json::to_value(ToolsResult { tools: out }).map_err(|e| DispatchError::Other(e.into()))
 }
 
 pub async fn resources(params: Value, services: &Services) -> Result<Value, DispatchError> {
@@ -181,10 +179,7 @@ pub async fn call(params: Value, services: &Services) -> Result<Value, DispatchE
             .into_iter()
             .find(|t| t.server == p.server && t.name == p.tool)
             .ok_or_else(|| {
-                DispatchError::BadParams(format!(
-                    "unknown tool {}::{}",
-                    p.server, p.tool
-                ))
+                DispatchError::BadParams(format!("unknown tool {}::{}", p.server, p.tool))
             })?
     };
     let result: ToolResult = {
@@ -205,7 +200,7 @@ pub async fn call(params: Value, services: &Services) -> Result<Value, DispatchE
         content,
         is_error: result.is_error,
     })
-        .map_err(|e| DispatchError::Other(e.into()))
+    .map_err(|e| DispatchError::Other(e.into()))
 }
 
 pub async fn shutdown(params: Value, services: &Services) -> Result<Value, DispatchError> {
@@ -226,8 +221,7 @@ pub async fn shutdown(params: Value, services: &Services) -> Result<Value, Dispa
                 .map_err(|e| DispatchError::Other(anyhow::anyhow!(e.to_string())))?;
         }
     }
-    serde_json::to_value(ShutdownResult { ok: true })
-        .map_err(|e| DispatchError::Other(e.into()))
+    serde_json::to_value(ShutdownResult { ok: true }).map_err(|e| DispatchError::Other(e.into()))
 }
 
 async fn ensure_loaded(services: &Services, workspace: &PathBuf) -> Result<McpSlot, DispatchError> {

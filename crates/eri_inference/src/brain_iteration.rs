@@ -29,11 +29,11 @@ use std::path::PathBuf;
 use eri_caveman::BudgetPart;
 use eri_router::{Intent, ModelChoice, PromptContext};
 
+use crate::InferenceError;
 use crate::brain::{Brain, BrainError, BrainPlan};
 use crate::edit_mode::{StreamEvent, TokenUsage};
 use crate::llm_provider::{LlmProvider, ProviderKeys, provider_from_choice_with_keys};
 use crate::templates::edit_mode_system_prompt;
-use crate::InferenceError;
 
 /// Default token cap for chat-shaped responses.
 const CHAT_MAX_TOKENS: u32 = 4_096;
@@ -160,17 +160,24 @@ pub fn run_iteration_via_brain(
             run_edit_intent(&req, &plan, &mut instrumentation, &mut on_event)?
         }
         Intent::Search => {
-            let provider =
-                search_provider.ok_or(BrainIterationError::NoSearchProvider)?;
+            let provider = search_provider.ok_or(BrainIterationError::NoSearchProvider)?;
             run_search_intent(&req.user_prompt, provider, &mut on_event)?
         }
-        Intent::Voice => {
-            run_chat_intent(&req, &plan, VOICE_MAX_TOKENS, &mut instrumentation, &mut on_event)?
-        }
+        Intent::Voice => run_chat_intent(
+            &req,
+            &plan,
+            VOICE_MAX_TOKENS,
+            &mut instrumentation,
+            &mut on_event,
+        )?,
         // Chat / Explain / Debug / Unknown all stream plain text.
-        Intent::Chat | Intent::Explain | Intent::Debug | Intent::Unknown => {
-            run_chat_intent(&req, &plan, CHAT_MAX_TOKENS, &mut instrumentation, &mut on_event)?
-        }
+        Intent::Chat | Intent::Explain | Intent::Debug | Intent::Unknown => run_chat_intent(
+            &req,
+            &plan,
+            CHAT_MAX_TOKENS,
+            &mut instrumentation,
+            &mut on_event,
+        )?,
     };
 
     let response = BrainIterationResponse {
@@ -375,8 +382,8 @@ fn run_search_intent(
 mod tests {
     use super::*;
     use crate::llm_provider::LlmResponse;
-    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Mutex;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use tempfile::TempDir;
 
     /// In-test provider that returns canned text without touching the network.
@@ -455,7 +462,10 @@ mod tests {
             self.events.lock().unwrap().push(format!("prompt:{prompt}"));
         }
         fn on_intent(&mut self, intent: Intent) {
-            self.events.lock().unwrap().push(format!("intent:{intent:?}"));
+            self.events
+                .lock()
+                .unwrap()
+                .push(format!("intent:{intent:?}"));
         }
         fn on_model_call(
             &mut self,
@@ -687,9 +697,8 @@ mod tests {
     fn edit_intent_applies_search_replace_block() {
         let dir = TempDir::new().unwrap();
         seed_file(dir.path(), "a.txt", "alpha\n");
-        let canned = CannedProvider::new(
-            "<<<<<<< SEARCH a.txt\nalpha\n=======\nALPHA\n>>>>>>> REPLACE\n",
-        );
+        let canned =
+            CannedProvider::new("<<<<<<< SEARCH a.txt\nalpha\n=======\nALPHA\n>>>>>>> REPLACE\n");
         let req = BrainIterationRequest {
             user_prompt: "change a.txt to uppercase the contents".to_string(),
             context: PromptContext {
@@ -707,8 +716,8 @@ mod tests {
         };
         let recorder = RecordingInstr::default();
         let events_handle = recorder.events.clone();
-        let resp = run_with_stub(req, Box::new(canned), None, Box::new(recorder), |_ev| {})
-            .expect("ok");
+        let resp =
+            run_with_stub(req, Box::new(canned), None, Box::new(recorder), |_ev| {}).expect("ok");
         let report = resp.apply_report.expect("edit intent has report");
         assert_eq!(report.applied.len(), 1);
         assert_eq!(report.failed.len(), 0);
@@ -737,11 +746,17 @@ mod tests {
             language: None,
         };
         let mut tokens = Vec::<String>::new();
-        let resp = run_with_stub(req, Box::new(canned), None, Box::new(NullInstr), move |ev| {
-            if let StreamEvent::Token(t) = ev {
-                tokens.push(t);
-            }
-        })
+        let resp = run_with_stub(
+            req,
+            Box::new(canned),
+            None,
+            Box::new(NullInstr),
+            move |ev| {
+                if let StreamEvent::Token(t) = ev {
+                    tokens.push(t);
+                }
+            },
+        )
         .expect("ok");
         assert!(resp.apply_report.is_none());
         assert!(resp.raw_model_output.contains("async"));
@@ -775,8 +790,14 @@ mod tests {
         // Trick: use a wrapper that flips canned_called if .stream/.complete
         // ever fires — but CannedProvider already tracks `.called`, so we
         // just assert on that after the run.
-        let resp = run_with_stub(req, Box::new(canned), Some(&stub), Box::new(NullInstr), |_| {})
-            .expect("ok");
+        let resp = run_with_stub(
+            req,
+            Box::new(canned),
+            Some(&stub),
+            Box::new(NullInstr),
+            |_| {},
+        )
+        .expect("ok");
         // The stub search provider was called.
         assert!(stub.called.load(Ordering::SeqCst));
         // Result text was returned.
@@ -807,10 +828,11 @@ mod tests {
         let plan = brain
             .plan("change the button color", &ctx, parts)
             .expect("plans");
-        assert!(plan
-            .budgeted_prompt
-            .dropped_parts
-            .contains(&"ctx:huge".to_string()));
+        assert!(
+            plan.budgeted_prompt
+                .dropped_parts
+                .contains(&"ctx:huge".to_string())
+        );
         match prev {
             Some(v) => unsafe { std::env::set_var("ERI_ROUTE_EDIT", v) },
             None => unsafe { std::env::remove_var("ERI_ROUTE_EDIT") },
@@ -832,8 +854,7 @@ mod tests {
         };
         let recorder = RecordingInstr::default();
         let events = recorder.events.clone();
-        let _ = run_with_stub(req, Box::new(canned), None, Box::new(recorder), |_| {})
-            .expect("ok");
+        let _ = run_with_stub(req, Box::new(canned), None, Box::new(recorder), |_| {}).expect("ok");
         let captured = events.lock().unwrap().clone();
         // We should have prompt + intent + call + response — at minimum.
         assert!(

@@ -24,7 +24,7 @@ use serde_json::Value;
 use tokio::sync::Mutex;
 
 use eri_caveman::BudgetPart;
-use eri_graph::{auto as graph_auto, Graph};
+use eri_graph::{Graph, auto as graph_auto};
 use eri_index::Index;
 use eri_inference::{
     BrainIterationError, BrainIterationRequest, BrainIterationResponse, InferenceError,
@@ -269,9 +269,11 @@ impl IterInstrumentation for GraphInstr {
             &format!("{:?}", failed.reason),
         ) {
             Ok(proposed_id) => {
-                if let Err(err) =
-                    graph_auto::record_edit_rejected(&g, &proposed_id, Some(&format!("{:?}", failed.reason)))
-                {
+                if let Err(err) = graph_auto::record_edit_rejected(
+                    &g,
+                    &proposed_id,
+                    Some(&format!("{:?}", failed.reason)),
+                ) {
                     tracing::warn!(error = %err, "graph: record_edit_rejected failed");
                 }
             }
@@ -327,11 +329,7 @@ fn event_to_wire(ev: &StreamEvent) -> EventWire {
 /// (priority 0) are the prompt itself; file payloads come in at priority 5
 /// with a min_keep so very short files survive a truncation pass; auto-
 /// attached rules land at priority 2.
-fn build_parts(
-    prompt: &str,
-    open_files: &[OpenFileWire],
-    rules: &[String],
-) -> Vec<BudgetPart> {
+fn build_parts(prompt: &str, open_files: &[OpenFileWire], rules: &[String]) -> Vec<BudgetPart> {
     let mut parts: Vec<BudgetPart> = Vec::with_capacity(open_files.len() + rules.len() + 2);
     parts.push(BudgetPart::new(
         "system:base",
@@ -462,8 +460,7 @@ pub async fn iterate(
     // makes blocking network calls and would otherwise jam the dispatcher.
     let response: Result<BrainIterationResponse, BrainIterationError> =
         tokio::task::spawn_blocking(move || {
-            let search_adapter =
-                index_handle.map(|h| IndexSearchAdapter { handle: h });
+            let search_adapter = index_handle.map(|h| IndexSearchAdapter { handle: h });
             let search_dyn: Option<&dyn SearchProvider> = match &search_adapter {
                 Some(s) => Some(s as &dyn SearchProvider),
                 None => None,
@@ -603,10 +600,7 @@ mod tests {
         let err = iterate(params, &tier, &services).await.expect_err("err");
         match err {
             DispatchError::Other(e) => {
-                assert!(
-                    e.to_string().contains("search intent requires"),
-                    "got: {e}"
-                );
+                assert!(e.to_string().contains("search intent requires"), "got: {e}");
             }
             other => panic!("unexpected error: {other:?}"),
         }

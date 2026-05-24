@@ -141,10 +141,7 @@ mod tests {
     fn leading_whitespace_does_not_block_match() {
         let content = format!("   <@{BOT_ID}>   make a saas landing page  ");
         let parsed = parse_mention_prompt(&content, BOT_ID).expect("should parse");
-        assert_eq!(
-            parsed,
-            ParsedPrompt::Build("saas landing page".to_string())
-        );
+        assert_eq!(parsed, ParsedPrompt::Build("saas landing page".to_string()));
     }
 
     #[test]
@@ -167,8 +164,8 @@ mod tests {
     fn enterprise_w_prefixed_id_matches_when_equal() {
         // Enterprise Grid users have IDs that start with `W` instead of `U`;
         // the parser is agnostic to the prefix, it just matches the literal id.
-        let parsed = parse_mention_prompt("<@W12ABCD> build a thing", "W12ABCD")
-            .expect("should parse");
+        let parsed =
+            parse_mention_prompt("<@W12ABCD> build a thing", "W12ABCD").expect("should parse");
         // `build a ` is a recognised verb so it strips fully, leaving just `thing`.
         assert_eq!(parsed, ParsedPrompt::Build("thing".to_string()));
     }

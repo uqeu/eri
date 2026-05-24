@@ -15,17 +15,17 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tracing::warn;
 
 use eri_tab::model_store;
 use eri_tab::{
-    LlamaTabEngine, TabError, TabRequest, DEFAULT_MODEL_FILE, DEFAULT_MODEL_ID, DEFAULT_MODEL_REPO,
-    DEFAULT_N_CTX,
+    DEFAULT_MODEL_FILE, DEFAULT_MODEL_ID, DEFAULT_MODEL_REPO, DEFAULT_N_CTX, LlamaTabEngine,
+    TabError, TabRequest,
 };
 
-use crate::services::Services;
 use crate::DispatchError;
+use crate::services::Services;
 
 /// RPC error code: model download in progress.
 pub const DOWNLOADING_CODE: i32 = -32100;
@@ -106,9 +106,10 @@ async fn ensure_model_ready(
     filename: &'static str,
 ) -> Result<Option<std::path::PathBuf>, DispatchError> {
     if model_store::is_cached(repo, filename) {
-        return Ok(Some(model_store::cached_path(repo, filename).map_err(
-            |e| DispatchError::Other(anyhow!(e.to_string())),
-        )?));
+        return Ok(Some(
+            model_store::cached_path(repo, filename)
+                .map_err(|e| DispatchError::Other(anyhow!(e.to_string())))?,
+        ));
     }
 
     // Either start a download or report ongoing progress.
@@ -147,7 +148,14 @@ async fn ensure_model_ready(
 
     // Return current progress so the caller can map it to -32100.
     let state = services.tab_download.read().await;
-    Ok(if state.progress.is_some() { None } else { Some(model_store::cached_path(repo, filename).map_err(|e| DispatchError::Other(anyhow!(e.to_string())))?) })
+    Ok(if state.progress.is_some() {
+        None
+    } else {
+        Some(
+            model_store::cached_path(repo, filename)
+                .map_err(|e| DispatchError::Other(anyhow!(e.to_string())))?,
+        )
+    })
 }
 
 async fn engine_for(
@@ -158,12 +166,7 @@ async fn engine_for(
     let path = match ensure_model_ready(services, repo, filename).await? {
         Some(p) => p,
         None => {
-            let progress = services
-                .tab_download
-                .read()
-                .await
-                .progress
-                .unwrap_or(0.0);
+            let progress = services.tab_download.read().await.progress.unwrap_or(0.0);
             return Err(downloading_error(progress));
         }
     };
@@ -262,12 +265,7 @@ pub async fn handle_preload(
     let (repo, filename) = resolve_repo(DEFAULT_MODEL_ID);
     match ensure_model_ready(services, repo, filename).await? {
         None => {
-            let progress = services
-                .tab_download
-                .read()
-                .await
-                .progress
-                .unwrap_or(0.0);
+            let progress = services.tab_download.read().await.progress.unwrap_or(0.0);
             Ok(json!({ "stage": "downloading", "progress": progress }))
         }
         Some(path) => {

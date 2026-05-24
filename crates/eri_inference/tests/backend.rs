@@ -166,12 +166,9 @@ fn agent_backend_picks_goose_when_env_says_goose_and_goose_installed() {
 fn agent_backend_falls_back_to_claude_when_goose_missing() {
     // Env asks for Goose but Goose isn't installed — must fall back to
     // Claude rather than returning None outright.
-    let picked = AgentBackend::detect_with(
-        Some(AgentChoice::Goose),
-        || Some(stub_claude()),
-        || None,
-    )
-    .expect("falls back to claude");
+    let picked =
+        AgentBackend::detect_with(Some(AgentChoice::Goose), || Some(stub_claude()), || None)
+            .expect("falls back to claude");
     assert_eq!(picked.choice(), AgentChoice::Claude);
 }
 
@@ -183,11 +180,7 @@ fn agent_backend_returns_none_when_neither_installed() {
 
 #[test]
 fn agent_backend_no_env_prefers_claude_when_both_present() {
-    let picked = AgentBackend::detect_with(
-        None,
-        || Some(stub_claude()),
-        || Some(stub_goose()),
-    )
-    .expect("backend resolves");
+    let picked = AgentBackend::detect_with(None, || Some(stub_claude()), || Some(stub_goose()))
+        .expect("backend resolves");
     assert_eq!(picked.choice(), AgentChoice::Claude);
 }

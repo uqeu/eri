@@ -332,7 +332,9 @@ mod tests {
         let pg_prompt = build_supabase_postgres_prompt(&html_path());
         assert_ne!(auth_prompt, pg_prompt);
         assert!(auth_prompt.contains("supabase.auth"));
-        assert!(auth_prompt.contains("signInWithPassword") || auth_prompt.contains("signInWithOtp"));
+        assert!(
+            auth_prompt.contains("signInWithPassword") || auth_prompt.contains("signInWithOtp")
+        );
         assert!(pg_prompt.contains(".from(") || pg_prompt.contains("from('demo')"));
         // Each must explicitly disclaim the other to avoid duplicate wiring.
         assert!(auth_prompt.contains("DATABASE wiring is a SEPARATE task"));

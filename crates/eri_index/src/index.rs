@@ -7,10 +7,10 @@ use std::time::Instant;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::chunker::{chunk_file, Chunk};
+use crate::chunker::{Chunk, chunk_file};
 use crate::embedder::{DummyEmbedder, Embedder, EmbedderError};
 use crate::store::{Store, StoreError};
-use crate::walker::{walk, WalkOptions, WalkedFile};
+use crate::walker::{WalkOptions, WalkedFile, walk};
 
 const STATE_DIR: &str = ".eri";
 const DB_FILENAME: &str = "index.sqlite";
@@ -136,7 +136,11 @@ impl Index {
                 score: cosine_similarity(&query_vec, &vec),
             })
             .collect();
-        scored.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        scored.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         scored.truncate(top_k);
         Ok(scored)
     }
@@ -229,11 +233,7 @@ fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
         nb += y * y;
     }
     let denom = na.sqrt() * nb.sqrt();
-    if denom == 0.0 {
-        0.0
-    } else {
-        dot / denom
-    }
+    if denom == 0.0 { 0.0 } else { dot / denom }
 }
 
 #[cfg(test)]

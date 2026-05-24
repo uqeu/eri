@@ -29,9 +29,9 @@ pub mod providers;
 pub mod social;
 pub mod templates;
 pub use brain::{Brain, BrainError, BrainPlan, BudgetedPrompt};
-pub use llm_provider::{
-    LlmProvider, LlmResponse, ProviderKeys, canonical_model_id, list_providers,
-    provider_from_choice, provider_from_choice_with_keys,
+pub use brain_iteration::{
+    BrainIterationError, BrainIterationRequest, BrainIterationResponse, Instrumentation, NullInstr,
+    SearchProvider, run_iteration_via_brain,
 };
 pub use bug_finder::{
     BUG_FINDER_MAX_BUGS, Bug, Severity as BugSeverity, build_bug_finder_prompt,
@@ -40,6 +40,10 @@ pub use bug_finder::{
 pub use code_assist::{
     DocStyle, build_code_explainer_prompt, build_doc_generator_prompt, build_refactor_prompt,
     build_test_generation_prompt,
+};
+pub use edit_mode::{
+    EditModeRequest, EditModeResponse, StreamEvent, TokenUsage, run_edit_mode,
+    run_edit_mode_streaming, run_iteration_via_edit_blocks,
 };
 pub use goose_backend::{AgentBackend, AgentChoice, GooseCliBackend};
 pub use integrations::{
@@ -51,27 +55,22 @@ pub use intent::{
     AdaptiveClassifier, HeuristicClassifier, HybridClassifier, Intent, IntentClassifier,
     IntentContext, IntentDecision,
 };
-pub use social::{
-    ERI_WAITLIST_URL, SOCIAL_THREAD_BEST_TIME, SOCIAL_THREAD_MAX_TWEETS, SOCIAL_THREAD_MIN_TWEETS,
-    SOCIAL_THREAD_TWEET_CHAR_BUDGET, SocialThread, build_social_thread_prompt,
-    parse_social_thread,
+pub use llm_provider::{
+    LlmProvider, LlmResponse, ProviderKeys, canonical_model_id, list_providers,
+    provider_from_choice, provider_from_choice_with_keys,
 };
 pub use pr::{
     CommitSummary, GeneratedPr, build_commit_message_prompt, build_pr_description_prompt,
     parse_pr_response,
 };
 pub use pr_workflow::{PrWorkflowError, open_pr_workflow};
+pub use social::{
+    ERI_WAITLIST_URL, SOCIAL_THREAD_BEST_TIME, SOCIAL_THREAD_MAX_TWEETS, SOCIAL_THREAD_MIN_TWEETS,
+    SOCIAL_THREAD_TWEET_CHAR_BUDGET, SocialThread, build_social_thread_prompt, parse_social_thread,
+};
 pub use templates::{
     EDIT_MODE_EMBED_BUDGET_CHARS, TEMPLATES, Template, edit_mode_system_prompt,
     edit_mode_user_prompt, match_template, template_by_slug,
-};
-pub use edit_mode::{
-    EditModeRequest, EditModeResponse, StreamEvent, TokenUsage, run_edit_mode,
-    run_edit_mode_streaming, run_iteration_via_edit_blocks,
-};
-pub use brain_iteration::{
-    BrainIterationError, BrainIterationRequest, BrainIterationResponse, Instrumentation,
-    NullInstr, SearchProvider, run_iteration_via_brain,
 };
 
 pub trait InferenceBackend {
@@ -157,8 +156,14 @@ pub fn parse_search_replace_blocks(response: &str) -> Vec<SearchReplaceBlock> {
         let replace_part = &after_div[..end_idx];
         // Trim only the single trailing newline that the marker convention
         // produces — preserving meaningful whitespace inside the block.
-        let search = search_part.strip_suffix('\n').unwrap_or(search_part).to_string();
-        let replace = replace_part.strip_suffix('\n').unwrap_or(replace_part).to_string();
+        let search = search_part
+            .strip_suffix('\n')
+            .unwrap_or(search_part)
+            .to_string();
+        let replace = replace_part
+            .strip_suffix('\n')
+            .unwrap_or(replace_part)
+            .to_string();
         if !search.is_empty() {
             blocks.push(SearchReplaceBlock { search, replace });
         }
@@ -256,7 +261,9 @@ struct EditHtmlEdit {
 /// Parse the streaming tool-call arguments (a JSON string concatenated across
 /// chunks) into search/replace blocks. Skips edits with empty `search` — those
 /// are unactionable.
-pub fn parse_edit_html_tool_arguments(arguments: &str) -> Result<Vec<SearchReplaceBlock>, serde_json::Error> {
+pub fn parse_edit_html_tool_arguments(
+    arguments: &str,
+) -> Result<Vec<SearchReplaceBlock>, serde_json::Error> {
     let parsed: EditHtmlArguments = serde_json::from_str(arguments)?;
     Ok(parsed
         .edits
@@ -530,14 +537,13 @@ impl<T: SidecarTransport> InferenceBackend for DreamSidecarBackend<T> {
         };
         let body = serde_json::to_string(&payload)?;
         let response = self.transport.post_json(&self.endpoint(), &body)?;
-        let (mut events, envelope_draft) =
-            match serde_json::from_str::<DreamResponse>(&response) {
-                Ok(envelope) => (envelope.events.unwrap_or_default(), envelope.draft),
-                Err(envelope_err) => match serde_json::from_str::<Vec<IterEvent>>(&response) {
-                    Ok(events) => (events, None),
-                    Err(_) => return Err(InferenceError::Json(envelope_err)),
-                },
-            };
+        let (mut events, envelope_draft) = match serde_json::from_str::<DreamResponse>(&response) {
+            Ok(envelope) => (envelope.events.unwrap_or_default(), envelope.draft),
+            Err(envelope_err) => match serde_json::from_str::<Vec<IterEvent>>(&response) {
+                Ok(events) => (events, None),
+                Err(_) => return Err(InferenceError::Json(envelope_err)),
+            },
+        };
 
         if events.is_empty()
             && let Some(text) = envelope_draft.clone()
@@ -548,14 +554,18 @@ impl<T: SidecarTransport> InferenceBackend for DreamSidecarBackend<T> {
 
         let draft_text = collect_draft(&events).or(envelope_draft);
         if let Some(text) = draft_text.as_deref()
-            && let Some(patch) =
-                extract_diff_patch(text, prompt_ctx, self.next_patch_id())
-            && !events.iter().any(|event| matches!(event, IterEvent::CandidatePatch { .. }))
+            && let Some(patch) = extract_diff_patch(text, prompt_ctx, self.next_patch_id())
+            && !events
+                .iter()
+                .any(|event| matches!(event, IterEvent::CandidatePatch { .. }))
         {
             events.push(IterEvent::CandidatePatch { patch });
         }
 
-        if !events.iter().any(|event| matches!(event, IterEvent::Done | IterEvent::Error { .. })) {
+        if !events
+            .iter()
+            .any(|event| matches!(event, IterEvent::Done | IterEvent::Error { .. }))
+        {
             events.push(IterEvent::Done);
         }
         Ok(events)
@@ -731,8 +741,8 @@ impl MercuryConfig {
         // separate task. For now `iterate_surgical_stream` still POSTs to
         // /v1/chat/completions; this default is only used once the surgical
         // path is upgraded to call the apply endpoint.
-        let edit_model = env::var("MERCURY_EDIT_MODEL")
-            .unwrap_or_else(|_| "mercury-edit-2".to_string());
+        let edit_model =
+            env::var("MERCURY_EDIT_MODEL").unwrap_or_else(|_| "mercury-edit-2".to_string());
         let max_tokens = env::var("MERCURY_MAX_TOKENS")
             .ok()
             .and_then(|raw| raw.parse().ok())
@@ -748,9 +758,7 @@ impl MercuryConfig {
         // while still respecting the system prompt's design rules.
         let reasoning_effort = env::var("MERCURY_REASONING_EFFORT")
             .ok()
-            .filter(|value| {
-                matches!(value.as_str(), "instant" | "low" | "medium" | "high")
-            })
+            .filter(|value| matches!(value.as_str(), "instant" | "low" | "medium" | "high"))
             .unwrap_or_else(|| "medium".to_string());
         Some(Self {
             api_base,
@@ -856,17 +864,11 @@ pub fn read_project_rules(project_root: &Path) -> std::io::Result<Option<String>
             // comments" state collapses to None and Mercury never sees an
             // empty rules block. A line is "comment-only" if it's blank or
             // starts with `#` after trimming.
-            let meaningful = body
-                .lines()
-                .any(|line| {
-                    let trimmed = line.trim();
-                    !trimmed.is_empty() && !trimmed.starts_with('#')
-                });
-            if meaningful {
-                Ok(Some(body))
-            } else {
-                Ok(None)
-            }
+            let meaningful = body.lines().any(|line| {
+                let trimmed = line.trim();
+                !trimmed.is_empty() && !trimmed.starts_with('#')
+            });
+            if meaningful { Ok(Some(body)) } else { Ok(None) }
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(error),
@@ -1011,7 +1013,11 @@ impl MercuryBackend {
     /// Snapshot the active MCP tool list. Returns an empty Vec when no tools
     /// are configured — the same state the constructor leaves the backend in.
     pub fn mcp_tools(&self) -> Vec<McpToolDescriptor> {
-        self.mcp_tools.lock().ok().map(|g| g.clone()).unwrap_or_default()
+        self.mcp_tools
+            .lock()
+            .ok()
+            .map(|g| g.clone())
+            .unwrap_or_default()
     }
 
     /// Install the dispatcher that translates Mercury-issued tool calls into
@@ -1116,7 +1122,9 @@ impl MercuryBackend {
             temperature: self.config.temperature,
             stream: true,
             reasoning_effort: &self.config.reasoning_effort,
-            stream_options: Some(StreamOptions { include_usage: true }),
+            stream_options: Some(StreamOptions {
+                include_usage: true,
+            }),
             diffusing: None,
             tools: Some(std::slice::from_ref(&tools)),
             tool_choice: Some(tool_choice),
@@ -1220,8 +1228,7 @@ impl MercuryBackend {
             return Ok(());
         }
 
-        let (modified, applied, skipped) =
-            apply_search_replace_blocks(current_draft, &blocks);
+        let (modified, applied, skipped) = apply_search_replace_blocks(current_draft, &blocks);
         eprintln!(
             "[eri.mercury.surgical] applied {}/{} edits ({} skipped)",
             applied,
@@ -1325,7 +1332,9 @@ impl MercuryBackend {
             // protocol stays consistent across turns. OpenAI requires the
             // assistant message that requested the calls to precede each
             // tool result.
-            messages.push(ChatMessage::assistant(choice.message.content.unwrap_or_default()));
+            messages.push(ChatMessage::assistant(
+                choice.message.content.unwrap_or_default(),
+            ));
 
             let mut dispatched_any = false;
             for call in calls {
@@ -1393,9 +1402,7 @@ impl MercuryBackend {
 
         let snippet = self.fetch_update_snippet(prompt_ctx, current_draft)?;
         if snippet.trim().is_empty() {
-            eprintln!(
-                "[eri.mercury.apply] empty update snippet — falling back to surgical path"
-            );
+            eprintln!("[eri.mercury.apply] empty update snippet — falling back to surgical path");
             return self.iterate_surgical_stream(prompt_ctx, request, on_event, on_partial_html);
         }
         eprintln!(
@@ -1467,13 +1474,11 @@ impl MercuryBackend {
                         });
                         let now = std::time::Instant::now();
                         if now.duration_since(last_partial_write) >= partial_write_min_gap
-                            && (accumulated.contains("</head>")
-                                || accumulated.contains("</HEAD>"))
+                            && (accumulated.contains("</head>") || accumulated.contains("</HEAD>"))
+                            && let Some(html) = extract_partial_html_body(&accumulated)
                         {
-                            if let Some(html) = extract_partial_html_body(&accumulated) {
-                                on_partial_html(&html);
-                                last_partial_write = now;
-                            }
+                            on_partial_html(&html);
+                            last_partial_write = now;
                         }
                     }
                 }
@@ -1486,8 +1491,7 @@ impl MercuryBackend {
             start_time.elapsed().as_millis()
         );
 
-        let merged = extract_partial_html_body(&accumulated)
-            .unwrap_or_else(|| accumulated.clone());
+        let merged = extract_partial_html_body(&accumulated).unwrap_or_else(|| accumulated.clone());
         if !merged.trim().is_empty() {
             on_partial_html(&merged);
         }
@@ -1626,11 +1630,9 @@ impl MercuryBackend {
                         // streams. Strip the prefix/suffix to surface just
                         // the candidate replacement so the panel renders a
                         // tight ghost overlay rather than the whole file.
-                        if let Some(partial_rep) = extract_replacement_between(
-                            &accumulated,
-                            &prefix_owned,
-                            &suffix_owned,
-                        ) {
+                        if let Some(partial_rep) =
+                            extract_replacement_between(&accumulated, &prefix_owned, &suffix_owned)
+                        {
                             on_partial(&partial_rep);
                         }
                     }
@@ -1645,8 +1647,8 @@ impl MercuryBackend {
         );
 
         let merged = strip_code_fence(accumulated.trim()).to_string();
-        let replacement = extract_replacement_between(&merged, prefix, suffix)
-            .unwrap_or_else(|| merged.clone());
+        let replacement =
+            extract_replacement_between(&merged, prefix, suffix).unwrap_or_else(|| merged.clone());
         Ok(replacement)
     }
 
@@ -1675,10 +1677,7 @@ impl MercuryBackend {
         );
         let payload = ChatCompletionPayload {
             model: &self.config.model,
-            messages: &[
-                ChatMessage::system(system),
-                ChatMessage::user(user_msg),
-            ],
+            messages: &[ChatMessage::system(system), ChatMessage::user(user_msg)],
             max_tokens: 1500.min(self.config.max_tokens),
             temperature: self.config.temperature,
             stream: false,
@@ -1718,10 +1717,7 @@ impl MercuryBackend {
         );
         let payload = ChatCompletionPayload {
             model: &self.config.model,
-            messages: &[
-                ChatMessage::system(system),
-                ChatMessage::user(user_msg),
-            ],
+            messages: &[ChatMessage::system(system), ChatMessage::user(user_msg)],
             max_tokens: 768,
             temperature: 0.9,
             stream: false,
@@ -1829,10 +1825,10 @@ impl MercuryBackend {
             .last()
             .map(|turn| turn.trim().to_string())
             .unwrap_or_default();
-        if request_text.is_empty() {
-            if let Some(partial) = ctx.partial_transcript() {
-                request_text = partial.trim().to_string();
-            }
+        if request_text.is_empty()
+            && let Some(partial) = ctx.partial_transcript()
+        {
+            request_text = partial.trim().to_string();
         }
 
         // The ORIGINAL request (first committed turn) anchors the topic so
@@ -1867,7 +1863,9 @@ impl MercuryBackend {
         }
 
         if !request_text.is_empty() {
-            user.push_str("# User request (the LATEST change to apply — keep the topic above intact)\n");
+            user.push_str(
+                "# User request (the LATEST change to apply — keep the topic above intact)\n",
+            );
             user.push_str(&request_text);
             user.push_str("\n\n");
             // When iterating, add a reminder right next to the request so the
@@ -1929,16 +1927,12 @@ impl MercuryBackend {
         // fragments left over from earlier streaming bugs would confuse
         // Mercury and cause topic drift (e.g. coffee shop → fitness app
         // because the previous draft was just `+</footer>` fragments).
-        let starts_new_build = self
-            .classify_intent(ctx, current_draft)
-            .is_new_build();
+        let starts_new_build = self.classify_intent(ctx, current_draft).is_new_build();
         let draft_looks_complete = current_draft
             .map(|d| {
                 let trimmed = d.trim();
                 let lower = trimmed.to_ascii_lowercase();
-                trimmed.len() > 500
-                    && lower.contains("<!doctype html")
-                    && lower.contains("</html>")
+                trimmed.len() > 500 && lower.contains("<!doctype html") && lower.contains("</html>")
             })
             .unwrap_or(false);
         if let Some(draft) = current_draft
@@ -2128,7 +2122,13 @@ pub const THEME_PALETTES: &[ThemePalette] = &[
     },
     ThemePalette {
         name: "coffee shop",
-        aliases: &["coffee", "coffeeshop", "coffee colors", "coffee palette", "cafe"],
+        aliases: &[
+            "coffee",
+            "coffeeshop",
+            "coffee colors",
+            "coffee palette",
+            "cafe",
+        ],
         bg_hex: "#FFF8F0",
         fg_hex: "#2D1810",
         accent_hex: "#C97B5A",
@@ -2430,16 +2430,19 @@ impl InferenceBackend for MercuryBackend {
         // We ask Mercury to produce a structured JSON brief — custom palette,
         // unique copy hooks, layout choice — so the second pass has concrete
         // direction and we get genuine variety per build.
-        let needs_brief = request.current_draft.is_none()
-            && self.looks_like_new_build_from_ctx(prompt_ctx);
+        let needs_brief =
+            request.current_draft.is_none() && self.looks_like_new_build_from_ctx(prompt_ctx);
         let design_brief = if needs_brief {
             self.fetch_design_brief(prompt_ctx).ok()
         } else {
             None
         };
 
-        let messages =
-            self.build_messages(prompt_ctx, request.current_draft.as_deref(), design_brief.as_deref());
+        let messages = self.build_messages(
+            prompt_ctx,
+            request.current_draft.as_deref(),
+            design_brief.as_deref(),
+        );
         let payload = ChatCompletionPayload {
             model: &self.config.model,
             messages: &messages,
@@ -2538,7 +2541,9 @@ impl InferenceBackend for MercuryBackend {
             match self.run_mcp_tool_loop(prompt_ctx, request.current_draft.as_deref(), on_event) {
                 Ok(results) => results,
                 Err(error) => {
-                    eprintln!("[eri.mcp] tool loop failed: {error} — continuing without tool results");
+                    eprintln!(
+                        "[eri.mcp] tool loop failed: {error} — continuing without tool results"
+                    );
                     Vec::new()
                 }
             }
@@ -2568,7 +2573,11 @@ impl InferenceBackend for MercuryBackend {
         // Task #48: opt-in Mercury Edit 2 apply path. Only meaningful for
         // iterations on a large existing draft (>4000 chars); for smaller
         // files the surgical tool-call path's overhead is already negligible.
-        let draft_len = request.current_draft.as_deref().map(|s| s.len()).unwrap_or(0);
+        let draft_len = request
+            .current_draft
+            .as_deref()
+            .map(|s| s.len())
+            .unwrap_or(0);
         let use_apply = is_iteration
             && draft_len > 4000
             && env::var("ERI_APPLY_ITERATE")
@@ -2582,12 +2591,7 @@ impl InferenceBackend for MercuryBackend {
                 .map(|v| v != "0" && !v.is_empty())
                 .unwrap_or(true); // opt-OUT not opt-in — surgical is the default
         if use_surgical {
-            return self.iterate_surgical_stream(
-                prompt_ctx,
-                request,
-                on_event,
-                on_partial_html,
-            );
+            return self.iterate_surgical_stream(prompt_ctx, request, on_event, on_partial_html);
         }
 
         // Skip the design-brief Pass 1 — it added 1-2s of dead time before
@@ -2636,7 +2640,10 @@ impl InferenceBackend for MercuryBackend {
                 );
                 // Insert as a second system message right after SYSTEM_PROMPT
                 // so Mercury sees it before the user's content.
-                let insert_at = messages.iter().position(|m| m.role != "system").unwrap_or(messages.len());
+                let insert_at = messages
+                    .iter()
+                    .position(|m| m.role != "system")
+                    .unwrap_or(messages.len());
                 messages.insert(insert_at, ChatMessage::system(seed_message));
             }
         }
@@ -2655,7 +2662,9 @@ impl InferenceBackend for MercuryBackend {
             temperature: self.config.temperature,
             stream: true,
             reasoning_effort: &self.config.reasoning_effort,
-            stream_options: Some(StreamOptions { include_usage: true }),
+            stream_options: Some(StreamOptions {
+                include_usage: true,
+            }),
             diffusing: if want_diffusing { Some(true) } else { None },
             tools: None,
             tool_choice: None,
@@ -2744,22 +2753,17 @@ impl InferenceBackend for MercuryBackend {
                         // not after the full 2-5s response arrives.
                         let now = std::time::Instant::now();
                         if now.duration_since(last_partial_write) >= partial_write_min_gap
-                            && (accumulated.contains("</head>")
-                                || accumulated.contains("</HEAD>"))
+                            && (accumulated.contains("</head>") || accumulated.contains("</HEAD>"))
+                            && let Some(html) = extract_partial_html_body(&accumulated)
                         {
-                            if let Some(html) = extract_partial_html_body(&accumulated) {
-                                on_partial_html(&html);
-                                last_partial_write = now;
-                            }
+                            on_partial_html(&html);
+                            last_partial_write = now;
                         }
                     }
                 }
             })?;
         let total_time = start_time.elapsed();
-        let first_chunk_ms = first_chunk_time
-            .get()
-            .map(|d| d.as_millis())
-            .unwrap_or(0);
+        let first_chunk_ms = first_chunk_time.get().map(|d| d.as_millis()).unwrap_or(0);
         eprintln!(
             "[eri.mercury] stream done: {} chunks, {} chars, finish_reason={}, ttfb={}ms, total={}ms",
             chunk_count,
@@ -2772,13 +2776,12 @@ impl InferenceBackend for MercuryBackend {
         // After the stream closes, try to extract a candidate patch from
         // the accumulated text once (separate from the streaming deltas so
         // we don't try to parse incomplete diffs).
-        if !accumulated.is_empty() && !emitted_patch {
-            if let Some(patch) =
-                extract_diff_patch(&accumulated, prompt_ctx, self.next_patch_id())
-            {
-                on_event(IterEvent::CandidatePatch { patch });
-                emitted_patch = true;
-            }
+        if !accumulated.is_empty()
+            && !emitted_patch
+            && let Some(patch) = extract_diff_patch(&accumulated, prompt_ctx, self.next_patch_id())
+        {
+            on_event(IterEvent::CandidatePatch { patch });
+            emitted_patch = true;
         }
 
         if accumulated.trim().is_empty() && final_finish_reason == "length" {
@@ -3013,7 +3016,7 @@ impl ClaudeCliBackend {
                 Err(err) => {
                     return Err(InferenceError::Transport(format!(
                         "claude wait failed: {err}"
-                    )))
+                    )));
                 }
             }
         }
@@ -3071,9 +3074,7 @@ pub fn vercel_deploy_enabled() -> bool {
 /// they bubble up to the panel status.
 pub fn deploy_to_vercel(build_dir: &Path) -> Result<String, InferenceError> {
     let binary = vercel_cli_available().ok_or_else(|| {
-        InferenceError::Transport(
-            "vercel CLI not found on PATH — install: npm i -g vercel".into(),
-        )
+        InferenceError::Transport("vercel CLI not found on PATH — install: npm i -g vercel".into())
     })?;
     if !build_dir.is_dir() {
         return Err(InferenceError::Transport(format!(
@@ -3335,6 +3336,7 @@ pub fn replace_deploy_url_placeholder(html: &str, deploy_url: &str) -> (String, 
 ///    OUTSIDE of `<script>`, `<style>`, `<pre>`, `<textarea>` blocks where
 ///    whitespace is semantic.
 /// 3. Trim leading/trailing whitespace around tags (`> <` → `><`).
+///
 /// This is a conservative minifier — it won't break visible whitespace
 /// inside text nodes that need it, but it'll shave 30-50% off typical Tailwind
 /// HTML where indentation dominates byte count.
@@ -3474,7 +3476,6 @@ struct ChunkToolCallFunction {
     #[serde(default)]
     arguments: Option<String>,
 }
-
 
 /// Payload for Mercury Edit 2's `/v1/apply/completions` endpoint. Per the
 /// Inception Labs docs, the apply endpoint expects the full current file
@@ -3685,7 +3686,6 @@ struct ChatUsage {
     total_tokens: u32,
 }
 
-
 fn deserialize_nullable_string<'de, D>(deserializer: D) -> Result<String, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -3789,7 +3789,11 @@ fn extract_fenced_code_files(response: &str) -> Vec<ParsedFile> {
     while i < lines.len() {
         let trimmed = lines[i].trim();
         if let Some(rest) = trimmed.strip_prefix("```") {
-            let lang = rest.split_whitespace().next().unwrap_or("").to_ascii_lowercase();
+            let lang = rest
+                .split_whitespace()
+                .next()
+                .unwrap_or("")
+                .to_ascii_lowercase();
             let (default_path, accept) = match lang.as_str() {
                 "html" => ("index.html", true),
                 "javascript" | "js" => ("script.js", true),
@@ -3883,7 +3887,12 @@ fn parse_unified_diff_files(diff: &str) -> Vec<ParsedFile> {
 
     for line in diff.lines() {
         if line.starts_with("--- ") {
-            flush(&mut files, &mut current_path, &mut current_lines, &mut is_new);
+            flush(
+                &mut files,
+                &mut current_path,
+                &mut current_lines,
+                &mut is_new,
+            );
             // Treat ALL diff hunks as full-file rewrites for the build flow.
             // The system prompt instructs Mercury to always send /dev/null, and
             // even if it slips and sends `--- a/<path>`, we still write the
@@ -3924,7 +3933,12 @@ fn parse_unified_diff_files(diff: &str) -> Vec<ParsedFile> {
             }
         }
     }
-    flush(&mut files, &mut current_path, &mut current_lines, &mut is_new);
+    flush(
+        &mut files,
+        &mut current_path,
+        &mut current_lines,
+        &mut is_new,
+    );
     files
 }
 
@@ -4183,10 +4197,12 @@ mod tool_call_tests {
         let serialized = serde_json::to_value(&payload).expect("serialize");
         assert_eq!(serialized["model"], "mercury-edit-2");
         assert_eq!(serialized["original_code"], "<html><body>old</body></html>");
-        assert!(serialized["update_snippet"]
-            .as_str()
-            .expect("snippet string")
-            .contains("// ... existing code ..."));
+        assert!(
+            serialized["update_snippet"]
+                .as_str()
+                .expect("snippet string")
+                .contains("// ... existing code ...")
+        );
         assert_eq!(serialized["stream"], true);
         // The apply endpoint MUST NOT receive chat-only fields.
         assert!(serialized.get("messages").is_none());
@@ -4311,10 +4327,7 @@ mod tool_call_tests {
 
     #[test]
     fn ship_it_prompt_without_target_uses_placeholder() {
-        let prompt = build_ship_it_prompt(
-            &["a thing".to_string()],
-            "<html></html>",
-        );
+        let prompt = build_ship_it_prompt(&["a thing".to_string()], "<html></html>");
         assert!(prompt.contains(SHIP_IT_DEPLOY_URL_PLACEHOLDER));
     }
 
@@ -4332,8 +4345,7 @@ mod tool_call_tests {
     fn replace_deploy_url_placeholder_swaps_every_match() {
         let html = "<link rel=\"canonical\" href=\"{{DEPLOY_URL}}\">\n\
                     <meta property=\"og:url\" content=\"{{DEPLOY_URL}}\">";
-        let (out, count) =
-            replace_deploy_url_placeholder(html, "https://demo.vercel.app");
+        let (out, count) = replace_deploy_url_placeholder(html, "https://demo.vercel.app");
         assert_eq!(count, 2);
         assert!(out.contains("https://demo.vercel.app"));
         assert!(!out.contains(SHIP_IT_DEPLOY_URL_PLACEHOLDER));
@@ -4342,8 +4354,7 @@ mod tool_call_tests {
     #[test]
     fn replace_deploy_url_placeholder_is_noop_when_absent() {
         let html = "<title>hi</title>";
-        let (out, count) =
-            replace_deploy_url_placeholder(html, "https://x.vercel.app");
+        let (out, count) = replace_deploy_url_placeholder(html, "https://x.vercel.app");
         assert_eq!(count, 0);
         assert_eq!(out, html);
     }
@@ -4386,23 +4397,33 @@ mod tool_call_tests {
             .collect();
 
         assert!(
-            system_messages.iter().any(|m| m.contains("shadcn/ui patterns")),
+            system_messages
+                .iter()
+                .any(|m| m.contains("shadcn/ui patterns")),
             "expected shadcn component hints in system messages"
         );
         assert!(
-            system_messages.iter().any(|m| m.contains("bg-primary text-primary-foreground")),
+            system_messages
+                .iter()
+                .any(|m| m.contains("bg-primary text-primary-foreground")),
             "expected primary button class string"
         );
         assert!(
-            system_messages.iter().any(|m| m.contains("rounded-lg border bg-card")),
+            system_messages
+                .iter()
+                .any(|m| m.contains("rounded-lg border bg-card")),
             "expected card class string"
         );
         assert!(
-            system_messages.iter().any(|m| m.contains("flex h-10 w-full rounded-md border border-input")),
+            system_messages
+                .iter()
+                .any(|m| m.contains("flex h-10 w-full rounded-md border border-input")),
             "expected input class string"
         );
         assert!(
-            system_messages.iter().any(|m| m.contains("backdrop-blur-sm")),
+            system_messages
+                .iter()
+                .any(|m| m.contains("backdrop-blur-sm")),
             "expected dialog backdrop pattern"
         );
         assert!(

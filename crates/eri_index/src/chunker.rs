@@ -235,13 +235,7 @@ fn match_kind(node_kind: &str, table: &[(&str, ChunkKind)]) -> Option<ChunkKind>
         .map(|(_, kind)| *kind)
 }
 
-fn push_chunk(
-    path: &str,
-    content: &str,
-    node: Node<'_>,
-    kind: ChunkKind,
-    chunks: &mut Vec<Chunk>,
-) {
+fn push_chunk(path: &str, content: &str, node: Node<'_>, kind: ChunkKind, chunks: &mut Vec<Chunk>) {
     let byte_start = node.start_byte();
     let byte_end = node.end_byte();
     let line_start = node.start_position().row + 1;
@@ -333,9 +327,7 @@ fn split_by_newline(
     let mut current_start_byte = base_byte;
     let mut cursor_byte = base_byte;
     for line in paragraph.split_inclusive('\n') {
-        if current.chars().count() + line.chars().count() > MAX_CHUNK_CHARS
-            && !current.is_empty()
-        {
+        if current.chars().count() + line.chars().count() > MAX_CHUNK_CHARS && !current.is_empty() {
             flush_recursive(
                 path,
                 full_content,
@@ -505,7 +497,11 @@ export class Counter {
         let src = "alpha bravo\n\ncharlie delta\n";
         let chunks = chunk_file("notes.txt", src);
         assert!(!chunks.is_empty());
-        assert!(chunks.iter().all(|c| c.kind == ChunkKind::RecursiveFallback));
+        assert!(
+            chunks
+                .iter()
+                .all(|c| c.kind == ChunkKind::RecursiveFallback)
+        );
     }
 
     #[test]

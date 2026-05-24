@@ -15,8 +15,8 @@ use tokio::sync::Mutex;
 use eri_codemaps::{CodemapKind, CodemapStore};
 use eri_index::Index;
 
-use crate::services::Services;
 use crate::DispatchError;
+use crate::services::Services;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -57,9 +57,7 @@ pub async fn generate(params: Value, services: &Services) -> Result<Value, Dispa
     let index_handle = get_or_open_index(services, &p.workspace).await?;
     let map = {
         let guard = index_handle.lock().await;
-        store
-            .generate(kind, &guard)
-            .map_err(DispatchError::Other)?
+        store.generate(kind, &guard).map_err(DispatchError::Other)?
     };
     store.save(&map).map_err(DispatchError::Other)?;
     serde_json::to_value(serde_json::json!({
@@ -121,8 +119,8 @@ async fn get_or_open_index(
     if let Some(existing) = map.get(workspace) {
         return Ok(existing.clone());
     }
-    let index = Index::open(workspace)
-        .map_err(|e| DispatchError::Other(anyhow::anyhow!(e.to_string())))?;
+    let index =
+        Index::open(workspace).map_err(|e| DispatchError::Other(anyhow::anyhow!(e.to_string())))?;
     let arc = Arc::new(Mutex::new(index));
     map.insert(workspace.clone(), arc.clone());
     Ok(arc)

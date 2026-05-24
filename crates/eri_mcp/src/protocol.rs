@@ -337,7 +337,8 @@ mod tests {
 
     #[test]
     fn content_block_deserializes_text_and_image() {
-        let raw = r#"[{"type":"text","text":"hi"},{"type":"image","data":"AAA","mimeType":"image/png"}]"#;
+        let raw =
+            r#"[{"type":"text","text":"hi"},{"type":"image","data":"AAA","mimeType":"image/png"}]"#;
         let parsed: Vec<ContentBlock> = serde_json::from_str(raw).unwrap();
         assert_eq!(parsed.len(), 2);
         match &parsed[0] {

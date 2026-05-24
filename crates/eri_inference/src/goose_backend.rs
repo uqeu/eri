@@ -14,7 +14,10 @@
 use std::{
     env,
     path::{Path, PathBuf},
-    sync::{Arc, atomic::{AtomicBool, Ordering}},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
 use crate::{
@@ -217,7 +220,11 @@ impl AgentBackend {
             .ok()
             .as_deref()
             .and_then(AgentChoice::parse);
-        Self::detect_with(env_choice, ClaudeCliBackend::detect, GooseCliBackend::detect)
+        Self::detect_with(
+            env_choice,
+            ClaudeCliBackend::detect,
+            GooseCliBackend::detect,
+        )
     }
 
     /// Test seam: same selection logic as [`Self::detect`] but with explicit
@@ -420,9 +427,6 @@ mod tests {
         // `/bin/echo` exists on every UNIX host, so this is a reliable probe
         // that `which_path` honors the absolute-path shortcut without
         // touching $PATH.
-        assert_eq!(
-            which_path("/bin/echo"),
-            Some(PathBuf::from("/bin/echo"))
-        );
+        assert_eq!(which_path("/bin/echo"), Some(PathBuf::from("/bin/echo")));
     }
 }

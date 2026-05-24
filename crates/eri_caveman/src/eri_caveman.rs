@@ -135,10 +135,13 @@ const ARTICLES: &[&str] = &["a", "an", "the"];
 // Weak verbs that frequently act as filler when followed by a noun ("get
 // the file", "make a request"). When dropping them, the next noun stands
 // in for the whole verb phrase.
-const WEAK_VERBS: &[&str] = &["get", "gets", "make", "makes", "do", "does", "perform", "performs"];
+const WEAK_VERBS: &[&str] = &[
+    "get", "gets", "make", "makes", "do", "does", "perform", "performs",
+];
 
-const UNAMBIGUOUS_PRONOUNS: &[&str] =
-    &["it", "its", "this", "that", "these", "those", "me", "you", "us"];
+const UNAMBIGUOUS_PRONOUNS: &[&str] = &[
+    "it", "its", "this", "that", "these", "those", "me", "you", "us",
+];
 
 const LIST_CONJUNCTIONS: &[&str] = &["and", "or", "but"];
 
@@ -159,7 +162,10 @@ fn compress_prose(text: &str, level: CompressionLevel) -> String {
         }
 
         // Level: Medium
-        if matches!(level, CompressionLevel::Medium | CompressionLevel::Aggressive) {
+        if matches!(
+            level,
+            CompressionLevel::Medium | CompressionLevel::Aggressive
+        ) {
             if ARTICLES.contains(&lower.as_str()) {
                 continue;
             }
@@ -238,10 +244,13 @@ fn tokenize(text: &str) -> Vec<Token> {
             }
         }
     }
-    if let Some(k) = current_kind {
-        if !current.is_empty() {
-            out.push(Token { text: current, kind: k });
-        }
+    if let Some(k) = current_kind
+        && !current.is_empty()
+    {
+        out.push(Token {
+            text: current,
+            kind: k,
+        });
     }
     out
 }

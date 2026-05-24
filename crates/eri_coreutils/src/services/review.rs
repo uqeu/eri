@@ -13,15 +13,15 @@ use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::Value;
 
-use eri_inference::llm_provider::{provider_from_choice, LlmProvider};
+use eri_inference::llm_provider::{LlmProvider, provider_from_choice};
 use eri_review::findings::FindingCategory;
 use eri_review::{
-    loader_for, DiffSource, Effort, ReviewBackend, ReviewFinding, ReviewOptions, ReviewReport,
-    Reviewer,
+    DiffSource, Effort, ReviewBackend, ReviewFinding, ReviewOptions, ReviewReport, Reviewer,
+    loader_for,
 };
 
-use crate::services::Services;
 use crate::DispatchError;
+use crate::services::Services;
 
 // ---------------------------------------------------------------------------
 // Params
@@ -128,14 +128,14 @@ pub async fn local(params: Value, services: &Services) -> Result<Value, Dispatch
             base: p.base.ok_or_else(|| {
                 DispatchError::BadParams("range kind requires `base`".to_string())
             })?,
-            head: p
-                .head
-                .ok_or_else(|| DispatchError::BadParams("range kind requires `head`".to_string()))?,
+            head: p.head.ok_or_else(|| {
+                DispatchError::BadParams("range kind requires `head`".to_string())
+            })?,
         },
         other => {
             return Err(DispatchError::BadParams(format!(
                 "unknown local review kind: {other}"
-            )))
+            )));
         }
     };
     let model_choice = p.options.model.clone();
@@ -213,9 +213,9 @@ fn resolve_pr_source(p: &PrParams) -> Result<DiffSource, DispatchError> {
             let repo = p.repo.clone().ok_or_else(|| {
                 DispatchError::BadParams("forgejo review requires repo".to_string())
             })?;
-            let pr = p
-                .pr
-                .ok_or_else(|| DispatchError::BadParams("forgejo review requires pr".to_string()))?;
+            let pr = p.pr.ok_or_else(|| {
+                DispatchError::BadParams("forgejo review requires pr".to_string())
+            })?;
             Ok(DiffSource::Forgejo {
                 instance_url,
                 owner,
@@ -223,9 +223,7 @@ fn resolve_pr_source(p: &PrParams) -> Result<DiffSource, DispatchError> {
                 pr,
             })
         }
-        other => Err(DispatchError::BadParams(format!(
-            "unknown forge: {other}"
-        ))),
+        other => Err(DispatchError::BadParams(format!("unknown forge: {other}"))),
     }
 }
 

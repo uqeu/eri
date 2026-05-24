@@ -32,8 +32,7 @@ pub fn parse_mention_prompt(content: &str, bot_id: u64) -> Option<ParsedPrompt> 
         return None;
     }
 
-    let remainder = strip_bot_mention(trimmed, bot_id)
-        .or_else(|| strip_bang_prefix(trimmed))?;
+    let remainder = strip_bot_mention(trimmed, bot_id).or_else(|| strip_bang_prefix(trimmed))?;
 
     let cleaned = strip_build_verb(remainder).trim();
     if cleaned.is_empty() {
@@ -133,8 +132,8 @@ mod tests {
 
     #[test]
     fn bang_eri_prefix_with_build_verb() {
-        let parsed = parse_mention_prompt("!eri build me a pricing page", BOT_ID)
-            .expect("should parse");
+        let parsed =
+            parse_mention_prompt("!eri build me a pricing page", BOT_ID).expect("should parse");
         assert_eq!(parsed, ParsedPrompt::Build("pricing page".to_string()));
     }
 
@@ -193,9 +192,6 @@ mod tests {
     fn leading_whitespace_does_not_block_match() {
         let content = format!("   <@{BOT_ID}>   make a saas landing page  ");
         let parsed = parse_mention_prompt(&content, BOT_ID).expect("should parse");
-        assert_eq!(
-            parsed,
-            ParsedPrompt::Build("saas landing page".to_string())
-        );
+        assert_eq!(parsed, ParsedPrompt::Build("saas landing page".to_string()));
     }
 }

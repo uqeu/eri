@@ -26,7 +26,7 @@ mod types;
 
 pub use error::GraphError;
 pub use types::{
-    edge_kind, node_kind, Direction, Edge, EdgeId, GraphStats, Node, NodeId, Subgraph,
+    Direction, Edge, EdgeId, GraphStats, Node, NodeId, Subgraph, edge_kind, node_kind,
 };
 
 use storage::Store;
@@ -143,7 +143,11 @@ impl Graph {
         }
         let mut out = Vec::with_capacity(edges.len());
         for edge in edges {
-            let neighbor_id = if edge.src == *id { &edge.dst } else { &edge.src };
+            let neighbor_id = if edge.src == *id {
+                &edge.dst
+            } else {
+                &edge.src
+            };
             if let Some(node) = inner.store.get_node(neighbor_id)? {
                 out.push((edge, node));
             }
@@ -214,9 +218,7 @@ impl Graph {
     /// chronological order.
     pub fn query_by_time(&self, since_ms: u64, until_ms: u64) -> Result<Vec<Node>, GraphError> {
         if since_ms > until_ms {
-            return Err(GraphError::Invalid(
-                "since_ms must be <= until_ms".into(),
-            ));
+            return Err(GraphError::Invalid("since_ms must be <= until_ms".into()));
         }
         let inner = self.lock_inner()?;
         inner.store.nodes_in_range(since_ms, until_ms)
@@ -270,10 +272,10 @@ impl Graph {
     /// can be wired up to a sidecar command that writes
     /// `<workspace>/.eri/graph-export-<date>.jsonl`.
     pub fn export_jsonl(&self, path: &Path) -> Result<(), GraphError> {
-        if let Some(parent) = path.parent() {
-            if !parent.as_os_str().is_empty() {
-                std::fs::create_dir_all(parent)?;
-            }
+        if let Some(parent) = path.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            std::fs::create_dir_all(parent)?;
         }
         let inner = self.lock_inner()?;
         let mut buf = String::new();

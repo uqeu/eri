@@ -64,8 +64,8 @@ fn walk_inner(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
 }
 
 fn load_rule_file(path: &Path) -> Result<Rule> {
-    let content = fs::read_to_string(path)
-        .with_context(|| format!("failed to read {}", path.display()))?;
+    let content =
+        fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()))?;
     let ParsedFile { frontmatter, body } = frontmatter::split(&content);
 
     let name = frontmatter

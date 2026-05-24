@@ -135,7 +135,11 @@ mod tests {
         assert_eq!(skill.description(), "Review code for OWASP issues");
         assert_eq!(
             skill.keywords(),
-            &["security".to_string(), "review".to_string(), "audit".to_string()]
+            &[
+                "security".to_string(),
+                "review".to_string(),
+                "audit".to_string()
+            ]
         );
         assert!(skill.body().contains("Body content goes here."));
         assert_eq!(skill.root_dir(), dir.as_path());
@@ -206,7 +210,10 @@ mod tests {
             &dir.join("SKILL.md"),
             "---\nname: with-helper\ndescription: uses helper\n---\nSee checklist.md\n",
         )?;
-        write(&dir.join("checklist.md"), "1. lock the doors\n2. check inputs\n")?;
+        write(
+            &dir.join("checklist.md"),
+            "1. lock the doors\n2. check inputs\n",
+        )?;
 
         let skills = Skills::load(ws)?;
         let skill = skills.get("with-helper").expect("loaded");

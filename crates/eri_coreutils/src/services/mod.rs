@@ -121,9 +121,10 @@ impl Services {
     /// client. The binary uses this so secret lookups can round-trip to the
     /// extension's `SecretStorage`.
     pub fn with_host(host: Arc<HostClient>) -> Arc<Self> {
-        let mut services = Self::default();
-        services.host_client = Some(host);
-        Arc::new(services)
+        Arc::new(Self {
+            host_client: Some(host),
+            ..Self::default()
+        })
     }
 
     /// Convenience: resolve a secret using the cache + host + env chain.

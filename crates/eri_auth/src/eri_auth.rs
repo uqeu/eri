@@ -213,12 +213,7 @@ impl AuthClient {
         Ok(())
     }
 
-    fn post_json(
-        &self,
-        path: &str,
-        body: &str,
-        bearer: Option<&str>,
-    ) -> Result<String, AuthError> {
+    fn post_json(&self, path: &str, body: &str, bearer: Option<&str>) -> Result<String, AuthError> {
         let url = format!("{}{}", self.api_base, path);
         let mut request = self
             .http
@@ -376,4 +371,3 @@ impl RefreshTokenStore for MemoryStore {
         Ok(())
     }
 }
-

@@ -11,16 +11,16 @@
 //! — by writing a frame to stdout and matching the extension's response by
 //! id when it arrives on stdin.
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use serde_json::Value;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::Mutex;
 
 use eri_coreutils::{
-    dispatch, install_panic_handler, install_sentry, install_tracing_subscriber, DispatchError,
-    HostClient, Notification, Request, Response, RpcError, Services, SharedTierState, SharedWriter,
-    TierState, PROTOCOL_VERSION,
+    DispatchError, HostClient, Notification, PROTOCOL_VERSION, Request, Response, RpcError,
+    Services, SharedTierState, SharedWriter, TierState, dispatch, install_panic_handler,
+    install_sentry, install_tracing_subscriber,
 };
 
 #[tokio::main]
@@ -47,7 +47,10 @@ async fn main() -> Result<()> {
     // `main` so we bind it explicitly.
     let _sentry_guard = install_sentry();
 
-    tracing::info!(protocol = PROTOCOL_VERSION, "eri-coreutils sidecar starting");
+    tracing::info!(
+        protocol = PROTOCOL_VERSION,
+        "eri-coreutils sidecar starting"
+    );
 
     // Type-erased shared stdout so `HostClient` and the response writer can
     // both hold a clone of the same `Arc<Mutex<dyn AsyncWrite>>`.
@@ -150,9 +153,7 @@ fn classify(value: &Value) -> InboundKind {
         let id = match id_value.as_u64() {
             Some(id) => id,
             None => {
-                return InboundKind::Malformed(format!(
-                    "response id is not a u64: {id_value}"
-                ));
+                return InboundKind::Malformed(format!("response id is not a u64: {id_value}"));
             }
         };
         if let Some(error_value) = value.get("error") {

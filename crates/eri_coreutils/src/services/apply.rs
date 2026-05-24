@@ -7,8 +7,8 @@ use serde_json::Value;
 
 use eri_apply::{ApplyKind, ApplyReport, Edit, FailureReason};
 
-use crate::services::Services;
 use crate::DispatchError;
+use crate::services::Services;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -100,9 +100,11 @@ struct RunResult {
 pub async fn parse(params: Value, _services: &Services) -> Result<Value, DispatchError> {
     let p: ParseParams =
         serde_json::from_value(params).map_err(|e| DispatchError::BadParams(e.to_string()))?;
-    let edits: Vec<EditOut> = eri_apply::parse(&p.text).into_iter().map(Into::into).collect();
-    serde_json::to_value(ParseResult { edits })
-        .map_err(|e| DispatchError::Other(e.into()))
+    let edits: Vec<EditOut> = eri_apply::parse(&p.text)
+        .into_iter()
+        .map(Into::into)
+        .collect();
+    serde_json::to_value(ParseResult { edits }).map_err(|e| DispatchError::Other(e.into()))
 }
 
 pub async fn run(params: Value, _services: &Services) -> Result<Value, DispatchError> {
@@ -144,8 +146,7 @@ fn serialize_report(report: ApplyReport) -> Result<Value, DispatchError> {
             }
         })
         .collect();
-    serde_json::to_value(RunResult { applied, failed })
-        .map_err(|e| DispatchError::Other(e.into()))
+    serde_json::to_value(RunResult { applied, failed }).map_err(|e| DispatchError::Other(e.into()))
 }
 
 fn kind_str(kind: &ApplyKind) -> &'static str {

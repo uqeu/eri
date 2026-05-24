@@ -132,8 +132,8 @@ fn run_build(prompt: &str, deploy: bool, output: &Path) -> Result<(), CliError> 
     let IterationOutcome { final_html, usage } =
         stream_iteration(&backend, &ctx, request, "Generating")?;
 
-    let final_html = final_html
-        .ok_or_else(|| CliError::Mercury("Mercury returned no HTML body".into()))?;
+    let final_html =
+        final_html.ok_or_else(|| CliError::Mercury("Mercury returned no HTML body".into()))?;
 
     write_file(output, &final_html)?;
     println!("wrote {} ({} bytes)", output.display(), final_html.len());
@@ -305,11 +305,12 @@ fn stream_iteration(
 }
 
 fn write_file(path: &Path, content: &str) -> Result<(), CliError> {
-    if let Some(parent) = path.parent() {
-        if !parent.as_os_str().is_empty() && !parent.exists() {
-            std::fs::create_dir_all(parent)
-                .map_err(|err| CliError::User(format!("mkdir {}: {err}", parent.display())))?;
-        }
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+        && !parent.exists()
+    {
+        std::fs::create_dir_all(parent)
+            .map_err(|err| CliError::User(format!("mkdir {}: {err}", parent.display())))?;
     }
     std::fs::write(path, content)
         .map_err(|err| CliError::User(format!("write {}: {err}", path.display())))
@@ -369,7 +370,7 @@ impl ProgressLine {
         self.tick_counter = self.tick_counter.wrapping_add(1);
         // Throttle: redraw at most every 5 chunks. Mercury emits tokens fast
         // enough that one redraw per chunk pegs a terminal at 30% CPU.
-        if !self.enabled || self.tick_counter % 5 != 0 {
+        if !self.enabled || !self.tick_counter.is_multiple_of(5) {
             return;
         }
         let elapsed = started.elapsed().as_secs_f32();
@@ -430,12 +431,7 @@ mod tests {
 
     #[test]
     fn parses_build_with_prompt_and_deploy() {
-        let cli = Cli::parse_from([
-            "eri",
-            "build",
-            "make me a coffee shop",
-            "--deploy",
-        ]);
+        let cli = Cli::parse_from(["eri", "build", "make me a coffee shop", "--deploy"]);
         match cli.command {
             Command::Build {
                 prompt,
@@ -465,7 +461,11 @@ mod tests {
     #[test]
     fn parses_build_with_explicit_output_path() {
         let cli = Cli::parse_from([
-            "eri", "build", "ship me a page", "--output", "dist/page.html",
+            "eri",
+            "build",
+            "ship me a page",
+            "--output",
+            "dist/page.html",
         ]);
         match cli.command {
             Command::Build { output, .. } => {

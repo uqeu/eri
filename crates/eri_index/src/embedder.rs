@@ -94,7 +94,11 @@ fn hash_embed(input: &str) -> Vec<f32> {
         for window in 0..4 {
             let idx = u16::from_le_bytes([bytes[window * 2], bytes[window * 2 + 1]]) as usize
                 % EMBEDDING_DIM;
-            let sign = if bytes[window * 2 + 2] & 1 == 0 { 1.0 } else { -1.0 };
+            let sign = if bytes[window * 2 + 2] & 1 == 0 {
+                1.0
+            } else {
+                -1.0
+            };
             vec[idx] += sign;
         }
     }
@@ -273,7 +277,11 @@ mod tests {
     #[test]
     fn dummy_embedder_batches_in_order() {
         let e = DummyEmbedder::new();
-        let inputs = vec!["alpha".to_string(), "bravo".to_string(), "alpha".to_string()];
+        let inputs = vec![
+            "alpha".to_string(),
+            "bravo".to_string(),
+            "alpha".to_string(),
+        ];
         let out = e.embed_batch(&inputs).unwrap();
         assert_eq!(out.len(), 3);
         assert_eq!(out[0], out[2]);

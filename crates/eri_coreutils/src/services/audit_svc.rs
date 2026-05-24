@@ -45,6 +45,6 @@ pub async fn recent(params: Value, services: &Services) -> Result<Value, Dispatc
     let entries = services
         .audit
         .read_recent(limit)
-        .map_err(|e| DispatchError::Other(e))?;
+        .map_err(DispatchError::Other)?;
     Ok(serde_json::json!({ "entries": entries }))
 }

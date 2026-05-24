@@ -6,8 +6,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::services::Services;
 use crate::DispatchError;
+use crate::services::Services;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -47,7 +47,7 @@ pub async fn web_search(params: Value, _services: &Services) -> Result<Value, Di
         results: Vec::new(),
         note: "Web search not yet wired",
     })
-        .map_err(|e| DispatchError::Other(e.into()))
+    .map_err(|e| DispatchError::Other(e.into()))
 }
 
 pub async fn docs_fetch(params: Value, _services: &Services) -> Result<Value, DispatchError> {
@@ -57,5 +57,5 @@ pub async fn docs_fetch(params: Value, _services: &Services) -> Result<Value, Di
         body: "",
         note: "Docs fetch not yet wired",
     })
-        .map_err(|e| DispatchError::Other(e.into()))
+    .map_err(|e| DispatchError::Other(e.into()))
 }

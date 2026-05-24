@@ -18,11 +18,7 @@ fn ctx_with_files(files: &[&str]) -> PromptContext {
 
 fn small_parts(prompt: &str) -> Vec<BudgetPart> {
     vec![
-        BudgetPart::new(
-            "system:base",
-            0,
-            "You are eri, a careful coding assistant.",
-        ),
+        BudgetPart::new("system:base", 0, "You are eri, a careful coding assistant."),
         BudgetPart::new("user:prompt", 0, prompt),
     ]
 }

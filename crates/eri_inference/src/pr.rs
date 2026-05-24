@@ -82,11 +82,7 @@ pub fn build_commit_message_prompt(diff: &str, recent_intents: &[String]) -> Str
 /// response with a clearly delimited title and body so the parser can split
 /// them deterministically. The body MUST end with a `Release Notes:` section
 /// per eri's `CLAUDE.md`.
-pub fn build_pr_description_prompt(
-    branch: &str,
-    base: &str,
-    commits: &[CommitSummary],
-) -> String {
+pub fn build_pr_description_prompt(branch: &str, base: &str, commits: &[CommitSummary]) -> String {
     let mut prompt = String::new();
     prompt.push_str(
         "You are eri's pull-request author. Write a polished pull-request title \
@@ -246,7 +242,7 @@ fn strip_outer_code_fence(text: &str) -> &str {
     let trimmed = text.trim();
     if let Some(rest) = trimmed.strip_prefix("```") {
         // Drop the optional language tag on the opening fence.
-        let after_fence = rest.splitn(2, '\n').nth(1).unwrap_or(rest);
+        let after_fence = rest.split_once('\n').map(|x| x.1).unwrap_or(rest);
         if let Some(stripped) = after_fence.strip_suffix("```") {
             return stripped.trim_end_matches('\n');
         }
@@ -264,7 +260,10 @@ mod tests {
     #[test]
     fn commit_message_prompt_asks_for_imperative_mood_and_72_char_limit() {
         let diff = "@@ -1 +1 @@\n-old\n+new\n";
-        let intents = vec!["make the hero red".to_string(), "tighten spacing".to_string()];
+        let intents = vec![
+            "make the hero red".to_string(),
+            "tighten spacing".to_string(),
+        ];
         let prompt = build_commit_message_prompt(diff, &intents);
 
         assert!(
@@ -297,13 +296,19 @@ mod tests {
         ];
         let prompt = build_pr_description_prompt("feature/hero", "main", &commits);
 
-        assert!(prompt.contains("Release Notes:"), "Release Notes section required");
+        assert!(
+            prompt.contains("Release Notes:"),
+            "Release Notes section required"
+        );
         assert!(
             prompt.contains("- Added") && prompt.contains("- N/A"),
             "release-notes bullet examples must be present"
         );
         assert!(prompt.contains("## Summary"), "Summary section required");
-        assert!(prompt.contains("## Test Plan"), "Test Plan section required");
+        assert!(
+            prompt.contains("## Test Plan"),
+            "Test Plan section required"
+        );
         assert!(
             prompt.contains("≤70 characters"),
             "70-char title cap must be present"

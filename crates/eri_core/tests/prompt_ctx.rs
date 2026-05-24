@@ -193,7 +193,12 @@ fn mcp_voice_commands_parse() {
         );
     }
 
-    for phrase in ["reload mcp", "reload tools", "reload mcp config", "refresh tools"] {
+    for phrase in [
+        "reload mcp",
+        "reload tools",
+        "reload mcp config",
+        "refresh tools",
+    ] {
         assert_eq!(
             ControlCommand::parse(phrase),
             Some(ControlCommand::ReloadMcpConfig),
@@ -298,7 +303,10 @@ fn scrubber_voice_commands_parse_to_undo_redo_and_go_to() {
 #[test]
 fn retry_voice_commands_parse_to_retry() {
     // Primary phrasings every demo run will use.
-    assert_eq!(ControlCommand::parse("try again"), Some(ControlCommand::Retry));
+    assert_eq!(
+        ControlCommand::parse("try again"),
+        Some(ControlCommand::Retry)
+    );
     assert_eq!(ControlCommand::parse("retry"), Some(ControlCommand::Retry));
     assert_eq!(
         ControlCommand::parse("do it again"),
@@ -638,10 +646,7 @@ fn git_revert_voice_commands_parse_to_revert_to_commit() {
         Some(ControlCommand::GoToIteration(7))
     );
     // Plain "go back" stays an Undo.
-    assert_eq!(
-        ControlCommand::parse("go back"),
-        Some(ControlCommand::Undo)
-    );
+    assert_eq!(ControlCommand::parse("go back"), Some(ControlCommand::Undo));
 }
 
 #[test]
@@ -1012,14 +1017,24 @@ fn list_themes_phrases_parse_to_list_themes() {
 fn dark_and_light_mode_phrases_parse_to_set_ui_theme_mode() {
     use eri_core::ControlCommand;
 
-    for phrase in ["dark mode", "use dark mode", "switch to dark mode", "make it dark"] {
+    for phrase in [
+        "dark mode",
+        "use dark mode",
+        "switch to dark mode",
+        "make it dark",
+    ] {
         assert_eq!(
             ControlCommand::parse(phrase),
             Some(ControlCommand::SetUiThemeMode("dark".into())),
             "phrase: {phrase}"
         );
     }
-    for phrase in ["light mode", "use light mode", "switch to light mode", "make it light"] {
+    for phrase in [
+        "light mode",
+        "use light mode",
+        "switch to light mode",
+        "make it light",
+    ] {
         assert_eq!(
             ControlCommand::parse(phrase),
             Some(ControlCommand::SetUiThemeMode("light".into())),
@@ -1088,18 +1103,12 @@ fn hero_image_phrases_parse_to_generate_hero_image() {
     use eri_core::ControlCommand;
 
     for (phrase, expected) in [
-        (
-            "generate a hero image of a coffee shop",
-            "a coffee shop",
-        ),
+        ("generate a hero image of a coffee shop", "a coffee shop"),
         (
             "make a hero photo of mountains at sunrise",
             "mountains at sunrise",
         ),
-        (
-            "add a hero image showing downtown tokyo",
-            "downtown tokyo",
-        ),
+        ("add a hero image showing downtown tokyo", "downtown tokyo"),
         (
             "Generate a hero image of a coffee shop on a rainy night.",
             "a coffee shop on a rainy night",
@@ -1258,9 +1267,9 @@ fn add_stripe_parses_with_optional_price() {
                     "phrase {phrase:?} should parse plan price {expected_usd}, got {usd}",
                 );
             }
-            other => panic!(
-                "phrase {phrase:?} should map to AddPayments({expected_usd}), got {other:?}",
-            ),
+            other => {
+                panic!("phrase {phrase:?} should map to AddPayments({expected_usd}), got {other:?}",)
+            }
         }
     }
 }
@@ -1398,10 +1407,7 @@ fn parses_start_background_agent_command() {
         Some(ControlCommand::StartBackgroundAgent("clean up css".into())),
     );
     // Empty task must not produce a command.
-    assert_eq!(
-        ControlCommand::parse("start a background agent to "),
-        None,
-    );
+    assert_eq!(ControlCommand::parse("start a background agent to "), None,);
 }
 
 #[test]
@@ -1504,8 +1510,14 @@ fn refactor_this_voice_command_parses_with_payload() {
     let cases: &[(&str, &str)] = &[
         ("refactor this to use map", "use map"),
         ("refactor this to use async await", "use async await"),
-        ("clean this up by extracting a helper", "extracting a helper"),
-        ("rewrite this to use a switch statement", "use a switch statement"),
+        (
+            "clean this up by extracting a helper",
+            "extracting a helper",
+        ),
+        (
+            "rewrite this to use a switch statement",
+            "use a switch statement",
+        ),
         ("rewrite it to use early returns", "use early returns"),
         ("refactor this code to use map", "use map"),
     ];
@@ -1736,12 +1748,7 @@ fn account_logout_voice_commands_parse() {
 
 #[test]
 fn whoami_voice_commands_parse() {
-    for phrase in &[
-        "who am i",
-        "whoami",
-        "what's my account",
-        "am i logged in",
-    ] {
+    for phrase in &["who am i", "whoami", "what's my account", "am i logged in"] {
         assert_eq!(
             ControlCommand::parse(phrase),
             Some(ControlCommand::WhoAmI),
@@ -1752,12 +1759,7 @@ fn whoami_voice_commands_parse() {
 
 #[test]
 fn upgrade_account_voice_commands_parse() {
-    for phrase in &[
-        "upgrade",
-        "upgrade my account",
-        "upgrade my plan",
-        "go pro",
-    ] {
+    for phrase in &["upgrade", "upgrade my account", "upgrade my plan", "go pro"] {
         assert_eq!(
             ControlCommand::parse(phrase),
             Some(ControlCommand::UpgradeAccount),

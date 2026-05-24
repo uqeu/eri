@@ -4,7 +4,7 @@
 //! a GitHub / GitLab / Forgejo PR, or a user-pasted patch. The review
 //! pipeline only sees `DiffBundle`; loaders own forge specifics.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -20,7 +20,11 @@ pub enum DiffSource {
     /// Two-dot range (`git diff <base>..<head>`).
     LocalRange { base: String, head: String },
     /// GitHub PR fetched via the `gh` CLI.
-    Github { owner: String, repo: String, pr: u32 },
+    Github {
+        owner: String,
+        repo: String,
+        pr: u32,
+    },
     /// GitLab MR fetched via the `glab` CLI.
     Gitlab { project: String, mr: u32 },
     /// Forgejo / Gitea instance, fetched via plain HTTP via `curl`.
@@ -99,7 +103,7 @@ pub struct DiffBundle {
 
 /// Best-effort language inference from file extension. Returned to the model
 /// so it knows which patterns to flag.
-pub fn infer_language(path: &PathBuf) -> Option<String> {
+pub fn infer_language(path: &Path) -> Option<String> {
     let ext = path.extension()?.to_str()?.to_ascii_lowercase();
     let lang = match ext.as_str() {
         "rs" => "rust",

@@ -116,9 +116,7 @@ pub async fn fire(params: Value, _services: &Services) -> Result<Value, Dispatch
             error: p.error.unwrap_or_default(),
         },
         other => {
-            return Err(DispatchError::BadParams(format!(
-                "unknown event: {other}"
-            )));
+            return Err(DispatchError::BadParams(format!("unknown event: {other}")));
         }
     };
     let outcomes = hooks.fire(event).await;
@@ -136,8 +134,10 @@ pub async fn fire(params: Value, _services: &Services) -> Result<Value, Dispatch
             spawn_error: o.spawn_error,
         })
         .collect();
-    serde_json::to_value(FireResult { outcomes: summaries })
-        .map_err(|e| DispatchError::Other(e.into()))
+    serde_json::to_value(FireResult {
+        outcomes: summaries,
+    })
+    .map_err(|e| DispatchError::Other(e.into()))
 }
 
 fn parse_params<T: for<'de> Deserialize<'de>>(value: Value) -> Result<T, DispatchError> {

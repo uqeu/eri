@@ -28,7 +28,7 @@
 
 use std::path::Path;
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 use thiserror::Error;
 
 use crate::chunker::{Chunk, ChunkKind};
@@ -64,12 +64,12 @@ impl Store {
     /// Open or create the database at `path`. The containing directory is
     /// created lazily.
     pub fn open(path: &Path) -> Result<Self, StoreError> {
-        if let Some(parent) = path.parent() {
-            if !parent.as_os_str().is_empty() {
-                std::fs::create_dir_all(parent).map_err(|e| {
-                    StoreError::Sqlite(rusqlite::Error::ToSqlConversionFailure(Box::new(e)))
-                })?;
-            }
+        if let Some(parent) = path.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            std::fs::create_dir_all(parent).map_err(|e| {
+                StoreError::Sqlite(rusqlite::Error::ToSqlConversionFailure(Box::new(e)))
+            })?;
         }
         let conn = Connection::open(path)?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
@@ -214,21 +214,17 @@ impl Store {
     }
 
     pub fn total_bytes(&self) -> Result<u64, StoreError> {
-        let n: i64 = self
-            .conn
-            .query_row(
-                "SELECT COALESCE(SUM(byte_end - byte_start), 0) FROM chunks",
-                [],
-                |row| row.get(0),
-            )?;
+        let n: i64 = self.conn.query_row(
+            "SELECT COALESCE(SUM(byte_end - byte_start), 0) FROM chunks",
+            [],
+            |row| row.get(0),
+        )?;
         Ok(n.max(0) as u64)
     }
 
     /// Iterate every (chunk, embedding) pair. Used by the brute-force
     /// cosine search at query time.
-    pub fn iter_chunks_with_vectors(
-        &self,
-    ) -> Result<Vec<(StoredChunk, Vec<f32>)>, StoreError> {
+    pub fn iter_chunks_with_vectors(&self) -> Result<Vec<(StoredChunk, Vec<f32>)>, StoreError> {
         let mut stmt = self.conn.prepare(
             "SELECT c.id, c.path, c.byte_start, c.byte_end, c.line_start, c.line_end, c.kind, c.content, e.vec \
              FROM chunks c \
@@ -328,7 +324,12 @@ mod tests {
         let mut store = Store::open_in_memory().unwrap();
         let chunk = sample_chunk("a.rs", "fn a() {}");
         store
-            .upsert_file("a.rs", 1, b"hash-a", &[(chunk.clone(), vec![1.0, 2.0, 3.0])])
+            .upsert_file(
+                "a.rs",
+                1,
+                b"hash-a",
+                &[(chunk.clone(), vec![1.0, 2.0, 3.0])],
+            )
             .unwrap();
         assert_eq!(store.count_files().unwrap(), 1);
         assert_eq!(store.count_chunks().unwrap(), 1);

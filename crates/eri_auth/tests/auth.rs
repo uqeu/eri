@@ -58,9 +58,7 @@ type Responder = Box<dyn Fn(&CapturedRequest) -> (u16, &'static str, String) + S
 
 fn start_server(responder: Responder) -> ServerHandle {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
-    listener
-        .set_nonblocking(false)
-        .expect("blocking listener");
+    listener.set_nonblocking(false).expect("blocking listener");
     let addr = listener.local_addr().expect("local addr");
     let captures: Arc<Mutex<Vec<CapturedRequest>>> = Arc::new(Mutex::new(Vec::new()));
     let shutdown = Arc::new(Mutex::new(false));
@@ -77,12 +75,8 @@ fn start_server(responder: Responder) -> ServerHandle {
                 Ok(stream) => stream,
                 Err(_) => continue,
             };
-            stream
-                .set_read_timeout(Some(Duration::from_secs(5)))
-                .ok();
-            stream
-                .set_write_timeout(Some(Duration::from_secs(5)))
-                .ok();
+            stream.set_read_timeout(Some(Duration::from_secs(5))).ok();
+            stream.set_write_timeout(Some(Duration::from_secs(5))).ok();
             let captured = match parse_request(&stream) {
                 Some(request) => request,
                 None => continue,
@@ -210,9 +204,11 @@ fn signup_request_body_has_email_and_password() {
     assert_eq!(request.method, "POST");
     assert_eq!(request.path, endpoints::SIGNUP);
 
-    let body: serde_json::Value =
-        serde_json::from_str(&request.body).expect("body parses as json");
-    assert_eq!(body.get("email").and_then(|v| v.as_str()), Some("alice@example.com"));
+    let body: serde_json::Value = serde_json::from_str(&request.body).expect("body parses as json");
+    assert_eq!(
+        body.get("email").and_then(|v| v.as_str()),
+        Some("alice@example.com")
+    );
     assert_eq!(
         body.get("password").and_then(|v| v.as_str()),
         Some("hunter2-very-secure"),
@@ -222,7 +218,11 @@ fn signup_request_body_has_email_and_password() {
 #[test]
 fn auth_error_maps_401_to_bad_credentials() {
     let server = start_server(Box::new(|_req| {
-        (401, "Unauthorized", String::from(r#"{"error":"bad creds"}"#))
+        (
+            401,
+            "Unauthorized",
+            String::from(r#"{"error":"bad creds"}"#),
+        )
     }));
     let client = AuthClient::with_api_base(server.base_url());
 
@@ -312,8 +312,7 @@ fn subscription_tier_serializes_pro_plus_as_snake_case() {
     let parsed: SubscriptionTier =
         serde_json::from_str("\"pro_plus\"").expect("deserialize pro_plus");
     assert_eq!(parsed, SubscriptionTier::ProPlus);
-    let parsed: SubscriptionTier =
-        serde_json::from_str("\"teams\"").expect("deserialize teams");
+    let parsed: SubscriptionTier = serde_json::from_str("\"teams\"").expect("deserialize teams");
     assert_eq!(parsed, SubscriptionTier::Teams);
 }
 
@@ -338,4 +337,3 @@ fn expires_at_is_in_the_future_after_successful_login() {
     assert_eq!(tokens.refresh_token, "refresh-xyz");
     assert_eq!(tokens.access_token, "access-abc");
 }
-

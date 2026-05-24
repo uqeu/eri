@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
@@ -292,9 +292,7 @@ fn parse_per_event_file(event_name: &str, body: &str) -> Result<RawConfig> {
             }
         }
         _ => {
-            return Err(anyhow!(
-                "per-event hook file must be an array or an object"
-            ));
+            return Err(anyhow!("per-event hook file must be an array or an object"));
         }
     };
     let mut cfg = RawConfig::default();
@@ -341,8 +339,7 @@ fn compile_bucket(items: Vec<RawHook>, event: &str) -> Result<Vec<Hook>> {
 fn compile_one(raw: RawHook, event: &str, idx: usize) -> Result<Hook> {
     let matcher = match raw.matcher.as_deref() {
         Some(s) if !s.is_empty() => Some(
-            Regex::new(s)
-                .with_context(|| format!("{event}[{idx}] matcher regex invalid: {s}"))?,
+            Regex::new(s).with_context(|| format!("{event}[{idx}] matcher regex invalid: {s}"))?,
         ),
         _ => None,
     };
@@ -818,8 +815,7 @@ mod tests {
         );
         let hooks = Hooks::load(tmp.path()).unwrap();
         let _ = hooks.fire(HookEvent::SessionStart).await;
-        let log = fs::read_to_string(tmp.path().join(".eri").join("audit.log"))
-            .expect("audit log");
+        let log = fs::read_to_string(tmp.path().join(".eri").join("audit.log")).expect("audit log");
         assert!(log.contains("hook_fired"));
         assert!(log.contains("SessionStart"));
     }

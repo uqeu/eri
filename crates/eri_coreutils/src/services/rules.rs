@@ -7,8 +7,8 @@ use serde_json::Value;
 
 use eri_rules::{Mode, PromptContext, Rules};
 
-use crate::services::Services;
 use crate::DispatchError;
+use crate::services::Services;
 
 const BODY_PREVIEW_CHARS: usize = 160;
 
@@ -88,9 +88,7 @@ pub async fn list(params: Value, _services: &Services) -> Result<Value, Dispatch
 pub async fn active(params: Value, _services: &Services) -> Result<Value, DispatchError> {
     let p: ActiveParams = parse_params(params)?;
     if p.workspace.as_os_str().is_empty() {
-        return Err(DispatchError::BadParams(
-            "workspace is required".into(),
-        ));
+        return Err(DispatchError::BadParams("workspace is required".into()));
     }
     let rules = Rules::load(&p.workspace).map_err(DispatchError::Other)?;
     let ctx = PromptContext::new()
@@ -105,8 +103,7 @@ pub async fn active(params: Value, _services: &Services) -> Result<Value, Dispat
             body: r.body().to_string(),
         })
         .collect();
-    serde_json::to_value(ActiveResult { active })
-        .map_err(|e| DispatchError::Other(e.into()))
+    serde_json::to_value(ActiveResult { active }).map_err(|e| DispatchError::Other(e.into()))
 }
 
 fn parse_params<T: for<'de> Deserialize<'de>>(value: Value) -> Result<T, DispatchError> {

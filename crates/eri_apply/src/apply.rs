@@ -3,8 +3,8 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use crate::matcher::{locate, MatchOutcome};
 use crate::Edit;
+use crate::matcher::{MatchOutcome, locate};
 
 /// Outcome of an apply pass over multiple edits.
 #[derive(Debug, Default)]
@@ -239,8 +239,8 @@ fn resolve_inside_root(root: &Path, rel: &Path) -> Result<PathBuf, FailureReason
     }
     let joined = root.join(rel);
     // Canonicalize the deepest existing prefix; the rest is appended raw.
-    let canonical = canonicalize_existing_prefix(&joined)
-        .map_err(|e| FailureReason::IoError(e.to_string()))?;
+    let canonical =
+        canonicalize_existing_prefix(&joined).map_err(|e| FailureReason::IoError(e.to_string()))?;
     if !canonical.starts_with(root) {
         return Err(FailureReason::PathOutsideRoot);
     }
@@ -453,11 +453,7 @@ mod tests {
         let leftover: Vec<_> = fs::read_dir(dir.path())
             .unwrap()
             .filter_map(|e| e.ok())
-            .filter(|e| {
-                e.file_name()
-                    .to_string_lossy()
-                    .contains(".tmp")
-            })
+            .filter(|e| e.file_name().to_string_lossy().contains(".tmp"))
             .collect();
         assert!(leftover.is_empty());
     }
@@ -465,7 +461,11 @@ mod tests {
     #[test]
     fn whitespace_tolerant_apply() {
         let dir = TempDir::new().unwrap();
-        write(dir.path(), "a.txt", "fn   thing(  ) {\n    println!(\"hi\");\n}\n");
+        write(
+            dir.path(),
+            "a.txt",
+            "fn   thing(  ) {\n    println!(\"hi\");\n}\n",
+        );
         let edits = vec![Edit {
             path: PathBuf::from("a.txt"),
             search: "fn thing() {\n    println!(\"hi\");\n}".into(),

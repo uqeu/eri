@@ -45,8 +45,17 @@ pub const TEMPLATES: &[Template] = &[
         slug: "flappy-bird",
         name: "Flappy Bird clone",
         keywords: &[
-            "flappy", "bird", "flap", "pipe", "pipes", "game", "clone", "arcade",
-            "tap", "jump", "side-scroller",
+            "flappy",
+            "bird",
+            "flap",
+            "pipe",
+            "pipes",
+            "game",
+            "clone",
+            "arcade",
+            "tap",
+            "jump",
+            "side-scroller",
         ],
         html: FLAPPY_BIRD_HTML,
     },
@@ -54,8 +63,8 @@ pub const TEMPLATES: &[Template] = &[
         slug: "coffee-shop",
         name: "Coffee shop site",
         keywords: &[
-            "coffee", "cafe", "espresso", "latte", "roastery", "roaster", "shop",
-            "barista", "beans", "menu", "hours",
+            "coffee", "cafe", "espresso", "latte", "roastery", "roaster", "shop", "barista",
+            "beans", "menu", "hours",
         ],
         html: COFFEE_SHOP_HTML,
     },
@@ -63,8 +72,16 @@ pub const TEMPLATES: &[Template] = &[
         slug: "restaurant",
         name: "Restaurant site",
         keywords: &[
-            "restaurant", "bistro", "dining", "kitchen", "chef", "menu",
-            "reservation", "reservations", "trattoria", "eatery",
+            "restaurant",
+            "bistro",
+            "dining",
+            "kitchen",
+            "chef",
+            "menu",
+            "reservation",
+            "reservations",
+            "trattoria",
+            "eatery",
         ],
         html: RESTAURANT_HTML,
     },
@@ -72,8 +89,16 @@ pub const TEMPLATES: &[Template] = &[
         slug: "portfolio",
         name: "Editorial portfolio",
         keywords: &[
-            "portfolio", "photography", "photographer", "designer", "creative",
-            "showcase", "work", "case", "studies", "personal",
+            "portfolio",
+            "photography",
+            "photographer",
+            "designer",
+            "creative",
+            "showcase",
+            "work",
+            "case",
+            "studies",
+            "personal",
         ],
         html: PORTFOLIO_HTML,
     },
@@ -81,8 +106,15 @@ pub const TEMPLATES: &[Template] = &[
         slug: "pricing",
         name: "Pricing page",
         keywords: &[
-            "pricing", "price", "tiers", "plans", "billing", "subscribe",
-            "subscription", "monthly", "yearly",
+            "pricing",
+            "price",
+            "tiers",
+            "plans",
+            "billing",
+            "subscribe",
+            "subscription",
+            "monthly",
+            "yearly",
         ],
         html: PRICING_HTML,
     },
@@ -90,8 +122,15 @@ pub const TEMPLATES: &[Template] = &[
         slug: "blog-post",
         name: "Long-form blog post",
         keywords: &[
-            "blog", "post", "article", "essay", "writing", "longform",
-            "long-form", "reading", "newsletter",
+            "blog",
+            "post",
+            "article",
+            "essay",
+            "writing",
+            "longform",
+            "long-form",
+            "reading",
+            "newsletter",
         ],
         html: BLOG_POST_HTML,
     },
@@ -99,15 +138,24 @@ pub const TEMPLATES: &[Template] = &[
         slug: "landing-saas",
         name: "SaaS landing page",
         keywords: &[
-            "saas", "landing", "startup", "product", "marketing", "homepage",
-            "launch", "b2b", "software",
+            "saas",
+            "landing",
+            "startup",
+            "product",
+            "marketing",
+            "homepage",
+            "launch",
+            "b2b",
+            "software",
         ],
         html: LANDING_SAAS_HTML,
     },
     Template {
         slug: "404-fun",
         name: "Playful 404 page",
-        keywords: &["404", "error", "not", "found", "missing", "broken", "lost", "page"],
+        keywords: &[
+            "404", "error", "not", "found", "missing", "broken", "lost", "page",
+        ],
         html: FOUR_OH_FOUR_HTML,
     },
 ];
@@ -178,7 +226,10 @@ pub fn template_by_slug(slug: &str) -> Option<&'static Template> {
 pub fn edit_mode_system_prompt(language: Option<&str>) -> String {
     let language_hint = match language {
         Some(lang) if !lang.trim().is_empty() => {
-            format!("\nThe user's active language is {}. Match its idioms.", lang.trim())
+            format!(
+                "\nThe user's active language is {}. Match its idioms.",
+                lang.trim()
+            )
         }
         _ => String::new(),
     };
@@ -225,7 +276,10 @@ pub fn edit_mode_user_prompt(user_request: &str, open_files: &[(PathBuf, String)
         buf.push_str("```\n\n");
     }
     if kept.truncated_count > 0 {
-        buf.push_str(&format!("[... {} files truncated ...]\n\n", kept.truncated_count));
+        buf.push_str(&format!(
+            "[... {} files truncated ...]\n\n",
+            kept.truncated_count
+        ));
     }
     buf.push_str("## Request\n");
     buf.push_str(user_request.trim());
@@ -238,10 +292,7 @@ struct SelectedFiles<'a> {
     truncated_count: usize,
 }
 
-fn select_files_within_budget(
-    files: &[(PathBuf, String)],
-    budget: usize,
-) -> SelectedFiles<'_> {
+fn select_files_within_budget(files: &[(PathBuf, String)], budget: usize) -> SelectedFiles<'_> {
     // WHY: drop the largest files first so a single huge file can't crowd out
     // the rest of the working set. Order within the kept set is preserved
     // from the caller so the model sees files in the user's open-tab order.

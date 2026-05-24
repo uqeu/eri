@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 
 use crate::rule::Mode;
 
@@ -83,10 +83,8 @@ fn parse_frontmatter(lines: &[&str]) -> Result<ParsedFrontmatter> {
                     );
                 }
                 "mode" | "type" | "activation" => mode_str = Some(unquote(value).to_lowercase()),
-                "always" => {
-                    if parse_bool(&unquote(value)) {
-                        mode_str = Some("always".into());
-                    }
+                "always" if parse_bool(&unquote(value)) => {
+                    mode_str = Some("always".into());
                 }
                 "globs" => {
                     let v = value.trim();

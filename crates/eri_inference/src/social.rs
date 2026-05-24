@@ -174,10 +174,10 @@ pub fn parse_social_thread(raw: &str) -> Result<SocialThread, InferenceError> {
     if let Some(parsed) = try_parse_json(trimmed) {
         return Ok(parsed);
     }
-    if let Some(extracted) = extract_first_json_object(trimmed) {
-        if let Some(parsed) = try_parse_json(extracted) {
-            return Ok(parsed);
-        }
+    if let Some(extracted) = extract_first_json_object(trimmed)
+        && let Some(parsed) = try_parse_json(extracted)
+    {
+        return Ok(parsed);
     }
     // Fall back: stuff the whole stdout into a single tweet (truncated to
     // the per-tweet budget). The panel will surface this as a degraded
@@ -299,13 +299,7 @@ mod tests {
     #[test]
     fn social_thread_prompt_falls_back_when_no_recording() {
         let intents = vec!["build a pomodoro timer".to_string()];
-        let prompt = build_social_thread_prompt(
-            "pomodoro",
-            &intents,
-            None,
-            None,
-            1,
-        );
+        let prompt = build_social_thread_prompt("pomodoro", &intents, None, None, 1);
         assert!(prompt.contains("RECORDING: (none"));
         assert!(prompt.contains("Write a text-only thread"));
         assert!(prompt.contains("DEPLOYED URL: (none yet"));
@@ -332,8 +326,8 @@ mod tests {
 
     #[test]
     fn fallback_wraps_unparseable_stdout_in_single_tweet() {
-        let parsed = parse_social_thread("claude couldn't be bothered to JSON today")
-            .expect("fallback");
+        let parsed =
+            parse_social_thread("claude couldn't be bothered to JSON today").expect("fallback");
         assert_eq!(parsed.thread.len(), 1);
         assert!(parsed.thread[0].contains("claude couldn't be bothered"));
     }
@@ -343,6 +337,9 @@ mod tests {
         let long = "x".repeat(400);
         let raw = format!(r#"{{"thread":["{long}"],"alt_text":"","best_time":""}}"#);
         let parsed = parse_social_thread(&raw).expect("parse");
-        assert_eq!(parsed.thread[0].chars().count(), SOCIAL_THREAD_TWEET_CHAR_BUDGET);
+        assert_eq!(
+            parsed.thread[0].chars().count(),
+            SOCIAL_THREAD_TWEET_CHAR_BUDGET
+        );
     }
 }

@@ -122,7 +122,12 @@ fn export_iterations_returns_commits_in_chronological_order_with_prompts() {
     ensure_git_repo(&project).unwrap();
 
     fs::write(project.join("index.html"), "<html>v1</html>").unwrap();
-    commit_iteration(&project, "iter 0001: build a coffee shop landing page", &["index.html"]).unwrap();
+    commit_iteration(
+        &project,
+        "iter 0001: build a coffee shop landing page",
+        &["index.html"],
+    )
+    .unwrap();
     fs::write(project.join("index.html"), "<html>v2</html>").unwrap();
     commit_iteration(&project, "iter 0002: add a hero image", &["index.html"]).unwrap();
     fs::write(project.join("index.html"), "<html>v3</html>").unwrap();

@@ -18,8 +18,8 @@ pub mod prompts;
 pub use diff::{ChangeKind, DiffBundle, DiffHunk, DiffSource, FileDiff};
 pub use findings::{FindingCategory, ReviewFinding, ReviewReport, Severity};
 pub use loaders::{
-    loader_for, DiffLoader, ForgejoApiLoader, GithubApiLoader, GitlabApiLoader, LocalGitLoader,
-    PatchLoader,
+    DiffLoader, ForgejoApiLoader, GithubApiLoader, GitlabApiLoader, LocalGitLoader, PatchLoader,
+    loader_for,
 };
 pub use pipeline::{Effort, ReviewBackend, ReviewOptions, Reviewer};
 

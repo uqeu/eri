@@ -11,7 +11,7 @@
 
 use serde_json::json;
 
-use crate::types::{edge_kind, node_kind, Edge, Node, NodeId};
+use crate::types::{Edge, Node, NodeId, edge_kind, node_kind};
 use crate::{Graph, GraphError};
 
 /// Record a user-typed (or voice-transcribed) prompt.
@@ -46,10 +46,7 @@ pub fn record_intent(
     prompt_id: &NodeId,
     intent: &str,
 ) -> Result<NodeId, GraphError> {
-    let intent_id = graph.insert_node(Node::new(
-        node_kind::INTENT,
-        json!({ "label": intent }),
-    ))?;
+    let intent_id = graph.insert_node(Node::new(node_kind::INTENT, json!({ "label": intent })))?;
     graph.insert_edge(Edge::new(
         intent_id.clone(),
         prompt_id.clone(),
@@ -183,10 +180,7 @@ pub fn record_edit_rejected(
 /// Record a file touched (read, edited, or referenced). Caller links it to
 /// the originating node via `Graph::insert_edge` if desired.
 pub fn record_file_touched(graph: &Graph, path: &str) -> Result<NodeId, GraphError> {
-    graph.insert_node(Node::new(
-        node_kind::FILE_TOUCHED,
-        json!({ "path": path }),
-    ))
+    graph.insert_node(Node::new(node_kind::FILE_TOUCHED, json!({ "path": path })))
 }
 
 /// Record a symbol reference (function, class, type).
@@ -230,16 +224,9 @@ pub fn record_error(
     context_id: Option<&NodeId>,
     message: &str,
 ) -> Result<NodeId, GraphError> {
-    let id = graph.insert_node(Node::new(
-        node_kind::ERROR,
-        json!({ "message": message }),
-    ))?;
+    let id = graph.insert_node(Node::new(node_kind::ERROR, json!({ "message": message })))?;
     if let Some(ctx) = context_id {
-        graph.insert_edge(Edge::new(
-            id.clone(),
-            ctx.clone(),
-            edge_kind::CAUSED_BY,
-        ))?;
+        graph.insert_edge(Edge::new(id.clone(), ctx.clone(), edge_kind::CAUSED_BY))?;
     }
     Ok(id)
 }

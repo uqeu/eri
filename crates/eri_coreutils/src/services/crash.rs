@@ -9,10 +9,10 @@
 //! All five are free-tier — observability is not a paid feature.
 
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
-use crate::crash;
 use crate::DispatchError;
+use crate::crash;
 use crate::services::Services;
 
 const ENV_DSN: &str = "ERI_SENTRY_DSN";
@@ -29,14 +29,10 @@ pub async fn recent(
     params: Value,
     _services: &Services,
 ) -> std::result::Result<Value, DispatchError> {
-    let parsed: RecentParams = serde_json::from_value(params)
-        .map_err(|e| DispatchError::BadParams(e.to_string()))?;
-    let limit = parsed
-        .limit
-        .unwrap_or(RECENT_DEFAULT)
-        .min(RECENT_MAX);
-    let entries = crash::read_recent_crashes(limit)
-        .map_err(DispatchError::Other)?;
+    let parsed: RecentParams =
+        serde_json::from_value(params).map_err(|e| DispatchError::BadParams(e.to_string()))?;
+    let limit = parsed.limit.unwrap_or(RECENT_DEFAULT).min(RECENT_MAX);
+    let entries = crash::read_recent_crashes(limit).map_err(DispatchError::Other)?;
     Ok(json!({ "entries": entries }))
 }
 
@@ -77,8 +73,8 @@ pub async fn sentry_enable(
     params: Value,
     _services: &Services,
 ) -> std::result::Result<Value, DispatchError> {
-    let parsed: SentryEnableParams = serde_json::from_value(params)
-        .map_err(|e| DispatchError::BadParams(e.to_string()))?;
+    let parsed: SentryEnableParams =
+        serde_json::from_value(params).map_err(|e| DispatchError::BadParams(e.to_string()))?;
     // Default to the public eri Sentry DSN sentinel if the caller did
     // not provide one. The actual DSN string is the IDE's
     // responsibility — we only flip the env var. Empty input means

@@ -48,13 +48,15 @@ pub fn parse_streaming(buffer: &mut String) -> Vec<Edit> {
 
 fn next_block(input: &str, cursor: &mut usize) -> Option<Edit> {
     let start = find_marker(input, SEARCH_MARKER, *cursor)?;
-    let header_end = input[start..].find('\n').map(|n| start + n)? ;
+    let header_end = input[start..].find('\n').map(|n| start + n)?;
     let header_line = &input[start..header_end];
     let path = extract_path(header_line)?;
 
     let body_start = header_end + 1;
     let divider_start = find_marker(input, DIVIDER, body_start)?;
-    let divider_end = input[divider_start..].find('\n').map(|n| divider_start + n)?;
+    let divider_end = input[divider_start..]
+        .find('\n')
+        .map(|n| divider_start + n)?;
     // Divider line must be its own line — no extra content after `=======`.
     let divider_line = input[divider_start..divider_end].trim_end();
     if divider_line.trim_start() != DIVIDER {
@@ -190,7 +192,9 @@ mod tests {
 
     #[test]
     fn streaming_holds_back_partial_block() {
-        let mut buf = String::from("<<<<<<< SEARCH x.rs\nold\n=======\nnew\n>>>>>>> REPLACE\n<<<<<<< SEARCH y.rs\npartial");
+        let mut buf = String::from(
+            "<<<<<<< SEARCH x.rs\nold\n=======\nnew\n>>>>>>> REPLACE\n<<<<<<< SEARCH y.rs\npartial",
+        );
         let edits = parse_streaming(&mut buf);
         assert_eq!(edits.len(), 1);
         assert!(buf.starts_with("<<<<<<< SEARCH y.rs"));

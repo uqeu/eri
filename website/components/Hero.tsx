@@ -1,37 +1,37 @@
 import Link from "next/link";
-import { HeroBig } from "./HeroBig";
 
 export function Hero(): React.ReactElement {
   return (
     <section className="bg-bg text-text">
-      <div className="container pt-20 pb-10 lg:pt-28 lg:pb-12">
-        <div className="max-w-3xl mb-10 lg:mb-14">
-          <h1 className="text-h1 text-balance mb-5">
-            Speak the edit. eri watches where you&apos;re pointing.
+      <div className="container pt-24 pb-12 lg:pt-36 lg:pb-20">
+        <div className="max-w-3xl">
+          <h1 className="text-h1 text-balance mb-6 leading-[1.04]">
+            An editor that hears, sees, infers.
           </h1>
-          <p className="text-body text-text-sec max-w-prose">
-            A local-first editor for voice, gaze, and diffusion. Audio and the camera frame never leave your laptop — bring your own key for the model calls that do.
+          <p className="lead text-prose-narrow mb-8">
+            eri compiles your voice, your gaze, and the file you&apos;re actually in into one diffused edit. The model call is the only thing that crosses the wire.
           </p>
-          <div className="mt-7 flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap items-center gap-5">
             <Link
               href="/download"
-              className="inline-flex items-center rounded-md bg-sage-deep px-4 py-2 text-[14px] font-medium text-bg hover:bg-sage transition-colors"
+              className="inline-flex items-center rounded-md bg-text px-4 py-2 text-[14px] font-medium text-bg hover:opacity-90 transition-opacity"
             >
-              Download for macOS <span className="ml-2">⤓</span>
+              Download for macOS
+              <span className="ml-2">⤓</span>
             </Link>
             <Link
               href="/contact"
-              className="inline-flex items-center rounded-md border border-border px-4 py-2 text-[14px] text-text hover:bg-bg-card transition-colors"
+              className="inline-flex items-center text-[14px] text-text-sec hover:text-text transition-colors"
             >
-              Request a demo <span className="ml-2">→</span>
+              Request a demo
+              <span className="ml-1.5">→</span>
             </Link>
           </div>
+          <p className="mt-6 font-mono text-[11px] uppercase tracking-[0.18em] italic text-text-sec">
+            Pre-launch · free in beta · no card
+          </p>
         </div>
       </div>
-
-      {/* HeroBig is the prototype + reason-to-switch demo — eri's own thing,
-          auto-plays. No interactive scene-tabs wrapper anymore. */}
-      <HeroBig />
     </section>
   );
 }

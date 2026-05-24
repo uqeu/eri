@@ -8,11 +8,11 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tempfile::TempDir;
 use tokio::sync::Mutex;
 
-use eri_coreutils::{dispatch, Request, Services, SharedTierState, TierState};
+use eri_coreutils::{Request, Services, SharedTierState, TierState, dispatch};
 
 fn make_state() -> (SharedTierState, Arc<Services>) {
     let tier = Arc::new(Mutex::new(TierState {
@@ -69,10 +69,12 @@ async fn rules_list_returns_loaded_rules() {
     assert_eq!(rules[0]["mode"], "always");
     assert_eq!(rules[0]["priority"], 7);
     assert_eq!(rules[0]["description"], "House style");
-    assert!(rules[0]["bodyPreview"]
-        .as_str()
-        .unwrap()
-        .contains("Be terse."));
+    assert!(
+        rules[0]["bodyPreview"]
+            .as_str()
+            .unwrap()
+            .contains("Be terse.")
+    );
 }
 
 #[tokio::test]
@@ -142,10 +144,12 @@ async fn web_search_stub_returns_note() {
     let request = req("eri/web/search", json!({ "query": "rust" }));
     let result = dispatch(&request, &tier, &services).await.unwrap();
     assert_eq!(result["results"].as_array().unwrap().len(), 0);
-    assert!(result["note"]
-        .as_str()
-        .unwrap()
-        .contains("Web search not yet wired"));
+    assert!(
+        result["note"]
+            .as_str()
+            .unwrap()
+            .contains("Web search not yet wired")
+    );
 }
 
 #[tokio::test]

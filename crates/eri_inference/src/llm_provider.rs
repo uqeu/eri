@@ -180,18 +180,26 @@ fn provider_from_choice_inner(
     }
     let supplied = keys.and_then(|k| k.for_canonical(canonical));
     match (canonical, supplied) {
-        ("gpt-4o", Some(key)) => providers::openai::OpenAiProvider::for_model_with_key("gpt-4o", key)
-            .ok()
-            .map(|p| Box::new(p) as Box<dyn LlmProvider>),
-        ("gpt-4o-mini", Some(key)) => providers::openai::OpenAiProvider::for_model_with_key("gpt-4o-mini", key)
-            .ok()
-            .map(|p| Box::new(p) as Box<dyn LlmProvider>),
-        ("o1-mini", Some(key)) => providers::openai::OpenAiProvider::for_model_with_key("o1-mini", key)
-            .ok()
-            .map(|p| Box::new(p) as Box<dyn LlmProvider>),
-        ("o3-mini", Some(key)) => providers::openai::OpenAiProvider::for_model_with_key("o3-mini", key)
-            .ok()
-            .map(|p| Box::new(p) as Box<dyn LlmProvider>),
+        ("gpt-4o", Some(key)) => {
+            providers::openai::OpenAiProvider::for_model_with_key("gpt-4o", key)
+                .ok()
+                .map(|p| Box::new(p) as Box<dyn LlmProvider>)
+        }
+        ("gpt-4o-mini", Some(key)) => {
+            providers::openai::OpenAiProvider::for_model_with_key("gpt-4o-mini", key)
+                .ok()
+                .map(|p| Box::new(p) as Box<dyn LlmProvider>)
+        }
+        ("o1-mini", Some(key)) => {
+            providers::openai::OpenAiProvider::for_model_with_key("o1-mini", key)
+                .ok()
+                .map(|p| Box::new(p) as Box<dyn LlmProvider>)
+        }
+        ("o3-mini", Some(key)) => {
+            providers::openai::OpenAiProvider::for_model_with_key("o3-mini", key)
+                .ok()
+                .map(|p| Box::new(p) as Box<dyn LlmProvider>)
+        }
         ("o4", Some(key)) => providers::openai::OpenAiProvider::for_model_with_key("o4", key)
             .ok()
             .map(|p| Box::new(p) as Box<dyn LlmProvider>),
@@ -221,14 +229,12 @@ fn provider_from_choice_inner(
                 .ok()
                 .map(|p| Box::new(p) as Box<dyn LlmProvider>)
         }
-        ("gemini-thinking-2", Some(key)) => {
-            providers::gemini::GeminiProvider::for_model_with_key(
-                "gemini-2.0-flash-thinking-exp",
-                key,
-            )
-            .ok()
-            .map(|p| Box::new(p) as Box<dyn LlmProvider>)
-        }
+        ("gemini-thinking-2", Some(key)) => providers::gemini::GeminiProvider::for_model_with_key(
+            "gemini-2.0-flash-thinking-exp",
+            key,
+        )
+        .ok()
+        .map(|p| Box::new(p) as Box<dyn LlmProvider>),
         // Either no caller-supplied key for this vendor or no `keys`
         // bundle at all — fall through to env-based resolution.
         (canonical, _) => provider_from_choice_env(canonical),
@@ -295,7 +301,13 @@ pub fn canonical_model_id(choice: &str) -> Option<&'static str> {
     // Strip hyphens / dots so "gpt-4o" and "gpt 4o" both normalize the same.
     let normalized: String = lowered
         .chars()
-        .map(|c| if c == '-' || c == '.' || c == '_' { ' ' } else { c })
+        .map(|c| {
+            if c == '-' || c == '.' || c == '_' {
+                ' '
+            } else {
+                c
+            }
+        })
         .collect();
     let squashed: String = normalized.split_whitespace().collect::<Vec<_>>().join(" ");
     let s = squashed.as_str();
@@ -315,10 +327,7 @@ pub fn canonical_model_id(choice: &str) -> Option<&'static str> {
         "gemini-thinking-2",
     ];
     for &id in &canonical {
-        let id_norm: String = id
-            .chars()
-            .map(|c| if c == '-' { ' ' } else { c })
-            .collect();
+        let id_norm: String = id.chars().map(|c| if c == '-' { ' ' } else { c }).collect();
         if s == id_norm {
             return Some(id);
         }
@@ -392,8 +401,14 @@ mod tests {
 
     #[test]
     fn canonical_model_id_recognizes_claude_haiku() {
-        assert_eq!(canonical_model_id("use claude haiku"), Some("claude-haiku-4-5"));
-        assert_eq!(canonical_model_id("switch to claude"), Some("claude-sonnet-4-5"));
+        assert_eq!(
+            canonical_model_id("use claude haiku"),
+            Some("claude-haiku-4-5")
+        );
+        assert_eq!(
+            canonical_model_id("switch to claude"),
+            Some("claude-sonnet-4-5")
+        );
         assert_eq!(canonical_model_id("claude opus"), Some("claude-opus-4-5"));
     }
 
@@ -410,7 +425,10 @@ mod tests {
     #[test]
     fn canonical_model_id_recognizes_mercury_default() {
         assert_eq!(canonical_model_id("mercury"), Some("mercury-2"));
-        assert_eq!(canonical_model_id("switch back to mercury"), Some("mercury-2"));
+        assert_eq!(
+            canonical_model_id("switch back to mercury"),
+            Some("mercury-2")
+        );
     }
 
     #[test]

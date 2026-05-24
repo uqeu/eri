@@ -133,10 +133,10 @@ impl HttpTransport {
                     None => return,
                 };
                 for event_data in sse.feed(&chunk) {
-                    if let Some(msg) = parse_event(&event_data, &name) {
-                        if tx.send(Ok(msg)).await.is_err() {
-                            return;
-                        }
+                    if let Some(msg) = parse_event(&event_data, &name)
+                        && tx.send(Ok(msg)).await.is_err()
+                    {
+                        return;
                     }
                 }
             }

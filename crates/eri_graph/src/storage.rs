@@ -6,7 +6,7 @@
 
 use std::path::Path;
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::error::GraphError;
 use crate::types::{Edge, Node};
@@ -19,10 +19,10 @@ impl Store {
     /// Open or create the database file at `path`. Parent directories are
     /// created lazily.
     pub fn open(path: &Path) -> Result<Self, GraphError> {
-        if let Some(parent) = path.parent() {
-            if !parent.as_os_str().is_empty() {
-                std::fs::create_dir_all(parent)?;
-            }
+        if let Some(parent) = path.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            std::fs::create_dir_all(parent)?;
         }
         let conn = Connection::open(path)?;
         Self::configure(&conn)?;
@@ -82,13 +82,7 @@ impl Store {
         let tags = serde_json::to_string(&node.tags)?;
         self.conn.execute(
             "INSERT INTO nodes (id, kind, created_at_ms, body, tags) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![
-                node.id,
-                node.kind,
-                node.created_at_ms as i64,
-                body,
-                tags,
-            ],
+            params![node.id, node.kind, node.created_at_ms as i64, body, tags,],
         )?;
         Ok(())
     }
@@ -159,10 +153,7 @@ impl Store {
         let mut stmt = self.conn.prepare(
             "SELECT id, kind, created_at_ms, body, tags FROM nodes WHERE created_at_ms >= ?1 AND created_at_ms <= ?2 ORDER BY created_at_ms ASC",
         )?;
-        let rows = stmt.query_map(
-            params![since_ms as i64, until_ms as i64],
-            row_to_node,
-        )?;
+        let rows = stmt.query_map(params![since_ms as i64, until_ms as i64], row_to_node)?;
         collect_nodes(rows)
     }
 

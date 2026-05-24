@@ -13,8 +13,8 @@ use tokio::sync::Mutex;
 
 use eri_graph::{Direction, Edge, Graph, Node, Subgraph};
 
-use crate::services::Services;
 use crate::DispatchError;
+use crate::services::Services;
 
 const DEFAULT_SEARCH_LIMIT: usize = 25;
 const DEFAULT_KIND_LIMIT: usize = 50;
@@ -299,8 +299,8 @@ async fn get_or_open(
     if let Some(existing) = map.get(workspace) {
         return Ok(existing.clone());
     }
-    let graph = Graph::open(workspace)
-        .map_err(|e| DispatchError::Other(anyhow::anyhow!(e.to_string())))?;
+    let graph =
+        Graph::open(workspace).map_err(|e| DispatchError::Other(anyhow::anyhow!(e.to_string())))?;
     let arc = Arc::new(Mutex::new(graph));
     map.insert(workspace.clone(), arc.clone());
     Ok(arc)

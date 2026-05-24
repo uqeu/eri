@@ -10,7 +10,7 @@ use std::time::Duration;
 use serde_json::json;
 use tempfile::TempDir;
 
-use eri_graph::{auto, edge_kind, node_kind, Direction, Edge, Graph, Node};
+use eri_graph::{Direction, Edge, Graph, Node, auto, edge_kind, node_kind};
 
 #[test]
 fn open_creates_schema_in_tempdir() {
@@ -45,9 +45,7 @@ fn insert_node_and_edge_then_read_back() {
         Some("build me a button")
     );
 
-    let neighbors = graph
-        .neighbors(&a, None, Direction::In)
-        .unwrap();
+    let neighbors = graph.neighbors(&a, None, Direction::In).unwrap();
     // Two in-edges: belongs_to_session and caused_by from `b`.
     assert!(neighbors.iter().any(|(e, _)| e.kind == "caused_by"));
 }
@@ -113,9 +111,7 @@ fn traverse_respects_depth_and_edge_kind() {
         .insert_edge(Edge::new(p.clone(), r.clone(), edge_kind::REFERENCES))
         .unwrap();
 
-    let sub = graph
-        .traverse(&r, 2, &[edge_kind::CAUSED_BY])
-        .unwrap();
+    let sub = graph.traverse(&r, 2, &[edge_kind::CAUSED_BY]).unwrap();
     let ids: Vec<&str> = sub.nodes.iter().map(|n| n.id.as_str()).collect();
     assert!(ids.contains(&r.as_str()));
     assert!(ids.contains(&m.as_str()));
@@ -185,12 +181,14 @@ fn search_body_matches_substring() {
         .unwrap();
     let hits = graph.search_body("login", 10).unwrap();
     assert_eq!(hits.len(), 1);
-    assert!(hits[0]
-        .body
-        .get("text")
-        .and_then(|v| v.as_str())
-        .unwrap()
-        .contains("login"));
+    assert!(
+        hits[0]
+            .body
+            .get("text")
+            .and_then(|v| v.as_str())
+            .unwrap()
+            .contains("login")
+    );
 }
 
 #[test]
@@ -241,9 +239,7 @@ fn traverse_does_not_infinite_loop_on_cycles() {
         .insert_edge(Edge::new(c.clone(), a.clone(), edge_kind::RELATED_TO))
         .unwrap();
 
-    let sub = graph
-        .traverse(&a, 10, &[edge_kind::RELATED_TO])
-        .unwrap();
+    let sub = graph.traverse(&a, 10, &[edge_kind::RELATED_TO]).unwrap();
     // All three nodes visited, no infinite loop, no duplicate ids.
     let mut ids: Vec<&str> = sub.nodes.iter().map(|n| n.id.as_str()).collect();
     ids.sort();
@@ -278,16 +274,8 @@ fn auto_helpers_link_prompt_to_intent_to_model_call() {
     let graph = Graph::open_in_memory().unwrap();
     let prompt = auto::record_prompt(&graph, "refactor the auth module").unwrap();
     let intent = auto::record_intent(&graph, &prompt, "refactor").unwrap();
-    let call = auto::record_model_call(
-        &graph,
-        &intent,
-        "mercury",
-        "mercury-2",
-        128,
-        256,
-        420,
-    )
-    .unwrap();
+    let call =
+        auto::record_model_call(&graph, &intent, "mercury", "mercury-2", 128, 256, 420).unwrap();
 
     // model_call -> intent (caused_by)
     let call_neighbors = graph
@@ -338,5 +326,9 @@ fn export_jsonl_writes_one_record_per_line() {
 }
 
 fn first_node_ts(graph: &Graph, id: &str) -> u64 {
-    graph.get_node(&id.to_string()).unwrap().unwrap().created_at_ms
+    graph
+        .get_node(&id.to_string())
+        .unwrap()
+        .unwrap()
+        .created_at_ms
 }

@@ -79,10 +79,7 @@ impl CheckpointStore {
         let message = encode_label_message(label);
         let sha = capture_working_tree(&self.workspace, &message)?;
         let ref_name = format!("{REF_PREFIX}{id}");
-        run_git(
-            &self.workspace,
-            &["update-ref", &ref_name, &sha],
-        )?;
+        run_git(&self.workspace, &["update-ref", &ref_name, &sha])?;
         let created_at = SystemTime::now();
         Ok(Checkpoint {
             id,
@@ -137,8 +134,7 @@ impl CheckpointStore {
         // Capture the *current* working tree into its own commit object so
         // `git diff` sees untracked files too — plain `git diff <ref>` ignores
         // anything not in the index, which would hide newly-added agent files.
-        let current_sha =
-            capture_working_tree(&self.workspace, "eri checkpoint (current)")?;
+        let current_sha = capture_working_tree(&self.workspace, "eri checkpoint (current)")?;
         let numstat = run_git(
             &self.workspace,
             &[
@@ -154,11 +150,7 @@ impl CheckpointStore {
         Ok(CheckpointDiff { files_changed })
     }
 
-    pub fn restore(
-        &self,
-        id: &str,
-        opts: RestoreOptions,
-    ) -> Result<RestoreReport, GitError> {
+    pub fn restore(&self, id: &str, opts: RestoreOptions) -> Result<RestoreReport, GitError> {
         let sha = self.resolve(id)?;
         let diff = self.show(id)?;
 
@@ -190,11 +182,7 @@ impl CheckpointStore {
 
         if opts.dry_run {
             return Ok(RestoreReport {
-                files_restored: diff
-                    .files_changed
-                    .iter()
-                    .map(|f| f.path.clone())
-                    .collect(),
+                files_restored: diff.files_changed.iter().map(|f| f.path.clone()).collect(),
                 files_skipped: Vec::new(),
             });
         }
@@ -203,10 +191,7 @@ impl CheckpointStore {
         // then materialises the index into the working tree. We don't move
         // HEAD, which is the whole point — the user's branch stays put.
         run_git(&self.workspace, &["read-tree", &sha])?;
-        run_git(
-            &self.workspace,
-            &["checkout-index", "--force", "--all"],
-        )?;
+        run_git(&self.workspace, &["checkout-index", "--force", "--all"])?;
         // Delete files that exist in the working tree but not in the
         // checkpoint — checkout-index can't remove what isn't in the index.
         let mut files_restored: Vec<PathBuf> = Vec::new();
@@ -220,9 +205,7 @@ impl CheckpointStore {
                 if absolute.exists() {
                     match std::fs::remove_file(&absolute) {
                         Ok(()) => files_restored.push(change.path.clone()),
-                        Err(error) => {
-                            files_skipped.push((change.path.clone(), error.to_string()))
-                        }
+                        Err(error) => files_skipped.push((change.path.clone(), error.to_string())),
                     }
                 }
             } else {
@@ -364,11 +347,7 @@ fn capture_working_tree(workspace: &Path, commit_message: &str) -> Result<String
     result
 }
 
-fn run_with_index(
-    workspace: &Path,
-    index_path: &Path,
-    args: &[&str],
-) -> Result<String, GitError> {
+fn run_with_index(workspace: &Path, index_path: &Path, args: &[&str]) -> Result<String, GitError> {
     let mut command = Command::new("git");
     command
         .arg("-C")
@@ -434,7 +413,9 @@ fn parse_numstat(raw: &str) -> Vec<FileChange> {
             }
             out.push(FileChange {
                 path: PathBuf::from(to),
-                kind: ChangeKind::Renamed { from: PathBuf::from(from) },
+                kind: ChangeKind::Renamed {
+                    from: PathBuf::from(from),
+                },
                 added,
                 removed,
             });

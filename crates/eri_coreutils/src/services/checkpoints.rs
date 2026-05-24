@@ -8,8 +8,8 @@ use serde_json::Value;
 
 use eri_git::{ChangeKind, CheckpointStore, RestoreOptions};
 
-use crate::services::Services;
 use crate::DispatchError;
+use crate::services::Services;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -127,7 +127,7 @@ pub async fn create(params: Value, _services: &Services) -> Result<Value, Dispat
         created_at_ms: ms_since_epoch(cp.created_at),
         label: cp.label,
     })
-        .map_err(|e| DispatchError::Other(e.into()))
+    .map_err(|e| DispatchError::Other(e.into()))
 }
 
 pub async fn list(params: Value, _services: &Services) -> Result<Value, DispatchError> {
@@ -173,8 +173,7 @@ pub async fn show(params: Value, _services: &Services) -> Result<Value, Dispatch
             }
         })
         .collect();
-    serde_json::to_value(ShowResult { files_changed })
-        .map_err(|e| DispatchError::Other(e.into()))
+    serde_json::to_value(ShowResult { files_changed }).map_err(|e| DispatchError::Other(e.into()))
 }
 
 pub async fn restore(params: Value, _services: &Services) -> Result<Value, DispatchError> {
@@ -208,7 +207,7 @@ pub async fn restore(params: Value, _services: &Services) -> Result<Value, Dispa
         files_restored,
         files_skipped,
     })
-        .map_err(|e| DispatchError::Other(e.into()))
+    .map_err(|e| DispatchError::Other(e.into()))
 }
 
 pub async fn prune(params: Value, _services: &Services) -> Result<Value, DispatchError> {
@@ -219,8 +218,7 @@ pub async fn prune(params: Value, _services: &Services) -> Result<Value, Dispatc
     let pruned = store
         .prune(p.keep)
         .map_err(|e| DispatchError::Other(anyhow::anyhow!(e.to_string())))?;
-    serde_json::to_value(PruneResult { pruned })
-        .map_err(|e| DispatchError::Other(e.into()))
+    serde_json::to_value(PruneResult { pruned }).map_err(|e| DispatchError::Other(e.into()))
 }
 
 pub async fn delete(params: Value, _services: &Services) -> Result<Value, DispatchError> {
@@ -231,8 +229,7 @@ pub async fn delete(params: Value, _services: &Services) -> Result<Value, Dispat
     store
         .delete(&p.id)
         .map_err(|e| DispatchError::Other(anyhow::anyhow!(e.to_string())))?;
-    serde_json::to_value(OkResult { ok: true })
-        .map_err(|e| DispatchError::Other(e.into()))
+    serde_json::to_value(OkResult { ok: true }).map_err(|e| DispatchError::Other(e.into()))
 }
 
 fn ms_since_epoch(t: SystemTime) -> u128 {

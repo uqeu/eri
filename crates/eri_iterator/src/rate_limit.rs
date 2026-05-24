@@ -59,7 +59,9 @@ impl Decision {
     fn deny(retry_after: Duration, reason: impl Into<String>) -> Self {
         // Round up: a user told "retry in 0s" while we still gate them is
         // worse than telling them to wait 1s.
-        let secs = retry_after.as_secs().max(if retry_after.is_zero() { 0 } else { 1 });
+        let secs = retry_after
+            .as_secs()
+            .max(if retry_after.is_zero() { 0 } else { 1 });
         Self {
             allow: false,
             retry_after_seconds: secs,
@@ -189,10 +191,7 @@ impl RateLimiter {
                 let wait = self.per_user_cooldown - elapsed;
                 return Decision::deny(
                     wait,
-                    format!(
-                        "Slow down — retry in {}s",
-                        wait.as_secs().max(1)
-                    ),
+                    format!("Slow down — retry in {}s", wait.as_secs().max(1)),
                 );
             }
         }

@@ -3,9 +3,7 @@
 
 use std::{fs, path::Path, process::Command};
 
-use eri_git::{
-    ChangeKind, CheckpointStore, RestoreOptions, ensure_git_repo,
-};
+use eri_git::{ChangeKind, CheckpointStore, RestoreOptions, ensure_git_repo};
 use tempfile::TempDir;
 
 fn git_on_path() -> bool {
@@ -89,7 +87,10 @@ fn create_on_dirty_tree_captures_tracked_and_untracked() {
         .output()
         .unwrap();
     assert!(tracked.status.success());
-    assert_eq!(String::from_utf8_lossy(&tracked.stdout).trim_end(), "v2-uncommitted");
+    assert_eq!(
+        String::from_utf8_lossy(&tracked.stdout).trim_end(),
+        "v2-uncommitted"
+    );
 
     let untracked = Command::new("git")
         .arg("-C")
@@ -98,7 +99,10 @@ fn create_on_dirty_tree_captures_tracked_and_untracked() {
         .output()
         .unwrap();
     assert!(untracked.status.success());
-    assert_eq!(String::from_utf8_lossy(&untracked.stdout).trim_end(), "fresh");
+    assert_eq!(
+        String::from_utf8_lossy(&untracked.stdout).trim_end(),
+        "fresh"
+    );
 }
 
 #[test]
@@ -139,7 +143,13 @@ fn restore_roundtrips_to_checkpoint_state() {
     fs::write(project.join("agent-new.txt"), "added by agent").unwrap();
 
     let report = store
-        .restore(&cp.id, RestoreOptions { force: true, dry_run: false })
+        .restore(
+            &cp.id,
+            RestoreOptions {
+                force: true,
+                dry_run: false,
+            },
+        )
         .unwrap();
 
     assert_eq!(
@@ -168,7 +178,10 @@ fn restore_refuses_when_uncommitted_changes_would_be_lost() {
     fs::write(project.join("data.txt"), "user-edit").unwrap();
 
     let result = store.restore(&cp.id, RestoreOptions::default());
-    assert!(result.is_err(), "must refuse without force when work would be lost");
+    assert!(
+        result.is_err(),
+        "must refuse without force when work would be lost"
+    );
 
     // User's edit is still on disk.
     assert_eq!(
@@ -193,7 +206,13 @@ fn restore_dry_run_lists_files_without_writing() {
     commit_all(&project, "land edits");
 
     let report = store
-        .restore(&cp.id, RestoreOptions { force: true, dry_run: true })
+        .restore(
+            &cp.id,
+            RestoreOptions {
+                force: true,
+                dry_run: true,
+            },
+        )
         .unwrap();
 
     // Dry run reports something but does not change the working tree.
@@ -257,7 +276,11 @@ fn show_lists_modified_files_between_checkpoint_and_working_tree() {
     fs::write(project.join("added.txt"), "brand new\n").unwrap();
 
     let diff = store.show(&cp.id).unwrap();
-    let paths: Vec<_> = diff.files_changed.iter().map(|f| f.path.to_string_lossy().to_string()).collect();
+    let paths: Vec<_> = diff
+        .files_changed
+        .iter()
+        .map(|f| f.path.to_string_lossy().to_string())
+        .collect();
     assert!(paths.iter().any(|p| p == "data.txt"));
     // `added.txt` exists in the working tree but not in the checkpoint, so it
     // shows up in `git diff <tree>` as an addition.

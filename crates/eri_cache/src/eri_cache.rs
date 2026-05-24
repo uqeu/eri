@@ -114,7 +114,11 @@ impl Cache {
         }
         let db = sled::open(path)?;
         let max_bytes = read_max_bytes_from_env();
-        let cache = Cache { db, clock, max_bytes };
+        let cache = Cache {
+            db,
+            clock,
+            max_bytes,
+        };
         cache.spawn_background_maintenance();
         Ok(cache)
     }
@@ -189,11 +193,7 @@ impl Cache {
 
     /// List keys in a namespace, optionally filtered by a key prefix. Keys are
     /// returned without the internal namespace tag.
-    pub fn list(
-        &self,
-        ns: Namespace,
-        prefix: Option<&str>,
-    ) -> Result<Vec<String>, CacheError> {
+    pub fn list(&self, ns: Namespace, prefix: Option<&str>) -> Result<Vec<String>, CacheError> {
         let mut scan_prefix = vec![ns.tag()];
         if let Some(p) = prefix {
             validate_key(p)?;
@@ -202,7 +202,7 @@ impl Cache {
         let mut out = Vec::new();
         for entry in self.db.scan_prefix(&scan_prefix) {
             let (raw_key, _value) = entry?;
-            if raw_key.len() < 1 {
+            if raw_key.is_empty() {
                 continue;
             }
             let key_bytes = &raw_key[1..];
@@ -293,11 +293,7 @@ impl Cache {
     }
 }
 
-fn run_maintenance(
-    db: &sled::Db,
-    clock: &dyn Clock,
-    max_bytes: u64,
-) -> Result<(), CacheError> {
+fn run_maintenance(db: &sled::Db, clock: &dyn Clock, max_bytes: u64) -> Result<(), CacheError> {
     let now = clock.now_unix();
     let mut to_remove = Vec::new();
     for entry in db.iter() {

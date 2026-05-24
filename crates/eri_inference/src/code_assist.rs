@@ -67,10 +67,10 @@ impl DocStyle {
 /// `framework_hint` (from the user / panel) wins over the heuristic when
 /// present, so a user who says "use vitest" still gets vitest even if we'd
 /// have guessed jest.
-fn classify_for_tests<'a>(
+fn classify_for_tests(
     file_path: &Path,
     code: &str,
-    framework_hint: Option<&'a str>,
+    framework_hint: Option<&str>,
 ) -> (&'static str, &'static str, String, String) {
     let extension = file_path
         .extension()
@@ -82,8 +82,7 @@ fn classify_for_tests<'a>(
         .unwrap_or("module");
     let parent = file_path.parent();
 
-    let looks_like_html_with_js =
-        extension.as_deref() == Some("html") && code.contains("<script");
+    let looks_like_html_with_js = extension.as_deref() == Some("html") && code.contains("<script");
 
     let (language, fence, framework_default, ext_for_test): (
         &'static str,
@@ -95,13 +94,21 @@ fn classify_for_tests<'a>(
         Some("py") => ("Python", "python", "pytest", "py"),
         Some("ts" | "tsx") => ("TypeScript", "ts", "vitest", "test.ts"),
         Some("js" | "jsx" | "mjs" | "cjs") => ("JavaScript", "js", "vitest", "test.js"),
-        Some("html") if looks_like_html_with_js => {
-            ("JavaScript (extracted from HTML)", "js", "vitest", "test.js")
-        }
+        Some("html") if looks_like_html_with_js => (
+            "JavaScript (extracted from HTML)",
+            "js",
+            "vitest",
+            "test.js",
+        ),
         Some("go") => ("Go", "go", "Go's testing package", "_test.go"),
         Some("rb") => ("Ruby", "ruby", "RSpec", "_spec.rb"),
         Some("swift") => ("Swift", "swift", "XCTest", "Tests.swift"),
-        _ => ("plain text", "text", "the project's idiomatic test runner", "test"),
+        _ => (
+            "plain text",
+            "text",
+            "the project's idiomatic test runner",
+            "test",
+        ),
     };
 
     let framework = framework_hint
@@ -113,7 +120,9 @@ fn classify_for_tests<'a>(
     // `<name>.test.js`. The prompt embeds this as a hint so Claude doesn't
     // invent a path that breaks the project's test discovery.
     let suggested_filename = match (extension.as_deref(), looks_like_html_with_js) {
-        (Some("rs"), _) => format!("tests in a `#[cfg(test)] mod tests` block at the bottom of {stem}.rs"),
+        (Some("rs"), _) => {
+            format!("tests in a `#[cfg(test)] mod tests` block at the bottom of {stem}.rs")
+        }
         (Some("go"), _) => format!("{stem}_test.go"),
         (Some("html"), true) => format!("{stem}.test.js"),
         _ => format!("{stem}.{ext_for_test}"),
@@ -121,7 +130,11 @@ fn classify_for_tests<'a>(
 
     let suggested_path = match parent {
         Some(dir) if !dir.as_os_str().is_empty() => {
-            format!("{} (adjacent to the source file at {})", suggested_filename, dir.display())
+            format!(
+                "{} (adjacent to the source file at {})",
+                suggested_filename,
+                dir.display()
+            )
         }
         _ => suggested_filename,
     };

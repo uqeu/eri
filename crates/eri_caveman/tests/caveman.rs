@@ -19,10 +19,15 @@ fn medium_collapses_articles() {
     let out = c.compress(input).to_lowercase();
     // No bare articles surrounded by spaces.
     for art in [" a ", " an ", " the "] {
-        assert!(!out.contains(art), "expected article {art:?} stripped, got: {out}");
+        assert!(
+            !out.contains(art),
+            "expected article {art:?} stripped, got: {out}"
+        );
     }
     // Core nouns survive.
-    for keep in ["coffee", "shop", "hero", "products", "grid", "contact", "form"] {
+    for keep in [
+        "coffee", "shop", "hero", "products", "grid", "contact", "form",
+    ] {
         assert!(out.contains(keep), "expected {keep:?} kept, got: {out}");
     }
 }
@@ -71,7 +76,10 @@ fn preserves_inline_code_spans() {
     let c = Compressor::new(CompressionLevel::Aggressive);
     let input = "Use `get the a value` to fetch it really fast.";
     let out = c.compress(input);
-    assert!(out.contains("`get the a value`"), "inline code mutated. got: {out}");
+    assert!(
+        out.contains("`get the a value`"),
+        "inline code mutated. got: {out}"
+    );
 }
 
 #[test]
@@ -100,8 +108,14 @@ fn preserves_quoted_string_literals() {
     let c = Compressor::new(CompressionLevel::Aggressive);
     let input = "Set the title to \"The Real Deal\" and pass 'really do it' as a flag.";
     let out = c.compress(input);
-    assert!(out.contains("\"The Real Deal\""), "double-quoted mutated. got: {out}");
-    assert!(out.contains("'really do it'"), "single-quoted mutated. got: {out}");
+    assert!(
+        out.contains("\"The Real Deal\""),
+        "double-quoted mutated. got: {out}"
+    );
+    assert!(
+        out.contains("'really do it'"),
+        "single-quoted mutated. got: {out}"
+    );
 }
 
 #[test]
@@ -112,7 +126,9 @@ fn compress_then_decompress_is_lossy_but_semantically_close() {
     let c = Compressor::new(CompressionLevel::Aggressive);
     let input = "Build me a coffee shop with a hero, a products grid, and a contact form.";
     let out = c.compress(input).to_lowercase();
-    for keep in ["build", "coffee", "shop", "hero", "products", "grid", "contact", "form"] {
+    for keep in [
+        "build", "coffee", "shop", "hero", "products", "grid", "contact", "form",
+    ] {
         assert!(out.contains(keep), "missing {keep:?} in: {out}");
     }
     for drop in [" a ", " an ", " the ", " me "] {

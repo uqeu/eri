@@ -72,8 +72,8 @@ fn load_skill_dir(root_dir: &Path, skill_md: &Path) -> Result<Skill> {
 }
 
 fn load_legacy_file(path: &Path) -> Result<Skill> {
-    let content = fs::read_to_string(path)
-        .with_context(|| format!("failed to read {}", path.display()))?;
+    let content =
+        fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()))?;
     let ParsedFile { frontmatter, body } = frontmatter::split(&content);
 
     let name = frontmatter

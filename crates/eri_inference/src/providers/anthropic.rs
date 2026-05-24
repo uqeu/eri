@@ -15,9 +15,9 @@ use serde::{Deserialize, Serialize};
 use crate::{
     InferenceError,
     costs::{
-        CLAUDE_HAIKU_4_5_INPUT_PER_M, CLAUDE_HAIKU_4_5_OUTPUT_PER_M,
-        CLAUDE_OPUS_4_5_INPUT_PER_M, CLAUDE_OPUS_4_5_OUTPUT_PER_M,
-        CLAUDE_SONNET_4_5_INPUT_PER_M, CLAUDE_SONNET_4_5_OUTPUT_PER_M, cost_for,
+        CLAUDE_HAIKU_4_5_INPUT_PER_M, CLAUDE_HAIKU_4_5_OUTPUT_PER_M, CLAUDE_OPUS_4_5_INPUT_PER_M,
+        CLAUDE_OPUS_4_5_OUTPUT_PER_M, CLAUDE_SONNET_4_5_INPUT_PER_M,
+        CLAUDE_SONNET_4_5_OUTPUT_PER_M, cost_for,
     },
     llm_provider::{LlmProvider, LlmResponse},
 };
@@ -95,7 +95,10 @@ fn pricing_for(model: &str) -> Option<(f64, f64)> {
     // Match by prefix so "claude-sonnet-4-5-20251015" and "claude-sonnet-4-5"
     // both resolve to the Sonnet rates.
     if model.starts_with("claude-sonnet-4-5") {
-        return Some((CLAUDE_SONNET_4_5_INPUT_PER_M, CLAUDE_SONNET_4_5_OUTPUT_PER_M));
+        return Some((
+            CLAUDE_SONNET_4_5_INPUT_PER_M,
+            CLAUDE_SONNET_4_5_OUTPUT_PER_M,
+        ));
     }
     if model.starts_with("claude-haiku-4-5") {
         return Some((CLAUDE_HAIKU_4_5_INPUT_PER_M, CLAUDE_HAIKU_4_5_OUTPUT_PER_M));

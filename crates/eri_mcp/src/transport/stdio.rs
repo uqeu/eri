@@ -39,13 +39,9 @@ impl StdioTransport {
     /// Errors out only on spawn failure or missing stdio pipes; the handshake
     /// itself is the caller's responsibility (see [`crate::client`]).
     pub async fn spawn(config: &ServerConfig) -> Result<Self, McpError> {
-        let command = config
-            .command
-            .clone()
-            .ok_or_else(|| McpError::Protocol(format!(
-                "stdio server {} has no `command`",
-                config.name
-            )))?;
+        let command = config.command.clone().ok_or_else(|| {
+            McpError::Protocol(format!("stdio server {} has no `command`", config.name))
+        })?;
 
         let mut cmd = Command::new(command);
         cmd.args(&config.args)

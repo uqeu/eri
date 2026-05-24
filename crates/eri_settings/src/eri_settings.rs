@@ -17,7 +17,7 @@ pub enum SettingsError {
     Invalid(String),
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct EriSettings {
     pub voice: VoiceSettings,
@@ -28,21 +28,6 @@ pub struct EriSettings {
     pub cost: CostSettings,
     pub ui: UiSettings,
     pub telemetry: TelemetrySettings,
-}
-
-impl Default for EriSettings {
-    fn default() -> Self {
-        Self {
-            voice: VoiceSettings::default(),
-            tts: TtsSettings::default(),
-            brain: BrainSettings::default(),
-            mercury: MercurySettings::default(),
-            agent: AgentSettings::default(),
-            cost: CostSettings::default(),
-            ui: UiSettings::default(),
-            telemetry: TelemetrySettings::default(),
-        }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -177,20 +162,11 @@ impl Default for UiSettings {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct TelemetrySettings {
     pub sentry: bool,
     pub posthog: bool,
-}
-
-impl Default for TelemetrySettings {
-    fn default() -> Self {
-        Self {
-            sentry: false,
-            posthog: false,
-        }
-    }
 }
 
 impl EriSettings {
@@ -232,10 +208,10 @@ impl EriSettings {
     /// Save to an explicit path. Creates the parent directory if missing.
     pub fn save_to(&self, path: &Path) -> Result<(), SettingsError> {
         self.validate()?;
-        if let Some(parent) = path.parent() {
-            if !parent.as_os_str().is_empty() {
-                std::fs::create_dir_all(parent)?;
-            }
+        if let Some(parent) = path.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            std::fs::create_dir_all(parent)?;
         }
         let serialized = toml::to_string_pretty(self)?;
         std::fs::write(path, serialized)?;

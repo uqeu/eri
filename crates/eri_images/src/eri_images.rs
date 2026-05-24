@@ -52,8 +52,7 @@ impl ImageGenConfig {
         let api_key = env::var("REPLICATE_API_TOKEN")
             .ok()
             .filter(|key| !key.trim().is_empty())?;
-        let model =
-            env::var("ERI_IMAGE_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.to_string());
+        let model = env::var("ERI_IMAGE_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.to_string());
         let aspect = env::var("ERI_IMAGE_ASPECT")
             .ok()
             .and_then(|raw| AspectRatio::parse(&raw))
@@ -101,11 +100,17 @@ pub enum ImageError {
     )]
     ApiKey,
     #[error("transport error: {0}")]
-    Transport(#[from] ureq::Error),
+    Transport(#[from] Box<ureq::Error>),
     #[error("json error: {0}")]
     Json(#[from] serde_json::Error),
     #[error("Replicate API failure: {0}")]
     ApiFailure(String),
+}
+
+impl From<ureq::Error> for ImageError {
+    fn from(e: ureq::Error) -> Self {
+        ImageError::Transport(Box::new(e))
+    }
 }
 
 /// Generate an image and return the hosted Replicate URL. Cheaper than
@@ -184,7 +189,7 @@ fn post_prediction(
                 "POST predictions returned {status}: {body}"
             )));
         }
-        Err(other) => return Err(ImageError::Transport(other)),
+        Err(other) => return Err(ImageError::Transport(Box::new(other))),
     };
     let body = response.into_string().map_err(|error| {
         ImageError::ApiFailure(format!("could not read prediction response: {error}"))
@@ -230,7 +235,7 @@ fn poll_until_terminal(
                     "GET prediction returned {status}: {body}"
                 )));
             }
-            Err(other) => return Err(ImageError::Transport(other)),
+            Err(other) => return Err(ImageError::Transport(Box::new(other))),
         };
         let body = response.into_string().map_err(|error| {
             ImageError::ApiFailure(format!("could not read poll response: {error}"))
@@ -273,9 +278,7 @@ fn extract_first_output_url(prediction: &PredictionResponse) -> Result<String, I
         serde_json::Value::Array(array) => array
             .iter()
             .find_map(|value| value.as_str().map(str::to_string))
-            .ok_or_else(|| {
-                ImageError::ApiFailure("output array contained no string URL".into())
-            }),
+            .ok_or_else(|| ImageError::ApiFailure("output array contained no string URL".into())),
         // flux-dev (older signature) sometimes returns a single string.
         serde_json::Value::String(url) => Ok(url.clone()),
         other => Err(ImageError::ApiFailure(format!(
@@ -326,8 +329,7 @@ mod tests {
             AspectRatio::Wide16x9,
         )
         .expect("body serializes");
-        let value: serde_json::Value =
-            serde_json::from_str(&body).expect("body parses as json");
+        let value: serde_json::Value = serde_json::from_str(&body).expect("body parses as json");
         assert_eq!(value["model"], "black-forest-labs/flux-schnell");
         assert_eq!(value["input"]["prompt"], "a coffee shop on a rainy night");
         assert_eq!(value["input"]["aspect_ratio"], "16:9");
@@ -340,7 +342,10 @@ mod tests {
         assert_eq!(AspectRatio::parse("1:1"), Some(AspectRatio::Square));
         assert_eq!(AspectRatio::parse("square"), Some(AspectRatio::Square));
         assert_eq!(AspectRatio::parse("4:5"), Some(AspectRatio::Portrait4x5));
-        assert_eq!(AspectRatio::parse("portrait"), Some(AspectRatio::Portrait4x5));
+        assert_eq!(
+            AspectRatio::parse("portrait"),
+            Some(AspectRatio::Portrait4x5)
+        );
         assert_eq!(AspectRatio::parse("nonsense"), None);
     }
 }

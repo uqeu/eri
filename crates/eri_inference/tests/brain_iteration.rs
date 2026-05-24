@@ -215,8 +215,7 @@ fn search_intent_errors_when_no_search_provider_is_supplied() {
         workspace_root: dir.path().to_path_buf(),
         language: None,
     };
-    let result =
-        eri_inference::run_iteration_via_brain(req, None, Box::new(NullInstr), |_| {});
+    let result = eri_inference::run_iteration_via_brain(req, None, Box::new(NullInstr), |_| {});
     match result {
         Err(BrainIterationError::NoSearchProvider) => {}
         other => panic!("expected NoSearchProvider, got {other:?}"),
@@ -248,7 +247,9 @@ fn budget_overflow_drops_low_priority_parts() {
         .plan("change the button color", &ctx, parts)
         .expect("plans");
     assert!(
-        plan.budgeted_prompt.dropped_parts.contains(&"ctx:huge".to_string()),
+        plan.budgeted_prompt
+            .dropped_parts
+            .contains(&"ctx:huge".to_string()),
         "dropped_parts = {:?}",
         plan.budgeted_prompt.dropped_parts
     );

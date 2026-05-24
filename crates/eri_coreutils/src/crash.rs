@@ -82,8 +82,7 @@ struct CrashRecord<'a> {
 /// [`install_tracing_subscriber`].
 pub fn install_panic_handler(workspace: Option<&Path>) -> Result<()> {
     let base = ensure_base_dir(workspace)?;
-    fs::create_dir_all(&base)
-        .with_context(|| format!("creating crash dir {}", base.display()))?;
+    fs::create_dir_all(&base).with_context(|| format!("creating crash dir {}", base.display()))?;
     std::panic::set_hook(Box::new(panic_hook));
     Ok(())
 }
@@ -96,20 +95,17 @@ pub fn install_panic_handler(workspace: Option<&Path>) -> Result<()> {
 /// installed (e.g. by an earlier call or by a test harness) we log a
 /// warning and continue — never panic over a double-init.
 pub fn install_tracing_subscriber(workspace: Option<&Path>) -> Result<()> {
+    use tracing_subscriber::EnvFilter;
     use tracing_subscriber::fmt;
     use tracing_subscriber::prelude::*;
-    use tracing_subscriber::EnvFilter;
 
     let base = ensure_base_dir(workspace)?;
     fs::create_dir_all(&base)
         .with_context(|| format!("creating sidecar log dir {}", base.display()))?;
 
-    let env_filter = EnvFilter::try_from_env("ERI_LOG")
-        .unwrap_or_else(|_| EnvFilter::new("info"));
+    let env_filter = EnvFilter::try_from_env("ERI_LOG").unwrap_or_else(|_| EnvFilter::new("info"));
 
-    let stderr_layer = fmt::layer()
-        .with_writer(std::io::stderr)
-        .with_target(true);
+    let stderr_layer = fmt::layer().with_writer(std::io::stderr).with_target(true);
 
     let file_writer = RotatingFileWriter::new(base.join("sidecar.log"));
     let file_layer = fmt::layer()
@@ -188,8 +184,8 @@ pub fn read_recent_crashes(limit: usize) -> Result<Vec<Value>> {
     if !path.exists() {
         return Ok(Vec::new());
     }
-    let content = fs::read_to_string(&path)
-        .with_context(|| format!("reading {}", path.display()))?;
+    let content =
+        fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
     let lines: Vec<&str> = content.lines().filter(|l| !l.trim().is_empty()).collect();
     let take_from = lines.len().saturating_sub(limit);
     let mut out: Vec<Value> = Vec::new();
@@ -208,8 +204,7 @@ pub fn clear_crash_log() -> Result<()> {
         return Ok(());
     }
     let _guard = CRASH_LOG_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    fs::write(&path, b"")
-        .with_context(|| format!("clearing {}", path.display()))
+    fs::write(&path, b"").with_context(|| format!("clearing {}", path.display()))
 }
 
 /// Apply the sanitiser to a single string. Public so the JSON-RPC
@@ -240,7 +235,7 @@ fn panic_hook(info: &PanicHookInfo<'_>) {
         .map(str::to_string)
         .unwrap_or_else(|| format!("{:?}", std::thread::current().id()));
     let location = info.location().map(|loc| {
-        let path = rewrite_workspace_paths(&loc.file().to_string());
+        let path = rewrite_workspace_paths(loc.file());
         format!("{}:{}:{}", path, loc.line(), loc.column())
     });
     let backtrace_str = sanitize_str(&Backtrace::force_capture().to_string());
@@ -268,8 +263,7 @@ fn panic_hook(info: &PanicHookInfo<'_>) {
 fn write_crash_record(record: &CrashRecord<'_>) -> Result<()> {
     let path = crash_log_path();
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("creating {}", parent.display()))?;
+        fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
     }
     let mut line = serde_json::to_string(record).context("serializing crash record")?;
     line.push('\n');
@@ -362,7 +356,9 @@ fn home_dir() -> Option<PathBuf> {
 #[cfg(feature = "sentry")]
 fn sanitize_sentry_event(event: &mut sentry::protocol::Event<'static>) {
     // Drop anything that looks like a payload blob.
-    let drop_keys = ["params", "prompt", "messages", "body", "secret", "token", "key"];
+    let drop_keys = [
+        "params", "prompt", "messages", "body", "secret", "token", "key",
+    ];
     for k in drop_keys {
         event.extra.remove(k);
     }
@@ -545,7 +541,11 @@ mod tests {
     fn sanitize_str_replaces_workspace_paths() {
         let _g = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         ensure_test_dir();
-        let ws = WORKSPACE_ROOT.get().and_then(Option::as_ref).cloned().unwrap();
+        let ws = WORKSPACE_ROOT
+            .get()
+            .and_then(Option::as_ref)
+            .cloned()
+            .unwrap();
         let raw = format!("{}/src/main.rs:42", ws.display());
         let cleaned = sanitize_str(&raw);
         assert!(cleaned.contains("<workspace>"), "got: {cleaned}");
@@ -574,11 +574,13 @@ mod tests {
             .iter()
             .filter_map(|l| serde_json::from_str(l).ok())
             .collect();
-        assert!(parsed.iter().any(|v| v["kind"] == "panic"
-            && v["message"]
-                .as_str()
-                .map(|s| s.contains("boom-test-marker"))
-                .unwrap_or(false)));
+        assert!(parsed.iter().any(|v| {
+            v["kind"] == "panic"
+                && v["message"]
+                    .as_str()
+                    .map(|s| s.contains("boom-test-marker"))
+                    .unwrap_or(false)
+        }));
     }
 
     #[test]
