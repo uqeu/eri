@@ -24,18 +24,15 @@ const config: Config = {
         // Demo-only accent
         "demo-accent": "var(--demo-accent)",
         // Legacy aliases — existing demo components (HeroBig/EriDemo/EngineRoom/
-        // PromptPipeline) reference `accent` for the engine's lime color. Keep
-        // pointing those at lime (--demo-accent) so the engine keeps its color.
-        // New site chrome uses `sage-deep` / `sage` explicitly — don't repaint
-        // the demos to sage by accident.
-        ink: "var(--text)",
-        paper: "var(--bg)",
+        // PromptPipeline) live in a dark-only inner world. These need to be
+        // FIXED colors, not theme-aware vars — otherwise `text-paper` resolves
+        // to the page bg (cream in light mode) and becomes invisible inside
+        // the dark demo. Engine has its own color world.
+        ink: "#0A0A0A",
+        paper: "#F5F2EC",
         accent: "var(--demo-accent)",
         "accent-bright": "var(--demo-accent)",
-        muted: "var(--text-sec)",
-        // Demos that hardcoded the old dark backgrounds expect dark inside;
-        // keep these dark-only so demo internals don't flip to cream in light
-        // mode and look broken. Engine has its own world.
+        muted: "rgba(245, 242, 236, 0.6)",
         "bg-1": "#0A0A0A",
         "bg-2": "#131311",
         "bg-3": "#1A1A18",
