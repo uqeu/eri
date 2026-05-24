@@ -12,8 +12,8 @@ export function HeroCanvas({ onReset, children }: HeroCanvasProps): React.ReactE
     <div
       className="relative w-full overflow-hidden rounded-2xl border border-border"
       style={{
-        height: "min(720px, 70vh)",
-        minHeight: 560,
+        height: "min(820px, 78vh)",
+        minHeight: 660,
         background:
           "radial-gradient(circle at 25% 20%, rgba(191, 215, 193, 0.10), transparent 55%), radial-gradient(circle at 80% 80%, rgba(201, 220, 234, 0.10), transparent 55%), #14120b",
       }}

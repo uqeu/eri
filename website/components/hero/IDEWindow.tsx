@@ -22,15 +22,35 @@ interface Rect {
   readonly height: number;
 }
 
-const TARGETS = ["h1", "p", "toggle", "price", "cta"] as const;
+const TARGETS = [
+  "brand",
+  "h1",
+  "p",
+  "monthly",
+  "toggle",
+  "annual",
+  "discount",
+  "priceCard",
+  "price",
+  "perUnit",
+  "cta",
+  "fineprint",
+] as const;
 type Target = (typeof TARGETS)[number];
 
 const LABELS: Record<Target, string> = {
+  brand: "Brand · span",
   h1: "Heading · h1",
   p: "Subtitle · p",
+  monthly: "Label · span",
   toggle: "Toggle · button",
+  annual: "Label · span",
+  discount: "Badge · span",
+  priceCard: "PriceCard · div",
   price: "Price · span",
+  perUnit: "PerUnit · span",
   cta: "PrimaryCTA · button",
+  fineprint: "Fineprint · p",
 };
 
 export function IDEWindow(): React.ReactElement {
@@ -119,33 +139,30 @@ export function IDEWindow(): React.ReactElement {
 function PreviewPane(): React.ReactElement {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const refs: Record<Target, React.RefObject<HTMLElement | null>> = {
+    brand: useRef<HTMLDivElement | null>(null),
     h1: useRef<HTMLHeadingElement | null>(null),
     p: useRef<HTMLParagraphElement | null>(null),
+    monthly: useRef<HTMLSpanElement | null>(null),
     toggle: useRef<HTMLDivElement | null>(null),
+    annual: useRef<HTMLSpanElement | null>(null),
+    discount: useRef<HTMLSpanElement | null>(null),
+    priceCard: useRef<HTMLDivElement | null>(null),
     price: useRef<HTMLSpanElement | null>(null),
+    perUnit: useRef<HTMLSpanElement | null>(null),
     cta: useRef<HTMLButtonElement | null>(null),
+    fineprint: useRef<HTMLParagraphElement | null>(null),
   };
-  const [hovered, setHovered] = useState<Target | null>(null);
-  const [autoIdx, setAutoIdx] = useState<number>(0);
+  const [active, setActive] = useState<Target | null>(null);
   const [rect, setRect] = useState<Rect | null>(null);
 
-  // Auto-cycle through targets unless the user is actively hovering — that
-  // way the demo "plays" on its own but hover takes over the instant the
-  // pointer enters the preview.
-  useEffect(() => {
-    if (hovered) return;
-    const id = setInterval(() => {
-      setAutoIdx((i) => (i + 1) % TARGETS.length);
-    }, 1900);
-    return () => clearInterval(id);
-  }, [hovered]);
-
-  const active: Target = hovered ?? TARGETS[autoIdx]!;
-
   useLayoutEffect(() => {
+    if (!active) {
+      setRect(null);
+      return;
+    }
     function measure(): void {
       const container = containerRef.current;
-      const el = refs[active].current;
+      const el = active ? refs[active].current : null;
       if (!container || !el) return;
       const c = container.getBoundingClientRect();
       const r = el.getBoundingClientRect();
@@ -167,8 +184,8 @@ function PreviewPane(): React.ReactElement {
     readonly onMouseLeave: () => void;
   } {
     return {
-      onMouseEnter: () => setHovered(t),
-      onMouseLeave: () => setHovered(null),
+      onMouseEnter: () => setActive(t),
+      onMouseLeave: () => setActive(null),
     };
   }
 
@@ -217,7 +234,13 @@ function PreviewPane(): React.ReactElement {
           display: tab === "preview" ? "block" : "none",
         }}
       >
-        <div className="mb-3 text-[11px] italic text-white/60">Acme</div>
+        <div
+          ref={refs.brand as React.RefObject<HTMLDivElement>}
+          {...hoverProps("brand")}
+          className="mb-3 inline-block text-[11px] italic text-white/60"
+        >
+          Acme
+        </div>
         <h1
           ref={refs.h1 as React.RefObject<HTMLHeadingElement>}
           {...hoverProps("h1")}
@@ -235,7 +258,13 @@ function PreviewPane(): React.ReactElement {
         </p>
 
         <div className="mt-5 flex items-center gap-3">
-          <span className="text-[10px] text-white/55">Monthly</span>
+          <span
+            ref={refs.monthly as React.RefObject<HTMLSpanElement>}
+            {...hoverProps("monthly")}
+            className="text-[10px] text-white/55"
+          >
+            Monthly
+          </span>
           <div
             ref={refs.toggle as React.RefObject<HTMLDivElement>}
             {...hoverProps("toggle")}
@@ -247,13 +276,27 @@ function PreviewPane(): React.ReactElement {
               style={{ transform: "translateX(16px)" }}
             />
           </div>
-          <span className="text-[10px] text-white/90">Annual</span>
-          <span className="rounded-sm border border-[#bfd7c1]/30 bg-[#bfd7c1]/[0.07] px-1.5 py-0.5 text-[9px] text-[#bfd7c1]">
+          <span
+            ref={refs.annual as React.RefObject<HTMLSpanElement>}
+            {...hoverProps("annual")}
+            className="text-[10px] text-white/90"
+          >
+            Annual
+          </span>
+          <span
+            ref={refs.discount as React.RefObject<HTMLSpanElement>}
+            {...hoverProps("discount")}
+            className="rounded-sm border border-[#bfd7c1]/30 bg-[#bfd7c1]/[0.07] px-1.5 py-0.5 text-[9px] text-[#bfd7c1]"
+          >
             -20%
           </span>
         </div>
 
-        <div className="mt-4 inline-flex items-baseline gap-2 rounded-md border border-white/[0.08] px-3 py-2">
+        <div
+          ref={refs.priceCard as React.RefObject<HTMLDivElement>}
+          {...hoverProps("priceCard")}
+          className="mt-4 inline-flex items-baseline gap-2 rounded-md border border-white/[0.08] px-3 py-2"
+        >
           <span
             ref={refs.price as React.RefObject<HTMLSpanElement>}
             {...hoverProps("price")}
@@ -262,7 +305,13 @@ function PreviewPane(): React.ReactElement {
           >
             $240/yr
           </span>
-          <span className="text-[10px] text-white/45">per workspace</span>
+          <span
+            ref={refs.perUnit as React.RefObject<HTMLSpanElement>}
+            {...hoverProps("perUnit")}
+            className="text-[10px] text-white/45"
+          >
+            per workspace
+          </span>
         </div>
 
         <div className="mt-4">
@@ -274,7 +323,13 @@ function PreviewPane(): React.ReactElement {
           >
             Start free trial →
           </button>
-          <p className="mt-2 text-[10px] text-white/45">No card. 14 days. Local-first.</p>
+          <p
+            ref={refs.fineprint as React.RefObject<HTMLParagraphElement>}
+            {...hoverProps("fineprint")}
+            className="mt-2 text-[10px] text-white/45"
+          >
+            No card. 14 days. Local-first.
+          </p>
         </div>
 
         {/* Highlight overlay */}
@@ -306,7 +361,7 @@ function PreviewPane(): React.ReactElement {
                 letterSpacing: "0.01em",
               }}
             >
-              {LABELS[active]}
+              {active ? LABELS[active] : ""}
             </div>
           </>
         ) : null}

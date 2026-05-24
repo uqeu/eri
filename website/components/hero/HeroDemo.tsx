@@ -4,7 +4,7 @@ import { useState } from "react";
 import { HeroCanvas } from "./HeroCanvas";
 import { SceneTabs } from "./SceneTabs";
 import { IDEWindow } from "./IDEWindow";
-import { EriDemo } from "../EriDemo";
+import { HeroBig } from "../HeroBig";
 import { PromptPipeline } from "../PromptPipeline";
 
 interface Scene {
@@ -16,6 +16,12 @@ interface Scene {
 
 const SCENES: ReadonlyArray<Scene> = [
   {
+    id: "prototype",
+    label: "prototype + reason to switch",
+    render: () => <HeroBig />,
+    scale: 0.7,
+  },
+  {
     id: "ide",
     label: "workspace",
     render: () => (
@@ -23,12 +29,6 @@ const SCENES: ReadonlyArray<Scene> = [
         <IDEWindow />
       </div>
     ),
-  },
-  {
-    id: "iteration",
-    label: "iteration history",
-    render: () => <EriDemo />,
-    scale: 0.7,
   },
   {
     id: "pipeline",
