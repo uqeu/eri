@@ -1,10 +1,10 @@
 import Link from "next/link";
-import { HeroDemo } from "./hero/HeroDemo";
+import { HeroBig } from "./HeroBig";
 
 export function Hero(): React.ReactElement {
   return (
     <section className="bg-bg text-text">
-      <div className="container pt-24 pb-10 lg:pt-32 lg:pb-14">
+      <div className="container pt-20 pb-10 lg:pt-28 lg:pb-12">
         <div className="max-w-3xl mb-10 lg:mb-14">
           <h1 className="text-h1 text-balance mb-5">
             Speak the edit. eri watches where you&apos;re pointing.
@@ -27,9 +27,11 @@ export function Hero(): React.ReactElement {
             </Link>
           </div>
         </div>
-
-        <HeroDemo />
       </div>
+
+      {/* HeroBig is the prototype + reason-to-switch demo — eri's own thing,
+          auto-plays. No interactive scene-tabs wrapper anymore. */}
+      <HeroBig />
     </section>
   );
 }

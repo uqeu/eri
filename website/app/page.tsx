@@ -1,8 +1,4 @@
 import { Hero } from "@/components/Hero";
-import { FeatureCard } from "@/components/FeatureCard";
-import { EngineRoom } from "@/components/EngineRoom";
-import { EriDemo } from "@/components/EriDemo";
-import { HeroBig } from "@/components/HeroBig";
 import { Testimonials } from "@/components/Testimonials";
 import { CtaFooter } from "@/components/CtaFooter";
 import { FooterBig } from "@/components/FooterBig";
@@ -12,54 +8,51 @@ export default function HomePage(): React.ReactElement {
     <main>
       <Hero />
 
-      <section className="container mb-16 lg:mb-24">
+      <section className="container mt-12 mb-16 lg:mt-20 lg:mb-24">
         <div className="rounded-xl border border-border bg-bg-card px-5 py-4 flex flex-wrap items-center gap-3 text-[13px]">
           <span className="inline-flex h-2 w-2 rounded-full bg-sage-deep" aria-hidden />
           <span className="text-text font-medium">Pre-launch · free in beta</span>
-          <span className="text-text-sec">No usage limits, no card. We&apos;re still building — first invite waves rolling now.</span>
+          <span className="text-text-sec">
+            No usage limits, no card. We&apos;re still building — first invite waves rolling now.
+          </span>
         </div>
       </section>
 
-      <FeatureCard
-        eyebrow="01 · voice + gaze"
-        title="Speak the edit. Look at what you mean."
-        body="Local Whisper transcribes voice in sub-second; an optional MediaPipe gaze layer tells eri exactly which element you're pointing at. The camera frame never leaves your laptop."
-        ctaHref="/features"
-        ctaLabel="Learn about voice + gaze"
-        media={<EngineRoom />}
-      />
-
-      <FeatureCard
-        eyebrow="02 · diffusion preview"
-        title="See the diff resolve, not the tokens stream."
-        body="eri's engine denoises a working patch while you finish your sentence. The preview becomes the answer — no waiting on a cursor."
-        ctaHref="/features"
-        ctaLabel="How diffusion works"
-        media={<HeroBig />}
-      />
-
-      <FeatureCard
-        eyebrow="03 · iteration history"
-        title="Branchable, time-travelable edit history."
-        body="Every prompt becomes a node. Fork it, replay it, send the whole branch through a different model. The thing you tried yesterday is one click away."
-        ctaHref="/features"
-        ctaLabel="See iteration history"
-        media={<EriDemo />}
-      />
-
-      <Testimonials />
+      <section className="container mb-20 lg:mb-28">
+        <h2 className="text-h2 mb-8 text-balance text-text">What&apos;s in the box</h2>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <FrontierCard
+            title="Voice + gaze in your editor"
+            body="Local Whisper transcribes voice in sub-second. Optional MediaPipe gaze tells eri exactly which element you&apos;re pointing at. The camera frame never leaves your laptop."
+            href="/features"
+            cta="How voice + gaze works"
+          />
+          <FrontierCard
+            title="Diffusion preview, not streaming tokens"
+            body="eri&apos;s engine denoises a working patch while you finish your sentence. The preview becomes the answer — no waiting on a cursor."
+            href="/features"
+            cta="Inside the engine"
+          />
+          <FrontierCard
+            title="Branchable iteration history"
+            body="Every prompt is a node. Fork it, replay it, send the whole branch through a different model. Yesterday&apos;s try is one click away."
+            href="/features"
+            cta="See iteration history"
+          />
+        </div>
+      </section>
 
       <section className="container mb-20 lg:mb-28">
         <h2 className="text-h2 mb-8 text-balance text-text">Stay on the frontier</h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <FrontierCard
-            title="Use the best model for every task"
-            body="Pick from Claude Opus/Sonnet, GPT-5.5, Gemini 3.1, Grok 4.3 — or eri's own diffusion engine for short edits. Auto-route or override per prompt."
+            title="The model that fits the task"
+            body="Claude Opus/Sonnet, GPT-5.5, Gemini 3.1, Grok 4.3, or eri&apos;s own diffusion engine for short edits. Auto-route or override per prompt."
             href="/docs/models"
             cta="Explore models"
           />
           <FrontierCard
-            title="Codebase context, not just chat history"
+            title="Codebase context, not chat history"
             body="eri reads your repo — semantic search, grep, AST awareness — so prompts ground in your code, not generic patterns from training data."
             href="/docs/context"
             cta="How context works"
@@ -72,6 +65,8 @@ export default function HomePage(): React.ReactElement {
           />
         </div>
       </section>
+
+      <Testimonials />
 
       <CtaFooter />
       <FooterBig />
