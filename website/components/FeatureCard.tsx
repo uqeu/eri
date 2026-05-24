@@ -27,7 +27,7 @@ export function FeatureCard({
           {ctaHref && ctaLabel ? (
             <a
               href={ctaHref}
-              className="mt-5 inline-flex items-center text-sage-deep hover:text-text transition-colors text-[14px]"
+              className="mt-5 inline-flex items-center text-text-sec hover:text-text transition-colors text-[14px]"
             >
               {ctaLabel} <span className="ml-1">→</span>
             </a>

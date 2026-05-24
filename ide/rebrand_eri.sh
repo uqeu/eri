@@ -453,6 +453,28 @@ echo "[eri] icon audit:"
 ls -la resources/darwin/code.icns resources/darwin/code_file.icns resources/linux/code.png 2>&1 || true
 
 # ---------------------------------------------------------------------------
+# 7b. Bundle the Swift preview binary into eri.app/Contents/Resources/bin/.
+#     Built by scripts/build_eri_preview.sh — if it's missing, build it now.
+#     We run from cwd=vscode/, so ../../scripts/... reaches the repo root.
+# ---------------------------------------------------------------------------
+if [[ ! -x ../../scripts/eri_preview && -f ../../scripts/build_eri_preview.sh ]]; then
+  echo "[eri] building eri_preview swift binary"
+  bash ../../scripts/build_eri_preview.sh || echo "[eri] WARN: preview build failed, continuing"
+fi
+if [[ -x ../../scripts/eri_preview ]]; then
+  ERI_APP_PATH="../VSCode-darwin-arm64/eri.app"
+  if [[ -d "${ERI_APP_PATH}" ]]; then
+    mkdir -p "${ERI_APP_PATH}/Contents/Resources/bin"
+    cp ../../scripts/eri_preview "${ERI_APP_PATH}/Contents/Resources/bin/eri_preview"
+    echo "[eri] bundled eri_preview binary into ${ERI_APP_PATH}/Contents/Resources/bin/"
+  else
+    echo "[eri] note: ${ERI_APP_PATH} not present yet — skipping preview bundle"
+  fi
+else
+  echo "[eri] WARN: scripts/eri_preview not found — preview window unavailable in this build"
+fi
+
+# ---------------------------------------------------------------------------
 # 8. Audit — dump the final product.json identity for the build log.
 # ---------------------------------------------------------------------------
 echo "[eri] final product.json identity:"

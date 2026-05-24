@@ -8,7 +8,7 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        // Semantic tokens (drive 99% of the site)
+        // Chrome — dark-only neutrals
         bg: "var(--bg)",
         "bg-card": "var(--bg-card)",
         "bg-card-2": "var(--bg-card-2)",
@@ -17,16 +17,9 @@ const config: Config = {
         text: "var(--text)",
         "text-sec": "var(--text-sec)",
         "text-ter": "var(--text-ter)",
-        sage: "var(--sage)",
-        "sage-deep": "var(--sage-deep)",
-        "accent-clay": "var(--accent-clay)",
-        // Demo-only accent
+        // Engine-only lime — used inside HeroBig/PromptPipeline/EngineRoom/EriDemo
         "demo-accent": "var(--demo-accent)",
-        // Legacy aliases — existing demo components (HeroBig/EriDemo/EngineRoom/
-        // PromptPipeline) live in a dark-only inner world. These need to be
-        // FIXED colors, not theme-aware vars — otherwise `text-paper` resolves
-        // to the page bg (cream in light mode) and becomes invisible inside
-        // the dark demo. Engine has its own color world.
+        // Legacy aliases — pinned to dark engine colors so old demos still render
         ink: "#0A0A0A",
         paper: "#F5F2EC",
         accent: "var(--demo-accent)",
@@ -41,7 +34,7 @@ const config: Config = {
         "24": "repeat(24, minmax(0, 1fr))",
       },
       fontFamily: {
-        display: ["var(--font-fraunces)", "serif"],
+        display: ["Funnel Display", "system-ui", "sans-serif"],
         sans: ["var(--font-grotesk)", "system-ui", "sans-serif"],
         mono: ["var(--font-mono)", "ui-monospace", "monospace"],
       },

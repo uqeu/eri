@@ -16,7 +16,7 @@ path = "src/eri_coreutils.rs"
 anyhow = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "io-std", "io-util", "sync", "signal"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "io-std", "io-util", "sync", "signal", "process", "net", "time"] }
 tracing = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
 sentry = { version = "0.34", default-features = false, features = ["backtrace", "panic", "rustls"], optional = true }
@@ -36,6 +36,8 @@ eri_review = { path = "../eri_review" }
 eri_inference = { path = "../eri_inference" }
 eri_caveman = { path = "../eri_caveman" }
 eri_router = { path = "../eri_router" }
+eri_voice = { path = "../eri_voice" }
+parking_lot = { workspace = true }
 async-trait = { workspace = true }
 
 [features]

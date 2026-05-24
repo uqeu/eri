@@ -24,16 +24,31 @@ pub mod brain;
 pub mod checkpoints;
 pub mod codemaps;
 pub mod crash;
+pub mod gaze;
 pub mod graph;
 pub mod hooks;
 pub mod index;
 pub mod iterate;
 pub mod mcp;
+pub mod preview;
 pub mod review;
 pub mod rules;
 pub mod skills;
 pub mod tab;
+pub mod voice;
 pub mod web_docs;
+
+/// Fire-and-forget notification sender supplied by the binary. Services use
+/// it to push transcripts, status, and other unsolicited events back to the
+/// extension without blocking dispatch on the response.
+///
+/// The trait is sync (`fn notify`) but implementations are expected to be
+/// non-blocking — the binary's impl serialises onto the shared stdout
+/// writer in a background task. `None` in tests so handlers degrade
+/// gracefully when no host is attached.
+pub trait Notifier: Send + Sync {
+    fn notify(&self, method: &'static str, params: serde_json::Value);
+}
 
 /// Tracks an in-flight (or completed) model download so health/complete
 /// can report progress to the IDE without restarting the download.
@@ -78,6 +93,15 @@ pub struct Services {
     /// Lazily-constructed brain instance shared across all `eri/brain/plan`
     /// calls. `None` until the first request, then populated and reused.
     pub brain: brain::SharedBrain,
+    /// Live voice capture handle. `None` until `eri/voice/start` is called;
+    /// stopping drops the inner `VoiceCapture` which cleanly tears down the
+    /// audio stream and the inference thread.
+    pub voice: voice::SharedVoiceState,
+    /// Outbound notification sender. Wired up by the binary; `None` in
+    /// tests so services that emit notifications skip them safely.
+    pub notifier: Option<Arc<dyn Notifier>>,
+    /// Live Swift preview window state (child process + last URL).
+    pub preview: preview::SharedPreviewState,
 }
 
 impl Default for Services {
@@ -106,6 +130,9 @@ impl Default for Services {
             secrets: SecretCache::new(),
             audit,
             brain: Mutex::new(None),
+            voice: voice::SharedVoiceState::default(),
+            notifier: None,
+            preview: Arc::new(Mutex::new(preview::PreviewState::default())),
         }
     }
 }
@@ -123,6 +150,20 @@ impl Services {
     pub fn with_host(host: Arc<HostClient>) -> Arc<Self> {
         Arc::new(Self {
             host_client: Some(host),
+            ..Self::default()
+        })
+    }
+
+    /// Build a `Services` registry wired up with the reverse-channel host
+    /// client AND the outbound notifier. The binary uses this so background
+    /// services (voice transcripts, etc.) can push unsolicited events.
+    pub fn with_host_and_notifier(
+        host: Arc<HostClient>,
+        notifier: Arc<dyn Notifier>,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            host_client: Some(host),
+            notifier: Some(notifier),
             ..Self::default()
         })
     }

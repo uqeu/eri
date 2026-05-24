@@ -1,15 +1,7 @@
 import type { Metadata } from "next";
-import { Fraunces, Space_Grotesk, JetBrains_Mono } from "next/font/google";
+import { Space_Grotesk, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
-import { ThemeProvider } from "@/components/ThemeProvider";
 import { SiteHeader } from "@/components/SiteHeader";
-
-const fraunces = Fraunces({
-  subsets: ["latin"],
-  variable: "--font-fraunces",
-  display: "swap",
-  weight: ["400", "500", "600", "700"],
-});
 
 const grotesk = Space_Grotesk({
   subsets: ["latin"],
@@ -41,12 +33,19 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" suppressHydrationWarning className={`${fraunces.variable} ${grotesk.variable} ${mono.variable}`}>
+    <html lang="en" className={`${grotesk.variable} ${mono.variable}`}>
+      <head>
+        {/* Funnel Display loaded via Google Fonts link — not in next/font/google allowlist */}
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
+        <link
+          href="https://fonts.googleapis.com/css2?family=Funnel+Display:wght@300;400;500;600;700;800&display=swap"
+          rel="stylesheet"
+        />
+      </head>
       <body className="font-sans bg-bg text-text min-h-screen">
-        <ThemeProvider>
-          <SiteHeader />
-          {children}
-        </ThemeProvider>
+        <SiteHeader />
+        {children}
       </body>
     </html>
   );

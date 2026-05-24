@@ -24,7 +24,55 @@ pub mod services;
 pub use audit::{AuditEntry, AuditLogger, AuditStatus, RotationPolicy};
 pub use crash::{install_panic_handler, install_sentry, install_tracing_subscriber};
 pub use host_client::{HostClient, SecretCache, SharedWriter};
-pub use services::Services;
+pub use services::{Notifier, Services};
+
+/// A `Notifier` that serialises a JSON-RPC notification frame onto the
+/// shared stdout writer. Used by the binary so background services (voice,
+/// gaze, etc.) can push unsolicited events to the IDE.
+pub struct StdoutNotifier {
+    stdout: SharedWriter,
+}
+
+impl StdoutNotifier {
+    pub fn new(stdout: SharedWriter) -> Arc<Self> {
+        Arc::new(Self { stdout })
+    }
+}
+
+impl Notifier for StdoutNotifier {
+    fn notify(&self, method: &'static str, params: Value) {
+        let stdout = Arc::clone(&self.stdout);
+        // Spawn so the caller (often inside a synchronous chunk of a
+        // service handler) returns immediately. Frame ordering is preserved
+        // by the writer mutex.
+        tokio::spawn(async move {
+            let payload = Notification {
+                jsonrpc: "2.0",
+                method,
+                params,
+            };
+            let body = match serde_json::to_vec(&payload) {
+                Ok(body) => body,
+                Err(err) => {
+                    tracing::warn!(method, error = %err, "failed to serialise notification");
+                    return;
+                }
+            };
+            let header = format!("Content-Length: {}\r\n\r\n", body.len());
+            let mut guard = stdout.lock().await;
+            use tokio::io::AsyncWriteExt;
+            if let Err(err) = guard.write_all(header.as_bytes()).await {
+                tracing::warn!(method, error = %err, "notify header write failed");
+                return;
+            }
+            if let Err(err) = guard.write_all(&body).await {
+                tracing::warn!(method, error = %err, "notify body write failed");
+                return;
+            }
+            let _ = guard.flush().await;
+        });
+    }
+}
 
 pub const PROTOCOL_VERSION: &str = "0.1.0";
 
@@ -487,11 +535,32 @@ async fn dispatch_inner(
         // --- Brain (free tier; classify + route + budget) ---
         "eri/brain/plan" => services::brain::plan(request.params.clone(), services).await,
 
+        // --- Voice (free tier; local Whisper continuous listen) ---
+        "eri/voice/start" => services::voice::start(request.params.clone(), services).await,
+        "eri/voice/stop" => services::voice::stop(request.params.clone(), services).await,
+        "eri/voice/toggle" => services::voice::toggle(request.params.clone(), services).await,
+        "eri/voice/status" => services::voice::status(request.params.clone(), services).await,
+        "eri/voice/probe" => services::voice::probe(request.params.clone(), services).await,
+
         // --- Audit log (free tier; local-only privacy primitive) ---
         "eri/audit/status" => services::audit_svc::status(request.params.clone(), services).await,
         "eri/audit/enable" => services::audit_svc::enable(request.params.clone(), services).await,
         "eri/audit/disable" => services::audit_svc::disable(request.params.clone(), services).await,
         "eri/audit/recent" => services::audit_svc::recent(request.params.clone(), services).await,
+
+        // --- Preview window (free tier; spawns the Swift WKWebView app) ---
+        "eri/preview/open" => services::preview::open(request.params.clone(), services).await,
+        "eri/preview/close" => services::preview::close(request.params.clone(), services).await,
+        "eri/preview/reload" => services::preview::reload(request.params.clone(), services).await,
+        "eri/preview/load" => services::preview::load(request.params.clone(), services).await,
+        "eri/preview/gaze" => services::preview::gaze(request.params.clone(), services).await,
+        "eri/preview/status" => services::preview::status(request.params.clone(), services).await,
+
+        // --- Gaze sidecar (free tier; local-only, never leaves the machine) ---
+        "eri/gaze/start" => services::gaze::start(request.params.clone(), services).await,
+        "eri/gaze/stop" => services::gaze::stop(request.params.clone(), services).await,
+        "eri/gaze/status" => services::gaze::status(request.params.clone(), services).await,
+        "eri/gaze/calibrate" => services::gaze::calibrate(request.params.clone(), services).await,
 
         // --- Crash + Sentry (free tier; local-only observability) ---
         "eri/crash/recent" => services::crash::recent(request.params.clone(), services).await,

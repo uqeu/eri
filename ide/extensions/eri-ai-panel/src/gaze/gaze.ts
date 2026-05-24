@@ -1,19 +1,29 @@
 import * as vscode from "vscode";
+
 import { Sidecar, SidecarNotification } from "../sidecar";
+import { ChatFocus } from "./chatFocus";
+import { EditorGaze } from "./editorGaze";
 import { GazeDecoration } from "./gazeDecoration";
+import { GazePoint, GazeService } from "./gazeService";
 import { GazeStatusBar } from "./gazeStatusBar";
+import { PreviewRelay } from "./previewRelay";
+import { SidebarGaze } from "./sidebarGaze";
+
+// --- Legacy target API ---------------------------------------------------
+//
+// The old terminal subsystem subscribed to discrete "eri/gaze/target"
+// notifications. We keep that surface alive so existing consumers
+// (terminals/gaze.ts, composer mentions) don't break — they now read from
+// the same module-level mirror but the source of truth is the continuous
+// `GazeService` point stream.
 
 export type GazeTargetKind = "editor" | "panel" | "preview";
 
 export interface GazeTarget {
   kind: GazeTargetKind;
-  // Only meaningful when kind === "editor".
   line?: number;
   column?: number;
-  // Only meaningful when kind === "panel" | "preview".
   elementId?: string;
-  // Set automatically when we receive an editor target so downstream consumers
-  // can resolve the document without recalculating from the active editor.
   uri?: string;
   receivedAt: number;
 }
@@ -22,23 +32,29 @@ export interface GazeHandle {
   getCurrentTarget(): GazeTarget | null;
   forward(notification: SidecarNotification): void;
   isEnabled(): boolean;
+  service(): GazeService;
   dispose(): void;
 }
 
-// Module-level state so other features (composer, mentions, inline-edit) can
-// read the gaze target via the exported getCurrentTarget() without threading
-// the handle through every constructor.
 let currentTarget: GazeTarget | null = null;
 
 export function getCurrentTarget(): GazeTarget | null {
   return currentTarget;
 }
 
-const GAZE_METHODS = new Set([
+const TARGET_METHODS = new Set([
   "eri/gaze/target",
   "eri/gaze/lost",
   "eri/gaze/calibration/required",
 ]);
+
+const POINT_METHODS = new Set([
+  "eri/gaze/point",
+  "eri/gaze/lost",
+  "eri/gaze/calibration/required",
+]);
+
+const CALIBRATION_STATE_KEY = "eri.gaze.calibrationComplete";
 
 export function activateGaze(
   context: vscode.ExtensionContext,
@@ -46,6 +62,14 @@ export function activateGaze(
 ): GazeHandle {
   const decoration = new GazeDecoration();
   const statusBar = new GazeStatusBar();
+  const dwellMs = vscode.workspace
+    .getConfiguration("eri.gaze")
+    .get<number>("dwellMs", 800);
+  const service = new GazeService({ getSidecar, dwellMs });
+  const editorGaze = new EditorGaze(service);
+  const sidebarGaze = new SidebarGaze(service);
+  const chatFocus = new ChatFocus(service);
+  const previewRelay = new PreviewRelay(service, getSidecar);
 
   const editorChangeSub = vscode.window.onDidChangeActiveTextEditor(() => {
     decoration.refreshForActiveEditor();
@@ -57,12 +81,15 @@ export function activateGaze(
         currentTarget = null;
         decoration.clear();
         statusBar.hide();
+        void service.stop();
       } else {
         statusBar.show();
+        if (autoStart()) {
+          void service.start();
+        }
       }
     }
     if (event.affectsConfiguration("eri.gaze.decorationsEnabled")) {
-      // Reapply current line so toggling the setting reflects immediately.
       if (currentTarget?.kind === "editor" && typeof currentTarget.line === "number") {
         decoration.showLine(currentTarget.line);
       } else {
@@ -71,14 +98,29 @@ export function activateGaze(
     }
   });
 
-  const recalibrateCmd = vscode.commands.registerCommand("eri.gaze.recalibrate", () => {
+  // Status bar visualisation hooks: status bar lights up when we get
+  // points; calms down when the tracker goes quiet.
+  const onGazeSub = service.onGaze((point: GazePoint) => {
+    statusBar.setState("looking");
+    // Mirror the continuous point into the legacy target API so
+    // existing consumers see "an editor target" without a sidecar emit.
+    syncTargetFromPoint(point, decoration);
+  });
+
+  const recalibrateCmd = vscode.commands.registerCommand("eri.gaze.recalibrate", async () => {
     const sidecar = getSidecar();
     if (!sidecar) {
       vscode.window.showWarningMessage("eri gaze — sidecar offline, can't recalibrate");
       return;
     }
-    sidecar.notify("eri/gaze/recalibrate", {});
-    vscode.window.setStatusBarMessage("eri gaze — recalibration requested", 2000);
+    try {
+      await sidecar.request("eri/gaze/calibrate", {});
+      await context.globalState.update(CALIBRATION_STATE_KEY, true);
+      vscode.window.setStatusBarMessage("eri gaze — recalibration complete", 2000);
+    } catch (err) {
+      console.warn("[eri-gaze] calibration failed", err);
+      vscode.window.setStatusBarMessage("eri gaze — calibration failed", 2000);
+    }
   });
 
   const toggleCmd = vscode.commands.registerCommand("eri.gaze.toggle", async () => {
@@ -91,27 +133,87 @@ export function activateGaze(
     );
   });
 
-  context.subscriptions.push(editorChangeSub, configChangeSub, recalibrateCmd, toggleCmd);
+  const pauseCmd = vscode.commands.registerCommand("eri.gaze.pause", async () => {
+    await service.stop();
+    statusBar.setState("lost");
+    vscode.window.setStatusBarMessage("eri gaze — paused", 2000);
+  });
+
+  const resumeCmd = vscode.commands.registerCommand("eri.gaze.resume", async () => {
+    await service.start();
+    vscode.window.setStatusBarMessage("eri gaze — resumed", 2000);
+  });
+
+  const toggleHighlightCmd = vscode.commands.registerCommand(
+    "eri.gaze.toggleEditorHighlight",
+    async () => {
+      const config = vscode.workspace.getConfiguration("eri.gaze");
+      const next = !config.get<boolean>("editorHighlight", true);
+      await config.update("editorHighlight", next, vscode.ConfigurationTarget.Global);
+      vscode.window.setStatusBarMessage(
+        `eri gaze — editor highlight ${next ? "on" : "off"}`,
+        2000,
+      );
+    },
+  );
+
+  context.subscriptions.push(
+    editorChangeSub,
+    configChangeSub,
+    recalibrateCmd,
+    toggleCmd,
+    pauseCmd,
+    resumeCmd,
+    toggleHighlightCmd,
+    onGazeSub,
+  );
 
   if (!isFeatureEnabled()) {
     statusBar.hide();
+  } else if (autoStart()) {
+    // Fire-and-forget. Camera permission rejection surfaces as a sidecar
+    // error which we already log on the Rust side.
+    void (async () => {
+      const calibrated = context.globalState.get<boolean>(CALIBRATION_STATE_KEY, false);
+      if (!calibrated) {
+        try {
+          const sidecar = getSidecar();
+          if (sidecar) {
+            await sidecar.request("eri/gaze/calibrate", {});
+            await context.globalState.update(CALIBRATION_STATE_KEY, true);
+          }
+        } catch (err) {
+          console.warn("[eri-gaze] initial calibrate failed", err);
+        }
+      }
+      await service.start();
+    })();
   }
 
   const handle: GazeHandle = {
     getCurrentTarget: () => currentTarget,
     isEnabled: isFeatureEnabled,
+    service: () => service,
     forward(notification: SidecarNotification): void {
-      if (!GAZE_METHODS.has(notification.method)) {
+      if (POINT_METHODS.has(notification.method) && isFeatureEnabled()) {
+        service.forward(notification);
+      }
+      if (!TARGET_METHODS.has(notification.method)) {
         return;
       }
       if (!isFeatureEnabled()) {
         return;
       }
-      handleGazeNotification(notification, decoration, statusBar);
+      handleLegacyTargetNotification(notification, decoration, statusBar);
     },
     dispose(): void {
       decoration.dispose();
       statusBar.dispose();
+      editorGaze.dispose();
+      sidebarGaze.dispose();
+      chatFocus.dispose();
+      previewRelay.dispose();
+      service.dispose();
       currentTarget = null;
     },
   };
@@ -121,14 +223,14 @@ export function activateGaze(
   return handle;
 }
 
-function handleGazeNotification(
+function handleLegacyTargetNotification(
   notification: SidecarNotification,
   decoration: GazeDecoration,
   statusBar: GazeStatusBar,
 ): void {
   switch (notification.method) {
     case "eri/gaze/target": {
-      const target = parseTarget(notification.params);
+      const target = parseLegacyTarget(notification.params);
       if (!target) {
         return;
       }
@@ -156,9 +258,42 @@ function handleGazeNotification(
   }
 }
 
-// Validate at the boundary — the sidecar protocol may evolve and a malformed
-// payload should never crash the extension host.
-function parseTarget(raw: unknown): GazeTarget | null {
+function syncTargetFromPoint(point: GazePoint, decoration: GazeDecoration): void {
+  // Only synthesise an editor target when the point is in the editor
+  // region; otherwise leave the legacy `currentTarget` untouched.
+  if (point.x < 0.18 || point.x > 0.82 || point.y > 0.7) {
+    return;
+  }
+  const editor = vscode.window.activeTextEditor;
+  if (!editor) {
+    return;
+  }
+  const visible = editor.visibleRanges[0];
+  if (!visible) {
+    return;
+  }
+  const span = Math.max(0, visible.end.line - visible.start.line);
+  const normalized = Math.max(0, Math.min(1, (point.y - 0.05) / (0.7 - 0.05)));
+  const line = Math.min(
+    visible.end.line,
+    Math.max(visible.start.line, Math.floor(visible.start.line + normalized * span)),
+  );
+  const next: GazeTarget = {
+    kind: "editor",
+    line,
+    column: 0,
+    uri: editor.document.uri.toString(),
+    receivedAt: Date.now(),
+  };
+  currentTarget = next;
+  if (
+    vscode.workspace.getConfiguration("eri.gaze").get<boolean>("decorationsEnabled", true)
+  ) {
+    decoration.showLine(line);
+  }
+}
+
+function parseLegacyTarget(raw: unknown): GazeTarget | null {
   if (!raw || typeof raw !== "object") {
     return null;
   }
@@ -197,10 +332,12 @@ function isFeatureEnabled(): boolean {
     .get<boolean>("enabled", true);
 }
 
-// Convenience helper for downstream features. Returns the resolved document
-// position when gaze is on the editor, otherwise null. Honors the configurable
-// contextRadius so callers can ask "what lines should I include around the
-// gaze point" without re-reading settings.
+function autoStart(): boolean {
+  return vscode.workspace
+    .getConfiguration("eri.gaze")
+    .get<boolean>("autoStart", true);
+}
+
 export function getEditorGazeContext(): {
   uri: string;
   line: number;

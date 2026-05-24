@@ -3,26 +3,20 @@
 @tailwind utilities;
 
 :root {
-  color-scheme: light dark;
+  color-scheme: dark;
 
-  /* Default (system): light tokens — warmer parchment */
-  --bg:        #f5f1e8;
-  --bg-card:   #ede7d8;
-  --bg-card-2: #e3dcc8;
-  --border:    rgba(31, 27, 22, 0.08);
-  --border-strong: rgba(31, 27, 22, 0.16);
+  /* Dark-only chrome — neutrals only, no accents in chrome */
+  --bg:        #0c0c0c;
+  --bg-card:   #141414;
+  --bg-card-2: #1c1c1c;
+  --border:    rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.16);
 
-  --text:     #1f1b16;
-  --text-sec: rgba(31, 27, 22, 0.6);
-  --text-ter: rgba(31, 27, 22, 0.4);
+  --text:     #ededed;
+  --text-sec: rgba(237, 237, 237, 0.6);
+  --text-ter: rgba(237, 237, 237, 0.4);
 
-  --sage:        #bfd7c1;
-  --sage-deep:   #6f9676;
-  --accent-clay: #c97a3f;
-  --focus-ring:  var(--sage-deep);
-
-  /* Demo-only — lime survives inside the engine. Aliases for legacy callsites
-     in HeroBig/PromptPipeline/EriDemo that still reference var(--accent). */
+  /* Engine-demo-only lime — never used on chrome */
   --demo-accent: #e0ff4f;
   --accent: #e0ff4f;
   --accent-bright: #f0ff7f;
@@ -48,52 +42,15 @@
   --dur-slow: 400ms;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --bg:        #1a1814;
-    --bg-card:   #221f19;
-    --bg-card-2: #2a2620;
-    --border:    rgba(236, 232, 223, 0.08);
-    --border-strong: rgba(236, 232, 223, 0.16);
-
-    --text:     #ece8df;
-    --text-sec: rgba(236, 232, 223, 0.6);
-    --text-ter: rgba(236, 232, 223, 0.4);
-
-    --sage:       #a8c4ab;
-    --sage-deep:  #cfe1d1;
-    --accent-clay: #d8956b;
-    --focus-ring: var(--sage-deep);
-  }
-}
-
-:root[data-theme="dark"] {
-  --bg:        #1a1814;
-  --bg-card:   #221f19;
-  --bg-card-2: #2a2620;
-  --border:    rgba(236, 232, 223, 0.08);
-  --border-strong: rgba(236, 232, 223, 0.16);
-
-  --text:     #ece8df;
-  --text-sec: rgba(236, 232, 223, 0.6);
-  --text-ter: rgba(236, 232, 223, 0.4);
-
-  --sage:       #a8c4ab;
-  --sage-deep:  #cfe1d1;
-  --accent-clay: #d8956b;
-  --focus-ring: var(--sage-deep);
-}
-
 html, body {
   background: var(--bg);
   color: var(--text);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  transition: background var(--dur-base) var(--ease-out), color var(--dur-base) var(--ease-out);
 }
 
 ::selection {
-  background: var(--sage);
+  background: rgba(237, 237, 237, 0.15);
   color: var(--text);
 }
 
@@ -110,9 +67,9 @@ html, body {
     max-width: 56ch;
   }
 
-  /* Restrained subhead voice in the Anthropic register */
+  /* Restrained subhead voice */
   .lead {
-    font-family: var(--font-fraunces), Georgia, serif;
+    font-family: "Funnel Display", system-ui, sans-serif;
     font-size: 1.25rem;
     line-height: 1.5;
     color: var(--text-sec);

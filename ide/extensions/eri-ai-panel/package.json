@@ -257,6 +257,9 @@
       { "command": "eri.composer.discard",  "title": "eri: Composer Discard",                            "enablement": "eri.feature.composer" },
       { "command": "eri.gaze.recalibrate",  "title": "eri: Recalibrate Gaze Tracker" },
       { "command": "eri.gaze.toggle",       "title": "eri: Toggle Gaze Tracking" },
+      { "command": "eri.gaze.pause",        "title": "eri: Pause Gaze Tracking" },
+      { "command": "eri.gaze.resume",       "title": "eri: Resume Gaze Tracking" },
+      { "command": "eri.gaze.toggleEditorHighlight", "title": "eri: Toggle Gaze Editor Highlight" },
       { "command": "eri.checkpoints.create",   "title": "eri: Create Checkpoint",    "icon": "$(add)" },
       { "command": "eri.checkpoints.refresh",  "title": "eri: Refresh Checkpoints",  "icon": "$(refresh)" },
       { "command": "eri.checkpoints.prune",    "title": "eri: Prune Checkpoints",    "icon": "$(trash)" },
@@ -532,6 +535,21 @@
           "default": true,
           "description": "Automatically open the diffusion preview beside the editor on new builds"
         },
+        "eri.preview.autoOpenOnBuild": {
+          "type": "boolean",
+          "default": true,
+          "description": "Spawn the standalone eri preview window when an iteration builds an index.html."
+        },
+        "eri.preview.gazeRelay": {
+          "type": "boolean",
+          "default": true,
+          "description": "Forward gaze coordinates to the eri preview window so it can render a soft cursor dot."
+        },
+        "eri.preview.binaryPath": {
+          "type": "string",
+          "default": "",
+          "description": "Optional absolute path to the eri_preview Swift binary. Leave blank to use the bundled binary (or the dev checkout's scripts/eri_preview)."
+        },
         "eri.tab.enabled": {
           "type": "boolean",
           "default": true,
@@ -596,6 +614,38 @@
           "minimum": 1,
           "maximum": 100,
           "markdownDescription": "Gaze tracking sensitivity (`1`–`100`). Higher values make gaze events fire more eagerly. Tune via the **Settings Hub** for a live slider."
+        },
+        "eri.gaze.autoStart": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Auto-start the gaze tracker when the extension activates. Disable to require manual `eri.gaze.resume`."
+        },
+        "eri.gaze.editorHighlight": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Draw a subtle highlight on the editor line the user is looking at."
+        },
+        "eri.gaze.sidebarAttention": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Expose `eri.gaze.attendingSidebar` as a context key when the user dwells on the sidebar, so view contributions can react."
+        },
+        "eri.gaze.chatAutoFocus": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Auto-focus the chat composer when gaze dwells on the panel region."
+        },
+        "eri.gaze.dwellMs": {
+          "type": "number",
+          "default": 800,
+          "minimum": 200,
+          "maximum": 3000,
+          "markdownDescription": "Milliseconds the gaze must stay within a single region before an attention event fires."
+        },
+        "eri.gaze.previewRelay": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Forward gaze samples to the Swift preview window so it can render its own cursor over the rendered HTML."
         },
         "eri.terminals.voiceTargeting": {
           "type": "boolean",

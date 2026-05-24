@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { ThemeToggle } from "./ThemeToggle";
 
 interface FooterColumn {
   readonly heading: string;
@@ -88,12 +87,13 @@ export function FooterBig(): React.ReactElement {
       <div className="relative mx-auto max-w-7xl">
         <div className="grid gap-14 lg:grid-cols-[1.6fr_1fr_repeat(4,_minmax(0,_0.9fr))]">
           <div>
-            <Link href="/" className="inline-flex items-center gap-2.5">
-              <span className="font-display text-3xl text-text">eri</span>
+            <Link href="/" className="inline-flex items-center">
               <span
-                aria-hidden
-                className="inline-block h-2 w-2 rounded-full bg-sage-deep"
-              />
+                className="font-display text-text"
+                style={{ fontSize: "1.75rem", fontWeight: 500, letterSpacing: "-0.05em" }}
+              >
+                eri
+              </span>
             </Link>
             <p className="mt-6 max-w-sm text-[14px] leading-relaxed text-text-sec">
               The voice-first IDE for solo founders and small teams. Native
@@ -195,7 +195,7 @@ export function FooterBig(): React.ReactElement {
           <span className="inline-flex items-center gap-2">
             <span
               aria-hidden
-              className="h-1.5 w-1.5 rounded-full bg-sage-deep"
+              className="h-1.5 w-1.5 rounded-full bg-demo-accent"
             />
             BYOK keys never leave your machine — stored in OS Keychain, never
             synced to our servers.
@@ -230,10 +230,6 @@ export function FooterBig(): React.ReactElement {
             >
               provided as-is
             </Link>
-            <span aria-hidden className="text-text-ter">
-              ·
-            </span>
-            <ThemeToggle />
           </div>
         </div>
       </div>

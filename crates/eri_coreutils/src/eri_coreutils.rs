@@ -18,9 +18,9 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::Mutex;
 
 use eri_coreutils::{
-    DispatchError, HostClient, Notification, PROTOCOL_VERSION, Request, Response, RpcError,
-    Services, SharedTierState, SharedWriter, TierState, dispatch, install_panic_handler,
-    install_sentry, install_tracing_subscriber,
+    DispatchError, HostClient, Notification, Notifier, PROTOCOL_VERSION, Request, Response,
+    RpcError, Services, SharedTierState, SharedWriter, TierState, dispatch,
+    install_panic_handler, install_sentry, install_tracing_subscriber,
 };
 
 #[tokio::main]
@@ -58,7 +58,9 @@ async fn main() -> Result<()> {
     let mut stdin = BufReader::new(tokio::io::stdin());
     let tier_state: SharedTierState = Arc::new(Mutex::new(TierState::default()));
     let host_client = HostClient::new(Arc::clone(&stdout));
-    let services: Arc<Services> = Services::with_host(Arc::clone(&host_client));
+    let notifier: Arc<dyn Notifier> = Arc::new(StdoutNotifier::new(Arc::clone(&stdout)));
+    let services: Arc<Services> =
+        Services::with_host_and_notifier(Arc::clone(&host_client), Arc::clone(&notifier));
 
     send_notification(
         &stdout,
@@ -289,4 +291,42 @@ async fn write_message<T: serde::Serialize>(stdout: &SharedWriter, value: &T) ->
     guard.write_all(&body).await?;
     guard.flush().await?;
     Ok(())
+}
+
+/// `Notifier` implementation that funnels into a tokio mpsc channel.
+/// A dedicated writer task drains the channel and serialises notifications
+/// onto the shared stdout writer.
+struct StdoutNotifier {
+    tx: tokio::sync::mpsc::UnboundedSender<(&'static str, Value)>,
+}
+
+impl StdoutNotifier {
+    fn new(stdout: SharedWriter) -> Self {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(&'static str, Value)>();
+        // Spawn a writer task. The runtime is the current tokio runtime;
+        // `tokio::spawn` here is safe because `main` is `#[tokio::main]`.
+        tokio::spawn(async move {
+            while let Some((method, params)) = rx.recv().await {
+                let notification = Notification {
+                    jsonrpc: "2.0",
+                    method,
+                    params,
+                };
+                if let Err(err) = write_message(&stdout, &notification).await {
+                    tracing::warn!(method, error = %err, "failed to write notification");
+                }
+            }
+        });
+        Self { tx }
+    }
+}
+
+impl Notifier for StdoutNotifier {
+    fn notify(&self, method: &'static str, params: Value) {
+        // Send is non-blocking and unbounded — drops only if the receiver
+        // task has already exited (i.e. process is shutting down).
+        if let Err(err) = self.tx.send((method, params)) {
+            tracing::debug!(error = %err, "notifier channel closed");
+        }
+    }
 }

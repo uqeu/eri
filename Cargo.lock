@@ -786,6 +786,8 @@ dependencies = [
  "eri_rules",
  "eri_skills",
  "eri_tab",
+ "eri_voice",
+ "parking_lot 0.12.5",
  "sentry",
  "sentry-tracing",
  "serde",

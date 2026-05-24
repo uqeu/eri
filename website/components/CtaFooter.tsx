@@ -6,10 +6,7 @@ export function CtaFooter(): React.ReactElement {
       <div className="container py-28 lg:py-40">
         <div className="max-w-3xl">
           <h2 className="text-display font-normal leading-[0.95] text-balance text-text">
-            Build at the speed{" "}
-            <span className="italic" style={{ color: "var(--accent-clay)" }}>
-              you think.
-            </span>
+            Build at the speed <span className="italic text-text-sec">you think.</span>
           </h2>
 
           <p className="lead text-prose-narrow mt-8">

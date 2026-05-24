@@ -37,7 +37,7 @@ Object.defineProperty(exports, "getCurrentGazeTarget", { enumerable: true, get: 
 Object.defineProperty(exports, "getEditorGazeContext", { enumerable: true, get: function () { return gaze_2.getEditorGazeContext; } });
 let sidecar = null;
 let panelProvider = null;
-let previewManager = null;
+let preview = null;
 let mcpRegistry = null;
 let composer = null;
 let atMentions = null;
@@ -82,8 +82,7 @@ function activate(context) {
     statusBar = (0, statusBar_1.activateStatusBar)(context);
     panelProvider = new panel_1.EriPanelProvider(context, () => sidecar);
     context.subscriptions.push(vscode.window.registerWebviewViewProvider("eri.panel", panelProvider));
-    previewManager = new preview_1.PreviewManager(context);
-    context.subscriptions.push(previewManager);
+    preview = (0, preview_1.activatePreview)(context, () => sidecar);
     // Activate tier client right after sidecar starts so the very first
     // setContext + sidecar handshake reflects the user's real tier.
     tierClient = (0, tierClient_1.activateTierClient)(context, () => sidecar);
@@ -95,6 +94,31 @@ function activate(context) {
     composer = (0, composer_1.activateComposer)(context, () => sidecar, atMentions);
     checkpoints = (0, checkpoints_1.activateCheckpoints)(context, () => sidecar);
     apply = (0, apply_1.activateApply)(context, () => sidecar);
+    // Auto-open the Swift preview window whenever an iteration applies an
+    // `index.html` build. Gated by `eri.preview.autoOpenOnBuild`. The hook
+    // looks at the apply orchestrator's `committed` event, which is the only
+    // signal we have post-disk-write that doesn't require a sidecar push.
+    context.subscriptions.push(apply.onDidChange((event) => {
+        if (event.kind !== "committed") {
+            return;
+        }
+        const autoOpen = vscode.workspace
+            .getConfiguration("eri.preview")
+            .get("autoOpenOnBuild", true);
+        if (!autoOpen) {
+            return;
+        }
+        const built = (event.result?.applied ?? []).find((a) => a.path.toLowerCase().endsWith("index.html"));
+        if (!built) {
+            return;
+        }
+        const folder = vscode.workspace.workspaceFolders?.[0];
+        if (!folder) {
+            return;
+        }
+        const url = vscode.Uri.joinPath(folder.uri, built.path).toString();
+        preview?.fireShouldOpen(url);
+    }));
     skills = (0, skills_1.activateSkills)(context, () => sidecar);
     onboarding = (0, onboarding_1.activateOnboarding)(context, () => sidecar);
     settingsHub = (0, settingsHub_1.activateSettingsHub)(context);
@@ -118,7 +142,7 @@ function activate(context) {
         await vscode.commands.executeCommand(`${settingsView_1.BYOK_VIEW_ID}.focus`);
     }));
     context.subscriptions.push(vscode.commands.registerCommand("eri.openPreview", () => {
-        previewManager?.open();
+        vscode.commands.executeCommand("eri.preview.open");
     }), vscode.commands.registerCommand("eri.toggleMic", () => {
         sidecar?.notify("eri/voice/toggle", {});
     }), vscode.commands.registerCommand("eri.inlineEdit", () => {
@@ -150,7 +174,8 @@ function deactivate() {
     sidecar?.stop();
     sidecar = null;
     panelProvider = null;
-    previewManager = null;
+    preview?.dispose();
+    preview = null;
     mcpRegistry?.dispose();
     mcpRegistry = null;
     composer = null;
@@ -198,6 +223,7 @@ function handleNotification(notification) {
     gaze?.forward(notification);
     terminalVoiceGaze?.forward(notification);
     visualEditor?.forward(notification);
+    maybeRelayGazeToPreview(notification);
     switch (notification.method) {
         case "eri/ready":
             console.log("[eri] sidecar ready", notification.params);
@@ -250,11 +276,16 @@ function handleNotification(notification) {
             }
             break;
         }
-        case "eri/preview/open":
-            previewManager?.open(typeof notification.params === "object" && notification.params
-                ? notification.params.sessionPath
-                : undefined);
+        case "eri/preview/open": {
+            const params = typeof notification.params === "object" && notification.params
+                ? notification.params
+                : {};
+            const url = params.url ?? deriveUrlFromSessionPath(params.sessionPath);
+            if (url) {
+                preview?.fireShouldOpen(url);
+            }
             break;
+        }
         case "eri/mcp/serverStatus": {
             const params = notification.params;
             if (params && typeof params.name === "string" && mcpRegistry) {
@@ -274,5 +305,35 @@ function handleNotification(notification) {
         default:
             console.debug("[eri] unhandled notification", notification.method);
     }
+}
+function maybeRelayGazeToPreview(notification) {
+    if (notification.method !== "eri/gaze/target") {
+        return;
+    }
+    const relayEnabled = vscode.workspace
+        .getConfiguration("eri.preview")
+        .get("gazeRelay", true);
+    if (!relayEnabled) {
+        return;
+    }
+    if (!notification.params || typeof notification.params !== "object") {
+        return;
+    }
+    const params = notification.params;
+    if (params.kind !== "preview") {
+        return;
+    }
+    const x = typeof params.x === "number" ? params.x : null;
+    const y = typeof params.y === "number" ? params.y : null;
+    if (x === null || y === null) {
+        return;
+    }
+    preview?.client.relayGaze(x, y);
+}
+function deriveUrlFromSessionPath(sessionPath) {
+    if (!sessionPath || sessionPath === "") {
+        return null;
+    }
+    return vscode.Uri.file(sessionPath + "/index.html").toString();
 }
 //# sourceMappingURL=extension.js.map
