@@ -153,7 +153,10 @@ function PreviewPane(): React.ReactElement {
     measure();
     window.addEventListener("resize", measure);
     return () => window.removeEventListener("resize", measure);
-  }, [active, refs]);
+    // `refs` is intentionally omitted — it's a fresh object literal each render
+    // but the refs inside are stable. Including it would loop infinitely.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active]);
 
   return (
     <div className="relative min-w-0 flex-1 overflow-hidden bg-[#0f0d09]">

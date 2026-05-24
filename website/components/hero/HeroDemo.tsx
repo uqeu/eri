@@ -76,16 +76,17 @@ export function HeroDemo(): React.ReactElement {
       ) : null}
 
       {scene === 2 ? (
-        <HeroWindow
-          title="eri · prompt pipeline"
-          initial={{ x: 16, y: 16 }}
-          width={10000}
-          height={10000}
-          z={10}
-          resetSignal={resetSignal}
-        >
-          <PipelineWindow />
-        </HeroWindow>
+        <div className="absolute inset-4 z-10 overflow-hidden rounded-[10px] border border-white/[0.06] bg-[#0A0A0A] shadow-[0_28px_70px_rgba(0,0,0,0.45)]">
+          <div className="flex h-7 items-center border-b border-white/[0.06] px-3">
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-[#bfd7c1]" aria-hidden />
+            <span className="ml-2 text-[10px] uppercase tracking-wider text-white/55">
+              eri · prompt pipeline · full view
+            </span>
+          </div>
+          <div className="h-[calc(100%-1.75rem)] overflow-auto">
+            <PipelineWindow />
+          </div>
+        </div>
       ) : null}
 
       <div className="absolute bottom-4 left-4">
