@@ -21,18 +21,38 @@
 use crate::InferenceError;
 use crate::providers;
 
-/// Snapshot of BYOK API keys fetched out-of-band (typically by the sidecar
-/// asking the extension's `vscode.SecretStorage` via JSON-RPC). The caller
-/// resolves each key asynchronously, then hands the bundle to
-/// [`provider_from_choice_with_keys`] for a pure sync construction step.
+/// Snapshot of credentials available to the inference layer.
+///
+/// Two parallel concepts:
+/// * `eri_session` + `eri_base_url` — the bearer + URL used to talk to the
+///   eri.dev inference proxy. When set, every provider call defaults to the
+///   proxy so the backend can enforce tier + count tokens centrally.
+/// * `*_byok` — power-user keys stored in the host's `SecretStorage`.
+///   When present for a given vendor, that vendor's calls bypass the proxy
+///   and hit the upstream API directly with the user's key.
+///
+/// The legacy `anthropic` / `openai` / `google` fields remain as aliases for
+/// the BYOK keys so callers built before the proxy split keep compiling. The
+/// `inception_byok` slot is new — when set it bypasses the proxy for the
+/// bundled engine too.
 ///
 /// Field names match the provider ids declared in the extension's
 /// `providers.ts` so the wire vocabulary is consistent end-to-end.
 #[derive(Debug, Default, Clone)]
 pub struct ProviderKeys {
-    pub anthropic: Option<String>,
-    pub openai: Option<String>,
-    pub google: Option<String>,
+    /// Bearer token for the eri.dev inference proxy.
+    pub eri_session: Option<String>,
+    /// Base URL for the eri.dev inference proxy (defaults to the production
+    /// host when constructed via `with_proxy`).
+    pub eri_base_url: String,
+    /// Power-user Anthropic key. Bypasses the proxy when present.
+    pub anthropic_byok: Option<String>,
+    /// Power-user OpenAI key. Bypasses the proxy when present.
+    pub openai_byok: Option<String>,
+    /// Power-user Google/Gemini key. Bypasses the proxy when present.
+    pub google_byok: Option<String>,
+    /// Power-user Inception/Mercury key. Bypasses the proxy when present.
+    pub inception_byok: Option<String>,
 }
 
 impl ProviderKeys {
@@ -41,30 +61,80 @@ impl ProviderKeys {
     }
 
     pub fn with_anthropic(mut self, key: impl Into<String>) -> Self {
-        self.anthropic = Some(key.into());
+        self.anthropic_byok = Some(key.into());
         self
     }
 
     pub fn with_openai(mut self, key: impl Into<String>) -> Self {
-        self.openai = Some(key.into());
+        self.openai_byok = Some(key.into());
         self
     }
 
     pub fn with_google(mut self, key: impl Into<String>) -> Self {
-        self.google = Some(key.into());
+        self.google_byok = Some(key.into());
         self
     }
 
-    /// Pick the key for a canonical model id. Returns `None` when the model
-    /// is not external (e.g. "mercury-2") or when the user has not
-    /// configured a key for the corresponding vendor.
+    pub fn with_inception(mut self, key: impl Into<String>) -> Self {
+        self.inception_byok = Some(key.into());
+        self
+    }
+
+    /// Attach the eri.dev session bearer + base URL to this bundle. Both
+    /// fields are required to enable the proxy code path; an absent bearer
+    /// keeps the legacy BYOK-only behaviour.
+    pub fn with_proxy(
+        mut self,
+        session: impl Into<String>,
+        base_url: impl Into<String>,
+    ) -> Self {
+        self.eri_session = Some(session.into());
+        self.eri_base_url = base_url.into();
+        self
+    }
+
+    /// Back-compat alias for `anthropic_byok`. Existing call sites that
+    /// peek the raw key field still compile.
+    pub fn anthropic(&self) -> Option<&str> {
+        self.anthropic_byok.as_deref()
+    }
+
+    pub fn openai(&self) -> Option<&str> {
+        self.openai_byok.as_deref()
+    }
+
+    pub fn google(&self) -> Option<&str> {
+        self.google_byok.as_deref()
+    }
+
+    /// Pick the BYOK key for a canonical model id. Returns `None` when the
+    /// model is not external (e.g. "mercury-2") or when the user has not
+    /// configured a BYOK key for the corresponding vendor.
     pub fn for_canonical(&self, canonical: &str) -> Option<&str> {
         let vendor = vendor_for_canonical(canonical)?;
         match vendor {
-            "anthropic" => self.anthropic.as_deref(),
-            "openai" => self.openai.as_deref(),
-            "google" => self.google.as_deref(),
+            "anthropic" => self.anthropic_byok.as_deref(),
+            "openai" => self.openai_byok.as_deref(),
+            "google" => self.google_byok.as_deref(),
             _ => None,
+        }
+    }
+
+    /// Decide whether a given provider should route through the eri.dev
+    /// proxy. True when the user has a session bearer AND has not configured
+    /// a BYOK key for that vendor. The `provider` argument is the short id
+    /// (`"anthropic"`, `"openai"`, `"google"`, `"inception"`).
+    pub fn use_proxy(&self, provider: &str) -> bool {
+        let has_session = self.eri_session.is_some() && !self.eri_base_url.is_empty();
+        if !has_session {
+            return false;
+        }
+        match provider {
+            "anthropic" => self.anthropic_byok.is_none(),
+            "openai" => self.openai_byok.is_none(),
+            "google" => self.google_byok.is_none(),
+            "inception" => self.inception_byok.is_none(),
+            _ => false,
         }
     }
 }
@@ -462,6 +532,35 @@ mod tests {
         assert!(provider.is_some(), "explicit key must build the provider");
         let provider = provider.expect("provider");
         assert_eq!(provider.name(), "anthropic");
+    }
+
+    #[test]
+    fn use_proxy_requires_session_and_no_byok_for_vendor() {
+        // No session → never proxy.
+        let bare = ProviderKeys::new();
+        assert!(!bare.use_proxy("anthropic"));
+        assert!(!bare.use_proxy("openai"));
+        assert!(!bare.use_proxy("google"));
+        assert!(!bare.use_proxy("inception"));
+
+        // Session present, no BYOK for any vendor → proxy for all four.
+        let signed_in = ProviderKeys::new().with_proxy("tok", "https://eri.dev");
+        assert!(signed_in.use_proxy("anthropic"));
+        assert!(signed_in.use_proxy("openai"));
+        assert!(signed_in.use_proxy("google"));
+        assert!(signed_in.use_proxy("inception"));
+
+        // Session + Anthropic BYOK → Anthropic bypasses, others proxy.
+        let mixed = ProviderKeys::new()
+            .with_proxy("tok", "https://eri.dev")
+            .with_anthropic("sk-ant");
+        assert!(!mixed.use_proxy("anthropic"));
+        assert!(mixed.use_proxy("openai"));
+        assert!(mixed.use_proxy("google"));
+        assert!(mixed.use_proxy("inception"));
+
+        // Unknown vendor → never proxy.
+        assert!(!signed_in.use_proxy("xai"));
     }
 
     #[test]

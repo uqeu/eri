@@ -25,11 +25,28 @@ use crate::{
 
 const GEMINI_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta/models";
 
+/// Path under the eri.dev proxy base. The proxy mirrors Google's URL shape
+/// (`/v1beta/models/<model>:<action>`) but is rooted at
+/// `/api/v1/inference/google` so the backend can disambiguate routes.
+const GEMINI_PROXY_PREFIX: &str = "/api/v1/inference/google/v1beta/models";
+
+/// Auth mode for the Gemini transport. BYOK appends `?key=<api_key>` to the
+/// upstream URL (Google's pattern); Proxy uses a bearer header against the
+/// eri.dev URL.
+#[derive(Debug, Clone)]
+enum GeminiAuth {
+    Byok { api_key: String },
+    Proxy { session_token: String },
+}
+
 #[derive(Debug)]
 pub struct GeminiProvider {
     model: String,
-    api_key: String,
+    auth: GeminiAuth,
     base_url: String,
+    /// True when `base_url` is the eri.dev proxy prefix. Drives whether
+    /// auth is a bearer header or a `?key=` query parameter.
+    proxied: bool,
 }
 
 impl GeminiProvider {
@@ -57,17 +74,54 @@ impl GeminiProvider {
         }
         Ok(Self {
             model: model.to_string(),
-            api_key: api_key.into(),
+            auth: GeminiAuth::Byok {
+                api_key: api_key.into(),
+            },
             base_url: GEMINI_BASE_URL.to_string(),
+            proxied: false,
         })
+    }
+
+    /// Route Gemini calls through the eri.dev inference proxy. The wire
+    /// shape under the proxy mirrors Google's URL structure so the backend
+    /// only has to rewrite host + auth.
+    pub fn for_model_with_proxy(
+        model: &str,
+        session_token: impl Into<String>,
+        base_url: &str,
+    ) -> Result<Self, InferenceError> {
+        if pricing_for(model).is_none() {
+            return Err(InferenceError::Transport(format!(
+                "unsupported gemini model: {model}"
+            )));
+        }
+        Ok(Self {
+            model: model.to_string(),
+            auth: GeminiAuth::Proxy {
+                session_token: session_token.into(),
+            },
+            base_url: format!("{}{}", base_url.trim_end_matches('/'), GEMINI_PROXY_PREFIX),
+            proxied: true,
+        })
+    }
+
+    pub fn is_proxied(&self) -> bool {
+        self.proxied
+    }
+
+    pub fn base_url(&self) -> &str {
+        &self.base_url
     }
 
     #[cfg(test)]
     pub(crate) fn with_endpoint(model: &str, api_key: &str, base_url: &str) -> Self {
         Self {
             model: model.to_string(),
-            api_key: api_key.to_string(),
+            auth: GeminiAuth::Byok {
+                api_key: api_key.to_string(),
+            },
             base_url: base_url.to_string(),
+            proxied: false,
         }
     }
 
@@ -97,14 +151,23 @@ impl GeminiProvider {
         serde_json::to_string(&payload).map_err(InferenceError::Json)
     }
 
-    fn endpoint(&self, action: &str) -> String {
-        format!(
-            "{}/{}:{}?key={}",
-            self.base_url.trim_end_matches('/'),
-            self.model,
-            action,
-            self.api_key
-        )
+    pub(crate) fn endpoint(&self, action: &str) -> String {
+        match &self.auth {
+            GeminiAuth::Byok { api_key } => format!(
+                "{}/{}:{}?key={}",
+                self.base_url.trim_end_matches('/'),
+                self.model,
+                action,
+                api_key
+            ),
+            // Proxy: auth is in the Authorization header, NOT a query param.
+            GeminiAuth::Proxy { .. } => format!(
+                "{}/{}:{}",
+                self.base_url.trim_end_matches('/'),
+                self.model,
+                action
+            ),
+        }
     }
 }
 
@@ -189,14 +252,24 @@ impl LlmProvider for GeminiProvider {
             .timeout_connect(Duration::from_secs(5))
             .timeout(Duration::from_secs(300))
             .build();
-        let response = match agent
+        let request = agent
             .post(&endpoint)
-            .set("content-type", "application/json")
-            .send_string(&body)
-        {
+            .set("content-type", "application/json");
+        let request = match &self.auth {
+            GeminiAuth::Byok { .. } => request,
+            GeminiAuth::Proxy { session_token } => {
+                request.set("authorization", &format!("Bearer {session_token}"))
+            }
+        };
+        let response = match request.send_string(&body) {
             Ok(response) => response,
             Err(ureq::Error::Status(status, response)) => {
                 let body = response.into_string().unwrap_or_default();
+                if status == 402 {
+                    return Err(InferenceError::Transport(format!(
+                        "eri engine quota exceeded: {body}"
+                    )));
+                }
                 return Err(InferenceError::Transport(format!(
                     "gemini returned {status}: {body}"
                 )));
@@ -238,14 +311,24 @@ impl LlmProvider for GeminiProvider {
             .timeout_connect(Duration::from_secs(5))
             .timeout(Duration::from_secs(300))
             .build();
-        let response = match agent
+        let request = agent
             .post(&endpoint)
-            .set("content-type", "application/json")
-            .send_string(&body)
-        {
+            .set("content-type", "application/json");
+        let request = match &self.auth {
+            GeminiAuth::Byok { .. } => request,
+            GeminiAuth::Proxy { session_token } => {
+                request.set("authorization", &format!("Bearer {session_token}"))
+            }
+        };
+        let response = match request.send_string(&body) {
             Ok(response) => response,
             Err(ureq::Error::Status(status, response)) => {
                 let body = response.into_string().unwrap_or_default();
+                if status == 402 {
+                    return Err(InferenceError::Transport(format!(
+                        "eri engine quota exceeded: {body}"
+                    )));
+                }
                 return Err(InferenceError::Transport(format!(
                     "gemini returned {status}: {body}"
                 )));

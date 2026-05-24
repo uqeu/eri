@@ -43,21 +43,13 @@ pub struct VoiceState {
 /// Inner mutable state. Held behind an `Arc<Mutex<...>>` so dispatch tasks
 /// and the engine callbacks (which run on the `eri-voice` worker thread)
 /// can both mutate it.
+#[derive(Default)]
 struct VoiceStateInner {
     /// Owned `VoiceEngine`. `Some` while capture is running, `None` when
     /// stopped. `VoiceEngine` is `Send + Sync` (the only thing holding the
     /// `cpal::Stream` is the pinned worker thread).
     engine: Option<VoiceEngine>,
     snapshot: VoiceState,
-}
-
-impl Default for VoiceStateInner {
-    fn default() -> Self {
-        Self {
-            engine: None,
-            snapshot: VoiceState::default(),
-        }
-    }
 }
 
 /// Cross-task voice state holder. Embedded in `Services` — must be

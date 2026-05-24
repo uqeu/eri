@@ -20,6 +20,31 @@ export interface TierLimits {
 }
 
 /**
+ * Token budgets per tier for the eri-managed inference proxy.
+ *
+ * `included` — monthly allowance counted against `token_buckets.tokens_used`.
+ * `ghost`    — soft pool above `included`; the user can keep going but the
+ *              proxy emits `x-eri-quota-warning: ghost` and the IDE tightens
+ *              its slow-mode. Hard cap is `included + ghost`; beyond that
+ *              the proxy returns HTTP 402.
+ *
+ * Numbers picked to match Cursor-class allowances at our tier prices.
+ * Teams numbers are PER SEAT — the billing layer multiplies by seat count.
+ */
+export interface TokenBudget {
+  included: number;
+  ghost: number;
+}
+
+export const TIER_TOKEN_BUDGETS: Record<TierName, TokenBudget> = {
+  Free:    { included:    25_000, ghost:   5_000 },
+  Starter: { included:   500_000, ghost: 100_000 },
+  Pro:     { included: 1_000_000, ghost: 200_000 },
+  "Pro+":  { included: 3_000_000, ghost: 500_000 },
+  Teams:   { included: 2_500_000, ghost: 500_000 },
+};
+
+/**
  * Numbers come directly from `scripts/pricing_model.py` (cache_hit_rate=0.5,
  * target_margin=0.35). Keep these in sync if pricing assumptions change —
  * the marketing site, the billing layer, and this gate must all agree.

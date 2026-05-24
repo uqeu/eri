@@ -58,6 +58,23 @@ struct OutboundRequest<'a> {
 /// `SecretStorage`. Mirrors `SECRET_REQUEST_METHOD` on the TypeScript side.
 pub const SECRET_REQUEST_METHOD: &str = "settings/getSecret";
 
+/// Conventional provider id used to namespace the eri.dev session bearer
+/// token in the host's secret storage. The matching field key is
+/// [`ERI_SESSION_FIELD`].
+pub const ERI_SESSION_PROVIDER: &str = "eri";
+pub const ERI_SESSION_FIELD: &str = "session-token";
+
+/// Env var that supplies the eri.dev session bearer for headless/dev runs
+/// when the host bridge is not attached.
+pub const ERI_SESSION_ENV: &str = "ERI_SESSION_TOKEN";
+
+/// Env var that overrides the eri.dev proxy base URL. Defaults to the
+/// production value below when unset.
+pub const ERI_BASE_URL_ENV: &str = "ERI_BASE_URL";
+
+/// Default base URL for the eri.dev inference proxy.
+pub const ERI_BASE_URL_DEFAULT: &str = "https://eri.dev";
+
 /// Default time the sidecar will wait for a host response before giving up.
 const HOST_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -292,6 +309,72 @@ impl SecretCache {
         let mut guard = self.inner.lock().await;
         guard.insert(cache_key, resolved.clone());
         Ok(resolved)
+    }
+
+    /// Resolve the eri.dev session bearer token from the cache, host, or
+    /// `ERI_SESSION_TOKEN` env fallback. Returns `None` when the user is not
+    /// signed in and no override is configured.
+    ///
+    /// The token is the credential the sidecar uses to authenticate to the
+    /// backend inference proxy at `{ERI_BASE_URL}/api/v1/inference/*`.
+    pub async fn eri_session_token(&self, host: Option<&HostClient>) -> Option<String> {
+        let cache_key = (
+            ERI_SESSION_PROVIDER.to_string(),
+            ERI_SESSION_FIELD.to_string(),
+        );
+
+        // 1. Cache.
+        {
+            let guard = self.inner.lock().await;
+            if let Some(slot) = guard.get(&cache_key) {
+                return slot.clone();
+            }
+        }
+
+        // 2. Host.
+        let from_host = match host {
+            Some(client) => match client
+                .request_secret(ERI_SESSION_PROVIDER, ERI_SESSION_FIELD)
+                .await
+            {
+                Ok(value) => value,
+                Err(err) => {
+                    tracing::warn!(
+                        error = %err,
+                        "host eri session request failed; falling back to env",
+                    );
+                    None
+                }
+            },
+            None => None,
+        };
+
+        // 3. Env fallback for headless / CI / dev runs.
+        let resolved = from_host.or_else(|| read_env(ERI_SESSION_ENV));
+
+        // Memoize for process lifetime — sign-out paths must call `clear`
+        // explicitly to bust this entry.
+        let mut guard = self.inner.lock().await;
+        guard.insert(cache_key, resolved.clone());
+        match &resolved {
+            Some(_) => tracing::info!("eri session token resolved (present)"),
+            None => tracing::info!("eri session token resolved (absent)"),
+        }
+        resolved
+    }
+
+    /// Resolve the eri.dev base URL. Honors `ERI_BASE_URL` so a developer
+    /// can point at a staging or local backend without rebuilding.
+    pub fn eri_base_url(&self) -> String {
+        read_env(ERI_BASE_URL_ENV).unwrap_or_else(|| ERI_BASE_URL_DEFAULT.to_string())
+    }
+
+    /// Forget a cached `(provider_id, field_key)` pair. Used by sign-out so
+    /// the next inference call re-fetches (and gets nothing) rather than
+    /// reusing a stale bearer.
+    pub async fn clear(&self, provider_id: &str, field_key: &str) {
+        let mut guard = self.inner.lock().await;
+        guard.remove(&(provider_id.to_string(), field_key.to_string()));
     }
 
     /// Test helper — seed an explicit value without hitting the host.
@@ -529,6 +612,128 @@ mod tests {
             .await;
         assert!(routed);
         let got = request_task.await.expect("join").expect("ok");
+        assert!(got.is_none());
+    }
+
+    #[tokio::test]
+    async fn eri_session_token_hits_cache_first() {
+        let cache = SecretCache::new();
+        cache
+            .insert(
+                ERI_SESSION_PROVIDER,
+                ERI_SESSION_FIELD,
+                Some("cached-bearer".into()),
+            )
+            .await;
+        // host=None proves cache was sufficient.
+        let got = cache.eri_session_token(None).await;
+        assert_eq!(got.as_deref(), Some("cached-bearer"));
+    }
+
+    #[tokio::test]
+    async fn eri_session_token_falls_back_to_env() {
+        // SAFETY: tests in this file already mutate process env without a
+        // mutex; we follow the same convention here and restore on exit.
+        let prev = std::env::var(ERI_SESSION_ENV).ok();
+        unsafe {
+            std::env::set_var(ERI_SESSION_ENV, "env-bearer-xyz");
+        }
+
+        let cache = SecretCache::new();
+        let got = cache.eri_session_token(None).await;
+
+        // Restore before any assertion that may panic.
+        unsafe {
+            match prev {
+                Some(v) => std::env::set_var(ERI_SESSION_ENV, v),
+                None => std::env::remove_var(ERI_SESSION_ENV),
+            }
+        }
+
+        assert_eq!(got.as_deref(), Some("env-bearer-xyz"));
+    }
+
+    #[tokio::test]
+    async fn eri_session_token_returns_none_when_unset() {
+        // Make sure the env var is not set during this test.
+        let prev = std::env::var(ERI_SESSION_ENV).ok();
+        unsafe {
+            std::env::remove_var(ERI_SESSION_ENV);
+        }
+
+        let cache = SecretCache::new();
+        let got = cache.eri_session_token(None).await;
+
+        unsafe {
+            if let Some(v) = prev {
+                std::env::set_var(ERI_SESSION_ENV, v);
+            }
+        }
+
+        assert!(got.is_none());
+    }
+
+    #[tokio::test]
+    async fn eri_base_url_defaults_to_production() {
+        let prev = std::env::var(ERI_BASE_URL_ENV).ok();
+        unsafe {
+            std::env::remove_var(ERI_BASE_URL_ENV);
+        }
+
+        let cache = SecretCache::new();
+        let url = cache.eri_base_url();
+
+        unsafe {
+            if let Some(v) = prev {
+                std::env::set_var(ERI_BASE_URL_ENV, v);
+            }
+        }
+
+        assert_eq!(url, ERI_BASE_URL_DEFAULT);
+    }
+
+    #[tokio::test]
+    async fn eri_base_url_honors_env_override() {
+        let prev = std::env::var(ERI_BASE_URL_ENV).ok();
+        unsafe {
+            std::env::set_var(ERI_BASE_URL_ENV, "http://localhost:3000");
+        }
+
+        let cache = SecretCache::new();
+        let url = cache.eri_base_url();
+
+        unsafe {
+            match prev {
+                Some(v) => std::env::set_var(ERI_BASE_URL_ENV, v),
+                None => std::env::remove_var(ERI_BASE_URL_ENV),
+            }
+        }
+
+        assert_eq!(url, "http://localhost:3000");
+    }
+
+    #[tokio::test]
+    async fn clear_evicts_cached_secret() {
+        let cache = SecretCache::new();
+        cache
+            .insert(
+                ERI_SESSION_PROVIDER,
+                ERI_SESSION_FIELD,
+                Some("tok".into()),
+            )
+            .await;
+        cache.clear(ERI_SESSION_PROVIDER, ERI_SESSION_FIELD).await;
+        // With nothing cached and no host/env, eri_session_token returns None.
+        let prev = std::env::var(ERI_SESSION_ENV).ok();
+        unsafe {
+            std::env::remove_var(ERI_SESSION_ENV);
+        }
+        let got = cache.eri_session_token(None).await;
+        unsafe {
+            if let Some(v) = prev {
+                std::env::set_var(ERI_SESSION_ENV, v);
+            }
+        }
         assert!(got.is_none());
     }
 

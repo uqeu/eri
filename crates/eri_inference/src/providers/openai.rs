@@ -24,10 +24,22 @@ use crate::{
 
 const OPENAI_CHAT_COMPLETIONS_URL: &str = "https://api.openai.com/v1/chat/completions";
 
+/// Path appended to the eri.dev base URL for the proxied OpenAI transport.
+const OPENAI_PROXY_PATH: &str = "/api/v1/inference/openai/chat/completions";
+
+/// Auth mode for the OpenAI transport. Both modes use bearer auth — the
+/// difference is which token (user's BYOK key vs eri session bearer) and
+/// which endpoint.
+#[derive(Debug, Clone)]
+enum OpenAiAuth {
+    Byok { api_key: String },
+    Proxy { session_token: String },
+}
+
 #[derive(Debug)]
 pub struct OpenAiProvider {
     model: String,
-    api_key: String,
+    auth: OpenAiAuth,
     endpoint: String,
 }
 
@@ -56,9 +68,41 @@ impl OpenAiProvider {
         }
         Ok(Self {
             model: model.to_string(),
-            api_key: api_key.into(),
+            auth: OpenAiAuth::Byok {
+                api_key: api_key.into(),
+            },
             endpoint: OPENAI_CHAT_COMPLETIONS_URL.to_string(),
         })
+    }
+
+    /// Route OpenAI calls through the eri.dev inference proxy. Body shape
+    /// matches `chat/completions` exactly so the backend can forward it
+    /// verbatim with its master key.
+    pub fn for_model_with_proxy(
+        model: &str,
+        session_token: impl Into<String>,
+        base_url: &str,
+    ) -> Result<Self, InferenceError> {
+        if pricing_for(model).is_none() {
+            return Err(InferenceError::Transport(format!(
+                "unsupported openai model: {model}"
+            )));
+        }
+        Ok(Self {
+            model: model.to_string(),
+            auth: OpenAiAuth::Proxy {
+                session_token: session_token.into(),
+            },
+            endpoint: format!("{}{}", base_url.trim_end_matches('/'), OPENAI_PROXY_PATH),
+        })
+    }
+
+    pub fn endpoint(&self) -> &str {
+        &self.endpoint
+    }
+
+    pub fn is_proxied(&self) -> bool {
+        matches!(self.auth, OpenAiAuth::Proxy { .. })
     }
 
     /// Test seam — override the endpoint to point at a mock server.
@@ -66,8 +110,17 @@ impl OpenAiProvider {
     pub(crate) fn with_endpoint(model: &str, api_key: &str, endpoint: &str) -> Self {
         Self {
             model: model.to_string(),
-            api_key: api_key.to_string(),
+            auth: OpenAiAuth::Byok {
+                api_key: api_key.to_string(),
+            },
             endpoint: endpoint.to_string(),
+        }
+    }
+
+    fn bearer_token(&self) -> &str {
+        match &self.auth {
+            OpenAiAuth::Byok { api_key } => api_key.as_str(),
+            OpenAiAuth::Proxy { session_token } => session_token.as_str(),
         }
     }
 
@@ -189,15 +242,21 @@ impl LlmProvider for OpenAiProvider {
             .timeout_connect(Duration::from_secs(5))
             .timeout(Duration::from_secs(300))
             .build();
+        let bearer = self.bearer_token();
         let response = match agent
             .post(&self.endpoint)
             .set("content-type", "application/json")
-            .set("authorization", &format!("Bearer {}", self.api_key))
+            .set("authorization", &format!("Bearer {bearer}"))
             .send_string(&body)
         {
             Ok(response) => response,
             Err(ureq::Error::Status(status, response)) => {
                 let body = response.into_string().unwrap_or_default();
+                if status == 402 {
+                    return Err(InferenceError::Transport(format!(
+                        "eri engine quota exceeded: {body}"
+                    )));
+                }
                 return Err(InferenceError::Transport(format!(
                     "openai returned {status}: {body}"
                 )));
@@ -242,16 +301,22 @@ impl LlmProvider for OpenAiProvider {
             .timeout_connect(Duration::from_secs(5))
             .timeout(Duration::from_secs(300))
             .build();
+        let bearer = self.bearer_token();
         let response = match agent
             .post(&self.endpoint)
             .set("content-type", "application/json")
             .set("accept", "text/event-stream")
-            .set("authorization", &format!("Bearer {}", self.api_key))
+            .set("authorization", &format!("Bearer {bearer}"))
             .send_string(&body)
         {
             Ok(response) => response,
             Err(ureq::Error::Status(status, response)) => {
                 let body = response.into_string().unwrap_or_default();
+                if status == 402 {
+                    return Err(InferenceError::Transport(format!(
+                        "eri engine quota exceeded: {body}"
+                    )));
+                }
                 return Err(InferenceError::Transport(format!(
                     "openai returned {status}: {body}"
                 )));
@@ -304,6 +369,26 @@ fn estimate_tokens(system: &str, user: &str, assistant: &str) -> (u32, u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn openai_proxy_constructor_rewrites_endpoint() {
+        let provider =
+            OpenAiProvider::for_model_with_proxy("gpt-4o", "sess-tok", "https://eri.dev")
+                .expect("provider builds");
+        assert!(provider.is_proxied());
+        assert_eq!(
+            provider.endpoint(),
+            "https://eri.dev/api/v1/inference/openai/chat/completions"
+        );
+    }
+
+    #[test]
+    fn openai_byok_constructor_keeps_openai_endpoint() {
+        let provider = OpenAiProvider::for_model_with_key("gpt-4o", "sk-byok")
+            .expect("provider builds");
+        assert!(!provider.is_proxied());
+        assert_eq!(provider.endpoint(), OPENAI_CHAT_COMPLETIONS_URL);
+    }
 
     #[test]
     fn openai_request_body_has_model_and_messages() {
