@@ -61,9 +61,9 @@ def main() -> int:
     tx = (CANVAS - drawn_w) / 2
     ty = (CANVAS + drawn_h) / 2 - (abs(descent) * scale)
 
-    # Semi-transparent white plate — sits like frosted glass against the dock blur.
+    # NO background plate. Just the wordmark on a transparent canvas — the
+    # dock shows just "eri" with nothing behind it.
     svg = f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {CANVAS} {CANVAS}">
-  <rect width="{CANVAS}" height="{CANVAS}" fill="{BG_FILL}" fill-opacity="0.22"/>
   <g fill="{FG_FILL}" transform="translate({tx:.2f},{ty:.2f}) scale({scale:.5f},-{scale:.5f})">
 {chr(10).join('    ' + p for p in paths)}
   </g>

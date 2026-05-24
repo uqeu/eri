@@ -4,7 +4,71 @@
 //! model filename resolution) so they can run without a microphone or
 //! the whisper model file on disk.
 
-use eri_voice::{is_hallucination, whisper_model_filename};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
+
+use eri_voice::{VoiceConfig, VoiceEngine, VoiceSink, is_hallucination, whisper_model_filename};
+
+fn assert_send_sync<T: Send + Sync>() {}
+
+#[test]
+fn voice_engine_is_send_sync() {
+    // The whole point of the pinned-thread refactor: `VoiceEngine` must be
+    // embeddable in the `Send + Sync` dispatch `Services` struct without
+    // the `cpal::Stream` crossing thread boundaries.
+    assert_send_sync::<VoiceEngine>();
+    assert_send_sync::<VoiceConfig>();
+}
+
+#[test]
+fn voice_engine_stops_quickly_when_mic_unavailable() {
+    // Drive the engine with a model path that does not exist on disk. The
+    // bootstrap path must fail gracefully via `on_error` and then exit so
+    // the join completes inside the deadline. This exercises the
+    // stop-signal/JoinHandle plumbing without touching the system mic.
+    let errors = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let errors_clone = errors.clone();
+    let saw_error = Arc::new(AtomicBool::new(false));
+    let saw_error_clone = saw_error.clone();
+
+    let mut cfg = VoiceConfig::default();
+    cfg.model_path = Some(std::path::PathBuf::from(
+        "/tmp/eri-voice-test-does-not-exist.bin",
+    ));
+
+    let sink = VoiceSink {
+        on_partial: Box::new(|_| {}),
+        on_final: Box::new(|_| {}),
+        on_error: Box::new(move |msg| {
+            saw_error_clone.store(true, Ordering::Relaxed);
+            if let Ok(mut guard) = errors_clone.lock() {
+                guard.push(msg);
+            }
+        }),
+        on_status: Box::new(|_| {}),
+    };
+
+    let engine = VoiceEngine::start(cfg, sink).expect("start spawns the worker thread");
+
+    // Wait up to 5s for the worker to fail and signal an error. The model
+    // load is the only blocking step before the error path.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !saw_error.load(Ordering::Relaxed) && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+
+    let start_stop = Instant::now();
+    engine.stop().expect("stop joins cleanly");
+    assert!(
+        start_stop.elapsed() < Duration::from_millis(500),
+        "stop should join within 500ms once the worker has exited"
+    );
+    assert!(
+        saw_error.load(Ordering::Relaxed),
+        "worker should have surfaced a model-load error"
+    );
+}
 
 #[test]
 fn is_hallucination_filters_subscribe_text() {

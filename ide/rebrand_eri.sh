@@ -453,25 +453,39 @@ echo "[eri] icon audit:"
 ls -la resources/darwin/code.icns resources/darwin/code_file.icns resources/linux/code.png 2>&1 || true
 
 # ---------------------------------------------------------------------------
-# 7b. Bundle the Swift preview binary into eri.app/Contents/Resources/bin/.
-#     Built by scripts/build_eri_preview.sh — if it's missing, build it now.
-#     We run from cwd=vscode/, so ../../scripts/... reaches the repo root.
+# 7b. Build + bundle the Swift preview binary into eri.app/Contents/Resources/bin/.
+#     Prefer the canonical `script/` directory; fall back to legacy `scripts/`.
+#     We run from cwd=vscode/, so ../../script/... reaches the repo root.
 # ---------------------------------------------------------------------------
-if [[ ! -x ../../scripts/eri_preview && -f ../../scripts/build_eri_preview.sh ]]; then
-  echo "[eri] building eri_preview swift binary"
-  bash ../../scripts/build_eri_preview.sh || echo "[eri] WARN: preview build failed, continuing"
+PREVIEW_DIR=""
+if [[ -f "../../script/eri_preview.swift" ]]; then
+  PREVIEW_DIR="../../script"
+elif [[ -f "../../scripts/eri_preview.swift" ]]; then
+  PREVIEW_DIR="../../scripts"
 fi
-if [[ -x ../../scripts/eri_preview ]]; then
-  ERI_APP_PATH="../VSCode-darwin-arm64/eri.app"
-  if [[ -d "${ERI_APP_PATH}" ]]; then
-    mkdir -p "${ERI_APP_PATH}/Contents/Resources/bin"
-    cp ../../scripts/eri_preview "${ERI_APP_PATH}/Contents/Resources/bin/eri_preview"
-    echo "[eri] bundled eri_preview binary into ${ERI_APP_PATH}/Contents/Resources/bin/"
+
+if [[ -n "${PREVIEW_DIR}" ]]; then
+  PREVIEW_BIN="${PREVIEW_DIR}/eri_preview"
+  PREVIEW_BUILD="${PREVIEW_DIR}/build_eri_preview.sh"
+
+  if [[ ! -x "${PREVIEW_BIN}" ]] && [[ -x "${PREVIEW_BUILD}" ]]; then
+    echo "[eri] building eri_preview swift binary (${PREVIEW_DIR})"
+    bash "${PREVIEW_BUILD}" || echo "[eri] WARN: preview build failed; continuing"
+  fi
+  if [[ -x "${PREVIEW_BIN}" ]]; then
+    APP_BIN_DIR="../VSCode-darwin-arm64/eri.app/Contents/Resources/bin"
+    if [[ -d "../VSCode-darwin-arm64/eri.app" ]]; then
+      mkdir -p "${APP_BIN_DIR}"
+      cp "${PREVIEW_BIN}" "${APP_BIN_DIR}/eri_preview"
+      echo "[eri] bundled eri_preview → ${APP_BIN_DIR}/eri_preview"
+    else
+      echo "[eri] note: eri.app not present yet — skipping preview bundle"
+    fi
   else
-    echo "[eri] note: ${ERI_APP_PATH} not present yet — skipping preview bundle"
+    echo "[eri] WARN: ${PREVIEW_BIN} not built — preview window unavailable in this build"
   fi
 else
-  echo "[eri] WARN: scripts/eri_preview not found — preview window unavailable in this build"
+  echo "[eri] WARN: no script/eri_preview.swift or scripts/eri_preview.swift found"
 fi
 
 # ---------------------------------------------------------------------------

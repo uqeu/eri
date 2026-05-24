@@ -44,18 +44,18 @@ const PLANS: ReadonlyArray<Plan> = [
   {
     name: "Free",
     shortName: "Free",
-    subtitle: "Stock Eri",
+    subtitle: "Alpha",
     slug: "free",
     priceMonthly: "Free",
     priceYearlyAsMonthly: "Free",
     cadenceNote: "forever",
-    tagline: "Stock Eri, voice and all. Free really means free — no keys to bring.",
+    tagline: "Free during invite-only alpha. Voice, gaze, and diffusion — nothing held back.",
     blurb:
-      "Drop into eri without a credit card. Voice in (we cover the ElevenLabs side), diffusion edits out, capped cloud turns to eri's engine, and every project you can ship. When the monthly cap hits, eri stays useful — you just trade cloud turns for local ones.",
+      "Drop in without a credit card. Voice, gaze, and diffusion preview, full editor, every project you can ship. When the monthly cap hits, eri keeps working locally — no surprise bill, ever.",
     includesHeader: "Includes",
     turns: { monthly: 50, weekly: 20, daily: 5, hourly: 2 },
     features: [
-      { glyph: "full", label: "Stock eri voice — ElevenLabs included, on us" },
+      { glyph: "full", label: "Voice transcription — on us" },
       { glyph: "full", label: "Diffusion edits + Cmd-K palette" },
       { glyph: "half", label: "Limited cloud turns to eri's engine" },
       { glyph: "full", label: "Templates + iteration history" },
@@ -73,19 +73,19 @@ const PLANS: ReadonlyArray<Plan> = [
       </>
     ),
     shortName: "Individual I",
-    subtitle: "Adaptive Eri",
+    subtitle: "Adaptive",
     slug: "starter",
     priceMonthly: 15,
     priceYearlyAsMonthly: 12,
     cadenceNote: "",
-    tagline: "Eri that learns the way you build, session over session.",
+    tagline: "eri that learns the way you build, session over session.",
     blurb:
-      "Adaptive Eri remembers what you've shipped, the patterns you reach for, and the way you phrase things. Picks one of the premium ElevenLabs voices so your assistant sounds the way you want it to. No eri branding on what you ship.",
+      "Adaptive eri remembers what you ship, the patterns you reach for, and how you phrase things. Pick a premium voice that fits the way you work.",
     includesHeader: "Everything in Free, plus",
     turns: { monthly: 1839, weekly: 459, daily: 65, hourly: 8 },
     features: [
       { glyph: "full", label: "Cross-session memory" },
-      { glyph: "full", label: "Pick eri's voice (premium ElevenLabs presets)" },
+      { glyph: "full", label: "Pick a premium voice" },
       { glyph: "full", label: "No eri branding on shipped apps" },
       { glyph: "full", label: "eri-cloud credits included" },
       { glyph: "half", label: "Expanded engine quota" },
@@ -102,22 +102,22 @@ const PLANS: ReadonlyArray<Plan> = [
       </>
     ),
     shortName: "Individual II",
-    subtitle: "Frontier Eri",
+    subtitle: "Frontier",
     slug: "pro",
     priceMonthly: 25,
     priceYearlyAsMonthly: 20,
     cadenceNote: "",
-    tagline: "Adaptive plus frontier models and cloud agents.",
+    tagline: "Adaptive, plus the model that fits the task. Background agents grind your backlog while you sleep.",
     blurb:
-      "Frontier Eri routes between eri's engine, Claude Sonnet 4.5, GPT-4o, and Gemini per task — the right model for the right job. Cloud agents grind through your backlog while you sleep. Inline Cmd-K edits and custom MCP servers ship in.",
+      "Frontier eri picks the right brain per task — eri's diffusion engine for short edits, a heavier reasoner when the task needs it. Async agents finish the rest while you sleep.",
     includesHeader: "Everything in Individual I, plus",
     turns: { monthly: 3254, weekly: 813, daily: 116, hourly: 14 },
     features: [
-      { glyph: "full", label: "Multi-model routing (eri's engine, GPT-4o, Claude, Gemini)" },
-      { glyph: "full", label: "Cloud agents that work while you idle" },
+      { glyph: "full", label: "Multi-model routing — the right brain per task" },
+      { glyph: "full", label: "Background agents that work while you idle" },
       { glyph: "full", label: "Inline Cmd-K edits included" },
-      { glyph: "full", label: "Custom MCP servers" },
-      { glyph: "half", label: "128K frontier context window" },
+      { glyph: "full", label: "Custom integrations" },
+      { glyph: "half", label: "Extended context window" },
       { glyph: "ring", label: "Priority email + Discord" },
     ],
     cta: { href: "/sign-up?plan=pro", label: "Choose Individual II" },
@@ -131,22 +131,22 @@ const PLANS: ReadonlyArray<Plan> = [
       </>
     ),
     shortName: "Individual III",
-    subtitle: "Personalized Eri",
+    subtitle: "Personalized",
     slug: "pro_plus",
     priceMonthly: 45,
     priceYearlyAsMonthly: 36,
     cadenceNote: "",
-    tagline: "Eri trained on your patterns. Exclusive voices. Your private brain.",
+    tagline: "eri trained on your patterns. A private brain that's only yours.",
     blurb:
-      "Personalized Eri studies your codebase locally — your conventions, your naming, your tests — and biases every suggestion toward how you actually write code. Exclusive voices with blending. A private brain that never pools with anyone else's.",
+      "Personalized eri studies your codebase locally — your conventions, your naming, your tests — and biases every suggestion toward how you actually write code. A private brain that never pools with anyone else's.",
     includesHeader: "Everything in Individual II, plus",
     turns: { monthly: 6084, weekly: 1521, daily: 217, hourly: 27 },
     features: [
-      { glyph: "full", label: "Exclusive eri voices + voice-blending" },
+      { glyph: "full", label: "Exclusive voice presets + blending" },
       { glyph: "full", label: "Trained on your codebase patterns (locally)" },
       { glyph: "full", label: "Private brain — never pooled" },
-      { glyph: "full", label: "256K frontier context window" },
-      { glyph: "full", label: "Priority Claude polish queue" },
+      { glyph: "full", label: "Largest context window" },
+      { glyph: "full", label: "Priority polish queue" },
       { glyph: "ring", label: "Priority support" },
     ],
     cta: { href: "/sign-up?plan=pro_plus", label: "Choose Individual III" },
@@ -186,8 +186,8 @@ const COMPARISON: ReadonlyArray<ComparisonCategory> = [
         values: [limited, expanded, unlimited, unlimited],
       },
       { label: "Inline Cmd-K edit turns", values: [no, yes, yes, yes] },
-      { label: "GPT-4o / Claude / Gemini routing", values: [no, no, yes, yes] },
-      { label: "Claude polish queue priority", values: [no, no, no, yes] },
+      { label: "Premium model routing", values: [no, no, yes, yes] },
+      { label: "Polish queue priority", values: [no, no, no, yes] },
       {
         label: "Frontier model context window",
         values: [text("27K"), text("54K"), text("128K"), text("256K")],
@@ -208,7 +208,7 @@ const COMPARISON: ReadonlyArray<ComparisonCategory> = [
     rows: [
       { label: "Voice commands (always-listening)", values: [yes, yes, yes, yes] },
       {
-        label: "ElevenLabs voice — on us",
+        label: "Stock voice — on us",
         values: [
           text("Stock", "accent"),
           text("Premium presets", "accent"),
@@ -259,7 +259,7 @@ interface FaqItem {
 const FAQ: ReadonlyArray<FaqItem> = [
   {
     q: "Is Free actually free?",
-    a: "Yes. No credit card, no trial clock, no ElevenLabs key to bring. We cover the stock voice on us. When you hit the monthly cap, cloud turns to eri's engine pause and eri keeps working locally — no surprise bill at any point.",
+    a: "Yes. No credit card, no trial clock. Stock voice is on us. When you hit the monthly cap, eri keeps working locally — no surprise bill, ever.",
   },
   {
     q: "Can I cancel anytime?",
@@ -271,7 +271,7 @@ const FAQ: ReadonlyArray<FaqItem> = [
   },
   {
     q: "What is BYOK?",
-    a: "Bring Your Own Keys. On paid tiers, you can plug in your own provider keys (Anthropic, OpenAI, Gemini, ElevenLabs) and eri reads them from macOS Keychain — we never proxy, mirror, or sync them. Paid tiers also include eri-cloud credits so you can use eri without bringing keys; either path works.",
+    a: "Bring your own provider keys on paid tiers — eri reads them from macOS Keychain. We never proxy, mirror, or sync them. Paid tiers also include eri-cloud credits if you'd rather not bring keys.",
   },
   {
     q: "What happens when I hit my monthly cap?",
@@ -294,11 +294,11 @@ const FAQ: ReadonlyArray<FaqItem> = [
     a: "Yearly billing saves you two months — the same monthly headline price, billed once a year. Switch cadence from your dashboard at any time.",
   },
   {
-    q: "Frontier vs Personalized Eri?",
-    a: "Frontier (Individual II) gives you multi-model routing — Eri picks between eri's engine, Claude, GPT-4o, and Gemini per task. Personalized (Individual III) adds exclusive eri voices with voice-blending, locally-trained pattern recognition on your codebase, and a private brain that doesn't pool with other users. Frontier makes Eri smarter; Personalized makes Eri yours.",
+    q: "Frontier vs Personalized?",
+    a: "Frontier (Individual II) gives you multi-model routing — eri picks the right brain per task. Personalized (Individual III) adds locally-trained pattern recognition on your codebase and a private brain that doesn't pool with other users. Frontier makes eri smarter; Personalized makes eri yours.",
   },
   {
-    q: "Does Personalized Eri train on my code?",
+    q: "Does Personalized train on my code?",
     a: "No. Your code never leaves your machine. Personalization is local pattern recognition + cached embeddings via eri_cache — not training data shipped to a third party. The private brain is a per-user vector store living next to your project, not a fine-tune.",
   },
 ];
@@ -869,13 +869,11 @@ export function PricingContent(): React.ReactElement {
           aria-hidden
         />
         <div className="relative mx-auto max-w-6xl px-6 pt-20 sm:pt-24 pb-10 text-center">
-          <h1 className="font-display text-4xl sm:text-6xl lg:text-7xl tracking-tight text-balance leading-[1.02] mx-auto max-w-4xl">
-            Start free. Grow into{" "}
-            <span className="italic accent-text">your own Eri.</span>
+          <h1 className="font-display text-4xl sm:text-6xl lg:text-7xl tracking-tight text-balance leading-[1.02] mx-auto max-w-4xl" style={{ fontWeight: 500, letterSpacing: "-0.03em" }}>
+            Free during alpha. <span className="italic text-text-sec">Pay when it earns it.</span>
           </h1>
-          <p className="mt-6 mx-auto max-w-2xl text-lg text-muted leading-relaxed">
-            Four tiers — Stock, Adaptive, Frontier, Personalized. Monthly or
-            yearly. Hard-capped, cancel any time.
+          <p className="mt-6 mx-auto max-w-2xl text-lg text-text-sec leading-relaxed">
+            Invite-only right now. Below is what paid tiers will look like when we open up — hard-capped, cancel any time, no surprise bills.
           </p>
 
           <div className="mt-8 flex items-center justify-center gap-4">
@@ -989,7 +987,7 @@ export function PricingContent(): React.ReactElement {
               <div className="flex gap-3">
                 <span aria-hidden className="mt-2 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-paper/40" />
                 <div>
-                  <p className="text-paper/90 text-sm">An ElevenLabs key on Free.</p>
+                  <p className="text-paper/90 text-sm">Bring your own keys on paid tiers.</p>
                   <p className="mt-1 text-xs text-muted leading-relaxed">
                     Stock eri voice ships in on Free — we cover it. You only bring keys if you want to.
                   </p>
