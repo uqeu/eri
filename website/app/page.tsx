@@ -1,4 +1,7 @@
 import { Hero } from "@/components/Hero";
+import { PromptPipeline } from "@/components/PromptPipeline";
+import { EngineRoom } from "@/components/EngineRoom";
+import { EriDemo } from "@/components/EriDemo";
 import { Testimonials } from "@/components/Testimonials";
 import { CtaFooter } from "@/components/CtaFooter";
 import { FooterBig } from "@/components/FooterBig";
@@ -8,7 +11,7 @@ export default function HomePage(): React.ReactElement {
     <main>
       <Hero />
 
-      <section className="container mt-12 mb-16 lg:mt-20 lg:mb-24">
+      <section className="container mt-12 mb-12 lg:mt-20 lg:mb-16">
         <div className="rounded-xl border border-border bg-bg-card px-5 py-4 flex flex-wrap items-center gap-3 text-[13px]">
           <span className="inline-flex h-2 w-2 rounded-full bg-sage-deep" aria-hidden />
           <span className="text-text font-medium">Pre-launch · free in beta</span>
@@ -18,29 +21,14 @@ export default function HomePage(): React.ReactElement {
         </div>
       </section>
 
-      <section className="container mb-20 lg:mb-28">
-        <h2 className="text-h2 mb-8 text-balance text-text">What&apos;s in the box</h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <FrontierCard
-            title="Voice + gaze in your editor"
-            body="Local Whisper transcribes voice in sub-second. Optional MediaPipe gaze tells eri exactly which element you&apos;re pointing at. The camera frame never leaves your laptop."
-            href="/features"
-            cta="How voice + gaze works"
-          />
-          <FrontierCard
-            title="Diffusion preview, not streaming tokens"
-            body="eri&apos;s engine denoises a working patch while you finish your sentence. The preview becomes the answer — no waiting on a cursor."
-            href="/features"
-            cta="Inside the engine"
-          />
-          <FrontierCard
-            title="Branchable iteration history"
-            body="Every prompt is a node. Fork it, replay it, send the whole branch through a different model. Yesterday&apos;s try is one click away."
-            href="/features"
-            cta="See iteration history"
-          />
-        </div>
-      </section>
+      {/* The 8-phase context pipeline — INPUT → COMPILE → ROUTE → PREVIEW → WHAT CHANGED */}
+      <PromptPipeline />
+
+      {/* Live cross-section of the engine — voice + diffusion + render */}
+      <EngineRoom />
+
+      {/* Iteration history demo (coffee-shop landing builder) */}
+      <EriDemo />
 
       <section className="container mb-20 lg:mb-28">
         <h2 className="text-h2 mb-8 text-balance text-text">Stay on the frontier</h2>
