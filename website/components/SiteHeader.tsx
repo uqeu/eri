@@ -25,14 +25,10 @@ export function SiteHeader({ variant = "transparent" }: SiteHeaderProps) {
   return (
     <div className={wrapperClass}>
       <header className="relative mx-auto max-w-7xl px-6 h-14 flex items-center justify-between text-text">
-        <Link
-          href="/"
-          className="flex items-center gap-2 group"
-          aria-label="eri home"
-        >
+        <Link href="/" className="flex items-center" aria-label="eri home">
           <span
-            className="font-display text-xl tracking-tight text-text"
-            style={{ fontWeight: 500 }}
+            className="font-display text-text"
+            style={{ fontSize: "1.5rem", fontWeight: 500, letterSpacing: "-0.05em" }}
           >
             eri
           </span>

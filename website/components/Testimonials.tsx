@@ -33,7 +33,7 @@ export function Testimonials(): React.ReactElement {
   return (
     <section className="container py-24 lg:py-32">
       <div className="border-t border-border pt-10 mb-16">
-        <div className="mono-cap text-text-sec mb-3">VI · What people say</div>
+        <div className="mono-cap text-text-sec mb-3">III · What people say</div>
         <h2 className="text-h2 text-balance max-w-2xl text-text">
           From the first wave of invites.
         </h2>

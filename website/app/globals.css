@@ -118,6 +118,7 @@ html, body {
     color: var(--text-sec);
   }
 
+
   @media (min-width: 768px) {
     .container {
       padding-inline: 2rem;
