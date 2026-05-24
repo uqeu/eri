@@ -39,6 +39,7 @@ export function IDEWindow(): React.ReactElement {
 
   function send(e: React.FormEvent): void {
     e.preventDefault();
+    e.stopPropagation();
     if (!input.trim()) return;
     const userMsg: Message = { id: Date.now(), role: "user", text: input };
     setMessages((prev) => [...prev, userMsg]);
