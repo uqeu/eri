@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { SiteHeader } from "@/components/SiteHeader";
 import { Footer } from "@/components/Footer";
 import { CapabilityGrid } from "@/components/CapabilityGrid";
 
@@ -25,7 +24,6 @@ const MARQUEE_STATS: ReadonlyArray<MarqueeStat> = [
 export default function FeaturesPage(): React.ReactElement {
   return (
     <main>
-      <SiteHeader variant="solid" />
 
       <section className="border-b border-white/[0.08]">
         <div className="mx-auto max-w-7xl px-6 py-20 sm:py-28">

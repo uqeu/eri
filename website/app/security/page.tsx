@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { SiteHeader } from "@/components/SiteHeader";
 import { Footer } from "@/components/Footer";
 
 export const metadata: Metadata = {
@@ -57,7 +56,6 @@ const NOT_COLLECTED: ReadonlyArray<string> = [
 export default function SecurityPage() {
   return (
     <main>
-      <SiteHeader variant="solid" />
 
       <section className="border-b border-white/10">
         <div className="mx-auto max-w-3xl px-6 py-20 sm:py-28">

@@ -7,7 +7,7 @@ export function Hero(): React.ReactElement {
         <div className="max-w-3xl">
           <span className="inline-flex items-center gap-2 rounded-full border border-border px-3 py-1 font-mono text-[11px] uppercase tracking-[0.18em] text-text-sec mb-8">
             <span className="inline-block h-1 w-1 rounded-full bg-demo-accent" aria-hidden />
-            agentic · invite-only alpha
+            agentic · invite-only
           </span>
 
           <h1
@@ -34,7 +34,7 @@ export function Hero(): React.ReactElement {
               href="/contact"
               className="inline-flex items-center rounded-md border border-border px-4 py-2 text-[14px] text-text hover:bg-bg-card transition-colors"
             >
-              Request alpha access
+              Request access
             </Link>
           </div>
         </div>

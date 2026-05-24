@@ -37,6 +37,7 @@ import { activateVisualEditor, VisualEditorHandle } from "./visualEditor";
 import { activateReview, ReviewHandle } from "./review";
 import { activateStatusBar, EriStatusBarHandle } from "./statusBar";
 import { activateAccount, AccountHandle } from "./account";
+import { activateAgents, AgentsHandle } from "./agents";
 
 export { getCurrentTarget as getCurrentGazeTarget, getEditorGazeContext } from "./gaze/gaze";
 
@@ -66,6 +67,7 @@ let visualEditor: VisualEditorHandle | null = null;
 let review: ReviewHandle | null = null;
 let statusBar: EriStatusBarHandle | null = null;
 let account: AccountHandle | null = null;
+let agents: AgentsHandle | null = null;
 
 export function activate(context: vscode.ExtensionContext): void {
   const binaryPath = resolveBinaryPath(context);
@@ -91,6 +93,18 @@ export function activate(context: vscode.ExtensionContext): void {
 
   statusBar = activateStatusBar(context);
   account = activateAccount(context);
+
+  agents = activateAgents(context, {
+    secrets: secretsStore,
+    session: account.store,
+    getSidecar: () => sidecar,
+    onActiveChanged: (descriptor) => {
+      panelProvider?.postToWebview({
+        method: "eri/agents/active",
+        params: { id: descriptor.id, label: descriptor.label, kind: descriptor.kind, free: descriptor.free },
+      });
+    },
+  });
 
   panelProvider = new EriPanelProvider(context, () => sidecar);
   context.subscriptions.push(
@@ -290,6 +304,8 @@ export function deactivate(): void {
   statusBar = null;
   account?.dispose();
   account = null;
+  agents?.dispose();
+  agents = null;
   byokView = null;
   secretsStore = null;
 }

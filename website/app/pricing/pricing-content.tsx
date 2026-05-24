@@ -883,21 +883,21 @@ export function PricingContent(): React.ReactElement {
             Free during invite-only alpha. Below is what paid tiers will look like when we open up — hard-capped, cancel any time, no surprise bills.
           </p>
 
-          <div className="mt-8 flex items-center justify-center gap-4">
+          <div className="mt-8 flex items-center justify-center">
             <div
               role="tablist"
               aria-label="Billing cadence"
-              className="relative inline-flex rounded-full border border-white/10 bg-white/[0.03] p-1"
+              className="inline-flex items-center gap-0.5 rounded-full border border-white/10 bg-white/[0.03] p-1"
             >
               <button
                 type="button"
                 role="tab"
                 aria-selected={cadence === "monthly"}
                 onClick={() => setCadence("monthly")}
-                className={`relative z-10 px-5 py-2 text-sm rounded-full transition-colors ${
+                className={`rounded-full px-4 py-1.5 text-sm transition-colors ${
                   cadence === "monthly"
-                    ? "text-paper"
-                    : "text-muted hover:text-paper"
+                    ? "bg-white/[0.08] text-paper border border-white/10"
+                    : "border border-transparent text-muted hover:text-paper"
                 }`}
               >
                 Monthly
@@ -907,10 +907,10 @@ export function PricingContent(): React.ReactElement {
                 role="tab"
                 aria-selected={cadence === "yearly"}
                 onClick={() => setCadence("yearly")}
-                className={`relative z-10 px-5 py-2 text-sm rounded-full transition-colors ${
+                className={`rounded-full px-4 py-1.5 text-sm transition-colors ${
                   cadence === "yearly"
-                    ? "text-paper"
-                    : "text-muted hover:text-paper"
+                    ? "bg-white/[0.08] text-paper border border-white/10"
+                    : "border border-transparent text-muted hover:text-paper"
                 }`}
               >
                 Yearly
@@ -918,16 +918,6 @@ export function PricingContent(): React.ReactElement {
                   · save 2mo
                 </span>
               </button>
-              <span
-                className="absolute top-1 bottom-1 rounded-full bg-white/[0.08] border border-white/10 transition-transform duration-300 ease-out"
-                style={{
-                  width: "calc(50% - 4px)",
-                  left: 4,
-                  transform:
-                    cadence === "yearly" ? "translateX(100%)" : "translateX(0%)",
-                }}
-                aria-hidden
-              />
             </div>
           </div>
         </div>

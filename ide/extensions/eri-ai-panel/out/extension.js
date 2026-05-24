@@ -33,6 +33,7 @@ const visualEditor_1 = require("./visualEditor");
 const review_1 = require("./review");
 const statusBar_1 = require("./statusBar");
 const account_1 = require("./account");
+const agents_1 = require("./agents");
 var gaze_2 = require("./gaze/gaze");
 Object.defineProperty(exports, "getCurrentGazeTarget", { enumerable: true, get: function () { return gaze_2.getCurrentTarget; } });
 Object.defineProperty(exports, "getEditorGazeContext", { enumerable: true, get: function () { return gaze_2.getEditorGazeContext; } });
@@ -62,6 +63,7 @@ let visualEditor = null;
 let review = null;
 let statusBar = null;
 let account = null;
+let agents = null;
 function activate(context) {
     const binaryPath = (0, sidecar_1.resolveBinaryPath)(context);
     secretsStore = new secrets_1.SecretsStore(context.secrets, context.globalState);
@@ -83,6 +85,17 @@ function activate(context) {
     sidecar.start();
     statusBar = (0, statusBar_1.activateStatusBar)(context);
     account = (0, account_1.activateAccount)(context);
+    agents = (0, agents_1.activateAgents)(context, {
+        secrets: secretsStore,
+        session: account.store,
+        getSidecar: () => sidecar,
+        onActiveChanged: (descriptor) => {
+            panelProvider?.postToWebview({
+                method: "eri/agents/active",
+                params: { id: descriptor.id, label: descriptor.label, kind: descriptor.kind, free: descriptor.free },
+            });
+        },
+    });
     panelProvider = new panel_1.EriPanelProvider(context, () => sidecar);
     context.subscriptions.push(vscode.window.registerWebviewViewProvider("eri.panel", panelProvider));
     preview = (0, preview_1.activatePreview)(context, () => sidecar);
@@ -243,6 +256,8 @@ function deactivate() {
     statusBar = null;
     account?.dispose();
     account = null;
+    agents?.dispose();
+    agents = null;
     byokView = null;
     secretsStore = null;
 }

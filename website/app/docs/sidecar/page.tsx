@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { SiteHeader } from "@/components/SiteHeader";
 import { FooterBig } from "@/components/FooterBig";
 
 export const metadata: Metadata = {
@@ -45,7 +44,6 @@ const CRATES: ReadonlyArray<Crate> = [
 export default function SidecarDocsPage() {
   return (
     <main>
-      <SiteHeader variant="solid" />
 
       <section className="border-b border-white/10">
         <div className="mx-auto max-w-3xl px-6 py-20 sm:py-28">

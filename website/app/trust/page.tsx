@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { SiteHeader } from "@/components/SiteHeader";
 import { FooterBig } from "@/components/FooterBig";
 
 export const metadata: Metadata = {
@@ -65,7 +64,6 @@ const STATUS_LABEL: Record<Posture["status"], string> = {
 export default function TrustPage() {
   return (
     <main>
-      <SiteHeader variant="solid" />
 
       <section className="border-b border-white/10">
         <div className="mx-auto max-w-3xl px-6 py-20 sm:py-28">

@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.EriPanelProvider = void 0;
+const vscode = require("vscode");
 class EriPanelProvider {
     context;
     getSidecar;
@@ -23,6 +24,12 @@ class EriPanelProvider {
     }
     handleMessage(message) {
         if (!message.method) {
+            return;
+        }
+        // Local handlers — intercept agent picker requests so the extension
+        // host shows a QuickPick rather than forwarding to the sidecar.
+        if (message.method === "eri/agents/openPicker") {
+            void vscode.commands.executeCommand("eri.agents.switch");
             return;
         }
         this.getSidecar()?.notify(message.method, message.params ?? {});
@@ -69,6 +76,16 @@ class EriPanelProvider {
     cursor: pointer;
   }
   .model-pill::after { content: "▾"; opacity: 0.6; }
+  .agent-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--eri-accent);
+    display: inline-block;
+  }
+  .agent-dot.proxy { background: #228df2; }
+  .agent-dot.cli { background: #34d399; }
+  .agent-dot.byok { background: #facc15; }
   .section { margin-top: 16px; }
   .section-label {
     font-size: 11px;
@@ -126,7 +143,7 @@ class EriPanelProvider {
 </style>
 </head>
 <body>
-<div class="model-pill" id="model-pill">eri Engine</div>
+<div class="model-pill" id="model-pill" title="Click to switch agent"><span class="agent-dot" id="agent-dot"></span><span id="agent-label">eri Engine</span></div>
 
 <div class="section">
   <div class="section-label">Voice</div>
@@ -157,6 +174,13 @@ const vscode = acquireVsCodeApi();
 function send(method, params) { vscode.postMessage({ method: method, params: params || {} }); }
 document.getElementById('btn-accept').addEventListener('click', () => send('eri/iteration/accept'));
 document.getElementById('btn-reject').addEventListener('click', () => send('eri/iteration/reject'));
+document.getElementById('model-pill').addEventListener('click', () => send('eri/agents/openPicker'));
+const agentLabelEl = document.getElementById('agent-label');
+const agentDotEl = document.getElementById('agent-dot');
+function setAgent(label, kind) {
+  if (label) agentLabelEl.textContent = label;
+  agentDotEl.className = 'agent-dot ' + (kind || '');
+}
 
 const iterationsEl = document.getElementById('iterations');
 const transcriptEl = document.getElementById('transcript');
@@ -192,6 +216,9 @@ window.addEventListener('message', (event) => {
       break;
     case 'eri/iteration/recorded':
       addIterationRow(params.label, params.stage);
+      break;
+    case 'eri/agents/active':
+      setAgent(params.label, params.kind);
       break;
   }
 });

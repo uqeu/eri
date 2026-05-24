@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { SiteHeader } from "@/components/SiteHeader";
 import { FooterBig } from "@/components/FooterBig";
 import {
   getThread,
@@ -30,7 +29,6 @@ export default async function ThreadPage({
 
   return (
     <main className="min-h-screen bg-ink text-paper">
-      <SiteHeader variant="solid" />
       <div className="mx-auto max-w-3xl px-6 py-12">
         <Link
           href="/forum"

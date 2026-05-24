@@ -64,6 +64,12 @@
     "onCommand:eri.account.signOut",
     "onCommand:eri.account.showStatus",
     "onCommand:eri.account.openBilling",
+    "onView:eri.agents",
+    "onCommand:eri.agents.switch",
+    "onCommand:eri.agents.detectCli",
+    "onCommand:eri.agents.addCustom",
+    "onCommand:eri.agents.showCurrent",
+    "onCommand:eri.agents.setActive",
     "onUri"
   ],
   "categories": [
@@ -216,6 +222,11 @@
           "id": "eri.review",
           "name": "Review",
           "visibility": "collapsed"
+        },
+        {
+          "id": "eri.agents",
+          "name": "Agents",
+          "visibility": "collapsed"
         }
       ]
     },
@@ -353,7 +364,12 @@
       { "command": "eri.review.openFinding",   "title": "eri: Open Finding" },
       { "command": "eri.review.applyFix",      "title": "eri: Apply Suggested Fix",              "icon": "$(wand)" },
       { "command": "eri.review.dismiss",       "title": "eri: Dismiss Finding",                  "icon": "$(close)" },
-      { "command": "eri.review.clear",         "title": "eri: Clear Review Findings",            "icon": "$(clear-all)" }
+      { "command": "eri.review.clear",         "title": "eri: Clear Review Findings",            "icon": "$(clear-all)" },
+      { "command": "eri.agents.switch",        "title": "eri: Switch Agent",                     "icon": "$(rocket)" },
+      { "command": "eri.agents.detectCli",     "title": "eri: Detect Local CLI Agents",          "icon": "$(refresh)" },
+      { "command": "eri.agents.addCustom",     "title": "eri: Add Custom Agent" },
+      { "command": "eri.agents.showCurrent",   "title": "eri: Show Current Agent" },
+      { "command": "eri.agents.setActive",     "title": "eri: Set Active Agent" }
     ],
     "walkthroughs": [
       {
@@ -443,7 +459,10 @@
         { "command": "eri.review.local",       "when": "view == eri.review", "group": "navigation@1" },
         { "command": "eri.review.pr",          "when": "view == eri.review", "group": "navigation@2" },
         { "command": "eri.review.openReport",  "when": "view == eri.review", "group": "navigation@3" },
-        { "command": "eri.review.clear",       "when": "view == eri.review", "group": "navigation@4" }
+        { "command": "eri.review.clear",       "when": "view == eri.review", "group": "navigation@4" },
+        { "command": "eri.agents.detectCli",   "when": "view == eri.agents", "group": "navigation@1" },
+        { "command": "eri.agents.switch",      "when": "view == eri.agents", "group": "navigation@2" },
+        { "command": "eri.agents.addCustom",   "when": "view == eri.agents", "group": "navigation@3" }
       ],
       "view/item/context": [
         { "command": "eri.mcp.viewTools",  "when": "view == eri.mcp && viewItem =~ /^eri\\.mcp\\.server\\./", "group": "inline@1" },
@@ -478,7 +497,8 @@
         { "command": "eri.review.dismiss",   "when": "view == eri.review && viewItem =~ /^eri\\.review\\.finding/",  "group": "inline@2" },
         { "command": "eri.review.openFinding", "when": "view == eri.review && viewItem =~ /^eri\\.review\\.finding/", "group": "1_open@1" },
         { "command": "eri.review.applyFix",  "when": "view == eri.review && viewItem == eri.review.finding.fixable", "group": "1_open@2" },
-        { "command": "eri.review.dismiss",   "when": "view == eri.review && viewItem =~ /^eri\\.review\\.finding/",  "group": "9_destructive@1" }
+        { "command": "eri.review.dismiss",   "when": "view == eri.review && viewItem =~ /^eri\\.review\\.finding/",  "group": "9_destructive@1" },
+        { "command": "eri.agents.setActive", "when": "view == eri.agents && viewItem == eri.agents.agent.available", "group": "1_action@1" }
       ]
     },
     "keybindings": [
@@ -758,6 +778,22 @@
           "minimum": 200,
           "maximum": 5000,
           "markdownDescription": "Number of milliseconds of stable gaze before the Visual Editor auto-picks the element under your gaze."
+        },
+        "eri.agents.default": {
+          "type": "string",
+          "default": "eri.agent.auto",
+          "markdownDescription": "Default **agent** that handles each chat turn. Use `eri.agent.auto` to let eri pick per turn."
+        },
+        "eri.agents.detectCli.onLaunch": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Run `which claude`/`which codex`/`which aider` on launch to detect installed local CLI agents."
+        },
+        "eri.agents.cliEnvBlocklist": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_API_KEY", "GEMINI_API_KEY"],
+          "markdownDescription": "Environment variables to strip before exec'ing a local CLI agent. Local CLIs ship their own auth — never share eri's BYOK keys."
         }
       }
     }

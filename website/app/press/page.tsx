@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { SiteHeader } from "@/components/SiteHeader";
 import { FooterBig } from "@/components/FooterBig";
 
 export const metadata: Metadata = {
@@ -53,7 +52,6 @@ const ASSETS: ReadonlyArray<Asset> = [
 export default function PressPage() {
   return (
     <main>
-      <SiteHeader variant="solid" />
 
       <section className="border-b border-white/10">
         <div className="mx-auto max-w-3xl px-6 py-20 sm:py-28">

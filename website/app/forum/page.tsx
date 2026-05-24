@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { SiteHeader } from "@/components/SiteHeader";
 import { FooterBig } from "@/components/FooterBig";
 import { listThreads, type ThreadSummary } from "@/lib/forum";
 import {
@@ -20,7 +19,6 @@ export default async function ForumPage(): Promise<React.ReactElement> {
 
   return (
     <main className="min-h-screen bg-ink text-paper">
-      <SiteHeader variant="solid" />
       <div className="mx-auto max-w-4xl px-6 py-12">
         <div className="flex items-end justify-between gap-4 mb-8">
           <div>
