@@ -125,17 +125,27 @@ function PreviewPane(): React.ReactElement {
     price: useRef<HTMLSpanElement | null>(null),
     cta: useRef<HTMLButtonElement | null>(null),
   };
-  const [active, setActive] = useState<Target | null>(null);
+  const [hovered, setHovered] = useState<Target | null>(null);
+  const [autoIdx, setAutoIdx] = useState<number>(0);
   const [rect, setRect] = useState<Rect | null>(null);
 
+  // Auto-cycle through targets unless the user is actively hovering — that
+  // way the demo "plays" on its own but hover takes over the instant the
+  // pointer enters the preview.
+  useEffect(() => {
+    if (hovered) return;
+    const id = setInterval(() => {
+      setAutoIdx((i) => (i + 1) % TARGETS.length);
+    }, 1900);
+    return () => clearInterval(id);
+  }, [hovered]);
+
+  const active: Target = hovered ?? TARGETS[autoIdx]!;
+
   useLayoutEffect(() => {
-    if (!active) {
-      setRect(null);
-      return;
-    }
     function measure(): void {
       const container = containerRef.current;
-      const el = active ? refs[active].current : null;
+      const el = refs[active].current;
       if (!container || !el) return;
       const c = container.getBoundingClientRect();
       const r = el.getBoundingClientRect();
@@ -157,8 +167,8 @@ function PreviewPane(): React.ReactElement {
     readonly onMouseLeave: () => void;
   } {
     return {
-      onMouseEnter: () => setActive(t),
-      onMouseLeave: () => setActive(null),
+      onMouseEnter: () => setHovered(t),
+      onMouseLeave: () => setHovered(null),
     };
   }
 
@@ -296,7 +306,7 @@ function PreviewPane(): React.ReactElement {
                 letterSpacing: "0.01em",
               }}
             >
-              {active ? LABELS[active] : ""}
+              {LABELS[active]}
             </div>
           </>
         ) : null}
