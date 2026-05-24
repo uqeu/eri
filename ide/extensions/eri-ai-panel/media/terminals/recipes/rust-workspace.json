@@ -1,0 +1,27 @@
+{
+  "name": "Rust workspace",
+  "description": "cargo watch + cargo test + plain shell for git ops.",
+  "groups": [
+    {
+      "name": "Build",
+      "icon": "tools",
+      "terminals": [
+        { "name": "cargo watch", "cwd": ".", "command": "cargo watch -x build", "icon": "tools" }
+      ]
+    },
+    {
+      "name": "Tests",
+      "icon": "beaker",
+      "terminals": [
+        { "name": "cargo test", "cwd": ".", "command": "cargo watch -x test", "icon": "beaker" }
+      ]
+    },
+    {
+      "name": "Shell",
+      "icon": "terminal",
+      "terminals": [
+        { "name": "shell", "cwd": "." }
+      ]
+    }
+  ]
+}

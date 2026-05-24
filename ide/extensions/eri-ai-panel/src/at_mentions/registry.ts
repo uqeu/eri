@@ -13,7 +13,8 @@ export type AtMentionKind =
   | "pastChats"
   | "recentChanges"
   | "linterErrors"
-  | "definitions";
+  | "definitions"
+  | "codemap";
 
 export interface AtMentionDescriptor {
   readonly id: AtMentionKind;
@@ -100,6 +101,13 @@ export const AT_MENTION_KINDS: ReadonlyArray<AtMentionDescriptor> = [
     token: "@Definitions",
     icon: "$(symbol-method)",
     description: "Attach definitions referenced near the cursor",
+  },
+  {
+    id: "codemap",
+    label: "Codemap",
+    token: "@Codemap",
+    icon: "$(graph)",
+    description: "Attach a saved codemap (module/hotspot/function/data)",
   },
 ];
 

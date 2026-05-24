@@ -165,6 +165,7 @@ function renderInlineToken(chip: AtMentionChip): string {
     case "recentChanges": return "@RecentChanges";
     case "linterErrors": return "@LinterErrors";
     case "definitions": return `@Definitions ${chip.label}`;
+    case "codemap": return `@Codemap ${chip.label}`;
     default: return "@Mention";
   }
 }

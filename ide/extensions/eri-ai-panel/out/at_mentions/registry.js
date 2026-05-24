@@ -79,6 +79,13 @@ exports.AT_MENTION_KINDS = [
         icon: "$(symbol-method)",
         description: "Attach definitions referenced near the cursor",
     },
+    {
+        id: "codemap",
+        label: "Codemap",
+        token: "@Codemap",
+        icon: "$(graph)",
+        description: "Attach a saved codemap (module/hotspot/function/data)",
+    },
 ];
 // Storage key for per-workspace enable/disable toggles. Persisted via
 // context.globalState because the user picks once and rarely changes.

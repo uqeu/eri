@@ -9,9 +9,16 @@ license = "LicenseRef-Proprietary"
 workspace = true
 
 [lib]
-path = "src/eri_graph.rs"
+path = "src/lib.rs"
 
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+anyhow.workspace = true
+
+rusqlite = { version = "0.31", features = ["bundled"] }
+ulid = "1.1"
+
+[dev-dependencies]
+tempfile.workspace = true

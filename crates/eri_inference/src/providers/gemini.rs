@@ -35,8 +35,21 @@ pub struct GeminiProvider {
 impl GeminiProvider {
     pub fn for_model(model: &str) -> Result<Self, InferenceError> {
         let _ = dotenvy::dotenv();
-        let api_key = std::env::var("GEMINI_API_KEY")
-            .map_err(|_| InferenceError::Transport("GEMINI_API_KEY not set".into()))?;
+        // Accept either `GOOGLE_API_KEY` (matches the BYOK provider id used
+        // by the extension's SecretStorage) or the legacy `GEMINI_API_KEY`.
+        let api_key = std::env::var("GOOGLE_API_KEY")
+            .or_else(|_| std::env::var("GEMINI_API_KEY"))
+            .map_err(|_| InferenceError::Transport("GOOGLE_API_KEY not set".into()))?;
+        Self::for_model_with_key(model, api_key)
+    }
+
+    /// Construct a Gemini provider with a pre-fetched API key. The sidecar
+    /// uses this after a `settings/getSecret` round-trip so the key never
+    /// has to live in the process env.
+    pub fn for_model_with_key(
+        model: &str,
+        api_key: impl Into<String>,
+    ) -> Result<Self, InferenceError> {
         if pricing_for(model).is_none() {
             return Err(InferenceError::Transport(format!(
                 "unsupported gemini model: {model}"
@@ -44,7 +57,7 @@ impl GeminiProvider {
         }
         Ok(Self {
             model: model.to_string(),
-            api_key,
+            api_key: api_key.into(),
             base_url: GEMINI_BASE_URL.to_string(),
         })
     }

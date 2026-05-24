@@ -12,14 +12,54 @@
   "main": "./out/extension.js",
   "activationEvents": [
     "onStartupFinished",
+    "onView:eri.crashes",
+    "onCommand:eri.crash.refresh",
+    "onCommand:eri.crash.openLog",
+    "onCommand:eri.crash.openSidecarLog",
+    "onCommand:eri.crash.clear",
+    "onCommand:eri.crash.copyLast",
     "onView:eri.panel",
     "onView:eri.iterations",
     "onView:eri.mcp",
     "onView:eri.checkpoints",
     "onView:eri.byok",
     "onView:eri.pendingEdits",
+    "onView:eri.skills",
+    "onView:eri.hooks",
+    "onCommand:eri.hooks.openConfig",
+    "onView:eri.codemaps",
+    "onView:eri.graph",
+    "onView:eri.terminals",
+    "onView:eri.terminalBlocks",
     "onView:eri.settingsHub",
-    "onCommand:eri.settings.hub"
+    "onView:eri.mcpPresets",
+    "onView:eri.audit",
+    "onCommand:eri.mcpPresets.browse",
+    "onCommand:eri.mcpPresets.install",
+    "onCommand:eri.mcpPresets.installRecommended",
+    "onCommand:eri.mcpPresets.refresh",
+    "onCommand:eri.settings.hub",
+    "onCommand:eri.audit.enable",
+    "onCommand:eri.audit.disable",
+    "onCommand:eri.audit.openFile",
+    "onCommand:eri.audit.refresh",
+    "onCommand:eri.terminals.newGroup",
+    "onCommand:eri.terminals.spawnInGroup",
+    "onCommand:eri.terminals.findCommand",
+    "onCommand:eri.terminals.saveLayout",
+    "onCommand:eri.terminals.restoreLayout",
+    "onCommand:eri.terminals.openRecipe",
+    "onCommand:eri.visualEditor.open",
+    "onCommand:eri.visualEditor.setUrl",
+    "onCommand:eri.visualEditor.pickElement",
+    "onCommand:eri.visualEditor.applyToSource",
+    "onView:eri.review",
+    "onCommand:eri.review.local",
+    "onCommand:eri.review.staged",
+    "onCommand:eri.review.range",
+    "onCommand:eri.review.pr",
+    "onCommand:eri.review.patch",
+    "onCommand:eri.review.openReport"
   ],
   "categories": [
     "Other"
@@ -53,6 +93,12 @@
           "visibility": "collapsed"
         },
         {
+          "type": "webview",
+          "id": "eri.mcpPresets",
+          "name": "MCP Starter Pack",
+          "visibility": "collapsed"
+        },
+        {
           "id": "eri.checkpoints",
           "name": "Checkpoints",
           "visibility": "collapsed"
@@ -63,15 +109,61 @@
           "visibility": "collapsed"
         },
         {
+          "id": "eri.skills",
+          "name": "Skills",
+          "visibility": "collapsed"
+        },
+        {
+          "id": "eri.hooks",
+          "name": "Hooks",
+          "visibility": "collapsed"
+        },
+        {
+          "id": "eri.codemaps",
+          "name": "Codemaps",
+          "visibility": "collapsed"
+        },
+        {
+          "id": "eri.graph",
+          "name": "Graph",
+          "visibility": "collapsed"
+        },
+        {
           "type": "webview",
           "id": "eri.byok",
           "name": "API Keys",
           "visibility": "collapsed"
         },
         {
+          "id": "eri.terminals",
+          "name": "Terminals",
+          "visibility": "collapsed"
+        },
+        {
+          "type": "webview",
+          "id": "eri.terminalBlocks",
+          "name": "Terminal Blocks",
+          "visibility": "collapsed"
+        },
+        {
           "type": "webview",
           "id": "eri.settingsHub",
           "name": "Settings",
+          "visibility": "collapsed"
+        },
+        {
+          "id": "eri.audit",
+          "name": "Audit Log",
+          "visibility": "collapsed"
+        },
+        {
+          "id": "eri.crashes",
+          "name": "Crashes",
+          "visibility": "collapsed"
+        },
+        {
+          "id": "eri.review",
+          "name": "Review",
           "visibility": "collapsed"
         }
       ]
@@ -92,6 +184,7 @@
       { "command": "eri.tab.acceptWord",    "title": "eri: Accept Next Word of Inline Suggestion" },
       { "command": "eri.tab.acceptLine",    "title": "eri: Accept Next Line of Inline Suggestion" },
       { "command": "eri.tab.health",        "title": "eri: Check Tab Completion Health" },
+      { "command": "eri.tab.preload",       "title": "eri: Preload Tab Completion Model" },
       { "command": "eri.mentions.openPicker",   "title": "eri: Mention Context" },
       { "command": "eri.mentions.pickFile",     "title": "eri: Mention File" },
       { "command": "eri.mentions.pickFolder",   "title": "eri: Mention Folder" },
@@ -110,6 +203,10 @@
       { "command": "eri.mcp.openConfig",   "title": "eri: Open MCP Config",         "icon": "$(gear)",     "enablement": "eri.feature.mcp" },
       { "command": "eri.mcp.restart",      "title": "eri: Restart MCP Server",      "icon": "$(refresh)",  "enablement": "eri.feature.mcp" },
       { "command": "eri.mcp.viewTools",    "title": "eri: View MCP Server Tools",   "icon": "$(tools)",    "enablement": "eri.feature.mcp" },
+      { "command": "eri.mcpPresets.browse",              "title": "eri: Browse MCP Starter Pack",        "icon": "$(extensions)" },
+      { "command": "eri.mcpPresets.install",             "title": "eri: Install MCP Server From Catalog" },
+      { "command": "eri.mcpPresets.installRecommended",  "title": "eri: Install Recommended MCP Servers" },
+      { "command": "eri.mcpPresets.refresh",             "title": "eri: Refresh MCP Starter Pack",        "icon": "$(refresh)" },
       { "command": "eri.composer.applyAll", "title": "eri: Composer Apply All",                          "enablement": "eri.feature.composer" },
       { "command": "eri.composer.discard",  "title": "eri: Composer Discard",                            "enablement": "eri.feature.composer" },
       { "command": "eri.gaze.recalibrate",  "title": "eri: Recalibrate Gaze Tracker" },
@@ -123,6 +220,19 @@
       { "command": "eri.checkpoints.copySha",  "title": "eri: Copy Checkpoint SHA" },
       { "command": "eri.checkpoints.openFile", "title": "eri: Open File At Checkpoint" },
       { "command": "eri.checkpoints.diffFile", "title": "eri: Diff File Against Checkpoint" },
+      { "command": "eri.codemaps.generate",    "title": "eri: Generate Codemap",     "icon": "$(graph)" },
+      { "command": "eri.codemaps.refresh",     "title": "eri: Refresh Codemaps",     "icon": "$(refresh)" },
+      { "command": "eri.codemaps.open",        "title": "eri: Open Codemap" },
+      { "command": "eri.graph.refresh",        "title": "eri: Refresh Graph",        "icon": "$(refresh)" },
+      { "command": "eri.graph.visualize",      "title": "eri: Visualize Graph",      "icon": "$(graph)" },
+      { "command": "eri.graph.search",         "title": "eri: Search Graph",         "icon": "$(search)" },
+      { "command": "eri.graph.openNode",       "title": "eri: Open Graph Node" },
+      { "command": "eri.graph.openNodeJson",   "title": "eri: Open Graph Node as JSON" },
+      { "command": "eri.graph.addNote",        "title": "eri: Add Graph Note",       "icon": "$(note)" },
+      { "command": "eri.graph.tagNode",        "title": "eri: Tag Graph Node" },
+      { "command": "eri.graph.linkRelated",    "title": "eri: Link Related Nodes" },
+      { "command": "eri.graph.export",         "title": "eri: Export Graph (JSONL)", "icon": "$(export)" },
+      { "command": "eri.graph.showStats",      "title": "eri: Show Graph Stats" },
       { "command": "eri.openWalkthrough",            "title": "eri: Open Welcome Walkthrough" },
       { "command": "eri.onboarding.signIn",          "title": "eri: Sign in with Google" },
       { "command": "eri.onboarding.skipSignIn",      "title": "eri: Skip Sign-in (use BYOK)" },
@@ -142,7 +252,50 @@
       { "command": "eri.apply.acceptBlock",    "title": "eri: Accept Edit Block",              "icon": "$(check)" },
       { "command": "eri.apply.rejectBlock",    "title": "eri: Reject Edit Block",              "icon": "$(x)" },
       { "command": "eri.apply.resetBlock",     "title": "eri: Reset Edit Block",               "icon": "$(discard)" },
-      { "command": "eri.apply.revert",         "title": "eri: Revert Last Apply",              "icon": "$(history)" }
+      { "command": "eri.apply.revert",         "title": "eri: Revert Last Apply",              "icon": "$(history)" },
+      { "command": "eri.skills.refresh",        "title": "eri: Refresh Skills",                 "icon": "$(refresh)" },
+      { "command": "eri.hooks.refresh",         "title": "eri: Refresh Hooks",                  "icon": "$(refresh)" },
+      { "command": "eri.hooks.openConfig",      "title": "eri: Edit Hooks Config",              "icon": "$(edit)" },
+      { "command": "eri.audit.enable",           "title": "eri: Enable Local Audit Log" },
+      { "command": "eri.audit.disable",          "title": "eri: Disable Local Audit Log" },
+      { "command": "eri.audit.openFile",         "title": "eri: Open Audit Log File",            "icon": "$(go-to-file)" },
+      { "command": "eri.audit.refresh",          "title": "eri: Refresh Audit Log View",         "icon": "$(refresh)" },
+      { "command": "eri.crash.refresh",          "title": "eri: Refresh Crash List",             "icon": "$(refresh)" },
+      { "command": "eri.crash.openLog",          "title": "eri: Open Crash Log File",            "icon": "$(go-to-file)" },
+      { "command": "eri.crash.openSidecarLog",   "title": "eri: Open Sidecar Log File",          "icon": "$(output)" },
+      { "command": "eri.crash.clear",            "title": "eri: Clear Crash Log",                "icon": "$(trash)" },
+      { "command": "eri.crash.copyLast",         "title": "eri: Copy Most Recent Crash",         "icon": "$(copy)" },
+      { "command": "eri.terminals.newGroup",      "title": "eri: New Terminal Group",            "icon": "$(new-folder)" },
+      { "command": "eri.terminals.renameGroup",   "title": "eri: Rename Terminal Group" },
+      { "command": "eri.terminals.removeGroup",   "title": "eri: Remove Terminal Group",         "icon": "$(trash)" },
+      { "command": "eri.terminals.setGroupIcon",  "title": "eri: Set Group Icon" },
+      { "command": "eri.terminals.rename",        "title": "eri: Rename Terminal" },
+      { "command": "eri.terminals.toggleLock",    "title": "eri: Toggle Terminal Name Lock" },
+      { "command": "eri.terminals.kill",          "title": "eri: Kill Terminal",                 "icon": "$(trash)" },
+      { "command": "eri.terminals.duplicate",     "title": "eri: Duplicate Terminal" },
+      { "command": "eri.terminals.moveToGroup",   "title": "eri: Move Terminal to Group" },
+      { "command": "eri.terminals.reveal",        "title": "eri: Reveal Terminal" },
+      { "command": "eri.terminals.spawnInGroup",  "title": "eri: Spawn Terminal in Group",       "icon": "$(add)" },
+      { "command": "eri.terminals.findCommand",   "title": "eri: Find Captured Command",         "icon": "$(search)" },
+      { "command": "eri.terminals.saveLayout",    "title": "eri: Save Terminal Layout",          "icon": "$(save)" },
+      { "command": "eri.terminals.restoreLayout", "title": "eri: Restore Terminal Layout" },
+      { "command": "eri.terminals.deleteLayout",  "title": "eri: Delete Terminal Layout",        "icon": "$(trash)" },
+      { "command": "eri.terminals.openRecipe",    "title": "eri: Open Terminal Recipe",          "icon": "$(library)" },
+      { "command": "eri.terminals.rerunBlock",    "title": "eri: Re-run Captured Block" },
+      { "command": "eri.visualEditor.open",          "title": "eri: Open Visual Editor",            "icon": "$(browser)" },
+      { "command": "eri.visualEditor.setUrl",        "title": "eri: Visual Editor - Set Dev Server URL" },
+      { "command": "eri.visualEditor.pickElement",   "title": "eri: Visual Editor - Pick Element" },
+      { "command": "eri.visualEditor.applyToSource", "title": "eri: Visual Editor - Apply Tweaks to Source" },
+      { "command": "eri.review.local",         "title": "eri: Review Local Changes (Unstaged)",  "icon": "$(checklist)" },
+      { "command": "eri.review.staged",        "title": "eri: Review Staged Changes" },
+      { "command": "eri.review.range",         "title": "eri: Review Git Range" },
+      { "command": "eri.review.pr",            "title": "eri: Review Pull Request",              "icon": "$(git-pull-request)" },
+      { "command": "eri.review.patch",         "title": "eri: Review Pasted Patch" },
+      { "command": "eri.review.openReport",    "title": "eri: Open Last Review Report",          "icon": "$(preview)" },
+      { "command": "eri.review.openFinding",   "title": "eri: Open Finding" },
+      { "command": "eri.review.applyFix",      "title": "eri: Apply Suggested Fix",              "icon": "$(wand)" },
+      { "command": "eri.review.dismiss",       "title": "eri: Dismiss Finding",                  "icon": "$(close)" },
+      { "command": "eri.review.clear",         "title": "eri: Clear Review Findings",            "icon": "$(clear-all)" }
     ],
     "walkthroughs": [
       {
@@ -198,6 +351,7 @@
       "view/title": [
         { "command": "eri.mcp.openConfig",      "when": "view == eri.mcp",         "group": "navigation@1" },
         { "command": "eri.mcp.restart",         "when": "view == eri.mcp",         "group": "navigation@2" },
+        { "command": "eri.mcpPresets.refresh",  "when": "view == eri.mcpPresets",  "group": "navigation@1" },
         { "command": "eri.checkpoints.create",  "when": "view == eri.checkpoints", "group": "navigation@1" },
         { "command": "eri.checkpoints.refresh", "when": "view == eri.checkpoints", "group": "navigation@2" },
         { "command": "eri.checkpoints.prune",   "when": "view == eri.checkpoints", "group": "navigation@3" },
@@ -205,7 +359,33 @@
         { "command": "eri.apply.acceptAll",     "when": "view == eri.pendingEdits", "group": "navigation@2" },
         { "command": "eri.apply.rejectAll",     "when": "view == eri.pendingEdits", "group": "navigation@3" },
         { "command": "eri.apply.discardAll",    "when": "view == eri.pendingEdits", "group": "navigation@4" },
-        { "command": "eri.apply.revert",        "when": "view == eri.pendingEdits", "group": "navigation@5" }
+        { "command": "eri.apply.revert",        "when": "view == eri.pendingEdits", "group": "navigation@5" },
+        { "command": "eri.skills.refresh",      "when": "view == eri.skills",       "group": "navigation@1" },
+        { "command": "eri.hooks.openConfig",    "when": "view == eri.hooks",        "group": "navigation@1" },
+        { "command": "eri.hooks.refresh",       "when": "view == eri.hooks",        "group": "navigation@2" },
+        { "command": "eri.audit.openFile",      "when": "view == eri.audit",        "group": "navigation@1" },
+        { "command": "eri.audit.refresh",       "when": "view == eri.audit",        "group": "navigation@2" },
+        { "command": "eri.crash.refresh",        "when": "view == eri.crashes",     "group": "navigation@1" },
+        { "command": "eri.crash.openLog",        "when": "view == eri.crashes",     "group": "navigation@2" },
+        { "command": "eri.crash.openSidecarLog", "when": "view == eri.crashes",     "group": "navigation@3" },
+        { "command": "eri.crash.copyLast",       "when": "view == eri.crashes",     "group": "navigation@4" },
+        { "command": "eri.crash.clear",          "when": "view == eri.crashes",     "group": "navigation@5" },
+        { "command": "eri.codemaps.generate",   "when": "view == eri.codemaps",    "group": "navigation@1" },
+        { "command": "eri.codemaps.refresh",    "when": "view == eri.codemaps",    "group": "navigation@2" },
+        { "command": "eri.graph.visualize",     "when": "view == eri.graph",       "group": "navigation@1" },
+        { "command": "eri.graph.search",        "when": "view == eri.graph",       "group": "navigation@2" },
+        { "command": "eri.graph.refresh",       "when": "view == eri.graph",       "group": "navigation@3" },
+        { "command": "eri.graph.addNote",       "when": "view == eri.graph",       "group": "navigation@4" },
+        { "command": "eri.graph.export",        "when": "view == eri.graph",       "group": "navigation@5" },
+        { "command": "eri.terminals.newGroup",     "when": "view == eri.terminals", "group": "navigation@1" },
+        { "command": "eri.terminals.spawnInGroup", "when": "view == eri.terminals", "group": "navigation@2" },
+        { "command": "eri.terminals.saveLayout",   "when": "view == eri.terminals", "group": "navigation@3" },
+        { "command": "eri.terminals.openRecipe",   "when": "view == eri.terminals", "group": "navigation@4" },
+        { "command": "eri.terminals.findCommand",  "when": "view == eri.terminals", "group": "navigation@5" },
+        { "command": "eri.review.local",       "when": "view == eri.review", "group": "navigation@1" },
+        { "command": "eri.review.pr",          "when": "view == eri.review", "group": "navigation@2" },
+        { "command": "eri.review.openReport",  "when": "view == eri.review", "group": "navigation@3" },
+        { "command": "eri.review.clear",       "when": "view == eri.review", "group": "navigation@4" }
       ],
       "view/item/context": [
         { "command": "eri.mcp.viewTools",  "when": "view == eri.mcp && viewItem =~ /^eri\\.mcp\\.server\\./", "group": "inline@1" },
@@ -222,7 +402,25 @@
         { "command": "eri.apply.rejectBlock", "when": "view == eri.pendingEdits && viewItem == eri.apply.block.pending", "group": "inline@3" },
         { "command": "eri.apply.acceptBlock", "when": "view == eri.pendingEdits && viewItem == eri.apply.block.rejected", "group": "inline@2" },
         { "command": "eri.apply.rejectBlock", "when": "view == eri.pendingEdits && viewItem == eri.apply.block.accepted", "group": "inline@2" },
-        { "command": "eri.apply.resetBlock",  "when": "view == eri.pendingEdits && viewItem =~ /^eri\\.apply\\.block\\.(accepted|rejected)$/", "group": "inline@3" }
+        { "command": "eri.apply.resetBlock",  "when": "view == eri.pendingEdits && viewItem =~ /^eri\\.apply\\.block\\.(accepted|rejected)$/", "group": "inline@3" },
+        { "command": "eri.terminals.renameGroup",  "when": "view == eri.terminals && viewItem =~ /^eri\\.terminal\\.group/",     "group": "1_modify@1" },
+        { "command": "eri.terminals.setGroupIcon", "when": "view == eri.terminals && viewItem =~ /^eri\\.terminal\\.group/",     "group": "1_modify@2" },
+        { "command": "eri.terminals.removeGroup",  "when": "view == eri.terminals && viewItem =~ /^eri\\.terminal\\.group/",     "group": "9_destructive@1" },
+        { "command": "eri.terminals.rename",       "when": "view == eri.terminals && viewItem =~ /^eri\\.terminal(\\.locked)?$/", "group": "1_modify@1" },
+        { "command": "eri.terminals.toggleLock",   "when": "view == eri.terminals && viewItem =~ /^eri\\.terminal(\\.locked)?$/", "group": "1_modify@2" },
+        { "command": "eri.terminals.duplicate",    "when": "view == eri.terminals && viewItem =~ /^eri\\.terminal(\\.locked)?$/", "group": "2_action@1" },
+        { "command": "eri.terminals.moveToGroup",  "when": "view == eri.terminals && viewItem =~ /^eri\\.terminal(\\.locked)?$/", "group": "2_action@2" },
+        { "command": "eri.terminals.kill",         "when": "view == eri.terminals && viewItem =~ /^eri\\.terminal(\\.locked)?$/", "group": "9_destructive@1" },
+        { "command": "eri.terminals.restoreLayout", "when": "view == eri.terminals && viewItem == eri.terminal.layout", "group": "1_action@1" },
+        { "command": "eri.graph.openNodeJson", "when": "view == eri.graph && viewItem == eri.graph.node", "group": "1_open@1" },
+        { "command": "eri.graph.tagNode",      "when": "view == eri.graph && viewItem == eri.graph.node", "group": "2_modify@1" },
+        { "command": "eri.graph.linkRelated",  "when": "view == eri.graph && viewItem == eri.graph.node", "group": "2_modify@2" },
+        { "command": "eri.terminals.deleteLayout",  "when": "view == eri.terminals && viewItem == eri.terminal.layout", "group": "9_destructive@1" },
+        { "command": "eri.review.applyFix",  "when": "view == eri.review && viewItem == eri.review.finding.fixable", "group": "inline@1" },
+        { "command": "eri.review.dismiss",   "when": "view == eri.review && viewItem =~ /^eri\\.review\\.finding/",  "group": "inline@2" },
+        { "command": "eri.review.openFinding", "when": "view == eri.review && viewItem =~ /^eri\\.review\\.finding/", "group": "1_open@1" },
+        { "command": "eri.review.applyFix",  "when": "view == eri.review && viewItem == eri.review.finding.fixable", "group": "1_open@2" },
+        { "command": "eri.review.dismiss",   "when": "view == eri.review && viewItem =~ /^eri\\.review\\.finding/",  "group": "9_destructive@1" }
       ]
     },
     "keybindings": [
@@ -307,7 +505,7 @@
         "eri.tab.model": {
           "type": "string",
           "default": "qwen2.5-coder:1.5b",
-          "description": "Ollama model name used for eri Tab completions."
+          "description": "Identifier for the eri Tab GGUF model. Today only the bundled Qwen2.5-Coder build is wired up; the value is also used to choose the FIM prompt template."
         },
         "eri.tab.maxTokens": {
           "type": "number",
@@ -315,15 +513,20 @@
           "minimum": 1,
           "description": "Maximum tokens to generate per eri Tab completion."
         },
-        "eri.tab.baseUrl": {
-          "type": "string",
-          "default": "http://localhost:11434",
-          "description": "Base URL of the local Ollama server used for eri Tab completions."
-        },
         "eri.mcp.configPath": {
           "type": "string",
           "default": "",
           "description": "Absolute path to the MCP servers config (JSON). Leave blank to use ~/.eri/mcp.json."
+        },
+        "eri.mcpPresets.autoSuggest": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Offer the **MCP starter pack** after onboarding finishes so you have working tools on first launch."
+        },
+        "eri.mcpPresets.includeBeta": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Show **beta** MCP servers (those marked beta in the catalog, e.g. Puppeteer) in the browse view."
         },
         "eri.gaze.enabled": {
           "type": "boolean",
@@ -348,6 +551,28 @@
           "maximum": 100,
           "markdownDescription": "Gaze tracking sensitivity (`1`–`100`). Higher values make gaze events fire more eagerly. Tune via the **Settings Hub** for a live slider."
         },
+        "eri.terminals.voiceTargeting": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Allow voice transcripts to drive terminal actions (focus, send, kill, spawn layouts)."
+        },
+        "eri.terminals.gazeTargeting": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Use gaze to resolve pronouns like \"kill it\" to whichever terminal you're currently looking at."
+        },
+        "eri.terminals.killSoftCtrlC": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "When voice says \"kill\", send `Ctrl+C` to the foreground process instead of disposing the terminal."
+        },
+        "eri.terminals.gazeDwellMs": {
+          "type": "number",
+          "default": 800,
+          "minimum": 200,
+          "maximum": 3000,
+          "markdownDescription": "Milliseconds of fixation required before a terminal is treated as gaze-attended."
+        },
         "eri.model.default": {
           "type": "string",
           "default": "auto",
@@ -368,6 +593,21 @@
           "default": false,
           "markdownDescription": "Send anonymous, aggregate **telemetry** (no code, no prompts) to help improve eri. Off by default."
         },
+        "eri.privacy.audit": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Write every sidecar JSON-RPC dispatch to a **local audit log** at `~/.eri/audit.log` (or `<workspace>/.eri/audit.log`). Records method names, durations, and parameter *shapes* only — never prompts, model outputs, file contents, or secrets. Off by default."
+        },
+        "eri.privacy.crashReporting": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Send sanitized **crash reports** to eri via Sentry. Local crash logs at `~/.eri/crash.log` are always written regardless of this setting. Off by default — local-first."
+        },
+        "eri.privacy.crashReportingDsn": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Optional override **Sentry DSN** for crash reports. Leave blank to use the default eri DSN. Has no effect unless `#eri.privacy.crashReporting#` is on."
+        },
         "eri.appearance.theme": {
           "type": "string",
           "enum": ["auto", "light", "dark"],
@@ -380,6 +620,28 @@
           "minimum": 10,
           "maximum": 20,
           "markdownDescription": "Font size in pixels for eri webviews. Range: `10`–`20`."
+        },
+        "eri.visualEditor.url": {
+          "type": "string",
+          "default": "http://localhost:5173",
+          "markdownDescription": "Default **dev server URL** loaded into the Visual Editor iframe. Pick a different URL at runtime with `eri: Visual Editor - Set Dev Server URL`."
+        },
+        "eri.visualEditor.voiceEdit": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Allow voice transcripts to **drive style edits** in the Visual Editor (e.g. \"make this red\", \"add a shadow\")."
+        },
+        "eri.visualEditor.gazePick": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Use **gaze dwell** to auto-pick the element you're looking at in the Visual Editor preview."
+        },
+        "eri.visualEditor.gazeDwellMs": {
+          "type": "number",
+          "default": 800,
+          "minimum": 200,
+          "maximum": 5000,
+          "markdownDescription": "Number of milliseconds of stable gaze before the Visual Editor auto-picks the element under your gaze."
         }
       }
     }

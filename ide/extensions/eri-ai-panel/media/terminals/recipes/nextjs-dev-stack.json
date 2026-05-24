@@ -1,0 +1,28 @@
+{
+  "name": "Next.js dev stack",
+  "description": "Vite-style dev server + Storybook + tests, ready to go.",
+  "groups": [
+    {
+      "name": "Web",
+      "icon": "rocket",
+      "terminals": [
+        { "name": "next dev", "cwd": ".", "command": "npm run dev", "icon": "rocket" },
+        { "name": "storybook", "cwd": ".", "command": "npm run storybook", "icon": "preview" }
+      ]
+    },
+    {
+      "name": "Tests",
+      "icon": "beaker",
+      "terminals": [
+        { "name": "vitest", "cwd": ".", "command": "npx vitest --watch", "icon": "beaker" }
+      ]
+    },
+    {
+      "name": "Git",
+      "icon": "git-branch",
+      "terminals": [
+        { "name": "shell", "cwd": "." }
+      ]
+    }
+  ]
+}

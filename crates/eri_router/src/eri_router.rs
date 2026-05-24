@@ -8,6 +8,10 @@
 
 use serde::{Deserialize, Serialize};
 
+mod brain_router;
+
+pub use brain_router::{Intent, ModelChoice, Plan, PromptContext, ReasoningLevel, Router};
+
 /// Concrete model the sidecar can dispatch to. Wire up matches the
 /// backends already implemented in `eri_inference`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

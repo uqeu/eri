@@ -21,6 +21,63 @@
 use crate::InferenceError;
 use crate::providers;
 
+/// Snapshot of BYOK API keys fetched out-of-band (typically by the sidecar
+/// asking the extension's `vscode.SecretStorage` via JSON-RPC). The caller
+/// resolves each key asynchronously, then hands the bundle to
+/// [`provider_from_choice_with_keys`] for a pure sync construction step.
+///
+/// Field names match the provider ids declared in the extension's
+/// `providers.ts` so the wire vocabulary is consistent end-to-end.
+#[derive(Debug, Default, Clone)]
+pub struct ProviderKeys {
+    pub anthropic: Option<String>,
+    pub openai: Option<String>,
+    pub google: Option<String>,
+}
+
+impl ProviderKeys {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_anthropic(mut self, key: impl Into<String>) -> Self {
+        self.anthropic = Some(key.into());
+        self
+    }
+
+    pub fn with_openai(mut self, key: impl Into<String>) -> Self {
+        self.openai = Some(key.into());
+        self
+    }
+
+    pub fn with_google(mut self, key: impl Into<String>) -> Self {
+        self.google = Some(key.into());
+        self
+    }
+
+    /// Pick the key for a canonical model id. Returns `None` when the model
+    /// is not external (e.g. "mercury-2") or when the user has not
+    /// configured a key for the corresponding vendor.
+    pub fn for_canonical(&self, canonical: &str) -> Option<&str> {
+        let vendor = vendor_for_canonical(canonical)?;
+        match vendor {
+            "anthropic" => self.anthropic.as_deref(),
+            "openai" => self.openai.as_deref(),
+            "google" => self.google.as_deref(),
+            _ => None,
+        }
+    }
+}
+
+fn vendor_for_canonical(canonical: &str) -> Option<&'static str> {
+    match canonical {
+        "claude-sonnet-4-5" | "claude-haiku-4-5" | "claude-opus-4-5" => Some("anthropic"),
+        "gpt-4o" | "gpt-4o-mini" | "o1-mini" | "o3-mini" | "o4" => Some("openai"),
+        "gemini-flash-2" | "gemini-thinking-2" => Some("google"),
+        _ => None,
+    }
+}
+
 /// Response envelope shared by every provider. `cost_usd` is computed locally
 /// from token counts (the providers don't return $$ in their wire format), so
 /// it's a best-effort figure that the cost guard can layer into the running
@@ -94,7 +151,91 @@ pub fn list_providers() -> Vec<&'static str> {
 /// path; the panel uses the registry to detect provider switches, not to
 /// replace Mercury.
 pub fn provider_from_choice(choice: &str) -> Option<Box<dyn LlmProvider>> {
+    provider_from_choice_inner(choice, None)
+}
+
+/// Variant of [`provider_from_choice`] that resolves the API key from a
+/// pre-fetched [`ProviderKeys`] bundle instead of process env vars. The
+/// sidecar populates `keys` via the `settings/getSecret` JSON-RPC call to
+/// the extension's `SecretStorage`, then hands it here so the construction
+/// chain never has to read env vars on the BYOK path.
+///
+/// Falls back to the env-var constructor when the bundle does not carry a
+/// key for the chosen vendor — this preserves the legacy DX where a
+/// developer can drop `OPENAI_API_KEY=...` in `.env` and have it Just Work.
+pub fn provider_from_choice_with_keys(
+    choice: &str,
+    keys: &ProviderKeys,
+) -> Option<Box<dyn LlmProvider>> {
+    provider_from_choice_inner(choice, Some(keys))
+}
+
+fn provider_from_choice_inner(
+    choice: &str,
+    keys: Option<&ProviderKeys>,
+) -> Option<Box<dyn LlmProvider>> {
     let canonical = canonical_model_id(choice)?;
+    if canonical == "mercury-2" {
+        return None;
+    }
+    let supplied = keys.and_then(|k| k.for_canonical(canonical));
+    match (canonical, supplied) {
+        ("gpt-4o", Some(key)) => providers::openai::OpenAiProvider::for_model_with_key("gpt-4o", key)
+            .ok()
+            .map(|p| Box::new(p) as Box<dyn LlmProvider>),
+        ("gpt-4o-mini", Some(key)) => providers::openai::OpenAiProvider::for_model_with_key("gpt-4o-mini", key)
+            .ok()
+            .map(|p| Box::new(p) as Box<dyn LlmProvider>),
+        ("o1-mini", Some(key)) => providers::openai::OpenAiProvider::for_model_with_key("o1-mini", key)
+            .ok()
+            .map(|p| Box::new(p) as Box<dyn LlmProvider>),
+        ("o3-mini", Some(key)) => providers::openai::OpenAiProvider::for_model_with_key("o3-mini", key)
+            .ok()
+            .map(|p| Box::new(p) as Box<dyn LlmProvider>),
+        ("o4", Some(key)) => providers::openai::OpenAiProvider::for_model_with_key("o4", key)
+            .ok()
+            .map(|p| Box::new(p) as Box<dyn LlmProvider>),
+        ("claude-sonnet-4-5", Some(key)) => {
+            providers::anthropic::AnthropicProvider::for_model_with_key(
+                "claude-sonnet-4-5-20251015",
+                key,
+            )
+            .ok()
+            .map(|p| Box::new(p) as Box<dyn LlmProvider>)
+        }
+        ("claude-haiku-4-5", Some(key)) => {
+            providers::anthropic::AnthropicProvider::for_model_with_key(
+                "claude-haiku-4-5-20251001",
+                key,
+            )
+            .ok()
+            .map(|p| Box::new(p) as Box<dyn LlmProvider>)
+        }
+        ("claude-opus-4-5", Some(key)) => {
+            providers::anthropic::AnthropicProvider::for_model_with_key("claude-opus-4-5", key)
+                .ok()
+                .map(|p| Box::new(p) as Box<dyn LlmProvider>)
+        }
+        ("gemini-flash-2", Some(key)) => {
+            providers::gemini::GeminiProvider::for_model_with_key("gemini-2.0-flash-exp", key)
+                .ok()
+                .map(|p| Box::new(p) as Box<dyn LlmProvider>)
+        }
+        ("gemini-thinking-2", Some(key)) => {
+            providers::gemini::GeminiProvider::for_model_with_key(
+                "gemini-2.0-flash-thinking-exp",
+                key,
+            )
+            .ok()
+            .map(|p| Box::new(p) as Box<dyn LlmProvider>)
+        }
+        // Either no caller-supplied key for this vendor or no `keys`
+        // bundle at all — fall through to env-based resolution.
+        (canonical, _) => provider_from_choice_env(canonical),
+    }
+}
+
+fn provider_from_choice_env(canonical: &str) -> Option<Box<dyn LlmProvider>> {
     match canonical {
         "mercury-2" => None,
         "gpt-4o" => providers::openai::OpenAiProvider::for_model("gpt-4o")
@@ -279,5 +420,40 @@ mod tests {
         assert!(providers.contains(&"gpt-4o"));
         assert!(providers.contains(&"claude-sonnet-4-5"));
         assert!(providers.contains(&"gemini-flash-2"));
+    }
+
+    #[test]
+    fn provider_keys_routes_canonical_to_vendor() {
+        let keys = ProviderKeys::new()
+            .with_anthropic("ak")
+            .with_openai("ok")
+            .with_google("gk");
+        assert_eq!(keys.for_canonical("claude-sonnet-4-5"), Some("ak"));
+        assert_eq!(keys.for_canonical("gpt-4o-mini"), Some("ok"));
+        assert_eq!(keys.for_canonical("gemini-flash-2"), Some("gk"));
+        assert_eq!(keys.for_canonical("mercury-2"), None);
+        assert_eq!(keys.for_canonical("unknown"), None);
+    }
+
+    #[test]
+    fn provider_from_choice_with_keys_uses_supplied_key() {
+        // With an explicit key in the bundle, construction succeeds even
+        // when no env var is set (the env var path is bypassed entirely).
+        let keys = ProviderKeys::new().with_anthropic("sk-ant-test-only");
+        let provider = provider_from_choice_with_keys("claude sonnet", &keys);
+        assert!(provider.is_some(), "explicit key must build the provider");
+        let provider = provider.expect("provider");
+        assert_eq!(provider.name(), "anthropic");
+    }
+
+    #[test]
+    fn provider_from_choice_with_keys_falls_through_to_env_when_missing() {
+        // Empty bundle + no env -> same fallback behaviour as the env-only
+        // variant: a missing key returns None instead of panicking.
+        let keys = ProviderKeys::new();
+        // We can't guarantee env is unset in CI, so just assert no panic
+        // and a stable return shape.
+        let _ = provider_from_choice_with_keys("mercury", &keys);
+        assert!(provider_from_choice_with_keys("banana", &keys).is_none());
     }
 }

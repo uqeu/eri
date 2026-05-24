@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { HeroBoundary } from "./HeroBoundary";
 
 // The demo simulates the eri loop:
 //   gaze (look at the prototype)
@@ -197,18 +198,18 @@ interface FeatureRow {
 }
 
 const DIFFERENTIATORS: ReadonlyArray<FeatureRow> = [
-  { label: "Voice transcription", note: "Local Whisper, sub-second" },
-  { label: "Diffusion preview", note: "See the diff resolve" },
-  { label: "Gaze targeting", note: "Look at what you mean" },
-  { label: "Iteration history", note: "Branchable, time-travel" },
+  { label: "Voice on existing repos", note: "Whisper-on-device, sub-second" },
+  { label: "Gaze targeting", note: "MediaPipe in-process, camera frames stay local" },
+  { label: "Diffusion edits", note: "The patch resolves; no left-to-right wait" },
+  { label: "Local Tab", note: "Embedded inference on your hardware" },
 ];
 
 // Which differentiator each step highlights in the right rail.
 const STEP_TO_DIFF: ReadonlyArray<string> = [
   "Gaze targeting",
-  "Voice transcription",
-  "Diffusion preview",
-  "Iteration history",
+  "Voice on existing repos",
+  "Diffusion edits",
+  "Local Tab",
 ];
 
 export function HeroBig(): React.ReactElement {
@@ -313,10 +314,10 @@ export function HeroBig(): React.ReactElement {
             </span>
           </h2>
           <p className="mt-6 text-body text-paper/55 max-w-2xl">
-            Look at the part you want to change. Say it out loud. eri's diffusion
-            engine streams the diff into the file, and the prototype updates
-            under your gaze. No keyboard, no waiting for tokens to tick out left
-            to right.
+            Look at the part you want to change. Say it out loud. The diffusion
+            engine streams the patch into the file and the prototype updates
+            under your gaze. Voice, vision, completion, and apply all run on
+            your hardware — the planner is the only call that crosses the wire.
           </p>
         </div>
 
@@ -337,6 +338,8 @@ export function HeroBig(): React.ReactElement {
           />
           <DifferentiatorsRail activeLabel={activeDiff} />
         </div>
+
+        <HeroBoundary />
 
         <div className="mt-12 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6 rounded-lg border border-white/[0.06] bg-bg-2/60 p-6">
           <div>
@@ -439,7 +442,7 @@ function DemoPanel({
               aria-hidden
             />
             <span className="font-mono text-[10px] text-accent">
-              eri's engine
+              eri engine
             </span>
           </div>
         </div>
@@ -892,7 +895,7 @@ function DifferentiatorsRail({
       </div>
       <p className="text-[13px] text-paper/55 mb-5">
         The four primitives that turn the loop on the left into a single
-        gesture.
+        gesture — and the ones nobody else has shipped.
       </p>
       <ul className="space-y-2.5 flex-1">
         {DIFFERENTIATORS.map((feature) => {
@@ -944,12 +947,13 @@ function DifferentiatorsRail({
         })}
       </ul>
       <p className="mt-5 pt-4 border-t border-white/[0.06] text-[12px] text-paper/45 leading-relaxed">
-        Plus everything Cursor ships — Tab completion, ⌘K, Composer, Agent mode,
-        @-mentions, MCP. The loop above is the part that's only here.
+        Tab, ⌘K, Composer, agents, @-mentions, MCP — all in the box. The four
+        above are the part nobody else ships.
       </p>
     </div>
   );
 }
+
 
 // ---------- helpers ----------
 

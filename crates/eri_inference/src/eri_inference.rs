@@ -13,6 +13,8 @@ use eri_core::{CandidatePatch, GazeTarget, IterEvent, PromptCtx};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+pub mod brain;
+pub mod brain_iteration;
 pub mod bug_finder;
 pub mod code_assist;
 pub mod costs;
@@ -26,8 +28,10 @@ pub mod pr_workflow;
 pub mod providers;
 pub mod social;
 pub mod templates;
+pub use brain::{Brain, BrainError, BrainPlan, BudgetedPrompt};
 pub use llm_provider::{
-    LlmProvider, LlmResponse, canonical_model_id, list_providers, provider_from_choice,
+    LlmProvider, LlmResponse, ProviderKeys, canonical_model_id, list_providers,
+    provider_from_choice, provider_from_choice_with_keys,
 };
 pub use bug_finder::{
     BUG_FINDER_MAX_BUGS, Bug, Severity as BugSeverity, build_bug_finder_prompt,
@@ -64,6 +68,10 @@ pub use templates::{
 pub use edit_mode::{
     EditModeRequest, EditModeResponse, StreamEvent, TokenUsage, run_edit_mode,
     run_edit_mode_streaming, run_iteration_via_edit_blocks,
+};
+pub use brain_iteration::{
+    BrainIterationError, BrainIterationRequest, BrainIterationResponse, Instrumentation,
+    NullInstr, SearchProvider, run_iteration_via_brain,
 };
 
 pub trait InferenceBackend {

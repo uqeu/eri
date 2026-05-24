@@ -11,28 +11,28 @@ interface Promise {
 
 const PROMISES: ReadonlyArray<Promise> = [
   {
-    tag: "Local-first inference",
-    title: "Voice, gaze, and TTS run on your machine.",
-    body: "Whisper transcribes, MediaPipe tracks your gaze, and the text-to-speech presets all execute on the laptop in front of you. Only the model call itself crosses the network — and only to the provider you point it at.",
-    proof: "Audio frames and camera frames never touch our servers. 0 bytes off-device.",
+    tag: "Local across the stack",
+    title: "Voice, gaze, Tab, apply, and the index live on your hardware.",
+    body: "Whisper transcribes, MediaPipe tracks your gaze, an embedded inference runtime drives Tab and fast-apply, and the semantic index is a SQLite file on your disk. Only planning calls cross the network — and only to the diffusion engine you subscribed to.",
+    proof: "Semantic index path: ~/.eri/index.sqlite — visible, portable, deletable.",
   },
   {
-    tag: "BYOK that actually works",
-    title: "Your API keys live in OS Keychain.",
-    body: "Bring your own keys for eri's engine, ElevenLabs, Anthropic, OpenAI, and Gemini. eri reads them from macOS Keychain at runtime and uses them for every call — including agent and inline-edit turns. We never proxy, mirror, or sync them.",
-    proof: "Stored in macOS Keychain under com.eri.keys.* — never synced to our database.",
+    tag: "Bundled, not metered",
+    title: "Tab and edits are in the box.",
+    body: "Tab completion runs in-process via embedded inference on your machine — bundled with the subscription, no per-token meter, no BYOK required to use it. Diffusion edits, semantic search, voice, gaze, MCP, and checkpoints all ride the same flat price.",
+    proof: "Local Tab via embedded inference. Zero per-token cost on the heaviest call in the loop.",
   },
   {
     tag: "Transparent routing",
     title: "See which model handled each turn.",
-    body: "Every voice turn shows the model that answered, the token count, and the wall-clock latency in the iterator panel. When eri auto-routes between providers, you see the decision — not a vague \"Auto\" badge.",
+    body: "Every turn shows the model that answered, the token count, and the wall-clock latency in the iterator panel. When eri picks between providers, the decision is on screen — not behind a vague \"Auto\" badge that quietly downgrades you to a cheaper model.",
     proof: "Each turn logs model, tokens, and latency in the turn footer. No hidden downgrades.",
   },
   {
     tag: "Hard-capped pricing",
-    title: "No overage. No surprise invoice.",
-    body: "Every paid tier has a fixed monthly cap on voice turns and a soft daily / hourly burst limit. When you hit the cap, eri pauses cloud turns and lets you bring your own key for the rest of the month. No metered backbill.",
-    proof: "Tier limits enforced client-side. You never see a charge above the headline price.",
+    title: "One price. Hard cap. No surprise invoice.",
+    body: "Every paid tier has a fixed monthly headline price and a soft burst limit. There is no credit pool that empties at 30% of the month, no usage-based overage rolled to a separate invoice, no auto-routing that quietly bills against your card. When you hit the cap, eri pauses cloud turns and lets you bring your own key for the rest of the month.",
+    proof: "No metered backbill. You never see a charge above the headline price.",
   },
 ];
 

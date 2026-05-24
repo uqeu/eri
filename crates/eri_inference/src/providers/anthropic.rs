@@ -37,6 +37,18 @@ impl AnthropicProvider {
         let _ = dotenvy::dotenv();
         let api_key = std::env::var("ANTHROPIC_API_KEY")
             .map_err(|_| InferenceError::Transport("ANTHROPIC_API_KEY not set".into()))?;
+        Self::for_model_with_key(model, api_key)
+    }
+
+    /// Construct a provider with a pre-fetched API key. Used by the sidecar
+    /// after a BYOK secret lookup resolves the key from
+    /// `vscode.SecretStorage` (with env-var fallback) — the caller already
+    /// knows whether the key is present, so this constructor does not touch
+    /// any env vars itself.
+    pub fn for_model_with_key(
+        model: &str,
+        api_key: impl Into<String>,
+    ) -> Result<Self, InferenceError> {
         if pricing_for(model).is_none() {
             return Err(InferenceError::Transport(format!(
                 "unsupported anthropic model: {model}"
@@ -44,7 +56,7 @@ impl AnthropicProvider {
         }
         Ok(Self {
             model: model.to_string(),
-            api_key,
+            api_key: api_key.into(),
             endpoint: ANTHROPIC_MESSAGES_URL.to_string(),
         })
     }

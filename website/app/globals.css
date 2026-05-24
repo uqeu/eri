@@ -22,8 +22,13 @@
   --blue-deep:   #9bb7cd;
   --focus-ring:  var(--sage-deep);
 
-  /* Demo-only — lime survives inside the engine */
+  /* Demo-only — lime survives inside the engine. Aliases for legacy callsites
+     in HeroBig/PromptPipeline/EriDemo that still reference var(--accent). */
   --demo-accent: #e0ff4f;
+  --accent: #e0ff4f;
+  --accent-bright: #f0ff7f;
+  --accent-muted: rgba(224, 255, 79, 0.12);
+  --accent-faint: rgba(224, 255, 79, 0.04);
 
   --text-display: clamp(3rem, 8vw, 6.5rem);
   --text-h1: clamp(2.5rem, 5vw, 4rem);

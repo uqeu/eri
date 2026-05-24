@@ -643,7 +643,7 @@ function PlanDetail({
     >
       <div className="grid gap-8 lg:grid-cols-[1.1fr_1fr]">
         <div>
-          <p className="font-mono text-[10px] uppercase tracking-[0.25em] text-accent">
+          <p className="font-mono text-[10px] uppercase tracking-[0.25em] text-paper/70">
             {plan.subtitle}
           </p>
           <h3 className="mt-2 font-display text-3xl sm:text-4xl tracking-tight leading-tight">
@@ -824,7 +824,7 @@ function MobileCompare(): React.ReactElement {
       <div className="mt-6 rounded-xl border border-white/10 overflow-hidden">
         {COMPARISON.map((category) => (
           <div key={`m-${category.title}`}>
-            <div className="px-5 py-3 bg-white/[0.04] font-mono text-[10px] uppercase tracking-[0.25em] text-accent">
+            <div className="px-5 py-3 bg-white/[0.04] font-mono text-[10px] uppercase tracking-[0.25em] text-paper/70">
               {category.title}
             </div>
             {category.rows.map((row, rIdx) => (
@@ -961,7 +961,7 @@ export function PricingContent(): React.ReactElement {
           </div>
 
           <div className="mt-14 rounded-xl border border-white/10 bg-white/[0.02] p-6 sm:p-8">
-            <p className="font-mono text-[10px] uppercase tracking-[0.25em] text-accent">
+            <p className="font-mono text-[10px] uppercase tracking-[0.25em] text-paper/70">
               What's not on this page
             </p>
             <h3 className="mt-3 font-display text-2xl sm:text-3xl tracking-tight">
@@ -969,7 +969,7 @@ export function PricingContent(): React.ReactElement {
             </h3>
             <div className="mt-7 grid gap-5 sm:grid-cols-2">
               <div className="flex gap-3">
-                <span aria-hidden className="mt-2 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-accent" />
+                <span aria-hidden className="mt-2 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-paper/40" />
                 <div>
                   <p className="text-paper/90 text-sm">Metered overage.</p>
                   <p className="mt-1 text-xs text-muted leading-relaxed">
@@ -978,7 +978,7 @@ export function PricingContent(): React.ReactElement {
                 </div>
               </div>
               <div className="flex gap-3">
-                <span aria-hidden className="mt-2 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-accent" />
+                <span aria-hidden className="mt-2 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-paper/40" />
                 <div>
                   <p className="text-paper/90 text-sm">Opaque auto-routing.</p>
                   <p className="mt-1 text-xs text-muted leading-relaxed">
@@ -987,7 +987,7 @@ export function PricingContent(): React.ReactElement {
                 </div>
               </div>
               <div className="flex gap-3">
-                <span aria-hidden className="mt-2 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-accent" />
+                <span aria-hidden className="mt-2 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-paper/40" />
                 <div>
                   <p className="text-paper/90 text-sm">An ElevenLabs key on Free.</p>
                   <p className="mt-1 text-xs text-muted leading-relaxed">
@@ -996,7 +996,7 @@ export function PricingContent(): React.ReactElement {
                 </div>
               </div>
               <div className="flex gap-3">
-                <span aria-hidden className="mt-2 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-accent" />
+                <span aria-hidden className="mt-2 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-paper/40" />
                 <div>
                   <p className="text-paper/90 text-sm">Add-ons for the basics.</p>
                   <p className="mt-1 text-xs text-muted leading-relaxed">

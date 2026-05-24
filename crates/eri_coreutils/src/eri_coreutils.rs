@@ -4,6 +4,12 @@
 //! at IDE startup and communicates with it over JSON-RPC 2.0 framed by
 //! Content-Length headers (same wire format as LSP), letting the editor
 //! drive the Rust crates that own voice, inference, iteration, and control.
+//!
+//! The stdio channel is symmetric: the extension writes requests to stdin,
+//! the sidecar writes responses to stdout. The sidecar can also issue its
+//! own requests in the reverse direction — see [`eri_coreutils::HostClient`]
+//! — by writing a frame to stdout and matching the extension's response by
+//! id when it arrives on stdin.
 
 use anyhow::{anyhow, Context, Result};
 use serde_json::Value;
@@ -12,26 +18,44 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::Mutex;
 
 use eri_coreutils::{
-    dispatch, DispatchError, Notification, Request, Response, RpcError, Services, SharedTierState,
+    dispatch, install_panic_handler, install_sentry, install_tracing_subscriber, DispatchError,
+    HostClient, Notification, Request, Response, RpcError, Services, SharedTierState, SharedWriter,
     TierState, PROTOCOL_VERSION,
 };
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_writer(std::io::stderr)
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_env("ERI_LOG")
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .init();
+    // Resolve the workspace root from ERI_WORKSPACE (set by the IDE
+    // extension when it spawns the sidecar). Fall back to None — both
+    // helpers degrade gracefully to `~/.eri/`.
+    let workspace = std::env::var("ERI_WORKSPACE")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .map(std::path::PathBuf::from);
+
+    // Tracing FIRST so the rest of init logs.
+    if let Err(err) = install_tracing_subscriber(workspace.as_deref()) {
+        eprintln!("[eri] failed to install tracing subscriber: {err}");
+    }
+    // Panic handler SECOND so any panic during the remainder of init
+    // lands in crash.log.
+    if let Err(err) = install_panic_handler(workspace.as_deref()) {
+        eprintln!("[eri] failed to install panic handler: {err}");
+    }
+    // Sentry LAST — optional, no-op without the `sentry` feature or
+    // without `ERI_SENTRY_DSN`. The guard must live for the duration of
+    // `main` so we bind it explicitly.
+    let _sentry_guard = install_sentry();
 
     tracing::info!(protocol = PROTOCOL_VERSION, "eri-coreutils sidecar starting");
 
-    let stdout = Arc::new(Mutex::new(tokio::io::stdout()));
+    // Type-erased shared stdout so `HostClient` and the response writer can
+    // both hold a clone of the same `Arc<Mutex<dyn AsyncWrite>>`.
+    let stdout: SharedWriter = Arc::new(Mutex::new(tokio::io::stdout()));
     let mut stdin = BufReader::new(tokio::io::stdin());
     let tier_state: SharedTierState = Arc::new(Mutex::new(TierState::default()));
-    let services: Arc<Services> = Services::new();
+    let host_client = HostClient::new(Arc::clone(&stdout));
+    let services: Arc<Services> = Services::with_host(Arc::clone(&host_client));
 
     send_notification(
         &stdout,
@@ -56,24 +80,107 @@ async fn main() -> Result<()> {
             }
         };
 
-        let stdout_for_task = Arc::clone(&stdout);
-        let tier_for_task = Arc::clone(&tier_state);
-        let services_for_task = Arc::clone(&services);
-        tokio::spawn(async move {
-            if let Err(err) =
-                handle_message(&stdout_for_task, &tier_for_task, &services_for_task, message).await
-            {
-                tracing::error!(error = %err, "handler failed");
+        // Route: if the frame has a `method` field it's a request from the
+        // extension; otherwise it's a response to one of *our* outbound
+        // requests (typically `settings/getSecret`).
+        match classify(&message) {
+            InboundKind::Request(request) => {
+                let stdout_for_task = Arc::clone(&stdout);
+                let tier_for_task = Arc::clone(&tier_state);
+                let services_for_task = Arc::clone(&services);
+                tokio::spawn(async move {
+                    if let Err(err) = handle_message(
+                        &stdout_for_task,
+                        &tier_for_task,
+                        &services_for_task,
+                        request,
+                    )
+                    .await
+                    {
+                        tracing::error!(error = %err, "handler failed");
+                    }
+                });
             }
-        });
+            InboundKind::Response { id, result } => {
+                if !host_client.route_response(id, result).await {
+                    tracing::warn!(id, "response with no pending requester");
+                }
+            }
+            InboundKind::Malformed(why) => {
+                tracing::warn!(reason = %why, "ignoring malformed frame");
+            }
+        }
     }
 
     Ok(())
 }
 
+enum InboundKind {
+    Request(Request),
+    Response {
+        id: u64,
+        result: std::result::Result<Value, RpcError>,
+    },
+    Malformed(String),
+}
+
+fn classify(value: &Value) -> InboundKind {
+    // Requests carry a `method`; responses don't.
+    if value.get("method").and_then(Value::as_str).is_some() {
+        match serde_json::from_value::<Request>(value.clone()) {
+            Ok(req) => {
+                if req.jsonrpc != "2.0" {
+                    return InboundKind::Malformed(format!(
+                        "unexpected jsonrpc version: {}",
+                        req.jsonrpc
+                    ));
+                }
+                InboundKind::Request(req)
+            }
+            Err(err) => InboundKind::Malformed(format!("invalid request: {err}")),
+        }
+    } else {
+        // Treat as a response. We need an integer id we can route on.
+        let id_value = match value.get("id") {
+            Some(id) => id,
+            None => {
+                return InboundKind::Malformed("frame missing both method and id".into());
+            }
+        };
+        let id = match id_value.as_u64() {
+            Some(id) => id,
+            None => {
+                return InboundKind::Malformed(format!(
+                    "response id is not a u64: {id_value}"
+                ));
+            }
+        };
+        if let Some(error_value) = value.get("error") {
+            let code = error_value
+                .get("code")
+                .and_then(Value::as_i64)
+                .unwrap_or(-32603) as i32;
+            let message = error_value
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown host error")
+                .to_string();
+            return InboundKind::Response {
+                id,
+                result: Err(RpcError { code, message }),
+            };
+        }
+        let result = value.get("result").cloned().unwrap_or(Value::Null);
+        InboundKind::Response {
+            id,
+            result: Ok(result),
+        }
+    }
+}
+
 async fn read_message<R: AsyncReadExt + AsyncBufReadExt + Unpin>(
     reader: &mut R,
-) -> Result<Option<Request>> {
+) -> Result<Option<Value>> {
     let mut content_length: Option<usize> = None;
     let mut header = String::new();
 
@@ -107,18 +214,12 @@ async fn read_message<R: AsyncReadExt + AsyncBufReadExt + Unpin>(
         .await
         .context("reading message body")?;
 
-    let request: Request = serde_json::from_slice(&body).context("parsing JSON-RPC request")?;
-    if request.jsonrpc != "2.0" {
-        return Err(anyhow!(
-            "unexpected jsonrpc version: {}",
-            request.jsonrpc
-        ));
-    }
-    Ok(Some(request))
+    let value: Value = serde_json::from_slice(&body).context("parsing JSON-RPC frame")?;
+    Ok(Some(value))
 }
 
 async fn handle_message(
-    stdout: &Arc<Mutex<tokio::io::Stdout>>,
+    stdout: &SharedWriter,
     tier_state: &SharedTierState,
     services: &Arc<Services>,
     request: Request,
@@ -145,7 +246,7 @@ async fn handle_message(
 }
 
 async fn send_response(
-    stdout: &Arc<Mutex<tokio::io::Stdout>>,
+    stdout: &SharedWriter,
     id: Value,
     outcome: std::result::Result<Value, RpcError>,
 ) -> Result<()> {
@@ -167,7 +268,7 @@ async fn send_response(
 }
 
 async fn send_notification(
-    stdout: &Arc<Mutex<tokio::io::Stdout>>,
+    stdout: &SharedWriter,
     method: &'static str,
     params: Value,
 ) -> Result<()> {
@@ -179,10 +280,7 @@ async fn send_notification(
     write_message(stdout, &notification).await
 }
 
-async fn write_message<T: serde::Serialize>(
-    stdout: &Arc<Mutex<tokio::io::Stdout>>,
-    value: &T,
-) -> Result<()> {
+async fn write_message<T: serde::Serialize>(stdout: &SharedWriter, value: &T) -> Result<()> {
     let body = serde_json::to_vec(value).context("serializing message")?;
     let header = format!("Content-Length: {}\r\n\r\n", body.len());
     let mut guard = stdout.lock().await;

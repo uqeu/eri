@@ -14,7 +14,12 @@
 
 use serde::{Deserialize, Serialize};
 
+mod budget;
 mod segment;
+
+pub use budget::{
+    BudgetError, BudgetPart, Budgeter, ModelProfile, TokenizerKind, default_profile_for,
+};
 
 /// How aggressively to compress prose.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

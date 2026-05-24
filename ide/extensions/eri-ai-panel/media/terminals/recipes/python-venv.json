@@ -1,0 +1,27 @@
+{
+  "name": "Python venv",
+  "description": "Activate venv, run server, run tests.",
+  "groups": [
+    {
+      "name": "Server",
+      "icon": "rocket",
+      "terminals": [
+        { "name": "uvicorn", "cwd": ".", "command": "source .venv/bin/activate && uvicorn app:app --reload", "icon": "rocket" }
+      ]
+    },
+    {
+      "name": "Tests",
+      "icon": "beaker",
+      "terminals": [
+        { "name": "pytest", "cwd": ".", "command": "source .venv/bin/activate && pytest --watch", "icon": "beaker" }
+      ]
+    },
+    {
+      "name": "Shell",
+      "icon": "terminal",
+      "terminals": [
+        { "name": "venv", "cwd": ".", "command": "source .venv/bin/activate" }
+      ]
+    }
+  ]
+}

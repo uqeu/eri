@@ -4,6 +4,33 @@ exports.activateTab = activateTab;
 const vscode = require("vscode");
 const acceptHandler_1 = require("./acceptHandler");
 const DEBOUNCE_MS = 150;
+/// JSON-RPC code emitted by the sidecar while the Tab model is downloading.
+const DOWNLOADING_CODE = -32100;
+function asRpcError(err) {
+    if (typeof err !== "object" || err === null) {
+        return null;
+    }
+    const e = err;
+    return {
+        code: typeof e.code === "number" ? e.code : undefined,
+        message: typeof e.message === "string" ? e.message : undefined,
+    };
+}
+function tryParseDownloadingPayload(message) {
+    if (!message) {
+        return null;
+    }
+    try {
+        const parsed = JSON.parse(message);
+        if (parsed.stage === "downloading" && typeof parsed.progress === "number") {
+            return parsed.progress;
+        }
+    }
+    catch {
+        return null;
+    }
+    return null;
+}
 class DebounceGate {
     timer = null;
     wait(token) {
@@ -28,11 +55,47 @@ class DebounceGate {
         });
     }
 }
+class DownloadStatus {
+    item;
+    visible = false;
+    constructor() {
+        this.item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+        this.item.name = "eri Tab";
+    }
+    show(progress) {
+        const pct = Math.max(0, Math.min(100, Math.round(progress * 100)));
+        this.item.text = `$(cloud-download) eri Tab: downloading model ${pct}%`;
+        this.item.tooltip = "eri Tab is downloading its inline-completion model.";
+        if (!this.visible) {
+            this.item.show();
+            this.visible = true;
+        }
+    }
+    showLoading() {
+        this.item.text = "$(sync~spin) eri Tab: loading model";
+        this.item.tooltip = "eri Tab is warming up.";
+        if (!this.visible) {
+            this.item.show();
+            this.visible = true;
+        }
+    }
+    hide() {
+        if (this.visible) {
+            this.item.hide();
+            this.visible = false;
+        }
+    }
+    dispose() {
+        this.item.dispose();
+    }
+}
 class EriTabProvider {
     sidecarRef;
+    status;
     gate = new DebounceGate();
-    constructor(sidecarRef) {
+    constructor(sidecarRef, status) {
         this.sidecarRef = sidecarRef;
+        this.status = status;
     }
     async provideInlineCompletionItems(document, position, _context, token) {
         const config = vscode.workspace.getConfiguration("eri.tab");
@@ -42,7 +105,6 @@ class EriTabProvider {
         const minPrefix = config.get("minPrefixLength", 2);
         const model = config.get("model", "qwen2.5-coder:1.5b");
         const maxTokens = config.get("maxTokens", 64);
-        const baseUrl = config.get("baseUrl", "http://localhost:11434");
         const sidecar = this.sidecarRef();
         if (!sidecar) {
             return null;
@@ -66,19 +128,23 @@ class EriTabProvider {
             language: document.languageId,
             maxTokens,
             model,
-            baseUrl,
         };
         let result;
         try {
             result = await sidecar.request("eri/tab/complete", params);
         }
         catch (err) {
-            void err;
+            const rpc = asRpcError(err);
+            if (rpc && rpc.code === DOWNLOADING_CODE) {
+                const progress = tryParseDownloadingPayload(rpc.message) ?? 0;
+                this.status.show(progress);
+            }
             return null;
         }
         if (token.isCancellationRequested) {
             return null;
         }
+        this.status.hide();
         const insertText = result?.text;
         if (typeof insertText !== "string" || insertText.length === 0) {
             return null;
@@ -99,28 +165,62 @@ async function runHealthCheck(sidecarRef) {
     }
     const config = vscode.workspace.getConfiguration("eri.tab");
     const model = config.get("model", "qwen2.5-coder:1.5b");
-    const baseUrl = config.get("baseUrl", "http://localhost:11434");
     try {
-        const result = await sidecar.request("eri/tab/health", {
-            model,
-            baseUrl,
-        });
-        if (result?.ok === true) {
-            void vscode.window.showInformationMessage(`eri tab: Ollama reachable at ${result.baseUrl ?? baseUrl} (model ${result.model ?? model})`);
+        const result = await sidecar.request("eri/tab/health", { model });
+        const loaded = result?.loaded === true;
+        const ok = result?.ok === true;
+        const progress = typeof result?.downloadProgress === "number"
+            ? Math.round(result.downloadProgress * 100)
+            : null;
+        if (loaded && ok) {
+            void vscode.window.showInformationMessage(`eri Tab: model ${result?.model ?? model} loaded and ready`);
+        }
+        else if (progress !== null) {
+            void vscode.window.showInformationMessage(`eri Tab: downloading model — ${progress}%`);
+        }
+        else if (ok) {
+            void vscode.window.showInformationMessage(`eri Tab: model ${result?.model ?? model} cached, not yet loaded`);
+        }
+        else if (result?.downloadError) {
+            void vscode.window.showErrorMessage(`eri Tab: model download failed — ${result.downloadError}`);
         }
         else {
-            void vscode.window.showWarningMessage(`eri tab: Ollama not reachable at ${result?.baseUrl ?? baseUrl}`);
+            void vscode.window.showWarningMessage(`eri Tab: model ${result?.model ?? model} not yet downloaded`);
         }
     }
     catch (err) {
         const msg = err instanceof Error ? err.message : "unknown error";
-        void vscode.window.showErrorMessage(`eri tab health check failed: ${msg}`);
+        void vscode.window.showErrorMessage(`eri Tab health check failed: ${msg}`);
+    }
+}
+async function triggerPreload(sidecarRef, status) {
+    const sidecar = sidecarRef();
+    if (!sidecar) {
+        return;
+    }
+    try {
+        const result = await sidecar.request("eri/tab/preload", {});
+        if (result?.stage === "downloading") {
+            status.show(result.progress ?? 0);
+        }
+        else if (result?.stage === "loading") {
+            status.showLoading();
+        }
+        else if (result?.stage === "ready") {
+            status.hide();
+        }
+    }
+    catch {
+        // Preload is best-effort; the first /complete call retries.
     }
 }
 function activateTab(context, sidecarRef) {
-    const provider = new EriTabProvider(sidecarRef);
+    const status = new DownloadStatus();
+    context.subscriptions.push({ dispose: () => status.dispose() });
+    const provider = new EriTabProvider(sidecarRef, status);
     const selector = { scheme: "file" };
-    context.subscriptions.push(vscode.languages.registerInlineCompletionItemProvider(selector, provider), vscode.commands.registerCommand("eri.tab.health", () => runHealthCheck(sidecarRef)));
+    context.subscriptions.push(vscode.languages.registerInlineCompletionItemProvider(selector, provider), vscode.commands.registerCommand("eri.tab.health", () => runHealthCheck(sidecarRef)), vscode.commands.registerCommand("eri.tab.preload", () => triggerPreload(sidecarRef, status)));
+    void triggerPreload(sidecarRef, status);
     (0, acceptHandler_1.registerAcceptHandlers)(context);
 }
 //# sourceMappingURL=tab.js.map

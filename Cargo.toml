@@ -1,5 +1,9 @@
 [workspace]
 resolver = "2"
+exclude = [
+    # vscode CLI ships its own workspace; keep it isolated from eri's.
+    "ide/vscode",
+]
 members = [
     "crates/eri_auth",
     "crates/eri_billing",
@@ -26,6 +30,10 @@ members = [
     "crates/eri_rules",
     "crates/eri_apply",
     "crates/eri_tab",
+    "crates/eri_skills",
+    "crates/eri_codemaps",
+    "crates/eri_review",
+    "crates/eri_hooks",
 ]
 
 [workspace.package]
@@ -42,6 +50,7 @@ eri_tokens = { path = "crates/eri_tokens" }
 
 # Third-party — kept minimal. Versions track current crates.io stable.
 anyhow = "1.0"
+async-trait = "0.1"
 clap = { version = "4.5", features = ["derive"] }
 cpal = "0.15"
 dotenvy = "0.15"

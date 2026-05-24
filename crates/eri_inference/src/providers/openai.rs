@@ -38,6 +38,17 @@ impl OpenAiProvider {
         let _ = dotenvy::dotenv();
         let api_key = std::env::var("OPENAI_API_KEY")
             .map_err(|_| InferenceError::Transport("OPENAI_API_KEY not set".into()))?;
+        Self::for_model_with_key(model, api_key)
+    }
+
+    /// Construct a provider with a pre-fetched API key. Used by the sidecar
+    /// after a BYOK secret lookup resolves the key — keeps the env-var
+    /// branch out of the call path so secrets coming from
+    /// `vscode.SecretStorage` never touch the process env.
+    pub fn for_model_with_key(
+        model: &str,
+        api_key: impl Into<String>,
+    ) -> Result<Self, InferenceError> {
         if pricing_for(model).is_none() {
             return Err(InferenceError::Transport(format!(
                 "unsupported openai model: {model}"
@@ -45,7 +56,7 @@ impl OpenAiProvider {
         }
         Ok(Self {
             model: model.to_string(),
-            api_key,
+            api_key: api_key.into(),
             endpoint: OPENAI_CHAT_COMPLETIONS_URL.to_string(),
         })
     }

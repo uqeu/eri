@@ -18,14 +18,29 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "io-std", "io-util", "sync", "signal"] }
 tracing = { workspace = true }
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
+sentry = { version = "0.34", default-features = false, features = ["backtrace", "panic", "rustls"], optional = true }
+sentry-tracing = { version = "0.34", optional = true }
 
 eri_rules = { path = "../eri_rules" }
+eri_skills = { path = "../eri_skills" }
 eri_apply = { path = "../eri_apply" }
 eri_index = { path = "../eri_index" }
 eri_mcp = { path = "../eri_mcp" }
 eri_git = { path = "../eri_git" }
 eri_tab = { path = "../eri_tab" }
+eri_codemaps = { path = "../eri_codemaps" }
+eri_graph = { path = "../eri_graph" }
+eri_hooks = { path = "../eri_hooks" }
+eri_review = { path = "../eri_review" }
+eri_inference = { path = "../eri_inference" }
+eri_caveman = { path = "../eri_caveman" }
+eri_router = { path = "../eri_router" }
+async-trait = { workspace = true }
+
+[features]
+default = []
+sentry = ["dep:sentry", "dep:sentry-tracing"]
 
 [dev-dependencies]
 tempfile = { workspace = true }

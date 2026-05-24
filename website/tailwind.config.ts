@@ -23,16 +23,23 @@ const config: Config = {
         "blue-deep": "var(--blue-deep)",
         // Demo-only accent
         "demo-accent": "var(--demo-accent)",
-        // Legacy aliases (kept so existing components don't break — sweeps happen incrementally)
+        // Legacy aliases — existing demo components (HeroBig/EriDemo/EngineRoom/
+        // PromptPipeline) reference `accent` for the engine's lime color. Keep
+        // pointing those at lime (--demo-accent) so the engine keeps its color.
+        // New site chrome uses `sage-deep` / `sage` explicitly — don't repaint
+        // the demos to sage by accident.
         ink: "var(--text)",
         paper: "var(--bg)",
-        accent: "var(--sage-deep)",
-        "accent-bright": "var(--sage)",
+        accent: "var(--demo-accent)",
+        "accent-bright": "var(--demo-accent)",
         muted: "var(--text-sec)",
-        "bg-1": "var(--bg)",
-        "bg-2": "var(--bg-card)",
-        "bg-3": "var(--bg-card-2)",
-        "bg-4": "var(--bg-card-2)",
+        // Demos that hardcoded the old dark backgrounds expect dark inside;
+        // keep these dark-only so demo internals don't flip to cream in light
+        // mode and look broken. Engine has its own world.
+        "bg-1": "#0A0A0A",
+        "bg-2": "#131311",
+        "bg-3": "#1A1A18",
+        "bg-4": "#1F1F1D",
       },
       gridTemplateColumns: {
         "24": "repeat(24, minmax(0, 1fr))",

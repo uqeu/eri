@@ -83,8 +83,39 @@ export class AtMentionResolvers {
         return this.resolveLinterErrors(chip);
       case "definitions":
         return this.resolveDefinitions(chip);
+      case "codemap":
+        return this.resolveCodemap(chip);
       default:
         return assertNever(chip.kind);
+    }
+  }
+
+  private async resolveCodemap(chip: AtMentionChip): Promise<ResolvedContext> {
+    const name = stringField(chip.payload, "name") ?? chip.label;
+    const sidecar = this.deps.getSidecar();
+    if (!sidecar) {
+      return emptyResolved(`@Codemap ${name}`, "sidecar offline");
+    }
+    const folder = vscode.workspace.workspaceFolders?.[0];
+    if (!folder) {
+      return emptyResolved(`@Codemap ${name}`, "no workspace folder");
+    }
+    try {
+      const map = await withTimeout(
+        sidecar.request<unknown>("eri/codemaps/load", {
+          workspace: folder.uri.fsPath,
+          name,
+        }),
+        SIDECAR_REQUEST_TIMEOUT_MS,
+      );
+      // The agent consumes the compact JSON directly. We do NOT inline the
+      // SVG — it's a few KB and the model can't render it anyway.
+      return {
+        heading: `@Codemap ${name}`,
+        body: codeFence(JSON.stringify(map, null, 2), "json"),
+      };
+    } catch (err) {
+      return emptyResolved(`@Codemap ${name}`, errorMessage(err));
     }
   }
 

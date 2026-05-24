@@ -15,7 +15,8 @@ if [[ "${SHOULD_BUILD}" == "yes" ]]; then
   export NODE_OPTIONS="--max-old-space-size=8192"
   export VSCODE_PUBLISH_COUNTER=1
 
-  npm run gulp vscode-min-prepack
+  # vscode 1.116 uses `vscode-min` (the `-prepack` variant was only in older VSCodium-tracked tags).
+  npm run gulp vscode-min
 
   if [[ "${OS_NAME}" == "osx" ]]; then
     # remove win32 node modules
@@ -25,7 +26,7 @@ if [[ "${SHOULD_BUILD}" == "yes" ]]; then
     npm run copy-policy-dto --prefix build
     node build/lib/policies/policyGenerator.ts build/lib/policies/policyData.jsonc darwin
 
-    npm run gulp "vscode-darwin-${VSCODE_ARCH}-min-packing"
+    npm run gulp "vscode-darwin-${VSCODE_ARCH}-min"
 
     find "../VSCode-darwin-${VSCODE_ARCH}" -print0 | xargs -0 touch -c
 

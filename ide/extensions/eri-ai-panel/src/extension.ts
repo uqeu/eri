@@ -17,6 +17,8 @@ import { activateGaze, GazeHandle } from "./gaze/gaze";
 import { activateTierClient, TierClientHandle } from "./tier/tierClient";
 import { activateCheckpoints, CheckpointsHandle } from "./checkpoints";
 import { activateApply, ApplyHandle } from "./apply";
+import { activateSkills, SkillsHandle } from "./skills";
+import { activateHooks, HooksHandle } from "./hooks";
 import { SecretsStore } from "./settings/secrets";
 import { ByokSettingsView, BYOK_VIEW_ID } from "./settings/settingsView";
 import {
@@ -25,6 +27,14 @@ import {
 } from "./settings/sidecarBridge";
 import { activateOnboarding, OnboardingHandle } from "./onboarding";
 import { activateSettingsHub, SettingsHubHandle } from "./settingsHub";
+import { activateCodemaps, CodemapsHandle } from "./codemaps";
+import { activateGraph, GraphHandle } from "./graph";
+import { activateTerminalVoiceGaze, TerminalVoiceGazeHandle } from "./terminals";
+import { activateMcpPresets, McpPresetsHandle } from "./mcpPresets";
+import { activateAudit, AuditHandle } from "./audit";
+import { activateCrash, CrashHandle } from "./crash";
+import { activateVisualEditor, VisualEditorHandle } from "./visualEditor";
+import { activateReview, ReviewHandle } from "./review";
 
 export { getCurrentTarget as getCurrentGazeTarget, getEditorGazeContext } from "./gaze/gaze";
 
@@ -38,10 +48,20 @@ let gaze: GazeHandle | null = null;
 let tierClient: TierClientHandle | null = null;
 let checkpoints: CheckpointsHandle | null = null;
 let apply: ApplyHandle | null = null;
+let skills: SkillsHandle | null = null;
 let byokView: ByokSettingsView | null = null;
 let secretsStore: SecretsStore | null = null;
 let onboarding: OnboardingHandle | null = null;
 let settingsHub: SettingsHubHandle | null = null;
+let codemaps: CodemapsHandle | null = null;
+let graph: GraphHandle | null = null;
+let terminalVoiceGaze: TerminalVoiceGazeHandle | null = null;
+let mcpPresets: McpPresetsHandle | null = null;
+let hooks: HooksHandle | null = null;
+let audit: AuditHandle | null = null;
+let crash: CrashHandle | null = null;
+let visualEditor: VisualEditorHandle | null = null;
+let review: ReviewHandle | null = null;
 
 export function activate(context: vscode.ExtensionContext): void {
   const binaryPath = resolveBinaryPath(context);
@@ -85,8 +105,18 @@ export function activate(context: vscode.ExtensionContext): void {
   composer = activateComposer(context, () => sidecar, atMentions);
   checkpoints = activateCheckpoints(context, () => sidecar);
   apply = activateApply(context, () => sidecar);
+  skills = activateSkills(context, () => sidecar);
   onboarding = activateOnboarding(context, () => sidecar);
   settingsHub = activateSettingsHub(context);
+  codemaps = activateCodemaps(context, () => sidecar);
+  graph = activateGraph(context, () => sidecar);
+  terminalVoiceGaze = activateTerminalVoiceGaze(context, () => sidecar);
+  review = activateReview(context, () => sidecar);
+  mcpPresets = activateMcpPresets(context);
+  hooks = activateHooks(context, () => sidecar);
+  audit = activateAudit(context, () => sidecar);
+  crash = activateCrash(context, () => sidecar);
+  visualEditor = activateVisualEditor(context, () => sidecar);
 
   byokView = new ByokSettingsView(context, secretsStore);
   const localView = byokView;
@@ -170,10 +200,30 @@ export function deactivate(): void {
   checkpoints = null;
   apply?.dispose();
   apply = null;
+  skills?.dispose();
+  skills = null;
+  hooks?.dispose();
+  hooks = null;
   onboarding?.dispose();
   onboarding = null;
   settingsHub?.dispose();
   settingsHub = null;
+  codemaps?.dispose();
+  codemaps = null;
+  graph?.dispose();
+  graph = null;
+  terminalVoiceGaze?.dispose();
+  terminalVoiceGaze = null;
+  mcpPresets?.dispose();
+  mcpPresets = null;
+  audit?.dispose();
+  audit = null;
+  crash?.dispose();
+  crash = null;
+  visualEditor?.dispose();
+  visualEditor = null;
+  review?.dispose();
+  review = null;
   byokView = null;
   secretsStore = null;
 }
@@ -181,6 +231,8 @@ export function deactivate(): void {
 function handleNotification(notification: SidecarNotification): void {
   composer?.forward(notification);
   gaze?.forward(notification);
+  terminalVoiceGaze?.forward(notification);
+  visualEditor?.forward(notification);
   switch (notification.method) {
     case "eri/ready":
       console.log("[eri] sidecar ready", notification.params);

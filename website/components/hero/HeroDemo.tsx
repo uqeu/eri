@@ -1,14 +1,42 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
 import { HeroCanvas } from "./HeroCanvas";
-import { HeroWindow } from "./HeroWindow";
 import { SceneTabs } from "./SceneTabs";
 import { IDEWindow } from "./IDEWindow";
-import { VoiceWindow } from "./VoiceWindow";
-import { CLIWindow } from "./CLIWindow";
-import { PipelineWindow } from "./PipelineWindow";
+import { EriDemo } from "../EriDemo";
+import { PromptPipeline } from "../PromptPipeline";
+
+interface Scene {
+  readonly id: string;
+  readonly label: string;
+  readonly render: () => React.ReactElement;
+  readonly scale?: number;
+}
+
+const SCENES: ReadonlyArray<Scene> = [
+  {
+    id: "ide",
+    label: "workspace",
+    render: () => (
+      <div className="h-full w-full">
+        <IDEWindow />
+      </div>
+    ),
+  },
+  {
+    id: "iteration",
+    label: "iteration history",
+    render: () => <EriDemo />,
+    scale: 0.7,
+  },
+  {
+    id: "pipeline",
+    label: "prompt pipeline",
+    render: () => <PromptPipeline />,
+    scale: 0.65,
+  },
+];
 
 export function HeroDemo(): React.ReactElement {
   const [scene, setScene] = useState<number>(0);
@@ -17,90 +45,44 @@ export function HeroDemo(): React.ReactElement {
   function reset(): void {
     setResetSignal((n) => n + 1);
   }
+  void resetSignal;
+
+  const current = SCENES[scene]!;
+  const scale = current.scale ?? 1;
+  const sizePct = `${(1 / scale) * 100}%`;
 
   return (
     <HeroCanvas onReset={reset}>
-      {scene === 0 ? (
-        <>
-          <HeroWindow
-            title="eri · workspace"
-            initial={{ x: 60, y: 60 }}
-            width={760}
-            height={460}
-            z={10}
-            resetSignal={resetSignal}
-          >
-            <IDEWindow />
-          </HeroWindow>
-          <HeroWindow
-            title="voice · gaze"
-            initial={{ x: 540, y: 320 }}
-            width={360}
-            height={300}
-            z={20}
-            resetSignal={resetSignal}
-          >
-            <VoiceWindow />
-          </HeroWindow>
-        </>
-      ) : null}
-
-      {scene === 1 ? (
-        <>
-          <HeroWindow
-            title="eri · workspace"
-            initial={{ x: 60, y: 60 }}
-            width={760}
-            height={460}
-            z={10}
-            resetSignal={resetSignal}
-          >
-            <IDEWindow />
-          </HeroWindow>
-          <HeroWindow
-            title="eri · cli"
-            initial={{ x: 540, y: 320 }}
-            width={420}
-            height={300}
-            z={20}
-            resetSignal={resetSignal}
-            titlebarRight={
-              <Link href="/download" className="rounded px-2 py-0.5 text-[10px] text-white/70 hover:bg-white/10">
-                Get eri
-              </Link>
-            }
-          >
-            <CLIWindow />
-          </HeroWindow>
-        </>
-      ) : null}
-
-      {scene === 2 ? (
-        <div className="absolute inset-4 z-10 overflow-hidden rounded-[10px] border border-white/[0.06] bg-[#0A0A0A] shadow-[0_28px_70px_rgba(0,0,0,0.45)]">
-          <div className="flex h-7 items-center border-b border-white/[0.06] px-3">
-            <span className="inline-block h-1.5 w-1.5 rounded-full bg-[#bfd7c1]" aria-hidden />
-            <span className="ml-2 text-[10px] uppercase tracking-wider text-white/55">
-              eri · prompt pipeline
-            </span>
-          </div>
-          {/* Scale the full PromptPipeline to fit the canvas without scroll */}
-          <div className="h-[calc(100%-1.75rem)] overflow-hidden">
+      <div className="absolute inset-4 z-10 overflow-hidden rounded-[10px] border border-white/[0.06] bg-[#0A0A0A] shadow-[0_28px_70px_rgba(0,0,0,0.45)]">
+        <div className="flex h-7 items-center border-b border-white/[0.06] px-3">
+          <span className="inline-block h-1.5 w-1.5 rounded-full bg-[#bfd7c1]" aria-hidden />
+          <span className="ml-2 text-[10px] uppercase tracking-wider text-white/55">
+            eri · {current.label}
+          </span>
+        </div>
+        <div className="h-[calc(100%-1.75rem)] overflow-hidden">
+          {scale === 1 ? (
+            <div key={current.id} className="h-full w-full">
+              {current.render()}
+            </div>
+          ) : (
             <div
+              key={current.id}
               style={{
-                width: "153.85%",
-                height: "153.85%",
-                transform: "scale(0.65)",
+                width: sizePct,
+                height: sizePct,
+                transform: `scale(${scale})`,
                 transformOrigin: "top left",
               }}
             >
-              <PipelineWindow />
+              {current.render()}
             </div>
-          </div>
+          )}
         </div>
-      ) : null}
+      </div>
 
       <div className="absolute bottom-4 left-4 z-50">
-        <SceneTabs active={scene} onChange={setScene} count={3} />
+        <SceneTabs active={scene} onChange={setScene} count={SCENES.length} />
       </div>
     </HeroCanvas>
   );

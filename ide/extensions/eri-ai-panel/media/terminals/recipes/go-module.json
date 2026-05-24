@@ -1,0 +1,27 @@
+{
+  "name": "Go module",
+  "description": "go run + go test in watch mode + shell.",
+  "groups": [
+    {
+      "name": "Run",
+      "icon": "rocket",
+      "terminals": [
+        { "name": "go run", "cwd": ".", "command": "go run ./...", "icon": "rocket" }
+      ]
+    },
+    {
+      "name": "Tests",
+      "icon": "beaker",
+      "terminals": [
+        { "name": "go test", "cwd": ".", "command": "go test ./...", "icon": "beaker" }
+      ]
+    },
+    {
+      "name": "Shell",
+      "icon": "terminal",
+      "terminals": [
+        { "name": "shell", "cwd": "." }
+      ]
+    }
+  ]
+}

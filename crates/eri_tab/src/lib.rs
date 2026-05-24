@@ -1,35 +1,69 @@
-//! Tab inline-completion client.
+//! Tab inline-completion engine.
 //!
-//! Talks to a local Ollama server (`/api/generate`) to produce next-edit
-//! suggestions for the IDE's inline completion provider. The Ollama wire
-//! contract is JSON in / JSON-lines out with `{"response": "...", "done": bool}`.
+//! Embeds `llama.cpp` (via the `llama-cpp-2` Rust FFI crate) directly in the
+//! sidecar process. A single `LlamaTabEngine` keeps the model + context
+//! warm so subsequent completions skip the multi-second load cost.
 //!
-//! Model-specific Fill-In-the-Middle (FIM) prompt templates are chosen by
-//! substring match on the model name. Unknown models fall back to a plain
-//! prefix prompt — Ollama will still produce a continuation, just without
-//! suffix-aware context.
+//! ### Lifecycle
+//! 1. Resolve the GGUF model path via [`model_store::ensure_model`]. If the
+//!    file isn't cached, download it from Hugging Face.
+//! 2. Construct a [`LlamaTabEngine`] with [`LlamaTabEngine::load`] — this is
+//!    synchronous, ~2-5s on first call. Callers should wrap it in
+//!    `tokio::task::spawn_blocking`.
+//! 3. Reuse the engine for every request. Generation happens inside
+//!    `spawn_blocking` so the async runtime stays responsive.
+//!
+//! The Fill-In-the-Middle prompt template is chosen by model name substring
+//! match (qwen / deepseek / fallback) — same as the previous Ollama
+//! implementation.
 
+#![allow(clippy::result_large_err)]
+
+use std::path::{Path, PathBuf};
+#[cfg(feature = "llama")]
+use std::sync::Arc;
+#[cfg(feature = "llama")]
 use std::time::Instant;
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use thiserror::Error;
 
-/// Default Ollama base URL when the environment doesn't override it.
-pub const DEFAULT_BASE_URL: &str = "http://localhost:11434";
+pub mod model_store;
 
-/// Errors from the tab client.
+#[cfg(feature = "ollama")]
+pub mod ollama;
+
+#[cfg(feature = "llama")]
+mod inference;
+
+/// Default Hugging Face repository for the bundled Tab model.
+pub const DEFAULT_MODEL_REPO: &str = "Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF";
+/// Default GGUF filename inside [`DEFAULT_MODEL_REPO`].
+pub const DEFAULT_MODEL_FILE: &str = "qwen2.5-coder-1.5b-instruct-q4_k_m.gguf";
+/// Stable model identifier surfaced to the IDE.
+pub const DEFAULT_MODEL_ID: &str = "qwen2.5-coder:1.5b";
+/// Default llama context window. 4k is plenty for FIM completion windows.
+pub const DEFAULT_N_CTX: u32 = 4096;
+
+/// Errors from the tab engine.
 #[derive(Debug, Error)]
 pub enum TabError {
-    #[error("Ollama not reachable at {base_url}")]
-    NotReachable { base_url: String },
-    #[error("Ollama returned non-success status: {status}")]
-    BadStatus { status: u16 },
-    #[error("invalid response payload: {0}")]
-    BadPayload(String),
-    #[error("network error: {0}")]
-    Network(#[from] reqwest::Error),
+    #[error("model not loaded; call LlamaTabEngine::load first")]
+    NotLoaded,
+    #[error("model file not found at {0}")]
+    ModelMissing(PathBuf),
+    #[error("llama.cpp error: {0}")]
+    Llama(String),
+    #[error("model download failed: {0}")]
+    Download(String),
+    #[error("io error: {0}")]
+    Io(#[from] std::io::Error),
     #[error("json error: {0}")]
     Json(#[from] serde_json::Error),
+    #[error("eri_tab built without the `llama` feature; rebuild with --features llama")]
+    FeatureDisabled,
+    #[error("{0}")]
+    Other(String),
 }
 
 /// Inbound request from the dispatcher / IDE.
@@ -40,6 +74,8 @@ pub struct TabRequest {
     pub language: Option<String>,
     pub max_tokens: usize,
     pub stop: Vec<String>,
+    /// Model id used purely for FIM template selection + reporting.
+    pub model: String,
 }
 
 /// Suggestion + timing info returned to the IDE.
@@ -55,162 +91,172 @@ pub struct TabSuggestion {
 pub struct TabHealth {
     pub ok: bool,
     pub model: String,
-    pub base_url: String,
+    pub loaded: bool,
+    pub model_path: Option<PathBuf>,
+    /// `Some(0.0..=1.0)` if a download is in flight; `None` otherwise.
+    pub download_progress: Option<f32>,
 }
 
-/// Client for a single Ollama endpoint + model pair.
-#[derive(Debug, Clone)]
-pub struct TabClient {
-    base_url: String,
-    model: String,
-    http: reqwest::Client,
+/// In-process llama.cpp engine. Construction is synchronous and expensive
+/// (the model is mmap'd and the context allocated); reuse the same engine
+/// for every completion to amortise that cost.
+///
+/// When the `llama` feature is disabled (e.g. host toolchain can't build
+/// `llama-cpp-sys-2`), the engine still compiles — `load` succeeds if the
+/// file exists, but `complete` returns [`TabError::FeatureDisabled`].
+/// Callers should check `cfg!(feature = "llama")` or just handle the
+/// error.
+pub struct LlamaTabEngine {
+    #[cfg(feature = "llama")]
+    inner: Arc<inference::Engine>,
+    model_id: String,
+    model_path: PathBuf,
 }
 
-impl TabClient {
-    /// Build a new client with the default `reqwest::Client`.
-    pub fn new(base_url: impl Into<String>, model: impl Into<String>) -> Self {
-        Self {
-            base_url: base_url.into(),
-            model: model.into(),
-            http: reqwest::Client::new(),
+impl LlamaTabEngine {
+    /// Load a GGUF model from disk. Synchronous, ~2-5s on first call —
+    /// wrap in `tokio::task::spawn_blocking` from async contexts.
+    #[cfg(feature = "llama")]
+    pub fn load(
+        model_path: &Path,
+        model_id: impl Into<String>,
+        n_ctx: u32,
+    ) -> Result<Self, TabError> {
+        if !model_path.exists() {
+            return Err(TabError::ModelMissing(model_path.to_path_buf()));
         }
+        let inner = inference::Engine::load(model_path, n_ctx)?;
+        Ok(Self {
+            inner: Arc::new(inner),
+            model_id: model_id.into(),
+            model_path: model_path.to_path_buf(),
+        })
     }
 
-    /// Override the HTTP client (used by tests with custom timeouts).
-    pub fn with_http(
-        base_url: impl Into<String>,
-        model: impl Into<String>,
-        http: reqwest::Client,
-    ) -> Self {
-        Self {
-            base_url: base_url.into(),
-            model: model.into(),
-            http,
+    /// Stub-mode constructor used when the `llama` feature is disabled.
+    /// The engine is structurally valid but every `complete` call errors
+    /// with `TabError::FeatureDisabled`. This exists so the surrounding
+    /// dispatch code can compile workspace-wide while the host toolchain
+    /// catches up to llama-cpp-sys-2's `cc ^1.2.61` requirement.
+    #[cfg(not(feature = "llama"))]
+    pub fn load(
+        model_path: &Path,
+        model_id: impl Into<String>,
+        _n_ctx: u32,
+    ) -> Result<Self, TabError> {
+        if !model_path.exists() {
+            return Err(TabError::ModelMissing(model_path.to_path_buf()));
         }
+        Ok(Self {
+            model_id: model_id.into(),
+            model_path: model_path.to_path_buf(),
+        })
     }
 
-    pub fn base_url(&self) -> &str {
-        &self.base_url
+    pub fn model_id(&self) -> &str {
+        &self.model_id
     }
 
-    pub fn model(&self) -> &str {
-        &self.model
+    pub fn model_path(&self) -> &Path {
+        &self.model_path
     }
 
     /// Compose the FIM prompt for the configured model family.
     pub fn build_prompt(&self, req: &TabRequest) -> String {
-        build_fim_prompt(&self.model, &req.prefix, &req.suffix)
-    }
-
-    /// Probe `/api/tags` and report reachability. Never fails — returns
-    /// `ok: false` on any network error.
-    pub async fn health(&self) -> TabHealth {
-        let url = format!("{}/api/tags", self.base_url.trim_end_matches('/'));
-        let ok = match self.http.get(&url).send().await {
-            Ok(resp) => resp.status().is_success(),
-            Err(_) => false,
-        };
-        TabHealth {
-            ok,
-            model: self.model.clone(),
-            base_url: self.base_url.clone(),
-        }
+        build_fim_prompt(&req.model, &req.prefix, &req.suffix)
     }
 
     /// Single-shot completion. Returns the cleaned suggestion text + latency.
-    pub async fn complete(&self, req: &TabRequest) -> Result<TabSuggestion, TabError> {
+    #[cfg(feature = "llama")]
+    pub async fn complete(&self, req: TabRequest) -> Result<TabSuggestion, TabError> {
         let started = Instant::now();
-        let prompt = self.build_prompt(req);
-        let body = build_payload(&self.model, &prompt, req, false);
-        let url = format!("{}/api/generate", self.base_url.trim_end_matches('/'));
+        let prompt = self.build_prompt(&req);
+        let stop = req.stop.clone();
+        let max_tokens = req.max_tokens;
+        let engine = Arc::clone(&self.inner);
+        let model_id = self.model_id.clone();
 
-        let resp = self.http.post(&url).json(&body).send().await.map_err(|e| {
-            if e.is_connect() || e.is_timeout() {
-                TabError::NotReachable {
-                    base_url: self.base_url.clone(),
-                }
-            } else {
-                TabError::Network(e)
-            }
-        })?;
+        let raw = tokio::task::spawn_blocking(move || {
+            engine.generate(&prompt, max_tokens, &stop, |_| {})
+        })
+        .await
+        .map_err(|e| TabError::Other(format!("blocking task: {e}")))??;
 
-        if !resp.status().is_success() {
-            return Err(TabError::BadStatus {
-                status: resp.status().as_u16(),
-            });
-        }
-
-        let raw = resp.text().await.map_err(TabError::Network)?;
-        let text = parse_generate_response(&raw)?;
-        let cleaned = clean_completion(&text, &req.stop);
-
+        let cleaned = clean_completion(&raw, &req.stop);
         Ok(TabSuggestion {
             text: cleaned,
             latency_ms: started.elapsed().as_millis() as u64,
-            model: self.model.clone(),
+            model: model_id,
         })
     }
 
-    /// Streaming completion. Each token chunk is delivered to `on_token`.
+    /// Stub completion when the `llama` feature is off. See [`Self::load`].
+    #[cfg(not(feature = "llama"))]
+    pub async fn complete(&self, _req: TabRequest) -> Result<TabSuggestion, TabError> {
+        // TODO(llama): once the workspace `cc` pin is lifted (tree-sitter
+        // bump in eri_index), turn on the `llama` feature and remove this
+        // stub. Until then, the IDE gets a clean error instead of a hang.
+        Err(TabError::FeatureDisabled)
+    }
+
+    /// Streaming completion. `on_token` is invoked for every decoded token.
+    ///
+    /// The callback runs on the blocking thread that owns the llama context;
+    /// it must not block the caller's tokio runtime if shared. For tokio
+    /// integration, send tokens through an `mpsc::UnboundedSender`.
+    #[cfg(feature = "llama")]
     pub async fn complete_stream<F>(
         &self,
-        req: &TabRequest,
+        req: TabRequest,
         mut on_token: F,
     ) -> Result<TabSuggestion, TabError>
     where
-        F: FnMut(&str),
+        F: FnMut(&str) + Send + 'static,
     {
         let started = Instant::now();
-        let prompt = self.build_prompt(req);
-        let body = build_payload(&self.model, &prompt, req, true);
-        let url = format!("{}/api/generate", self.base_url.trim_end_matches('/'));
+        let prompt = self.build_prompt(&req);
+        let stop = req.stop.clone();
+        let max_tokens = req.max_tokens;
+        let engine = Arc::clone(&self.inner);
+        let model_id = self.model_id.clone();
 
-        let resp = self.http.post(&url).json(&body).send().await.map_err(|e| {
-            if e.is_connect() || e.is_timeout() {
-                TabError::NotReachable {
-                    base_url: self.base_url.clone(),
-                }
-            } else {
-                TabError::Network(e)
-            }
-        })?;
-        if !resp.status().is_success() {
-            return Err(TabError::BadStatus {
-                status: resp.status().as_u16(),
-            });
-        }
+        let raw = tokio::task::spawn_blocking(move || {
+            engine.generate(&prompt, max_tokens, &stop, |tok| on_token(tok))
+        })
+        .await
+        .map_err(|e| TabError::Other(format!("blocking task: {e}")))??;
 
-        // Ollama streams newline-delimited JSON. We buffer text on the wire
-        // and split on '\n' — each frame is one JSON object.
-        let raw = resp.text().await.map_err(TabError::Network)?;
-        let mut accumulated = String::new();
-        for line in raw.split('\n') {
-            let trimmed = line.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
-            let chunk: GenerateChunk = serde_json::from_str(trimmed)?;
-            on_token(&chunk.response);
-            accumulated.push_str(&chunk.response);
-            if chunk.done {
-                break;
-            }
-        }
-
-        let cleaned = clean_completion(&accumulated, &req.stop);
+        let cleaned = clean_completion(&raw, &req.stop);
         Ok(TabSuggestion {
             text: cleaned,
             latency_ms: started.elapsed().as_millis() as u64,
-            model: self.model.clone(),
+            model: model_id,
         })
     }
-}
 
-#[derive(Debug, Deserialize)]
-struct GenerateChunk {
-    response: String,
-    #[serde(default)]
-    done: bool,
+    /// Stub stream when the `llama` feature is off.
+    #[cfg(not(feature = "llama"))]
+    pub async fn complete_stream<F>(
+        &self,
+        _req: TabRequest,
+        _on_token: F,
+    ) -> Result<TabSuggestion, TabError>
+    where
+        F: FnMut(&str) + Send + 'static,
+    {
+        Err(TabError::FeatureDisabled)
+    }
+
+    /// Health snapshot. `loaded=true` because if you have an engine it's loaded.
+    pub fn health(&self) -> TabHealth {
+        TabHealth {
+            ok: cfg!(feature = "llama"),
+            model: self.model_id.clone(),
+            loaded: cfg!(feature = "llama"),
+            model_path: Some(self.model_path.clone()),
+            download_progress: None,
+        }
+    }
 }
 
 /// Choose a FIM template based on the model name.
@@ -224,58 +270,18 @@ pub fn build_fim_prompt(model: &str, prefix: &str, suffix: &str) -> String {
     if m.contains("qwen") {
         format!("<|fim_prefix|>{prefix}<|fim_suffix|>{suffix}<|fim_middle|>")
     } else if m.contains("deepseek") {
-        format!("<\u{ff5c}fim\u{2581}begin\u{ff5c}>{prefix}<\u{ff5c}fim\u{2581}hole\u{ff5c}>{suffix}<\u{ff5c}fim\u{2581}end\u{ff5c}>")
+        format!(
+            "<\u{ff5c}fim\u{2581}begin\u{ff5c}>{prefix}<\u{ff5c}fim\u{2581}hole\u{ff5c}>{suffix}<\u{ff5c}fim\u{2581}end\u{ff5c}>"
+        )
     } else {
         prefix.to_string()
     }
-}
-
-fn build_payload(
-    model: &str,
-    prompt: &str,
-    req: &TabRequest,
-    stream: bool,
-) -> serde_json::Value {
-    serde_json::json!({
-        "model": model,
-        "prompt": prompt,
-        "stream": stream,
-        "options": {
-            "num_predict": req.max_tokens,
-            "stop": req.stop,
-        }
-    })
-}
-
-fn parse_generate_response(raw: &str) -> Result<String, TabError> {
-    // Non-streaming responses are a single JSON object; some servers still
-    // emit a trailing newline.
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return Err(TabError::BadPayload("empty response".into()));
-    }
-    // If the server returned NDJSON anyway (stream=true ignored), concat.
-    if trimmed.contains('\n') {
-        let mut out = String::new();
-        for line in trimmed.split('\n') {
-            let l = line.trim();
-            if l.is_empty() {
-                continue;
-            }
-            let chunk: GenerateChunk = serde_json::from_str(l)?;
-            out.push_str(&chunk.response);
-        }
-        return Ok(out);
-    }
-    let chunk: GenerateChunk = serde_json::from_str(trimmed)?;
-    Ok(chunk.response)
 }
 
 /// Truncate the completion at the first stop sequence and drop the FIM
 /// terminator if the model echoed it.
 pub fn clean_completion(text: &str, stop: &[String]) -> String {
     let mut s = text.to_string();
-    // Strip well-known terminators that some models append.
     for term in [
         "<|endoftext|>",
         "<|fim_pad|>",
@@ -295,20 +301,4 @@ pub fn clean_completion(text: &str, stop: &[String]) -> String {
         }
     }
     s
-}
-
-/// Parse `/api/tags` JSON to check the server is healthy and (optionally)
-/// confirm a model name is installed.
-pub fn parse_tags_response(raw: &str) -> Result<Vec<String>, TabError> {
-    #[derive(Deserialize)]
-    struct Tag {
-        name: String,
-    }
-    #[derive(Deserialize)]
-    struct Tags {
-        #[serde(default)]
-        models: Vec<Tag>,
-    }
-    let parsed: Tags = serde_json::from_str(raw)?;
-    Ok(parsed.models.into_iter().map(|t| t.name).collect())
 }

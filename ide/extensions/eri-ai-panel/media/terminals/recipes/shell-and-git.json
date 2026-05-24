@@ -1,0 +1,20 @@
+{
+  "name": "Shell + git ops",
+  "description": "A clean shell and a dedicated git status watcher.",
+  "groups": [
+    {
+      "name": "Shell",
+      "icon": "terminal",
+      "terminals": [
+        { "name": "shell", "cwd": "." }
+      ]
+    },
+    {
+      "name": "Git",
+      "icon": "git-branch",
+      "terminals": [
+        { "name": "git status", "cwd": ".", "command": "git status", "icon": "git-branch" }
+      ]
+    }
+  ]
+}

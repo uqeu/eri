@@ -161,19 +161,50 @@ function PreviewPane(): React.ReactElement {
     };
   }
 
+  const [tab, setTab] = useState<"preview" | "code">("preview");
+
   return (
     <div className="relative min-w-0 flex-1 overflow-hidden bg-[#0f0d09]">
-      {/* Mini browser chrome */}
-      <div className="flex h-6 items-center gap-2 border-b border-white/[0.06] px-3 text-[10px] text-white/45">
-        <span className="opacity-50">←</span>
-        <span className="opacity-50">→</span>
-        <div className="rounded bg-white/[0.04] px-2 py-0.5">localhost:3000/pricing</div>
+      {/* File tab strip */}
+      <div className="flex h-7 items-stretch border-b border-white/[0.06] text-[11px]">
+        <button
+          type="button"
+          onClick={() => setTab("preview")}
+          className={
+            "flex items-center gap-1.5 border-r border-white/[0.06] px-3 transition-colors " +
+            (tab === "preview"
+              ? "bg-[#0f0d09] text-white"
+              : "bg-[#161310] text-white/55 hover:text-white")
+          }
+        >
+          <span className="inline-block h-1.5 w-1.5 rounded-full bg-[#bfd7c1]" aria-hidden />
+          localhost:3000
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab("code")}
+          className={
+            "flex items-center gap-1.5 border-r border-white/[0.06] px-3 transition-colors " +
+            (tab === "code"
+              ? "bg-[#0f0d09] text-white"
+              : "bg-[#161310] text-white/55 hover:text-white")
+          }
+        >
+          <span aria-hidden>{"{}"}</span>
+          pricing.tsx
+        </button>
+        <div className="flex-1 bg-[#161310]" />
       </div>
+
+      {tab === "code" ? <CodeView /> : null}
 
       <div
         ref={containerRef}
-        className="relative h-[calc(100%-1.5rem)] overflow-hidden px-6 py-5"
-        style={{ fontFamily: "Georgia, 'Times New Roman', serif" }}
+        className="relative h-[calc(100%-1.75rem)] overflow-hidden px-6 py-5"
+        style={{
+          fontFamily: "Georgia, 'Times New Roman', serif",
+          display: tab === "preview" ? "block" : "none",
+        }}
       >
         <div className="mb-3 text-[11px] italic text-white/60">Acme</div>
         <h1
@@ -264,11 +295,119 @@ function PreviewPane(): React.ReactElement {
                 letterSpacing: "0.01em",
               }}
             >
-              {LABELS[active]}
+              {active ? LABELS[active] : ""}
             </div>
           </>
         ) : null}
       </div>
+    </div>
+  );
+}
+
+function CodeView(): React.ReactElement {
+  return (
+    <div
+      className="h-[calc(100%-1.75rem)] overflow-auto px-4 py-3 font-mono text-[11px] leading-[1.7]"
+      style={{ background: "#0f0d09", color: "#d6d6dd" }}
+    >
+      <CodeLine n={1}>
+        <span style={{ color: "#82d2ce" }}>export default function</span>{" "}
+        <span style={{ color: "#efb080" }}>Pricing</span>() {"{"}
+      </CodeLine>
+      <CodeLine n={2}>
+        {"  "}
+        <span style={{ color: "#82d2ce" }}>const</span> [annual, setAnnual] ={" "}
+        <span style={{ color: "#efb080" }}>useState</span>(
+        <span style={{ color: "#e394dc" }}>true</span>);
+      </CodeLine>
+      <CodeLine n={3}>{"  "}</CodeLine>
+      <CodeLine n={4}>
+        {"  "}
+        <span style={{ color: "#83d6c5" }}>return</span> (
+      </CodeLine>
+      <CodeLine n={5}>
+        {"    "}
+        <span style={{ color: "#a4a4a4" }}>{"<"}</span>
+        <span style={{ color: "#fad075" }}>section</span>{" "}
+        <span style={{ color: "#aaa0fa", fontStyle: "italic" }}>className</span>=
+        <span style={{ color: "#e394dc" }}>&quot;pricing&quot;</span>
+        <span style={{ color: "#a4a4a4" }}>{">"}</span>
+      </CodeLine>
+      <CodeLine n={6} highlight>
+        {"      "}
+        <span style={{ color: "#a4a4a4" }}>{"<"}</span>
+        <span style={{ color: "#fad075" }}>h1</span>{" "}
+        <span style={{ color: "#aaa0fa", fontStyle: "italic" }}>className</span>=
+        <span style={{ color: "#e394dc" }}>&quot;tracking-tight&quot;</span>
+        <span style={{ color: "#a4a4a4" }}>{">"}</span>
+        <span style={{ color: "#d6d6dd" }}>Pricing that scales with you</span>
+        <span style={{ color: "#a4a4a4" }}>{"</"}</span>
+        <span style={{ color: "#fad075" }}>h1</span>
+        <span style={{ color: "#a4a4a4" }}>{">"}</span>
+      </CodeLine>
+      <CodeLine n={7}>
+        {"      "}
+        <span style={{ color: "#a4a4a4" }}>{"<"}</span>
+        <span style={{ color: "#82d2ce" }}>Toggle</span>{" "}
+        <span style={{ color: "#aaa0fa", fontStyle: "italic" }}>value</span>=
+        <span style={{ color: "#83d6c5" }}>{"{"}</span>annual
+        <span style={{ color: "#83d6c5" }}>{"}"}</span>{" "}
+        <span style={{ color: "#aaa0fa", fontStyle: "italic" }}>glow</span>=
+        <span style={{ color: "#83d6c5" }}>{"{"}</span>annual
+        <span style={{ color: "#83d6c5" }}>{"}"}</span>{" "}
+        <span style={{ color: "#a4a4a4" }}>{"/>"}</span>
+      </CodeLine>
+      <CodeLine n={8}>
+        {"      "}
+        <span style={{ color: "#a4a4a4" }}>{"<"}</span>
+        <span style={{ color: "#82d2ce" }}>Price</span>{" "}
+        <span style={{ color: "#aaa0fa", fontStyle: "italic" }}>value</span>=
+        <span style={{ color: "#83d6c5" }}>{"{"}</span>annual ?{" "}
+        <span style={{ color: "#e394dc" }}>240</span> :{" "}
+        <span style={{ color: "#e394dc" }}>25</span>
+        <span style={{ color: "#83d6c5" }}>{"}"}</span>{" "}
+        <span style={{ color: "#a4a4a4" }}>{"/>"}</span>
+      </CodeLine>
+      <CodeLine n={9}>
+        {"      "}
+        <span style={{ color: "#a4a4a4" }}>{"<"}</span>
+        <span style={{ color: "#82d2ce" }}>Button</span>
+        <span style={{ color: "#a4a4a4" }}>{">"}</span>
+        Start free trial
+        <span style={{ color: "#a4a4a4" }}>{"</"}</span>
+        <span style={{ color: "#82d2ce" }}>Button</span>
+        <span style={{ color: "#a4a4a4" }}>{">"}</span>
+      </CodeLine>
+      <CodeLine n={10}>
+        {"    "}
+        <span style={{ color: "#a4a4a4" }}>{"</"}</span>
+        <span style={{ color: "#fad075" }}>section</span>
+        <span style={{ color: "#a4a4a4" }}>{">"}</span>
+      </CodeLine>
+      <CodeLine n={11}>{"  "});</CodeLine>
+      <CodeLine n={12}>{"}"}</CodeLine>
+    </div>
+  );
+}
+
+function CodeLine({
+  n,
+  highlight,
+  children,
+}: {
+  n: number;
+  highlight?: boolean;
+  children: React.ReactNode;
+}): React.ReactElement {
+  return (
+    <div
+      className="flex gap-3 whitespace-pre"
+      style={{
+        background: highlight ? "rgba(224, 255, 79, 0.06)" : "transparent",
+      }}
+    >
+      <span className="w-5 shrink-0 text-right text-white/30">{n}</span>
+      <span className="min-w-0">{children}</span>
     </div>
   );
 }

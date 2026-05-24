@@ -56,8 +56,28 @@ class AtMentionPicker {
             case "recentChanges": return this.pickRecentChanges(descriptor);
             case "linterErrors": return this.pickLinterErrors(descriptor);
             case "definitions": return this.pickDefinitions(descriptor);
+            case "codemap": return this.pickCodemap(descriptor);
             default: return undefined;
         }
+    }
+    async pickCodemap(_descriptor) {
+        // The actual list comes from the sidecar at resolve time; the picker
+        // only collects a free-form name from the user. This keeps the picker
+        // synchronous and avoids round-tripping over JSON-RPC just to fill in a
+        // dropdown — names tend to be short ("module", "hotspot", etc.).
+        const name = await vscode.window.showInputBox({
+            prompt: "Codemap name (e.g. 'module' or 'hotspot')",
+            placeHolder: "module",
+        });
+        if (!name) {
+            return undefined;
+        }
+        return {
+            kind: "codemap",
+            label: name,
+            subtitle: "codemap",
+            payload: { name },
+        };
     }
     // ---------- individual pickers ----------
     async pickFile(_descriptor) {
