@@ -15,7 +15,7 @@ export function CtaFooter(): React.ReactElement {
 
           <p className="text-text-sec text-[17px] leading-[1.55] max-w-prose mt-7">
             The agentic editor for engineers who think faster than they type.
-            Free during alpha. Bring your own keys. Local-first.
+            Bring your own keys. Local-first.
           </p>
 
           <div className="mt-9 flex flex-wrap items-center gap-3">
@@ -29,7 +29,7 @@ export function CtaFooter(): React.ReactElement {
               href="/contact"
               className="inline-flex items-center text-[14px] text-text-sec hover:text-text transition-colors"
             >
-              Request alpha access
+              Request access
               <span className="ml-1.5">→</span>
             </Link>
           </div>

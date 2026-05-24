@@ -19,7 +19,6 @@ const COLUMNS: ReadonlyArray<FooterColumn> = [
       { href: "/features", label: "Features" },
       { href: "/pricing", label: "Pricing" },
       { href: "/changelog", label: "Changelog" },
-      { href: "/releases", label: "Releases" },
     ],
   },
   {
@@ -28,16 +27,6 @@ const COLUMNS: ReadonlyArray<FooterColumn> = [
       { href: "/docs", label: "Docs" },
       { href: "/help", label: "Help" },
       { href: "/status", label: "Status" },
-      { href: "/forum", label: "Forum" },
-    ],
-  },
-  {
-    heading: "Company",
-    links: [
-      { href: "/about", label: "About" },
-      { href: "/blog", label: "Blog" },
-      { href: "/careers", label: "Careers" },
-      { href: "/press", label: "Press" },
       { href: "/contact", label: "Contact" },
     ],
   },
@@ -46,12 +35,7 @@ const COLUMNS: ReadonlyArray<FooterColumn> = [
     links: [
       { href: "/terms", label: "Terms" },
       { href: "/privacy", label: "Privacy" },
-      { href: "/legal/acceptable-use", label: "Acceptable use" },
-      { href: "/legal/ai-policy", label: "AI policy" },
-      { href: "/legal/sub-processors", label: "Sub-processors" },
-      { href: "/legal/cookies", label: "Cookies" },
       { href: "/security", label: "Security" },
-      { href: "/trust", label: "Trust" },
     ],
   },
 ];
@@ -85,7 +69,7 @@ export function FooterBig(): React.ReactElement {
   return (
     <footer className="relative overflow-hidden border-t border-border bg-bg-card text-text px-6 pt-20 pb-12">
       <div className="relative mx-auto max-w-7xl">
-        <div className="grid gap-14 lg:grid-cols-[1.6fr_1fr_repeat(4,_minmax(0,_0.9fr))]">
+        <div className="grid gap-14 lg:grid-cols-[2fr_repeat(3,_minmax(0,_1fr))]">
           <div>
             <Link href="/" className="inline-flex items-center">
               <span
@@ -120,37 +104,6 @@ export function FooterBig(): React.ReactElement {
                 </a>
               ))}
             </div>
-          </div>
-
-          <div className="lg:col-span-1">
-            <p className="text-text-sec text-[13px] pb-3 uppercase tracking-wider">Newsletter</p>
-            <p className="mt-1 text-[13px] leading-relaxed text-text-sec">
-              One short note when something ships. No drip campaigns.
-            </p>
-            <form
-              className="mt-5 flex flex-col gap-2"
-              onSubmit={(e) => e.preventDefault()}
-            >
-              <label htmlFor="footer-newsletter" className="sr-only">
-                Email address
-              </label>
-              <input
-                id="footer-newsletter"
-                type="email"
-                required
-                placeholder="you@studio.dev"
-                className="w-full rounded-md border border-border bg-bg-card-2 px-3 py-2.5 font-mono text-[12px] text-text placeholder:text-text-ter outline-none transition-colors focus:border-border-strong"
-              />
-              <button
-                type="submit"
-                className="inline-flex items-center justify-center gap-1.5 rounded-md bg-text px-3 py-2 font-mono text-[11px] uppercase tracking-wider font-medium text-bg transition-opacity hover:opacity-90"
-              >
-                Subscribe <span aria-hidden>→</span>
-              </button>
-            </form>
-            <p className="mt-3 font-mono text-[10px] text-text-ter">
-              No spam. Unsubscribe in one click.
-            </p>
           </div>
 
           {COLUMNS.map((col) => (

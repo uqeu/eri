@@ -44,12 +44,12 @@ const PLANS: ReadonlyArray<Plan> = [
   {
     name: "Free",
     shortName: "Free",
-    subtitle: "Alpha",
+    subtitle: "Free forever",
     slug: "free",
     priceMonthly: "Free",
     priceYearlyAsMonthly: "Free",
     cadenceNote: "forever",
-    tagline: "Free during invite-only alpha. Voice, gaze, and diffusion — nothing held back.",
+    tagline: "Voice, gaze, and diffusion — nothing held back. No card.",
     blurb:
       "Drop in without a credit card. Voice, gaze, and diffusion preview, full editor, every project you can ship. When the monthly cap hits, eri keeps working locally — no surprise bill, ever.",
     includesHeader: "Includes",
@@ -880,7 +880,7 @@ export function PricingContent(): React.ReactElement {
             Plans that grow with you
           </h1>
           <p className="mt-5 mx-auto max-w-xl text-[15px] text-text-sec leading-relaxed">
-            Free during invite-only alpha. Below is what paid tiers will look like when we open up — hard-capped, cancel any time, no surprise bills.
+            Start free, scale when you&apos;re ready. Hard-capped, cancel any time, no surprise bills.
           </p>
 
           <div className="mt-8 flex items-center justify-center">

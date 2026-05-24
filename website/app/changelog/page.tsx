@@ -39,13 +39,13 @@ const ENTRIES: ReadonlyArray<Entry> = [
   },
   {
     date: "2026-05-14",
-    title: "eri 0.1 — private alpha",
+    title: "eri 0.1 — first release",
     items: [
       "Voice-first IDE loop end to end (transcribe → edit → apply → reload)",
-      "Gaze targeting via MediaPipe sidecar",
-      "One-shot ship to Vercel with Claude polish pass",
+      "Gaze targeting via on-device sidecar",
+      "One-shot ship with model polish pass",
       "Iteration history with rollback to any prior state",
-      "Invite-only alpha — 47 founding users",
+      "Invite-only access opened",
     ],
   },
 ];

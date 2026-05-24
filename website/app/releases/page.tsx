@@ -75,7 +75,7 @@ const RELEASES: ReadonlyArray<Release> = [
     codename: "Jensen",
     date: "November 10, 2025",
     summary:
-      "Internal-only alpha. First end-to-end voice → diffusion → diff loop running on a single laptop.",
+      "First end-to-end voice → diffusion → diff loop running on a single laptop.",
     highlights: [
       "First working voice-to-diff pipeline.",
       "Minimal editor surface forked from VSCodium — keybindings and extensions carry over.",
