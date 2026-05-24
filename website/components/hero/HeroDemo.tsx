@@ -80,16 +80,26 @@ export function HeroDemo(): React.ReactElement {
           <div className="flex h-7 items-center border-b border-white/[0.06] px-3">
             <span className="inline-block h-1.5 w-1.5 rounded-full bg-[#bfd7c1]" aria-hidden />
             <span className="ml-2 text-[10px] uppercase tracking-wider text-white/55">
-              eri · prompt pipeline · full view
+              eri · prompt pipeline
             </span>
           </div>
-          <div className="h-[calc(100%-1.75rem)] overflow-auto">
-            <PipelineWindow />
+          {/* Scale the full PromptPipeline to fit the canvas without scroll */}
+          <div className="h-[calc(100%-1.75rem)] overflow-hidden">
+            <div
+              style={{
+                width: "153.85%",
+                height: "153.85%",
+                transform: "scale(0.65)",
+                transformOrigin: "top left",
+              }}
+            >
+              <PipelineWindow />
+            </div>
           </div>
         </div>
       ) : null}
 
-      <div className="absolute bottom-4 left-4">
+      <div className="absolute bottom-4 left-4 z-50">
         <SceneTabs active={scene} onChange={setScene} count={3} />
       </div>
     </HeroCanvas>

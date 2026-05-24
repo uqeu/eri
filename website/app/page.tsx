@@ -1,5 +1,4 @@
 import { Hero } from "@/components/Hero";
-import { LogoWall } from "@/components/LogoWall";
 import { FeatureCard } from "@/components/FeatureCard";
 import { EngineRoom } from "@/components/EngineRoom";
 import { EriDemo } from "@/components/EriDemo";
@@ -13,7 +12,13 @@ export default function HomePage(): React.ReactElement {
     <main>
       <Hero />
 
-      <LogoWall />
+      <section className="container mb-16 lg:mb-24">
+        <div className="rounded-xl border border-border bg-bg-card px-5 py-4 flex flex-wrap items-center gap-3 text-[13px]">
+          <span className="inline-flex h-2 w-2 rounded-full bg-sage-deep" aria-hidden />
+          <span className="text-text font-medium">Pre-launch · free in beta</span>
+          <span className="text-text-sec">No usage limits, no card. We&apos;re still building — first invite waves rolling now.</span>
+        </div>
+      </section>
 
       <FeatureCard
         eyebrow="01 · voice + gaze"

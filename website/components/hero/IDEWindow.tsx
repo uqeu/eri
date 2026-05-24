@@ -124,22 +124,17 @@ function PreviewPane(): React.ReactElement {
     price: useRef<HTMLSpanElement | null>(null),
     cta: useRef<HTMLButtonElement | null>(null),
   };
-  const [active, setActive] = useState<Target>("h1");
+  const [active, setActive] = useState<Target | null>(null);
   const [rect, setRect] = useState<Rect | null>(null);
 
-  useEffect(() => {
-    let i = 0;
-    const id = setInterval(() => {
-      i = (i + 1) % TARGETS.length;
-      setActive(TARGETS[i]!);
-    }, 1900);
-    return () => clearInterval(id);
-  }, []);
-
   useLayoutEffect(() => {
+    if (!active) {
+      setRect(null);
+      return;
+    }
     function measure(): void {
       const container = containerRef.current;
-      const el = refs[active].current;
+      const el = active ? refs[active].current : null;
       if (!container || !el) return;
       const c = container.getBoundingClientRect();
       const r = el.getBoundingClientRect();
@@ -153,10 +148,18 @@ function PreviewPane(): React.ReactElement {
     measure();
     window.addEventListener("resize", measure);
     return () => window.removeEventListener("resize", measure);
-    // `refs` is intentionally omitted — it's a fresh object literal each render
-    // but the refs inside are stable. Including it would loop infinitely.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active]);
+
+  function hoverProps(t: Target): {
+    readonly onMouseEnter: () => void;
+    readonly onMouseLeave: () => void;
+  } {
+    return {
+      onMouseEnter: () => setActive(t),
+      onMouseLeave: () => setActive(null),
+    };
+  }
 
   return (
     <div className="relative min-w-0 flex-1 overflow-hidden bg-[#0f0d09]">
@@ -175,6 +178,7 @@ function PreviewPane(): React.ReactElement {
         <div className="mb-3 text-[11px] italic text-white/60">Acme</div>
         <h1
           ref={refs.h1 as React.RefObject<HTMLHeadingElement>}
+          {...hoverProps("h1")}
           className="text-[20px] leading-tight text-white"
           style={{ letterSpacing: "-0.02em" }}
         >
@@ -182,6 +186,7 @@ function PreviewPane(): React.ReactElement {
         </h1>
         <p
           ref={refs.p as React.RefObject<HTMLParagraphElement>}
+          {...hoverProps("p")}
           className="mt-1 text-[11px] text-white/55"
         >
           One plan. Predictable cost. Cancel any time.
@@ -191,6 +196,7 @@ function PreviewPane(): React.ReactElement {
           <span className="text-[10px] text-white/55">Monthly</span>
           <div
             ref={refs.toggle as React.RefObject<HTMLDivElement>}
+            {...hoverProps("toggle")}
             className="relative h-5 w-9 rounded-full border border-[#bfd7c1]/45 bg-[#bfd7c1]/15"
           >
             <span
@@ -208,6 +214,7 @@ function PreviewPane(): React.ReactElement {
         <div className="mt-4 inline-flex items-baseline gap-2 rounded-md border border-white/[0.08] px-3 py-2">
           <span
             ref={refs.price as React.RefObject<HTMLSpanElement>}
+            {...hoverProps("price")}
             className="text-[22px] font-medium text-white"
             style={{ letterSpacing: "-0.02em" }}
           >
@@ -219,6 +226,7 @@ function PreviewPane(): React.ReactElement {
         <div className="mt-4">
           <button
             ref={refs.cta as React.RefObject<HTMLButtonElement>}
+            {...hoverProps("cta")}
             type="button"
             className="rounded-md bg-[#bfd7c1] px-3 py-1.5 text-[12px] font-medium text-[#1a1814]"
           >

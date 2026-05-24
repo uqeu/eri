@@ -19,18 +19,19 @@ export function CLIWindow(): React.ReactElement {
   return (
     <div className="flex h-full flex-col font-mono text-[12px] text-white/90">
       <div className="flex-1 overflow-y-auto px-3 pt-3 pb-2 space-y-2">
-        <div className="text-white/85">eri agent · ~/eri/website</div>
-        <div className="text-white/85">Analyze Tab vs Agent Usage Patterns</div>
+        <div className="text-white/85">eri · ~/projects/site</div>
         <div className="rounded border border-white/[0.08] bg-white/[0.02] px-2 py-1.5 text-white/85">
-          Help me understand how teams split their focus between Tab and the agents panel across our workspaces.
+          <span className="text-white/45">voice:</span> &ldquo;redesign the auth flow&rdquo;{" "}
+          <span className="text-white/45">· 420ms</span>
         </div>
         <div className="space-y-1 text-white/65">
-          <div>⬢ Thought · 7s</div>
-          <div>⬢ Reviewed workspace usage exports</div>
-          <div>⬢ Wrote summary.py · +150</div>
-          <div>⬢ Wrote test_usage.py · +90</div>
+          <div>⬢ Heard · 420ms</div>
+          <div>⬢ Read sign-in/page.tsx, sign-up/page.tsx</div>
+          <div>⬢ Routed to Claude Sonnet 4.6</div>
+          <div>⬢ Wrote sign-in/page.tsx · +47 −12</div>
+          <div>⬢ Diffused preview · 1.4s</div>
         </div>
-        <div className="text-white/85">All set. Focus share, switching rates, rolling engagement.</div>
+        <div className="text-white/85">Staged on branch <span className="text-[#bfd7c1]">eri/auth-refactor</span>. Look at it to commit.</div>
       </div>
 
       <form onSubmit={onSubmit} className="border-t border-white/[0.06] p-2">
