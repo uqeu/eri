@@ -59,7 +59,12 @@
     "onCommand:eri.review.range",
     "onCommand:eri.review.pr",
     "onCommand:eri.review.patch",
-    "onCommand:eri.review.openReport"
+    "onCommand:eri.review.openReport",
+    "onCommand:eri.account.signIn",
+    "onCommand:eri.account.signOut",
+    "onCommand:eri.account.showStatus",
+    "onCommand:eri.account.openBilling",
+    "onUri"
   ],
   "categories": [
     "Other"
@@ -283,7 +288,11 @@
       { "command": "eri.graph.export",         "title": "eri: Export Graph (JSONL)", "icon": "$(export)" },
       { "command": "eri.graph.showStats",      "title": "eri: Show Graph Stats" },
       { "command": "eri.openWalkthrough",            "title": "eri: Open Welcome Walkthrough" },
-      { "command": "eri.onboarding.signIn",          "title": "eri: Sign in with Google" },
+      { "command": "eri.onboarding.signIn",          "title": "eri: Sign in" },
+      { "command": "eri.account.signIn",              "title": "eri: Sign in" },
+      { "command": "eri.account.signOut",             "title": "eri: Sign out" },
+      { "command": "eri.account.showStatus",          "title": "eri: Show account & usage" },
+      { "command": "eri.account.openBilling",         "title": "eri: Open billing portal" },
       { "command": "eri.onboarding.skipSignIn",      "title": "eri: Skip Sign-in (use BYOK)" },
       { "command": "eri.onboarding.testMic",         "title": "eri: Test Microphone" },
       { "command": "eri.onboarding.calibrateGaze",   "title": "eri: Calibrate Gaze" },
@@ -360,9 +369,9 @@
           },
           {
             "id": "signin",
-            "title": "Sign in (optional)",
-            "description": "Sign in with Google to sync settings and unlock hosted features.\n[Sign in](command:eri.onboarding.signIn) · [Skip](command:eri.onboarding.skipSignIn)",
-            "media": { "svg": "media/walkthrough/step-signin.svg", "altText": "Sign in to eri" },
+            "title": "Sign in to eri",
+            "description": "One account, monthly token budget across every model — no API keys to manage.\n[Sign in with eri](command:eri.onboarding.signIn) · [Use my own keys](command:eri.onboarding.skipSignIn)",
+            "media": { "markdown": "media/walkthrough/signin.md" },
             "completionEvents": ["onCommand:eri.onboarding.signIn", "onCommand:eri.onboarding.skipSignIn"]
           },
           {
@@ -499,6 +508,17 @@
           "type": "string",
           "default": "https://eri.dev",
           "description": "Base URL for the eri website API used to fetch the current user's tier and feature flags."
+        },
+        "eri.account.baseUrl": {
+          "type": "string",
+          "default": "https://eri.dev",
+          "description": "Base URL for the eri account API (device-code sign-in, /api/v1/me, /api/v1/usage)."
+        },
+        "eri.account.autoRefreshUsageSec": {
+          "type": "number",
+          "default": 30,
+          "minimum": 5,
+          "description": "Interval (seconds) for refreshing the signed-in user's token usage in the status bar."
         },
         "eri.model": {
           "type": "string",

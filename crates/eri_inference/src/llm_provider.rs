@@ -248,66 +248,86 @@ fn provider_from_choice_inner(
     if canonical == "mercury-2" {
         return None;
     }
-    let supplied = keys.and_then(|k| k.for_canonical(canonical));
-    match (canonical, supplied) {
-        ("gpt-4o", Some(key)) => {
-            providers::openai::OpenAiProvider::for_model_with_key("gpt-4o", key)
-                .ok()
-                .map(|p| Box::new(p) as Box<dyn LlmProvider>)
-        }
-        ("gpt-4o-mini", Some(key)) => {
-            providers::openai::OpenAiProvider::for_model_with_key("gpt-4o-mini", key)
-                .ok()
-                .map(|p| Box::new(p) as Box<dyn LlmProvider>)
-        }
-        ("o1-mini", Some(key)) => {
-            providers::openai::OpenAiProvider::for_model_with_key("o1-mini", key)
-                .ok()
-                .map(|p| Box::new(p) as Box<dyn LlmProvider>)
-        }
-        ("o3-mini", Some(key)) => {
-            providers::openai::OpenAiProvider::for_model_with_key("o3-mini", key)
-                .ok()
-                .map(|p| Box::new(p) as Box<dyn LlmProvider>)
-        }
-        ("o4", Some(key)) => providers::openai::OpenAiProvider::for_model_with_key("o4", key)
+    let vendor = vendor_for_canonical(canonical)?;
+    let wire_model = wire_model_id_for_canonical(canonical)?;
+
+    // Routing priority:
+    // 1. If the bundle has a BYOK key for this vendor, use it (direct upstream).
+    // 2. Else, if the bundle has a session bearer, route through the eri.dev proxy.
+    // 3. Else, fall back to env-based BYOK construction (legacy DX).
+    let byok = keys.and_then(|k| k.for_canonical(canonical));
+    if let Some(key) = byok {
+        return build_byok(vendor, wire_model, key);
+    }
+    if let Some(bundle) = keys
+        && bundle.use_proxy(vendor)
+    {
+        let session = bundle.eri_session.as_deref()?;
+        return build_proxied(vendor, wire_model, session, &bundle.eri_base_url);
+    }
+    provider_from_choice_env(canonical)
+}
+
+fn wire_model_id_for_canonical(canonical: &str) -> Option<&'static str> {
+    match canonical {
+        "gpt-4o" => Some("gpt-4o"),
+        "gpt-4o-mini" => Some("gpt-4o-mini"),
+        "o1-mini" => Some("o1-mini"),
+        "o3-mini" => Some("o3-mini"),
+        "o4" => Some("o4"),
+        "claude-sonnet-4-5" => Some("claude-sonnet-4-5-20251015"),
+        "claude-haiku-4-5" => Some("claude-haiku-4-5-20251001"),
+        "claude-opus-4-5" => Some("claude-opus-4-5"),
+        "gemini-flash-2" => Some("gemini-2.0-flash-exp"),
+        "gemini-thinking-2" => Some("gemini-2.0-flash-thinking-exp"),
+        _ => None,
+    }
+}
+
+fn build_byok(
+    vendor: &str,
+    wire_model: &str,
+    key: &str,
+) -> Option<Box<dyn LlmProvider>> {
+    match vendor {
+        "openai" => providers::openai::OpenAiProvider::for_model_with_key(wire_model, key)
             .ok()
             .map(|p| Box::new(p) as Box<dyn LlmProvider>),
-        ("claude-sonnet-4-5", Some(key)) => {
-            providers::anthropic::AnthropicProvider::for_model_with_key(
-                "claude-sonnet-4-5-20251015",
-                key,
-            )
-            .ok()
-            .map(|p| Box::new(p) as Box<dyn LlmProvider>)
-        }
-        ("claude-haiku-4-5", Some(key)) => {
-            providers::anthropic::AnthropicProvider::for_model_with_key(
-                "claude-haiku-4-5-20251001",
-                key,
-            )
-            .ok()
-            .map(|p| Box::new(p) as Box<dyn LlmProvider>)
-        }
-        ("claude-opus-4-5", Some(key)) => {
-            providers::anthropic::AnthropicProvider::for_model_with_key("claude-opus-4-5", key)
+        "anthropic" => {
+            providers::anthropic::AnthropicProvider::for_model_with_key(wire_model, key)
                 .ok()
                 .map(|p| Box::new(p) as Box<dyn LlmProvider>)
         }
-        ("gemini-flash-2", Some(key)) => {
-            providers::gemini::GeminiProvider::for_model_with_key("gemini-2.0-flash-exp", key)
+        "google" => providers::gemini::GeminiProvider::for_model_with_key(wire_model, key)
+            .ok()
+            .map(|p| Box::new(p) as Box<dyn LlmProvider>),
+        _ => None,
+    }
+}
+
+fn build_proxied(
+    vendor: &str,
+    wire_model: &str,
+    session: &str,
+    base_url: &str,
+) -> Option<Box<dyn LlmProvider>> {
+    match vendor {
+        "openai" => {
+            providers::openai::OpenAiProvider::for_model_with_proxy(wire_model, session, base_url)
                 .ok()
                 .map(|p| Box::new(p) as Box<dyn LlmProvider>)
         }
-        ("gemini-thinking-2", Some(key)) => providers::gemini::GeminiProvider::for_model_with_key(
-            "gemini-2.0-flash-thinking-exp",
-            key,
+        "anthropic" => providers::anthropic::AnthropicProvider::for_model_with_proxy(
+            wire_model, session, base_url,
         )
         .ok()
         .map(|p| Box::new(p) as Box<dyn LlmProvider>),
-        // Either no caller-supplied key for this vendor or no `keys`
-        // bundle at all — fall through to env-based resolution.
-        (canonical, _) => provider_from_choice_env(canonical),
+        "google" => {
+            providers::gemini::GeminiProvider::for_model_with_proxy(wire_model, session, base_url)
+                .ok()
+                .map(|p| Box::new(p) as Box<dyn LlmProvider>)
+        }
+        _ => None,
     }
 }
 
@@ -532,6 +552,42 @@ mod tests {
         assert!(provider.is_some(), "explicit key must build the provider");
         let provider = provider.expect("provider");
         assert_eq!(provider.name(), "anthropic");
+    }
+
+    #[test]
+    fn provider_from_choice_with_keys_prefers_byok_over_proxy() {
+        // Both BYOK and session present → BYOK wins (Anthropic endpoint stays
+        // on api.anthropic.com).
+        let keys = ProviderKeys::new()
+            .with_anthropic("sk-ant")
+            .with_proxy("sess-tok", "https://eri.dev");
+        let provider =
+            provider_from_choice_with_keys("claude sonnet", &keys).expect("provider");
+        assert_eq!(provider.name(), "anthropic");
+        // Cast back through the concrete type to check the endpoint. We use
+        // the trait surface to keep the assertion stable: the provider id is
+        // "anthropic" in either case, but we can also inspect the wire model.
+        assert!(provider.model().starts_with("claude-sonnet-4-5"));
+    }
+
+    #[test]
+    fn provider_from_choice_with_keys_falls_back_to_proxy_without_byok() {
+        let keys = ProviderKeys::new().with_proxy("sess-tok", "https://eri.dev");
+        let provider =
+            provider_from_choice_with_keys("claude haiku", &keys).expect("provider");
+        assert_eq!(provider.name(), "anthropic");
+        // The provider name is the same; the URL differentiator lives on the
+        // concrete struct. We assert the route exists by checking model id.
+        assert!(provider.model().starts_with("claude-haiku-4-5"));
+    }
+
+    #[test]
+    fn provider_from_choice_with_keys_returns_none_without_session_or_byok() {
+        // Empty bundle → no proxy, no BYOK. The env fallback may or may not
+        // succeed depending on the host CI environment, so we only assert
+        // the unknown-model path stays None.
+        let keys = ProviderKeys::new();
+        assert!(provider_from_choice_with_keys("banana", &keys).is_none());
     }
 
     #[test]

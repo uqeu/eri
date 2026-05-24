@@ -18,6 +18,7 @@ use tokio::sync::{Mutex, OnceCell, RwLock};
 use crate::audit::AuditLogger;
 use crate::host_client::{HostClient, SecretCache};
 
+pub mod account;
 pub mod apply;
 pub mod audit_svc;
 pub mod brain;

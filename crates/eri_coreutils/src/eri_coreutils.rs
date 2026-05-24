@@ -237,6 +237,7 @@ async fn handle_message(
             let rpc_err = match err {
                 DispatchError::FeatureLocked(_)
                 | DispatchError::BadParams(_)
+                | DispatchError::OverQuota { .. }
                 | DispatchError::Other(_) => err.into_rpc_error(),
             };
             send_response(stdout, id, Err(rpc_err)).await?;

@@ -12,10 +12,22 @@ exports.BYOK_VIEW_ID = "eri.byok";
 class ByokSettingsView {
     context;
     secrets;
+    accountBanner;
     view = null;
-    constructor(context, secrets) {
+    bannerSubscription = null;
+    constructor(context, secrets, accountBanner = null) {
         this.context = context;
         this.secrets = secrets;
+        this.accountBanner = accountBanner;
+        if (accountBanner) {
+            this.bannerSubscription = accountBanner.onChange(() => {
+                void this.refresh();
+            });
+        }
+    }
+    dispose() {
+        this.bannerSubscription?.dispose();
+        this.bannerSubscription = null;
     }
     resolveWebviewView(view) {
         this.view = view;
@@ -163,7 +175,7 @@ class ByokSettingsView {
                 fields,
             });
         }
-        return { providers };
+        return { providers, accountBanner: this.accountBanner?.getBanner() ?? null };
     }
     loadHtml() {
         const htmlPath = vscode.Uri.joinPath(this.context.extensionUri, "media", "byok", "index.html").fsPath;

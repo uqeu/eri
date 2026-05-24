@@ -371,9 +371,17 @@ fn load_rules(workspace: &std::path::Path, ctx: &PromptContext) -> Vec<String> {
     }
 }
 
-/// Resolve BYOK keys via the existing secret cache. Each lookup is best
-/// effort; missing values mean the planner will route around that vendor
-/// or surface a [`BrainIterationError::MissingKey`] error later.
+/// Resolve credentials via the existing secret cache.
+///
+/// Two parallel lookups:
+/// * Session bearer + base URL → enables the eri.dev inference proxy when
+///   the user is signed in. The bearer is process-cached so cost is one
+///   round-trip per sidecar lifetime.
+/// * BYOK keys per vendor → if a user explicitly configured a power-user
+///   key in `SecretStorage`, that vendor bypasses the proxy.
+///
+/// Missing values are not fatal: the planner falls through to the next
+/// available auth mode or surfaces a [`BrainIterationError::MissingKey`].
 async fn collect_provider_keys(services: &Services) -> ProviderKeys {
     let anthropic = services
         .fetch_secret("anthropic", "anthropic-api-key")
@@ -387,6 +395,16 @@ async fn collect_provider_keys(services: &Services) -> ProviderKeys {
         .fetch_secret("google", "google-api-key")
         .await
         .unwrap_or(None);
+    let inception = services
+        .fetch_secret("inception", "inception-api-key")
+        .await
+        .unwrap_or(None);
+    let session = services
+        .secrets
+        .eri_session_token(services.host_client.as_deref())
+        .await;
+    let base_url = services.secrets.eri_base_url();
+
     let mut keys = ProviderKeys::default();
     if let Some(k) = anthropic {
         keys = keys.with_anthropic(k);
@@ -396,6 +414,12 @@ async fn collect_provider_keys(services: &Services) -> ProviderKeys {
     }
     if let Some(k) = google {
         keys = keys.with_google(k);
+    }
+    if let Some(k) = inception {
+        keys = keys.with_inception(k);
+    }
+    if let Some(s) = session {
+        keys = keys.with_proxy(s, base_url);
     }
     keys
 }

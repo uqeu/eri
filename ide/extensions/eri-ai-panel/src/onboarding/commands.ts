@@ -41,6 +41,14 @@ export function registerOnboardingCommands(
   });
 
   const signIn = vscode.commands.registerCommand("eri.onboarding.signIn", async () => {
+    // Delegate to the account module's device-code flow. If it isn't registered
+    // (e.g. during a partial activation), fall back to opening the legacy
+    // browser-based sign-in URL so the user is never stuck.
+    const commands = await vscode.commands.getCommands(true);
+    if (commands.includes("eri.account.signIn")) {
+      await vscode.commands.executeCommand("eri.account.signIn");
+      return;
+    }
     const url = resolveSignInUrl();
     await opener.open(url);
   });

@@ -39,6 +39,7 @@ eri_router = { path = "../eri_router" }
 eri_voice = { path = "../eri_voice" }
 parking_lot = { workspace = true }
 async-trait = { workspace = true }
+ureq = { workspace = true }
 
 [features]
 default = []

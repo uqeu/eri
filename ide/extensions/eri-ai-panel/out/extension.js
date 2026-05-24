@@ -32,6 +32,7 @@ const crash_1 = require("./crash");
 const visualEditor_1 = require("./visualEditor");
 const review_1 = require("./review");
 const statusBar_1 = require("./statusBar");
+const account_1 = require("./account");
 var gaze_2 = require("./gaze/gaze");
 Object.defineProperty(exports, "getCurrentGazeTarget", { enumerable: true, get: function () { return gaze_2.getCurrentTarget; } });
 Object.defineProperty(exports, "getEditorGazeContext", { enumerable: true, get: function () { return gaze_2.getEditorGazeContext; } });
@@ -60,6 +61,7 @@ let crash = null;
 let visualEditor = null;
 let review = null;
 let statusBar = null;
+let account = null;
 function activate(context) {
     const binaryPath = (0, sidecar_1.resolveBinaryPath)(context);
     secretsStore = new secrets_1.SecretsStore(context.secrets, context.globalState);
@@ -80,6 +82,7 @@ function activate(context) {
     });
     sidecar.start();
     statusBar = (0, statusBar_1.activateStatusBar)(context);
+    account = (0, account_1.activateAccount)(context);
     panelProvider = new panel_1.EriPanelProvider(context, () => sidecar);
     context.subscriptions.push(vscode.window.registerWebviewViewProvider("eri.panel", panelProvider));
     preview = (0, preview_1.activatePreview)(context, () => sidecar);
@@ -131,7 +134,30 @@ function activate(context) {
     audit = (0, audit_1.activateAudit)(context, () => sidecar);
     crash = (0, crash_1.activateCrash)(context, () => sidecar);
     visualEditor = (0, visualEditor_1.activateVisualEditor)(context, () => sidecar);
-    byokView = new settingsView_1.ByokSettingsView(context, secretsStore);
+    // Surface an "you're signed in to eri" banner in the BYOK view so users
+    // understand the precedence (BYOK key overrides eri's tier).
+    const bannerEmitter = new vscode.EventEmitter();
+    const accountCapture = account;
+    if (accountCapture) {
+        context.subscriptions.push(accountCapture.store.onChange(() => bannerEmitter.fire()), accountCapture.usage.onUsage(() => bannerEmitter.fire()), bannerEmitter);
+    }
+    const accountBanner = {
+        getBanner: () => {
+            const session = accountCapture?.store.current() ?? null;
+            if (!session)
+                return null;
+            const labels = {
+                free: "Free",
+                pro: "Pro",
+                proPlus: "Pro+",
+                team: "Team",
+                enterprise: "Enterprise",
+            };
+            return { email: session.email, tierLabel: labels[session.tier] ?? "Free" };
+        },
+        onChange: bannerEmitter.event,
+    };
+    byokView = new settingsView_1.ByokSettingsView(context, secretsStore, accountBanner);
     const localView = byokView;
     context.subscriptions.push(vscode.window.registerWebviewViewProvider(settingsView_1.BYOK_VIEW_ID, byokView), vscode.commands.registerCommand("eri.byok.setKey", async () => {
         await localView.pickAndSet();
@@ -215,6 +241,8 @@ function deactivate() {
     review = null;
     statusBar?.dispose();
     statusBar = null;
+    account?.dispose();
+    account = null;
     byokView = null;
     secretsStore = null;
 }

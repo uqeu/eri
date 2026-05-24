@@ -14,6 +14,20 @@ import {
   sendPaymentReceiptEmail,
   sendSubscriptionConfirmationEmail,
 } from "@/lib/email";
+import { applyTierToBucket } from "@/lib/usage/quota";
+
+async function applyTierBucketSafely(userId: string, tier: string): Promise<void> {
+  try {
+    await applyTierToBucket(userId, tier);
+  } catch (error) {
+    // Bucket sync is observability/quota only — never block Stripe on it.
+    console.error("stripe.webhook.bucket_sync_failed", {
+      user_id: userId,
+      tier,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
 
 // Vercel serverless functions have a 10s timeout on Hobby / 60s on Pro.
 // Email rendering + Resend round-trips can eat most of that budget on cold
@@ -106,10 +120,14 @@ async function applySubscription(
   };
   if (userId) {
     await applySubscriptionByUserId(userId, update);
-    return userById(userId);
+    const refreshed = await userById(userId);
+    if (refreshed) await applyTierBucketSafely(refreshed.id, refreshed.tier);
+    return refreshed;
   }
   await applySubscriptionByCustomerId(customerId, update);
-  return userForCustomer(customerId);
+  const refreshed = await userForCustomer(customerId);
+  if (refreshed) await applyTierBucketSafely(refreshed.id, refreshed.tier);
+  return refreshed;
 }
 
 async function clearSubscription(subscription: Stripe.Subscription): Promise<void> {
@@ -120,6 +138,8 @@ async function clearSubscription(subscription: Stripe.Subscription): Promise<voi
     subscription.status,
     subscriptionPeriodEnd(subscription),
   );
+  const user = await userForCustomer(customerId);
+  if (user) await applyTierBucketSafely(user.id, "free");
 }
 
 function customerIdFromInvoice(invoice: Stripe.Invoice): string | null {

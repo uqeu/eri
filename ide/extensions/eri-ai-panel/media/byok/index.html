@@ -74,6 +74,17 @@
   }
   .actions button:hover { background: rgba(255,255,255,0.05); }
   .actions button.danger { color: #ff7b72; }
+  .account-banner {
+    margin: 8px 12px;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: rgba(34, 141, 242, 0.08);
+    color: var(--fg);
+    font-size: 11px;
+    line-height: 1.4;
+  }
+  .account-banner strong { color: var(--accent); }
 </style>
 </head>
 <body>
@@ -81,12 +92,29 @@
   <h1>API Keys (BYOK)</h1>
   <button id="clear-all" title="Remove all stored keys">Clear All</button>
 </header>
+<div id="banner-host"></div>
 <ul id="providers"></ul>
 <script>
   const vscode = acquireVsCodeApi();
   const root = document.getElementById("providers");
 
+  function renderBanner(banner) {
+    const host = document.getElementById("banner-host");
+    host.replaceChildren();
+    if (!banner) return;
+    const box = document.createElement("div");
+    box.className = "account-banner";
+    const strong = document.createElement("strong");
+    strong.textContent = "You're signed in to eri " + banner.tierLabel + ".";
+    box.appendChild(strong);
+    box.appendChild(document.createTextNode(
+      " BYOK keys override and bypass eri's tier — use them for provider features eri doesn't proxy yet (e.g., custom endpoints).",
+    ));
+    host.appendChild(box);
+  }
+
   function render(state) {
+    renderBanner(state.accountBanner);
     root.replaceChildren();
     for (const provider of state.providers) {
       const li = document.createElement("li");

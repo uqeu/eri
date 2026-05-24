@@ -28,8 +28,19 @@ interface ProviderStatusPayload {
   readonly fields: ReadonlyArray<FieldStatusPayload>;
 }
 
+interface AccountBannerPayload {
+  readonly email: string;
+  readonly tierLabel: string;
+}
+
 interface StatePayload {
   readonly providers: ReadonlyArray<ProviderStatusPayload>;
+  readonly accountBanner: AccountBannerPayload | null;
+}
+
+export interface AccountBannerProvider {
+  getBanner(): AccountBannerPayload | null;
+  readonly onChange: vscode.Event<void>;
 }
 
 interface IncomingMessage {
@@ -41,10 +52,24 @@ interface IncomingMessage {
 export class ByokSettingsView implements vscode.WebviewViewProvider {
   private view: vscode.WebviewView | null = null;
 
+  private bannerSubscription: vscode.Disposable | null = null;
+
   constructor(
     private readonly context: vscode.ExtensionContext,
     private readonly secrets: SecretsStore,
-  ) {}
+    private readonly accountBanner: AccountBannerProvider | null = null,
+  ) {
+    if (accountBanner) {
+      this.bannerSubscription = accountBanner.onChange(() => {
+        void this.refresh();
+      });
+    }
+  }
+
+  dispose(): void {
+    this.bannerSubscription?.dispose();
+    this.bannerSubscription = null;
+  }
 
   resolveWebviewView(view: vscode.WebviewView): void {
     this.view = view;
@@ -221,7 +246,7 @@ export class ByokSettingsView implements vscode.WebviewViewProvider {
         fields,
       });
     }
-    return { providers };
+    return { providers, accountBanner: this.accountBanner?.getBanner() ?? null };
   }
 
   private loadHtml(): string {

@@ -1,5 +1,7 @@
-# Sign in (optional)
+# Sign in to eri
 
-Signing in lets eri remember your tier and preferences across machines. It is **not required** — BYOK works either way.
+eri handles model billing for you. Sign in once, get a monthly token budget across Claude, GPT, Gemini, and the eri Engine — no API keys to manage.
 
-We open your browser to a one-time Google sign-in. No password ever touches the IDE.
+You can also use your own keys if you prefer (BYOK is in Settings → API Keys).
+
+[Sign in with eri](command:eri.onboarding.signIn)

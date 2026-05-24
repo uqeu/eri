@@ -36,6 +36,7 @@ import { activateCrash, CrashHandle } from "./crash";
 import { activateVisualEditor, VisualEditorHandle } from "./visualEditor";
 import { activateReview, ReviewHandle } from "./review";
 import { activateStatusBar, EriStatusBarHandle } from "./statusBar";
+import { activateAccount, AccountHandle } from "./account";
 
 export { getCurrentTarget as getCurrentGazeTarget, getEditorGazeContext } from "./gaze/gaze";
 
@@ -64,6 +65,7 @@ let crash: CrashHandle | null = null;
 let visualEditor: VisualEditorHandle | null = null;
 let review: ReviewHandle | null = null;
 let statusBar: EriStatusBarHandle | null = null;
+let account: AccountHandle | null = null;
 
 export function activate(context: vscode.ExtensionContext): void {
   const binaryPath = resolveBinaryPath(context);
@@ -88,6 +90,7 @@ export function activate(context: vscode.ExtensionContext): void {
   sidecar.start();
 
   statusBar = activateStatusBar(context);
+  account = activateAccount(context);
 
   panelProvider = new EriPanelProvider(context, () => sidecar);
   context.subscriptions.push(
@@ -150,7 +153,33 @@ export function activate(context: vscode.ExtensionContext): void {
   crash = activateCrash(context, () => sidecar);
   visualEditor = activateVisualEditor(context, () => sidecar);
 
-  byokView = new ByokSettingsView(context, secretsStore);
+  // Surface an "you're signed in to eri" banner in the BYOK view so users
+  // understand the precedence (BYOK key overrides eri's tier).
+  const bannerEmitter = new vscode.EventEmitter<void>();
+  const accountCapture = account;
+  if (accountCapture) {
+    context.subscriptions.push(
+      accountCapture.store.onChange(() => bannerEmitter.fire()),
+      accountCapture.usage.onUsage(() => bannerEmitter.fire()),
+      bannerEmitter,
+    );
+  }
+  const accountBanner = {
+    getBanner: (): { email: string; tierLabel: string } | null => {
+      const session = accountCapture?.store.current() ?? null;
+      if (!session) return null;
+      const labels: Record<string, string> = {
+        free: "Free",
+        pro: "Pro",
+        proPlus: "Pro+",
+        team: "Team",
+        enterprise: "Enterprise",
+      };
+      return { email: session.email, tierLabel: labels[session.tier] ?? "Free" };
+    },
+    onChange: bannerEmitter.event,
+  };
+  byokView = new ByokSettingsView(context, secretsStore, accountBanner);
   const localView = byokView;
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(BYOK_VIEW_ID, byokView),
@@ -259,6 +288,8 @@ export function deactivate(): void {
   review = null;
   statusBar?.dispose();
   statusBar = null;
+  account?.dispose();
+  account = null;
   byokView = null;
   secretsStore = null;
 }

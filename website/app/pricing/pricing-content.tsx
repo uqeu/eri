@@ -2,229 +2,1058 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { TierNumeral } from "@/components/TierNumeral";
 
-type Cadence = "monthly" | "yearly";
+type BillingCadence = "monthly" | "yearly";
+
+type PlanSlug = "free" | "starter" | "pro" | "pro_plus";
+
+type GlyphValue =
+  | { kind: "bool"; on: boolean }
+  | { kind: "text"; label: string; tone?: "default" | "accent" | "muted" }
+  | { kind: "limited" }
+  | { kind: "expanded" }
+  | { kind: "unlimited" };
+
+interface TurnLimits {
+  monthly: number;
+  weekly: number;
+  daily: number;
+  hourly: number;
+}
 
 interface Plan {
-  readonly name: string;
-  readonly subtitle: string;
-  readonly priceMonthly: number | "Free";
-  readonly priceYearly: number | "Free";
-  readonly cta: { href: string; label: string };
-  readonly ctaPrimary: boolean;
-  readonly includesHeader: string;
-  readonly features: ReadonlyArray<string>;
+  name: React.ReactNode;
+  shortName: string;
+  subtitle: string;
+  slug: PlanSlug;
+  priceMonthly: number | "Free";
+  priceYearlyAsMonthly: number | "Free";
+  cadenceNote: string;
+  tagline: string;
+  blurb: string;
+  includesHeader: string;
+  turns: TurnLimits;
+  features: ReadonlyArray<{ glyph: "full" | "half" | "ring"; label: string }>;
+  cta: { href: string; label: string };
+  ctaVariant: "primary" | "ghost";
+  popular: boolean;
 }
 
 const PLANS: ReadonlyArray<Plan> = [
   {
     name: "Free",
-    subtitle: "Alpha access. Voice, gaze, diffusion — nothing held back.",
+    shortName: "Free",
+    subtitle: "Alpha",
+    slug: "free",
     priceMonthly: "Free",
-    priceYearly: "Free",
-    cta: { href: "/sign-up", label: "Get alpha access" },
-    ctaPrimary: false,
-    includesHeader: "Includes:",
+    priceYearlyAsMonthly: "Free",
+    cadenceNote: "forever",
+    tagline: "Free during invite-only alpha. Voice, gaze, and diffusion — nothing held back.",
+    blurb:
+      "Drop in without a credit card. Voice, gaze, and diffusion preview, full editor, every project you can ship. When the monthly cap hits, eri keeps working locally — no surprise bill, ever.",
+    includesHeader: "Includes",
+    turns: { monthly: 50, weekly: 20, daily: 5, hourly: 2 },
     features: [
-      "Voice transcription on us",
-      "Gaze targeting + diffusion preview",
-      "Capped cloud turns to eri's engine",
-      "Templates + iteration history",
-      "Deploy to your hosting",
-      "Community Discord support",
+      { glyph: "full", label: "Voice transcription — on us" },
+      { glyph: "full", label: "Diffusion edits + Cmd-K palette" },
+      { glyph: "half", label: "Limited cloud turns to eri's engine" },
+      { glyph: "full", label: "Templates + iteration history" },
+      { glyph: "full", label: "Deploy to Vercel" },
+      { glyph: "ring", label: "Community Discord support" },
+    ],
+    cta: { href: "/sign-up?plan=free", label: "Start free" },
+    ctaVariant: "primary",
+    popular: false,
+  },
+  {
+    name: (
+      <>
+        Individual <TierNumeral n="I" />
+      </>
+    ),
+    shortName: "Individual I",
+    subtitle: "Adaptive",
+    slug: "starter",
+    priceMonthly: 15,
+    priceYearlyAsMonthly: 12,
+    cadenceNote: "",
+    tagline: "eri that learns the way you build, session over session.",
+    blurb:
+      "Adaptive eri remembers what you ship, the patterns you reach for, and how you phrase things. Pick a premium voice that fits the way you work.",
+    includesHeader: "Everything in Free, plus",
+    turns: { monthly: 1839, weekly: 459, daily: 65, hourly: 8 },
+    features: [
+      { glyph: "full", label: "Cross-session memory" },
+      { glyph: "full", label: "Pick a premium voice" },
+      { glyph: "full", label: "No eri branding on shipped apps" },
+      { glyph: "full", label: "eri-cloud credits included" },
+      { glyph: "half", label: "Expanded engine quota" },
+      { glyph: "ring", label: "Email support" },
+    ],
+    cta: { href: "/sign-up?plan=starter", label: "Choose Individual I" },
+    ctaVariant: "ghost",
+    popular: false,
+  },
+  {
+    name: (
+      <>
+        Individual <TierNumeral n="II" />
+      </>
+    ),
+    shortName: "Individual II",
+    subtitle: "Frontier",
+    slug: "pro",
+    priceMonthly: 25,
+    priceYearlyAsMonthly: 20,
+    cadenceNote: "",
+    tagline: "Adaptive, plus the model that fits the task. Background agents grind your backlog while you sleep.",
+    blurb:
+      "Frontier eri picks the right brain per task — eri's diffusion engine for short edits, a heavier reasoner when the task needs it. Async agents finish the rest while you sleep.",
+    includesHeader: "Everything in Individual I, plus",
+    turns: { monthly: 3254, weekly: 813, daily: 116, hourly: 14 },
+    features: [
+      { glyph: "full", label: "Multi-model routing — the right brain per task" },
+      { glyph: "full", label: "Background agents that work while you idle" },
+      { glyph: "full", label: "Inline Cmd-K edits included" },
+      { glyph: "full", label: "Custom integrations" },
+      { glyph: "half", label: "Extended context window" },
+      { glyph: "ring", label: "Priority email + Discord" },
+    ],
+    cta: { href: "/sign-up?plan=pro", label: "Choose Individual II" },
+    ctaVariant: "primary",
+    popular: true,
+  },
+  {
+    name: (
+      <>
+        Individual <TierNumeral n="III" />
+      </>
+    ),
+    shortName: "Individual III",
+    subtitle: "Personalized",
+    slug: "pro_plus",
+    priceMonthly: 45,
+    priceYearlyAsMonthly: 36,
+    cadenceNote: "",
+    tagline: "eri trained on your patterns. A private brain that's only yours.",
+    blurb:
+      "Personalized eri studies your codebase locally — your conventions, your naming, your tests — and biases every suggestion toward how you actually write code. A private brain that never pools with anyone else's.",
+    includesHeader: "Everything in Individual II, plus",
+    turns: { monthly: 6084, weekly: 1521, daily: 217, hourly: 27 },
+    features: [
+      { glyph: "full", label: "Exclusive voice presets + blending" },
+      { glyph: "full", label: "Trained on your codebase patterns (locally)" },
+      { glyph: "full", label: "Private brain — never pooled" },
+      { glyph: "full", label: "Largest context window" },
+      { glyph: "full", label: "Priority polish queue" },
+      { glyph: "ring", label: "Priority support" },
+    ],
+    cta: { href: "/sign-up?plan=pro_plus", label: "Choose Individual III" },
+    ctaVariant: "ghost",
+    popular: false,
+  },
+];
+
+interface ComparisonRow {
+  label: string;
+  values: readonly [GlyphValue, GlyphValue, GlyphValue, GlyphValue];
+  note?: string;
+}
+
+interface ComparisonCategory {
+  title: string;
+  rows: ReadonlyArray<ComparisonRow>;
+}
+
+const yes: GlyphValue = { kind: "bool", on: true };
+const no: GlyphValue = { kind: "bool", on: false };
+const limited: GlyphValue = { kind: "limited" };
+const expanded: GlyphValue = { kind: "expanded" };
+const unlimited: GlyphValue = { kind: "unlimited" };
+const text = (label: string, tone: "default" | "accent" | "muted" = "default"): GlyphValue => ({
+  kind: "text",
+  label,
+  tone,
+});
+
+const COMPARISON: ReadonlyArray<ComparisonCategory> = [
+  {
+    title: "Models",
+    rows: [
+      {
+        label: "Diffusion turns on eri's engine",
+        values: [limited, expanded, unlimited, unlimited],
+      },
+      { label: "Inline Cmd-K edit turns", values: [no, yes, yes, yes] },
+      { label: "Premium model routing", values: [no, no, yes, yes] },
+      { label: "Polish queue priority", values: [no, no, no, yes] },
+      {
+        label: "Frontier model context window",
+        values: [text("27K"), text("54K"), text("128K"), text("256K")],
+      },
     ],
   },
   {
-    name: "Pro",
-    subtitle: "When we open up paid: an eri that learns how you build.",
-    priceMonthly: 25,
-    priceYearly: 20,
-    cta: { href: "/sign-up?plan=pro", label: "Join the waitlist" },
-    ctaPrimary: true,
-    includesHeader: "Everything in Free, plus:",
-    features: [
-      "Cross-session memory of your codebase",
-      "Premium voice presets",
-      "Multi-model routing — the right brain per task",
-      "Background agents that work while you idle",
-      "Extended context window",
-      "Priority support",
+    title: "Adaptive features",
+    rows: [
+      { label: "Cross-session memory", values: [no, yes, yes, yes] },
+      { label: "Multi-model routing", values: [no, no, yes, yes] },
+      { label: "Codebase-trained brain", values: [no, no, no, yes] },
+      { label: "Private brain (never shared)", values: [no, no, no, yes] },
+    ],
+  },
+  {
+    title: "Voice + interaction",
+    rows: [
+      { label: "Voice commands (always-listening)", values: [yes, yes, yes, yes] },
+      {
+        label: "Stock voice — on us",
+        values: [
+          text("Stock", "accent"),
+          text("Premium presets", "accent"),
+          text("Premium presets", "accent"),
+          text("Exclusive + blending", "accent"),
+        ],
+      },
+      { label: "Eye tracking", values: [yes, yes, yes, yes] },
+      { label: "Cmd-K palette", values: [yes, yes, yes, yes] },
+    ],
+  },
+  {
+    title: "Privacy + data",
+    rows: [
+      { label: "Code stays on your machine", values: [yes, yes, yes, yes] },
+      {
+        label: "Used to train our models",
+        values: [
+          text("No", "accent"),
+          text("No", "accent"),
+          text("No", "accent"),
+          text("No", "accent"),
+        ],
+      },
+      {
+        label: "Data residency",
+        values: [text("US"), text("US"), text("US"), text("US")],
+      },
+    ],
+  },
+  {
+    title: "Customer service",
+    rows: [
+      { label: "Community Discord", values: [yes, yes, yes, yes] },
+      {
+        label: "Email support",
+        values: [no, yes, text("Priority", "accent"), text("Priority", "accent")],
+      },
     ],
   },
 ];
 
-export function PricingContent(): React.ReactElement {
-  const [cadence, setCadence] = useState<Cadence>("yearly");
-
-  return (
-    <main className="bg-bg text-text">
-      <section className="container pt-24 pb-12 lg:pt-32 lg:pb-16">
-        <div className="mx-auto max-w-2xl text-center">
-          <h1
-            className="text-balance text-[clamp(2.5rem,5vw,4rem)] leading-[1.05] mb-5"
-            style={{
-              fontFamily: "Funnel Display, system-ui, sans-serif",
-              fontWeight: 500,
-              letterSpacing: "-0.03em",
-            }}
-          >
-            Plans that grow with you
-          </h1>
-          <p className="text-text-sec text-[16px] leading-[1.55] mb-9">
-            Free during invite-only alpha. Below is what paid tiers will look
-            like when we open up — hard-capped, cancel any time, no surprise
-            bills.
-          </p>
-
-          <CadenceToggle cadence={cadence} onChange={setCadence} />
-        </div>
-      </section>
-
-      <section className="container pb-24 lg:pb-32">
-        <div className="mx-auto max-w-4xl grid grid-cols-1 md:grid-cols-2 gap-4">
-          {PLANS.map((plan) => (
-            <PlanCard key={plan.name} plan={plan} cadence={cadence} />
-          ))}
-        </div>
-
-        <p className="mt-10 text-center text-text-ter text-[12px] leading-relaxed">
-          Prices shown don&apos;t include applicable tax. Plans and pricing
-          subject to change while we&apos;re in alpha.
-        </p>
-      </section>
-    </main>
-  );
+interface FaqItem {
+  q: string;
+  a: string;
 }
 
-function CadenceToggle({
-  cadence,
-  onChange,
-}: {
-  cadence: Cadence;
-  onChange: (c: Cadence) => void;
-}): React.ReactElement {
+const FAQ: ReadonlyArray<FaqItem> = [
+  {
+    q: "Is Free actually free?",
+    a: "Yes. No credit card, no trial clock. Stock voice is on us. When you hit the monthly cap, eri keeps working locally — no surprise bill, ever.",
+  },
+  {
+    q: "Can I cancel anytime?",
+    a: "Yes. Cancel from your dashboard in one click. You keep access through the end of the billing period and can come back whenever — we don't lock you in.",
+  },
+  {
+    q: "What happens to my apps if I downgrade?",
+    a: "Your projects, iteration history, and deployed apps all stay. The only things that change are the cloud-only features (premium eri voice presets, removed branding, expanded engine quotas). Your code is yours either way.",
+  },
+  {
+    q: "What is BYOK?",
+    a: "Bring your own provider keys on paid tiers — eri reads them from macOS Keychain. We never proxy, mirror, or sync them. Paid tiers also include eri-cloud credits if you'd rather not bring keys.",
+  },
+  {
+    q: "What happens when I hit my monthly cap?",
+    a: "Cloud turns pause. eri keeps working — Cmd-K, agent, composer, voice — using your own provider key for the rest of the month. There is no metered overage and we never bill above the headline price. Your cap resets at the start of the next billing cycle.",
+  },
+  {
+    q: "Do you offer student, non-profit, or open-source discounts?",
+    a: "Yes. Email phlotu@gmail.com with a .edu address, a non-profit registration, or a link to your OSS project and the operator will set you up. Case-by-case, real conversation, no coupon code.",
+  },
+  {
+    q: "Refund policy?",
+    a: "If you're unhappy within 30 days, email us and we'll refund the most recent month. No forms, no \"why are you leaving\" survey.",
+  },
+  {
+    q: "Does the price include VAT / GST?",
+    a: "Prices are listed in USD and exclude VAT, GST, and other local taxes. We add applicable taxes at checkout based on your billing address.",
+  },
+  {
+    q: "Annual billing discount?",
+    a: "Yearly billing saves you two months — the same monthly headline price, billed once a year. Switch cadence from your dashboard at any time.",
+  },
+  {
+    q: "Frontier vs Personalized?",
+    a: "Frontier (Individual II) gives you multi-model routing — eri picks the right brain per task. Personalized (Individual III) adds locally-trained pattern recognition on your codebase and a private brain that doesn't pool with other users. Frontier makes eri smarter; Personalized makes eri yours.",
+  },
+  {
+    q: "Does Personalized train on my code?",
+    a: "No. Your code never leaves your machine. Personalization is local pattern recognition + cached embeddings via eri_cache — not training data shipped to a third party. The private brain is a per-user vector store living next to your project, not a fine-tune.",
+  },
+];
+
+function Glyph({ glyph }: { glyph: "full" | "half" | "ring" }): React.ReactElement {
+  const common = "inline-block w-3 h-3 rounded-full flex-shrink-0";
+  if (glyph === "full") {
+    return <span className={`${common} bg-accent`} aria-hidden />;
+  }
+  if (glyph === "half") {
+    return (
+      <span
+        className={`${common} border border-accent`}
+        style={{
+          background:
+            "linear-gradient(90deg, #E0FF4F 0%, #E0FF4F 50%, transparent 50%, transparent 100%)",
+        }}
+        aria-hidden
+      />
+    );
+  }
+  return <span className={`${common} border border-accent`} aria-hidden />;
+}
+
+function ValueCell({ value }: { value: GlyphValue }): React.ReactElement {
+  if (value.kind === "bool") {
+    return value.on ? (
+      <span className="inline-flex w-4 h-4 items-center justify-center text-accent" aria-label="Yes">
+        <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2">
+          <path d="M3 8.5l3.5 3.5L13 4.5" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </span>
+    ) : (
+      <span className="text-muted/40 text-base leading-none" aria-label="Not included">—</span>
+    );
+  }
+  if (value.kind === "limited") {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-paper/85 text-xs">
+        <span
+          className="w-2.5 h-2.5 rounded-full border border-accent/70"
+          style={{
+            background:
+              "linear-gradient(90deg, rgba(224,255,79,0.7) 0%, rgba(224,255,79,0.7) 50%, transparent 50%, transparent 100%)",
+          }}
+          aria-hidden
+        />
+        Limited
+      </span>
+    );
+  }
+  if (value.kind === "expanded") {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-paper/85 text-xs">
+        <span
+          className="w-2.5 h-2.5 rounded-full border border-accent/70"
+          style={{
+            background:
+              "conic-gradient(#E0FF4F 0deg 270deg, transparent 270deg 360deg)",
+          }}
+          aria-hidden
+        />
+        Expanded
+      </span>
+    );
+  }
+  if (value.kind === "unlimited") {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-paper/95 text-xs">
+        <span className="w-2.5 h-2.5 rounded-full bg-accent" aria-hidden />
+        Unlimited<sup className="text-accent">*</sup>
+      </span>
+    );
+  }
+  const toneClass =
+    value.tone === "accent" ? "text-accent" : value.tone === "muted" ? "text-muted" : "text-paper/85";
+  return <span className={`text-xs tabular-nums ${toneClass}`}>{value.label}</span>;
+}
+
+function FaqRow({ item }: { item: FaqItem }): React.ReactElement {
+  const [open, setOpen] = useState(false);
   return (
-    <div
-      role="radiogroup"
-      aria-label="Billing cadence"
-      className="inline-flex items-center gap-0.5 rounded-full border border-border bg-bg-card p-1"
-    >
+    <div className="border-b border-white/10 last:border-b-0">
       <button
         type="button"
-        role="radio"
-        aria-checked={cadence === "monthly"}
-        onClick={() => onChange("monthly")}
-        className={
-          "rounded-full px-4 py-1.5 text-[13px] transition-colors " +
-          (cadence === "monthly"
-            ? "bg-bg-card-2 text-text"
-            : "text-text-sec hover:text-text")
-        }
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="w-full flex items-start justify-between gap-6 py-6 text-left transition-colors hover:text-paper cursor-pointer"
       >
-        Monthly
+        <span className={`font-display text-lg sm:text-xl tracking-tight transition-colors ${open ? "text-paper" : "text-paper/90"}`}>
+          {item.q}
+        </span>
+        <span
+          className={`mt-2 text-paper/60 transition-transform duration-200 ${open ? "rotate-180 text-paper" : ""}`}
+          aria-hidden
+        >
+          <svg viewBox="0 0 16 16" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <path d="M4 6l4 4 4-4" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </span>
       </button>
-      <button
-        type="button"
-        role="radio"
-        aria-checked={cadence === "yearly"}
-        onClick={() => onChange("yearly")}
-        className={
-          "rounded-full px-4 py-1.5 text-[13px] transition-colors " +
-          (cadence === "yearly"
-            ? "bg-bg-card-2 text-text"
-            : "text-text-sec hover:text-text")
-        }
+      <div
+        className="grid transition-all duration-300 ease-out"
+        style={{ gridTemplateRows: open ? "1fr" : "0fr" }}
       >
-        Yearly
-        <span className="ml-1.5 text-text-ter">· save 2mo</span>
-      </button>
+        <div className="overflow-hidden">
+          <p className="pb-6 pr-10 text-paper/80 leading-relaxed">{item.a}</p>
+        </div>
+      </div>
     </div>
   );
 }
 
-function PlanCard({
+function formatPrice(value: number | "Free"): string {
+  if (value === "Free") return "$0";
+  return `$${value}`;
+}
+
+function priceFor(plan: Plan, cadence: BillingCadence): number | "Free" {
+  return cadence === "yearly" ? plan.priceYearlyAsMonthly : plan.priceMonthly;
+}
+
+function PlanArt({ slug }: { slug: PlanSlug }): React.ReactElement {
+  // Orbital illustration that scales in density per tier. Each card gets a
+  // distinct rendering so the eye picks up that they're different products
+  // without us having to lean on a heavy logo per plan.
+  const rings = {
+    free: 1,
+    starter: 2,
+    pro: 3,
+    pro_plus: 4,
+  }[slug];
+  const dots = {
+    free: 2,
+    starter: 4,
+    pro: 6,
+    pro_plus: 8,
+  }[slug];
+  return (
+    <svg
+      width="56"
+      height="56"
+      viewBox="0 0 56 56"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden
+      className={slug === "pro" ? "text-accent" : "text-paper/60"}
+    >
+      <circle cx="28" cy="28" r="3" fill="currentColor" />
+      {Array.from({ length: rings }).map((_, i) => (
+        <circle
+          key={i}
+          cx="28"
+          cy="28"
+          r={6 + i * 7}
+          stroke="currentColor"
+          strokeOpacity={0.4 - i * 0.08}
+          strokeWidth="1"
+          fill="none"
+        />
+      ))}
+      {Array.from({ length: dots }).map((_, i) => {
+        const angle = (i / dots) * Math.PI * 2;
+        const r = 6 + (rings - 1) * 7;
+        const cx = 28 + Math.cos(angle) * r;
+        const cy = 28 + Math.sin(angle) * r;
+        return (
+          <circle
+            key={`d-${i}`}
+            cx={cx}
+            cy={cy}
+            r="1.6"
+            fill="currentColor"
+            opacity={0.7}
+          />
+        );
+      })}
+    </svg>
+  );
+}
+
+function PlanTile({
   plan,
   cadence,
 }: {
   plan: Plan;
-  cadence: Cadence;
+  cadence: BillingCadence;
 }): React.ReactElement {
-  const price = cadence === "monthly" ? plan.priceMonthly : plan.priceYearly;
-  const isFree = price === "Free";
+  const isFree = plan.priceMonthly === "Free";
+  const current = formatPrice(priceFor(plan, cadence));
+  const monthlyStr = formatPrice(plan.priceMonthly);
+  const yearlyStr = formatPrice(plan.priceYearlyAsMonthly);
+  const showStrike =
+    cadence === "yearly" && !isFree && monthlyStr !== yearlyStr;
+  const ctaClass =
+    plan.ctaVariant === "primary"
+      ? "ship-gradient ship-gradient-hover text-ink"
+      : "border border-white/15 hover:border-paper text-paper";
 
   return (
-    <div className="flex h-full flex-col rounded-2xl border border-border bg-bg-card p-7 lg:p-8">
-      <div className="mb-6">
-        <h2 className="text-[24px] font-medium leading-tight text-text mb-1.5">
+    <div
+      className={`group relative flex h-full flex-col rounded-2xl border p-6 transition-all duration-200 ${
+        plan.popular
+          ? "border-white/25 bg-white/[0.04]"
+          : "border-white/10 bg-white/[0.02] hover:border-white/20"
+      }`}
+    >
+      {plan.popular && (
+        <span className="absolute right-5 top-5 inline-flex items-center rounded-full border border-white/15 bg-black/40 px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-paper/70">
+          Recommended
+        </span>
+      )}
+
+      <div className="flex items-start justify-between gap-3">
+        <PlanArt slug={plan.slug} />
+      </div>
+
+      <div className="mt-5 flex flex-col gap-1">
+        <h3 className="font-display text-2xl tracking-tight leading-tight text-paper">
           {plan.name}
-        </h2>
-        <p className="text-text-sec text-[14px] leading-[1.45]">
+        </h3>
+        <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted">
           {plan.subtitle}
         </p>
+        <p className="mt-2 text-[13px] text-paper/80 leading-relaxed">
+          {plan.tagline}
+        </p>
       </div>
 
-      <div className="mb-6 flex items-baseline gap-2">
-        {isFree ? (
-          <span className="text-[36px] font-medium leading-none text-text">
-            $0
+      {/* Price block — fixed min-height so all 4 tiers align */}
+      <div className="mt-5 flex flex-wrap items-baseline gap-x-2 gap-y-1 tabular-nums min-h-[3.25rem]">
+        {showStrike && (
+          <span className="font-mono text-sm text-muted line-through decoration-muted/60">
+            {monthlyStr}
           </span>
-        ) : (
-          <>
-            <span className="text-[36px] font-medium leading-none text-text">
-              ${price}
-            </span>
-            <span className="text-text-sec text-[12px] leading-[1.4]">
-              USD / month
-              <br />
-              billed {cadence === "yearly" ? "annually" : "monthly"}
-            </span>
-          </>
         )}
+        <span className="font-display text-4xl tracking-tight leading-none text-paper">
+          {current}
+        </span>
+        <span className="inline-flex flex-col text-[11px] font-normal leading-tight text-muted">
+          {isFree ? (
+            <>
+              <span>{plan.cadenceNote || "forever"}</span>
+              <span className="opacity-0">·</span>
+            </>
+          ) : (
+            <>
+              <span>USD / month</span>
+              <span>
+                {cadence === "yearly" ? "billed annually" : "billed monthly"}
+              </span>
+            </>
+          )}
+        </span>
       </div>
 
-      <Link
-        href={plan.cta.href}
-        className={
-          "inline-flex items-center justify-center rounded-md px-4 py-2.5 text-[14px] font-medium transition-opacity " +
-          (plan.ctaPrimary
-            ? "bg-text text-bg hover:opacity-90"
-            : "border border-border text-text hover:bg-bg-card-2")
-        }
-      >
-        {plan.cta.label}
-      </Link>
+      <div className="mt-5">
+        <Link
+          href={plan.cta.href}
+          className={`inline-flex h-11 w-full items-center justify-center rounded-md px-5 text-sm font-medium transition ${ctaClass}`}
+        >
+          {plan.cta.label}
+        </Link>
+      </div>
 
-      <div className="my-6 border-t border-border" />
-
-      <div className="flex flex-1 flex-col">
-        <p className="text-text text-[14px] font-medium mb-4">
+      <div className="mt-6 -mx-6 px-6 pt-6 border-t border-white/[0.08]">
+        <p className="text-[13px] font-medium text-paper/80">
           {plan.includesHeader}
         </p>
-        <ul className="space-y-3">
+        <ul className="mt-3 flex flex-col gap-2 text-[13px] text-paper/75">
           {plan.features.map((f) => (
-            <li
-              key={f}
-              className="flex items-start gap-3 text-[14px] text-text-sec leading-[1.4]"
-            >
-              <span
+            <li key={f.label} className="flex items-start gap-2">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="14"
+                height="14"
+                fill="currentColor"
+                viewBox="0 0 256 256"
                 aria-hidden
-                className="mt-1 inline-block h-[14px] w-[14px] flex-shrink-0 text-text"
+                className={`mt-0.5 shrink-0 ${plan.popular ? "text-accent" : "text-paper/50"}`}
               >
-                <svg viewBox="0 0 14 14" fill="none">
-                  <path
-                    d="M3 7.5l2.5 2.5L11 4.5"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </span>
-              {f}
+                <path d="M229.66 77.66l-128 128a8 8 0 0 1-11.32 0l-56-56a8 8 0 0 1 11.32-11.32L96 188.69 218.34 66.34a8 8 0 0 1 11.32 11.32Z" />
+              </svg>
+              <span className="leading-snug">{f.label}</span>
             </li>
           ))}
         </ul>
       </div>
     </div>
+  );
+}
+
+function TurnLimitsBlock({ turns }: { turns: TurnLimits }): React.ReactElement {
+  return (
+    <div className="rounded-md border border-white/10 bg-white/[0.02] px-4 py-3">
+      <p className="font-mono text-[9px] uppercase tracking-[0.22em] text-muted">
+        Voice turns
+      </p>
+      <div className="mt-2 grid grid-cols-4 gap-3">
+        {[
+          { v: turns.monthly, sub: "/mo" },
+          { v: turns.weekly, sub: "/wk soft" },
+          { v: turns.daily, sub: "/day soft" },
+          { v: turns.hourly, sub: "/hr burst" },
+        ].map((row) => (
+          <div key={row.sub}>
+            <div className="font-mono text-[15px] tabular-nums text-paper leading-none">
+              {row.v.toLocaleString("en-US")}
+            </div>
+            <div className="mt-1 font-mono text-[9px] uppercase tracking-[0.18em] text-muted">
+              {row.sub}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function PlanDetail({
+  plan,
+  cadence,
+}: {
+  plan: Plan;
+  cadence: BillingCadence;
+}): React.ReactElement {
+  const isFree = plan.priceMonthly === "Free";
+  const current = formatPrice(priceFor(plan, cadence));
+  const monthlyStr = formatPrice(plan.priceMonthly);
+  const yearlyStr = formatPrice(plan.priceYearlyAsMonthly);
+  const showStrike = cadence === "yearly" && !isFree && monthlyStr !== yearlyStr;
+  const href = isFree ? plan.cta.href : `${plan.cta.href}&billing=${cadence}`;
+
+  const ctaClass =
+    plan.ctaVariant === "primary"
+      ? "ship-gradient ship-gradient-hover text-ink"
+      : "border border-white/15 text-paper hover:border-accent/60 hover:text-accent";
+
+  return (
+    <article
+      className={`relative overflow-hidden rounded-2xl border p-6 sm:p-8 ${
+        plan.popular
+          ? "border-accent/60 bg-accent/[0.04]"
+          : "border-white/10 bg-white/[0.02]"
+      }`}
+    >
+      <div className="grid gap-8 lg:grid-cols-[1.1fr_1fr]">
+        <div>
+          <p className="font-mono text-[10px] uppercase tracking-[0.25em] text-paper/70">
+            {plan.subtitle}
+          </p>
+          <h3 className="mt-2 font-display text-3xl sm:text-4xl tracking-tight leading-tight">
+            {plan.name}
+          </h3>
+
+          <div className="mt-5 flex items-baseline gap-3 tabular-nums">
+            {showStrike && (
+              <span className="font-mono text-sm text-muted line-through decoration-muted/60">
+                {monthlyStr}
+              </span>
+            )}
+            <span className="font-display text-5xl sm:text-6xl tracking-tight leading-none">
+              {current}
+            </span>
+            <span className="font-mono text-[11px] uppercase tracking-[0.18em] text-muted">
+              {isFree ? plan.cadenceNote : "/mo"}
+            </span>
+          </div>
+          {cadence === "yearly" && !isFree && (
+            <p className="mt-2 font-mono text-[10px] uppercase tracking-[0.2em] text-accent">
+              Billed yearly · save 2 mo
+            </p>
+          )}
+
+          <p className="mt-5 text-paper/85 leading-relaxed">{plan.blurb}</p>
+
+          <Link
+            href={href}
+            className={`mt-7 inline-flex w-full sm:w-auto justify-center font-medium px-5 py-3 rounded-md text-sm transition ${ctaClass}`}
+          >
+            {plan.cta.label}
+          </Link>
+
+          <div className="mt-7">
+            <TurnLimitsBlock turns={plan.turns} />
+          </div>
+        </div>
+
+        <div className="lg:border-l lg:border-white/10 lg:pl-8">
+          <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted">
+            {plan.includesHeader}
+          </p>
+          <ul className="mt-5 flex flex-col gap-4 text-sm">
+            {plan.features.map((feature) => (
+              <li key={feature.label} className="flex gap-3 items-start">
+                <span className="mt-1">
+                  <Glyph glyph={feature.glyph} />
+                </span>
+                <span className="text-paper/90 leading-relaxed">
+                  {feature.label}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+const TIER_HEADERS: ReadonlyArray<{ label: string; sub: string; popular?: boolean }> = [
+  { label: "Free", sub: "Stock" },
+  { label: "I", sub: "Adaptive" },
+  { label: "II", sub: "Frontier", popular: true },
+  { label: "III", sub: "Personalized" },
+];
+
+function ComparisonTable(): React.ReactElement {
+  return (
+    <div className="hidden md:block mt-12 rounded-xl border border-white/10 overflow-hidden">
+      <table className="w-full border-collapse text-sm">
+        <thead>
+          <tr className="sticky top-[3.5rem] z-10 bg-ink/95 backdrop-blur supports-[backdrop-filter]:bg-ink/80 border-b border-white/10">
+            <th className="text-left px-5 py-4 font-mono text-[10px] uppercase tracking-[0.22em] text-muted w-[36%]">
+              Compare features
+            </th>
+            {TIER_HEADERS.map((t) => (
+              <th
+                key={t.label}
+                className={`px-3 py-4 text-center align-middle ${
+                  t.popular ? "bg-accent/[0.06]" : ""
+                }`}
+              >
+                <div className="font-display text-base tracking-tight leading-none">
+                  {t.label === "I" || t.label === "II" || t.label === "III" ? (
+                    <span className="italic text-paper">{t.label}</span>
+                  ) : (
+                    t.label
+                  )}
+                </div>
+                <div className="mt-1 font-mono text-[9px] uppercase tracking-[0.22em] text-muted">
+                  {t.sub}
+                </div>
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {COMPARISON.flatMap((category) => [
+            <tr key={`cat-${category.title}`} className="bg-white/[0.04]">
+              <td
+                colSpan={5}
+                className="px-5 py-3 font-mono text-[10px] uppercase tracking-[0.25em] text-paper/70"
+              >
+                {category.title}
+              </td>
+            </tr>,
+            ...category.rows.map((row, rIdx) => (
+              <tr
+                key={`${category.title}-${row.label}`}
+                className={`border-t border-white/5 ${
+                  rIdx % 2 === 0 ? "bg-transparent" : "bg-white/[0.015]"
+                }`}
+              >
+                <td className="px-5 py-3.5 text-paper/90">
+                  {row.label}
+                  {row.note && (
+                    <span className="ml-2 font-mono text-[9px] uppercase tracking-[0.2em] text-muted">
+                      {row.note}
+                    </span>
+                  )}
+                </td>
+                {row.values.map((value, i) => (
+                  <td
+                    key={i}
+                    className={`px-3 py-3.5 text-center ${
+                      TIER_HEADERS[i]?.popular ? "bg-accent/[0.03]" : ""
+                    }`}
+                  >
+                    <ValueCell value={value} />
+                  </td>
+                ))}
+              </tr>
+            )),
+          ])}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function MobileCompare(): React.ReactElement {
+  const [activeTier, setActiveTier] = useState<number>(2);
+  const tier = TIER_HEADERS[activeTier];
+
+  return (
+    <div className="md:hidden mt-10">
+      <div className="overflow-x-auto -mx-6 px-6 pb-2">
+        <div className="inline-flex gap-2">
+          {TIER_HEADERS.map((t, idx) => {
+            const active = idx === activeTier;
+            return (
+              <button
+                key={t.label}
+                type="button"
+                onClick={() => setActiveTier(idx)}
+                className={`px-3 py-2 rounded-full font-mono text-[10px] uppercase tracking-[0.22em] whitespace-nowrap transition ${
+                  active
+                    ? "bg-accent text-ink"
+                    : "border border-white/10 text-muted"
+                }`}
+              >
+                <span className="font-display not-italic mr-1">
+                  {t.label === "I" || t.label === "II" || t.label === "III" ? (
+                    <span className="italic">{t.label}</span>
+                  ) : (
+                    t.label
+                  )}
+                </span>
+                <span>· {t.sub}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="mt-6 rounded-xl border border-white/10 overflow-hidden">
+        {COMPARISON.map((category) => (
+          <div key={`m-${category.title}`}>
+            <div className="px-5 py-3 bg-white/[0.04] font-mono text-[10px] uppercase tracking-[0.25em] text-paper/70">
+              {category.title}
+            </div>
+            {category.rows.map((row, rIdx) => (
+              <div
+                key={`m-${category.title}-${row.label}`}
+                className={`flex items-center justify-between gap-4 px-5 py-3.5 border-t border-white/5 ${
+                  rIdx % 2 === 0 ? "bg-transparent" : "bg-white/[0.015]"
+                }`}
+              >
+                <span className="text-paper/90 text-sm">
+                  {row.label}
+                  {row.note && (
+                    <span className="ml-2 font-mono text-[9px] uppercase tracking-[0.2em] text-muted">
+                      {row.note}
+                    </span>
+                  )}
+                </span>
+                <span className="flex-shrink-0">
+                  <ValueCell value={row.values[activeTier]} />
+                </span>
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+
+      <p className="mt-3 text-[11px] text-muted">
+        Showing <span className="text-paper">{tier.label} · {tier.sub}</span>. Tap a tier to switch.
+      </p>
+    </div>
+  );
+}
+
+export function PricingContent(): React.ReactElement {
+  const [cadence, setCadence] = useState<BillingCadence>("monthly");
+
+  return (
+    <>
+      <section className="border-b border-border">
+        <div className="container pt-20 lg:pt-28 pb-10 text-center">
+          <h1
+            className="text-[clamp(2rem,4vw,3.25rem)] tracking-tight text-balance leading-[1.05] mx-auto max-w-3xl"
+            style={{
+              fontFamily: "Funnel Display, system-ui, sans-serif",
+              fontWeight: 500,
+              letterSpacing: "-0.025em",
+            }}
+          >
+            Plans that grow with you
+          </h1>
+          <p className="mt-5 mx-auto max-w-xl text-[15px] text-text-sec leading-relaxed">
+            Free during invite-only alpha. Below is what paid tiers will look like when we open up — hard-capped, cancel any time, no surprise bills.
+          </p>
+
+          <div className="mt-8 flex items-center justify-center gap-4">
+            <div
+              role="tablist"
+              aria-label="Billing cadence"
+              className="relative inline-flex rounded-full border border-white/10 bg-white/[0.03] p-1"
+            >
+              <button
+                type="button"
+                role="tab"
+                aria-selected={cadence === "monthly"}
+                onClick={() => setCadence("monthly")}
+                className={`relative z-10 px-5 py-2 text-sm rounded-full transition-colors ${
+                  cadence === "monthly"
+                    ? "text-paper"
+                    : "text-muted hover:text-paper"
+                }`}
+              >
+                Monthly
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={cadence === "yearly"}
+                onClick={() => setCadence("yearly")}
+                className={`relative z-10 px-5 py-2 text-sm rounded-full transition-colors ${
+                  cadence === "yearly"
+                    ? "text-paper"
+                    : "text-muted hover:text-paper"
+                }`}
+              >
+                Yearly
+                <span className="ml-1.5 font-mono text-[10px] text-paper/60">
+                  · save 2mo
+                </span>
+              </button>
+              <span
+                className="absolute top-1 bottom-1 rounded-full bg-white/[0.08] border border-white/10 transition-transform duration-300 ease-out"
+                style={{
+                  width: "calc(50% - 4px)",
+                  left: 4,
+                  transform:
+                    cadence === "yearly" ? "translateX(100%)" : "translateX(0%)",
+                }}
+                aria-hidden
+              />
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="border-b border-white/10">
+        <div className="mx-auto max-w-6xl px-6 pt-10 sm:pt-12 pb-16 sm:pb-20">
+          <div className="grid gap-5 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 items-stretch">
+            {PLANS.map((plan) => (
+              <PlanTile key={plan.slug} plan={plan} cadence={cadence} />
+            ))}
+          </div>
+
+          <div className="mt-12 rounded-xl border border-white/10 bg-white/[0.02] p-6 sm:p-7">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:gap-8">
+              <div className="sm:w-44 flex-shrink-0">
+                <p className="font-mono text-[10px] uppercase tracking-[0.25em] text-paper/60">
+                  What's a turn?
+                </p>
+              </div>
+              <div className="flex-1">
+                <p className="text-paper/85 leading-relaxed">
+                  A <span className="text-paper">voice turn</span> is one
+                  round-trip with eri's engine: one push-to-talk submission, one
+                  Cmd-K inline edit, or one Composer multi-file plan. Each turn
+                  averages 15K input and 3K output tokens.
+                </p>
+                <p className="mt-2 text-muted leading-relaxed text-sm">
+                  Tab completions don't count — they're metered separately.
+                  Daily caps are soft (occasional overruns are fine); hourly
+                  caps stop a runaway agent from draining your month in five
+                  minutes.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-14 rounded-xl border border-white/10 bg-white/[0.02] p-6 sm:p-8">
+            <p className="font-mono text-[10px] uppercase tracking-[0.25em] text-paper/70">
+              What's not on this page
+            </p>
+            <h3 className="mt-3 font-display text-2xl sm:text-3xl tracking-tight">
+              Four line items you won't ever see on a bill from us.
+            </h3>
+            <div className="mt-7 grid gap-5 sm:grid-cols-2">
+              <div className="flex gap-3">
+                <span aria-hidden className="mt-2 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-paper/40" />
+                <div>
+                  <p className="text-paper/90 text-sm">Metered overage.</p>
+                  <p className="mt-1 text-xs text-muted leading-relaxed">
+                    Hit the monthly cap and cloud turns pause. Your own key still works.
+                  </p>
+                </div>
+              </div>
+              <div className="flex gap-3">
+                <span aria-hidden className="mt-2 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-paper/40" />
+                <div>
+                  <p className="text-paper/90 text-sm">Opaque auto-routing.</p>
+                  <p className="mt-1 text-xs text-muted leading-relaxed">
+                    Every turn shows which model answered and how much it cost in tokens and time.
+                  </p>
+                </div>
+              </div>
+              <div className="flex gap-3">
+                <span aria-hidden className="mt-2 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-paper/40" />
+                <div>
+                  <p className="text-paper/90 text-sm">Bring your own keys on paid tiers.</p>
+                  <p className="mt-1 text-xs text-muted leading-relaxed">
+                    Stock eri voice ships in on Free — we cover it. You only bring keys if you want to.
+                  </p>
+                </div>
+              </div>
+              <div className="flex gap-3">
+                <span aria-hidden className="mt-2 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-paper/40" />
+                <div>
+                  <p className="text-paper/90 text-sm">Add-ons for the basics.</p>
+                  <p className="mt-1 text-xs text-muted leading-relaxed">
+                    Voice, gaze, Cmd-K, diffusion preview, and iteration history ship on every tier.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="border-b border-white/10 bg-white/[0.01]">
+        <div className="mx-auto max-w-6xl px-6 py-20 sm:py-24">
+          <p className="font-mono text-xs uppercase tracking-[0.25em] text-muted">
+            Compare
+          </p>
+          <h2 className="mt-4 font-display text-3xl sm:text-5xl tracking-tight max-w-3xl text-balance">
+            Compare features{" "}
+            <span className="italic text-paper">across plans.</span>
+          </h2>
+          <p className="mt-4 max-w-2xl text-muted leading-relaxed">
+            Every feature, side by side. Categories group what Eri can do, how
+            you talk to it, and what's on us versus what you bring.
+          </p>
+
+          <ComparisonTable />
+          <MobileCompare />
+
+          <p className="mt-6 text-[11px] text-muted leading-relaxed max-w-2xl">
+            <span className="text-accent">*</span> Usage must be reasonable.
+          </p>
+        </div>
+      </section>
+
+      <section className="border-b border-white/10">
+        <div className="mx-auto max-w-3xl px-6 py-24 sm:py-32">
+          <p className="font-mono text-xs uppercase tracking-[0.25em] text-muted">
+            Questions
+          </p>
+          <h2 className="mt-4 font-display text-3xl sm:text-5xl tracking-tight text-balance">
+            The stuff people{" "}
+            <span className="italic text-paper">always ask.</span>
+          </h2>
+
+          <div className="mt-12 border-y border-white/10">
+            {FAQ.map((item) => (
+              <FaqRow key={item.q} item={item} />
+            ))}
+          </div>
+        </div>
+      </section>
+    </>
   );
 }

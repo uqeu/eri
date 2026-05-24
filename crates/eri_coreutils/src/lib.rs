@@ -93,6 +93,12 @@ pub const INTERNAL_ERROR_CODE: i32 = -32603;
 pub const TAB_DOWNLOADING_CODE: i32 = -32100;
 const TAB_DOWNLOADING_SENTINEL: &str = "__DOWNLOADING__";
 
+/// JSON-RPC -32402: the eri.dev inference proxy returned HTTP 402
+/// `over_quota`. Paired with a JSON-shaped message
+/// `{"tier":"free","remaining":0}` so the IDE can pop the upgrade dialog
+/// without parsing free-form English. Mirrors HTTP 402 / Payment Required.
+pub const OVER_QUOTA_CODE: i32 = -32402;
+
 #[derive(Clone, Debug, Default)]
 pub struct TierState {
     // Retained for telemetry / future per-tier branching even though feature
@@ -146,6 +152,10 @@ pub struct Notification {
 pub enum DispatchError {
     FeatureLocked(&'static str),
     BadParams(String),
+    /// The eri.dev backend rejected the call because the user is over their
+    /// tier quota. The IDE surfaces this with an upgrade CTA instead of the
+    /// generic error toast.
+    OverQuota { tier: String, remaining: i64 },
     Other(anyhow::Error),
 }
 
@@ -166,6 +176,14 @@ impl DispatchError {
             DispatchError::BadParams(message) => RpcError {
                 code: BAD_PARAMS_CODE,
                 message,
+            },
+            DispatchError::OverQuota { tier, remaining } => RpcError {
+                code: OVER_QUOTA_CODE,
+                message: format!(
+                    "OVER_QUOTA: {{\"tier\":\"{}\",\"remaining\":{}}}",
+                    tier.replace('"', ""),
+                    remaining
+                ),
             },
             DispatchError::Other(err) => {
                 let msg = err.to_string();
@@ -259,6 +277,9 @@ pub async fn dispatch(
                 let message = match err {
                     DispatchError::FeatureLocked(f) => format!("FEATURE_LOCKED: {f}"),
                     DispatchError::BadParams(m) => m.clone(),
+                    DispatchError::OverQuota { tier, remaining } => {
+                        format!("OVER_QUOTA: tier={tier} remaining={remaining}")
+                    }
                     DispatchError::Other(e) => e.to_string(),
                 };
                 fire_hooks_safe(
@@ -282,6 +303,7 @@ pub async fn dispatch(
             Ok(_) => (AuditStatus::Ok, None),
             Err(DispatchError::FeatureLocked(_)) => (AuditStatus::Skipped, Some("feature_locked")),
             Err(DispatchError::BadParams(_)) => (AuditStatus::Error, Some("bad_params")),
+            Err(DispatchError::OverQuota { .. }) => (AuditStatus::Error, Some("over_quota")),
             Err(DispatchError::Other(e)) => (
                 AuditStatus::Error,
                 Some(audit::audit_error_kind(&e.to_string())),
@@ -561,6 +583,13 @@ async fn dispatch_inner(
         "eri/gaze/stop" => services::gaze::stop(request.params.clone(), services).await,
         "eri/gaze/status" => services::gaze::status(request.params.clone(), services).await,
         "eri/gaze/calibrate" => services::gaze::calibrate(request.params.clone(), services).await,
+
+        // --- eri.dev account proxy (free tier; user's own data) ---
+        "eri/account/usage" => services::account::usage(request.params.clone(), services).await,
+        "eri/account/me" => services::account::me(request.params.clone(), services).await,
+        "eri/account/sign_out" => {
+            services::account::sign_out(request.params.clone(), services).await
+        }
 
         // --- Crash + Sentry (free tier; local-only observability) ---
         "eri/crash/recent" => services::crash::recent(request.params.clone(), services).await,

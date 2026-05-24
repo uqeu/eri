@@ -403,6 +403,36 @@ mod tests {
     use super::*;
 
     #[test]
+    fn gemini_proxy_constructor_omits_query_key_and_marks_proxied() {
+        let provider = GeminiProvider::for_model_with_proxy(
+            "gemini-2.0-flash-exp",
+            "sess-tok",
+            "https://eri.dev",
+        )
+        .expect("provider builds");
+        assert!(provider.is_proxied());
+        let endpoint = provider.endpoint("streamGenerateContent");
+        assert_eq!(
+            endpoint,
+            "https://eri.dev/api/v1/inference/google/v1beta/models/gemini-2.0-flash-exp:streamGenerateContent"
+        );
+        // The session bearer must NOT leak into the URL.
+        assert!(!endpoint.contains("key="));
+        assert!(!endpoint.contains("sess-tok"));
+    }
+
+    #[test]
+    fn gemini_byok_constructor_uses_query_param_auth() {
+        let provider =
+            GeminiProvider::for_model_with_key("gemini-2.0-flash-exp", "key-123")
+                .expect("provider builds");
+        assert!(!provider.is_proxied());
+        let endpoint = provider.endpoint("streamGenerateContent");
+        assert!(endpoint.contains("?key=key-123"));
+        assert!(endpoint.starts_with(GEMINI_BASE_URL));
+    }
+
+    #[test]
     fn gemini_request_body_has_contents_array() {
         let provider = GeminiProvider::with_endpoint(
             "gemini-2.0-flash-exp",
