@@ -106,14 +106,13 @@ export default function AccountPage() {
         method: "PATCH",
         body: { display_name: displayName },
       });
-      if (!response.ok && response.status !== 404 && response.status !== 405) {
+      if (!response.ok) {
         setToast({ kind: "error", message: "Could not save profile." });
         return;
       }
-      console.info("[account] display_name change pending backend", {
-        user_id: user.id,
-        display_name: displayName,
-      });
+      // PATCH /api/auth/me returns the fresh user so the next reload() call
+      // surfaces the stored display_name verbatim — Google's OAuth name no
+      // longer overwrites what the user typed.
       setToast({ kind: "success", message: "Saved." });
       await reload();
     } catch {

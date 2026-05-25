@@ -238,6 +238,23 @@ export interface ApplySubscriptionInput {
   current_period_end: number;
 }
 
+/**
+ * Update the user-controlled profile fields. Currently just `display_name`;
+ * email + tier flow through other code paths (OAuth callback, Stripe webhook)
+ * and aren't accepted here so the surface is intentionally small.
+ *
+ * `display_name === null` clears the name; the GET /me handler will fall back
+ * to the OAuth-derived label in `publicUser` only when nothing's stored.
+ */
+export async function updateUserDisplayName(
+  userId: string,
+  displayName: string | null,
+): Promise<void> {
+  await sql()`
+    UPDATE users SET display_name = ${displayName} WHERE id = ${userId}
+  `;
+}
+
 export async function applySubscriptionByUserId(
   userId: string,
   input: ApplySubscriptionInput,
