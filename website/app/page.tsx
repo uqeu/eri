@@ -1,4 +1,5 @@
 import { Hero } from "@/components/Hero";
+import { EriIDE } from "@/components/EriIDE";
 import { HeroBig } from "@/components/HeroBig";
 import { PromptPipeline } from "@/components/PromptPipeline";
 import { CtaFooter } from "@/components/CtaFooter";
@@ -34,11 +35,15 @@ export default function HomePage(): React.ReactElement {
     <main>
       <Hero />
 
-      <Chapter n={1} title="The loop. Look. Speak. Ship.">
+      <Chapter n={1} title="An IDE that watches, listens, ships.">
+        <EriIDE />
+      </Chapter>
+
+      <Chapter n={2} title="The loop. Look. Speak. Ship.">
         <HeroBig />
       </Chapter>
 
-      <Chapter n={2} title="Three lazy words. One precise prompt.">
+      <Chapter n={3} title="Three lazy words. One precise prompt.">
         <PromptPipeline />
       </Chapter>
 

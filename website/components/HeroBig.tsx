@@ -121,7 +121,7 @@ const STEPS: ReadonlyArray<LoopStep> = [
   {
     target: "toggle",
     targetLabel: "Toggle.billing-cycle",
-    voicePhrase: "make it glow",
+    voicePhrase: "make the toggle glow on annual",
     compiledPrompt:
       "add eri-accent box-shadow to Toggle.billing-cycle when value === 'annual'",
     codeLineIndex: 2,
@@ -144,9 +144,9 @@ const STEPS: ReadonlyArray<LoopStep> = [
   {
     target: "price",
     targetLabel: "Price.chip",
-    voicePhrase: "fade between them",
+    voicePhrase: "fade the price when it changes",
     compiledPrompt:
-      "transition price text from $25/mo to $240/yr with 200ms opacity fade",
+      "add 200ms opacity fade when Price.value changes (annual ↔ monthly)",
     codeLineIndex: 3,
     newCode: [
       { kind: "plain", text: "  " },
@@ -212,15 +212,34 @@ const STEP_TO_DIFF: ReadonlyArray<string> = [
   "Local Tab",
 ];
 
+// How long the auto-loop stays paused after a user interaction (ms).
+const IDLE_RESUME_MS = 5000;
+// In scenes where annual oscillates, swap every this many ms.
+const ANNUAL_OSCILLATE_MS = 1700;
+
 export function HeroBig(): React.ReactElement {
   const [tick, setTick] = useState<number>(0);
+  const [annual, setAnnual] = useState<boolean>(false);
+  // null = auto-loop running; number = ms timestamp when pause started.
+  const [pausedAt, setPausedAt] = useState<number | null>(null);
+  const lastInteractRef = useRef<number>(0);
 
   useEffect(() => {
     const id = window.setInterval(() => {
-      setTick((prev) => prev + 1);
+      // Resume after 5s of idle.
+      if (
+        pausedAt !== null &&
+        Date.now() - lastInteractRef.current >= IDLE_RESUME_MS
+      ) {
+        setPausedAt(null);
+      }
+      // Only advance the scene tick if auto-loop is running.
+      if (pausedAt === null) {
+        setTick((prev) => prev + 1);
+      }
     }, TICK_MS);
     return () => window.clearInterval(id);
-  }, []);
+  }, [pausedAt]);
 
   const elapsedMs = tick * TICK_MS;
   const totalMs = STEP_MS * STEP_COUNT;
@@ -267,12 +286,49 @@ export function HeroBig(): React.ReactElement {
   // through resolve so the user can read it.
   const compiledVisible = inStepMs >= PHASE_DENOISE_START;
 
-  // Prototype reflects diffs that have already resolved within this loop.
-  const prototypeFlags = {
-    headlineTight: stepIndex > 0 || (stepIndex === 0 && showNewLine),
-    toggleGlow: stepIndex > 1 || (stepIndex === 1 && showNewLine),
-    annualPrice: stepIndex > 2 || (stepIndex === 2 && showNewLine),
-    ctaHalo: stepIndex > 3 || (stepIndex === 3 && showNewLine),
+  // Which polish props eri has "added" to the prototype this cycle.
+  const headlineTightAdded =
+    stepIndex > 0 || (stepIndex === 0 && showNewLine);
+  const toggleGlowAdded =
+    stepIndex > 1 || (stepIndex === 1 && showNewLine);
+  const priceFadeAdded =
+    stepIndex > 2 || (stepIndex === 2 && showNewLine);
+  const ctaHaloAdded =
+    stepIndex > 3 || (stepIndex === 3 && showNewLine);
+
+  // Auto-cycle `annual` based on scene state — but only if the user hasn't
+  // grabbed control (pausedAt === null). When auto-loop is paused, the user
+  // is the source of truth.
+  useEffect(() => {
+    if (pausedAt !== null) return;
+    let next: boolean;
+    if (stepIndex >= 2) {
+      // Scenes 3+: oscillate to demo the fade / show the live toggle.
+      const subPhase = Math.floor(inStepMs / ANNUAL_OSCILLATE_MS) % 2;
+      next = subPhase === 1;
+    } else if (stepIndex === 1 && showNewLine) {
+      // Scene 2 (toggle gets glow={annual}): flip on so the glow appears.
+      next = true;
+    } else {
+      next = false;
+    }
+    if (next !== annual) setAnnual(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pausedAt, stepIndex, inStepMs, showNewLine]);
+
+  const handleToggleClick = (): void => {
+    lastInteractRef.current = Date.now();
+    setPausedAt((prev) => prev ?? Date.now());
+    setAnnual((prev) => !prev);
+  };
+
+  // Prototype reflects diffs that have resolved + the live `annual` state.
+  const prototypeFlags: PrototypeFlags = {
+    headlineTight: headlineTightAdded,
+    toggleGlowEnabled: toggleGlowAdded,
+    priceFadeEnabled: priceFadeAdded,
+    ctaHalo: ctaHaloAdded,
+    annual,
   };
 
   // Gaze position drifts toward the current step's target during the
@@ -335,6 +391,8 @@ export function HeroBig(): React.ReactElement {
             compiledVisible={compiledVisible}
             gazeProgress={gazeProgress}
             prototypeFlags={prototypeFlags}
+            onToggleClick={handleToggleClick}
+            paused={pausedAt !== null}
           />
           <DifferentiatorsRail activeLabel={activeDiff} />
         </div>
@@ -371,9 +429,10 @@ export function HeroBig(): React.ReactElement {
 
 interface PrototypeFlags {
   readonly headlineTight: boolean;
-  readonly toggleGlow: boolean;
-  readonly annualPrice: boolean;
+  readonly toggleGlowEnabled: boolean;
+  readonly priceFadeEnabled: boolean;
   readonly ctaHalo: boolean;
+  readonly annual: boolean;
 }
 
 interface DemoPanelProps {
@@ -389,6 +448,8 @@ interface DemoPanelProps {
   readonly compiledVisible: boolean;
   readonly gazeProgress: number;
   readonly prototypeFlags: PrototypeFlags;
+  readonly onToggleClick: () => void;
+  readonly paused: boolean;
 }
 
 function DemoPanel({
@@ -404,6 +465,8 @@ function DemoPanel({
   compiledVisible,
   gazeProgress,
   prototypeFlags,
+  onToggleClick,
+  paused,
 }: DemoPanelProps): React.ReactElement {
   return (
     <div className="relative rounded-lg border border-white/[0.06] bg-bg-2/60 overflow-hidden flex flex-col">
@@ -427,6 +490,8 @@ function DemoPanel({
           target={step.target}
           gazeProgress={gazeProgress}
           flags={prototypeFlags}
+          onToggleClick={onToggleClick}
+          paused={paused}
         />
       </div>
 
@@ -546,6 +611,8 @@ interface PrototypeProps {
   readonly target: TargetId;
   readonly gazeProgress: number;
   readonly flags: PrototypeFlags;
+  readonly onToggleClick: () => void;
+  readonly paused: boolean;
 }
 
 interface Point {
@@ -576,10 +643,12 @@ function Prototype({
   target,
   gazeProgress,
   flags,
+  onToggleClick,
+  paused,
 }: PrototypeProps): React.ReactElement {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const headlineRef = useRef<HTMLHeadingElement | null>(null);
-  const toggleRef = useRef<HTMLDivElement | null>(null);
+  const toggleRef = useRef<HTMLButtonElement | null>(null);
   const priceRef = useRef<HTMLDivElement | null>(null);
   const ctaRef = useRef<HTMLButtonElement | null>(null);
 
@@ -624,7 +693,8 @@ function Prototype({
   const gazeX = from.x + (to.x - from.x) * easeOut(gazeProgress);
   const gazeY = from.y + (to.y - from.y) * easeOut(gazeProgress);
 
-  const priceText = flags.annualPrice ? "$240/yr" : "$25/mo";
+  const priceText = flags.annual ? "$240/yr" : "$25/mo";
+  const toggleHasGlow = flags.toggleGlowEnabled && flags.annual;
 
   return (
     <div ref={containerRef} className="relative p-6" style={{ minHeight: "260px" }}>
@@ -653,21 +723,32 @@ function Prototype({
           One plan. Predictable cost. Cancel any time.
         </p>
 
-        {/* Billing toggle */}
+        {/* Billing toggle — clickable, drives `annual` state. */}
         <div className="mt-5 flex items-center gap-3">
-          <span className="font-mono text-[11px] text-paper/55">Monthly</span>
-          <div
+          <span
+            className={`font-mono text-[11px] transition-colors ${
+              flags.annual ? "text-paper/55" : "text-paper/85"
+            }`}
+          >
+            Monthly
+          </span>
+          <button
             ref={toggleRef}
-            className="relative h-6 w-12 rounded-full border transition-all duration-500"
+            type="button"
+            role="switch"
+            aria-checked={flags.annual}
+            aria-label="Toggle billing cycle"
+            onClick={onToggleClick}
+            className="relative h-6 w-12 rounded-full border transition-all duration-500 cursor-pointer"
             style={{
               borderColor:
                 target === "toggle"
                   ? "rgba(224,255,79,0.45)"
                   : "rgba(255,255,255,0.10)",
-              background: flags.toggleGlow
+              background: toggleHasGlow
                 ? "rgba(224,255,79,0.18)"
                 : "rgba(255,255,255,0.06)",
-              animation: flags.toggleGlow
+              animation: toggleHasGlow
                 ? "annualGlow 1.8s ease-in-out infinite"
                 : "none",
             }}
@@ -675,22 +756,37 @@ function Prototype({
             <span
               className="absolute top-1 left-1 h-4 w-4 rounded-full"
               style={{
-                transform: flags.toggleGlow ? "translateX(24px)" : "translateX(0)",
-                transition: "transform 220ms cubic-bezier(0.32, 0.72, 0, 1), background 220ms ease",
-                background: flags.toggleGlow
+                transform: flags.annual ? "translateX(24px)" : "translateX(0)",
+                transition:
+                  "transform 220ms cubic-bezier(0.32, 0.72, 0, 1), background 220ms ease",
+                background: toggleHasGlow
                   ? "var(--accent)"
                   : "rgba(245,242,236,0.85)",
               }}
               aria-hidden
             />
-          </div>
-          <span className="font-mono text-[11px] text-paper/85">Annual</span>
+          </button>
+          <span
+            className={`font-mono text-[11px] transition-colors ${
+              flags.annual ? "text-paper/85" : "text-paper/55"
+            }`}
+          >
+            Annual
+          </span>
           <span
             className="ml-1 rounded-sm border border-accent/30 bg-accent/[0.07] px-1.5 py-0.5 font-mono text-[9px] text-accent"
             aria-hidden
           >
             -20%
           </span>
+          {paused ? (
+            <span
+              className="ml-2 font-mono text-[9px] uppercase tracking-wider text-paper/35"
+              aria-live="polite"
+            >
+              auto · paused
+            </span>
+          ) : null}
         </div>
 
         {/* Price chip */}
@@ -706,14 +802,14 @@ function Prototype({
           }}
         >
           <span
-            key={priceText}
+            key={flags.priceFadeEnabled ? priceText : "static-price"}
             className="font-display text-paper"
             style={{
               fontWeight: 500,
               fontSize: "28px",
               letterSpacing: "-0.02em",
-              animation: flags.annualPrice
-                ? "diffResolve 0.6s ease-out"
+              animation: flags.priceFadeEnabled
+                ? "diffResolve 0.5s ease-out"
                 : undefined,
             }}
           >
