@@ -28,6 +28,8 @@ const PHASE_RESOLVE_END = 4000;
 
 type TargetId = "headline" | "toggle" | "price" | "cta";
 
+type FileId = "page.tsx" | "layout.tsx" | "Toggle.tsx";
+
 interface CodeToken {
   readonly kind: "plain" | "tag" | "attr" | "string" | "punct" | "comment";
   readonly text: string;
@@ -114,6 +116,168 @@ const CODE_BASE: ReadonlyArray<ReadonlyArray<CodeToken>> = [
     { kind: "punct", text: "</" },
     { kind: "tag", text: "section" },
     { kind: "punct", text: ">" },
+  ],
+  [
+    { kind: "plain", text: "  );" },
+  ],
+  [
+    { kind: "punct", text: "}" },
+  ],
+];
+
+const LAYOUT_CODE: ReadonlyArray<ReadonlyArray<CodeToken>> = [
+  [
+    { kind: "comment", text: "// app/pricing/layout.tsx" },
+  ],
+  [
+    { kind: "punct", text: "export const " },
+    { kind: "plain", text: "metadata" },
+    { kind: "punct", text: " = {" },
+  ],
+  [
+    { kind: "plain", text: "  title: " },
+    { kind: "string", text: '"Pricing — pricing-app"' },
+    { kind: "punct", text: "," },
+  ],
+  [
+    { kind: "plain", text: "  description: " },
+    { kind: "string", text: '"One plan. Predictable cost."' },
+    { kind: "punct", text: "," },
+  ],
+  [
+    { kind: "punct", text: "};" },
+  ],
+  [{ kind: "plain", text: "" }],
+  [
+    { kind: "punct", text: "export default function " },
+    { kind: "tag", text: "PricingLayout" },
+    { kind: "punct", text: "({ children }) {" },
+  ],
+  [
+    { kind: "plain", text: "  return (" },
+  ],
+  [
+    { kind: "plain", text: "    " },
+    { kind: "punct", text: "<" },
+    { kind: "tag", text: "div" },
+    { kind: "plain", text: " " },
+    { kind: "attr", text: "className" },
+    { kind: "punct", text: "=" },
+    { kind: "string", text: '"min-h-screen"' },
+    { kind: "punct", text: ">" },
+  ],
+  [
+    { kind: "plain", text: "      " },
+    { kind: "punct", text: "<" },
+    { kind: "tag", text: "SiteHeader" },
+    { kind: "plain", text: " />" },
+  ],
+  [
+    { kind: "plain", text: "      " },
+    { kind: "punct", text: "<" },
+    { kind: "tag", text: "main" },
+    { kind: "plain", text: " " },
+    { kind: "attr", text: "className" },
+    { kind: "punct", text: "=" },
+    { kind: "string", text: '"container py-16"' },
+    { kind: "punct", text: ">{children}</" },
+    { kind: "tag", text: "main" },
+    { kind: "punct", text: ">" },
+  ],
+  [
+    { kind: "plain", text: "      " },
+    { kind: "punct", text: "<" },
+    { kind: "tag", text: "SiteFooter" },
+    { kind: "plain", text: " />" },
+  ],
+  [
+    { kind: "plain", text: "    " },
+    { kind: "punct", text: "</" },
+    { kind: "tag", text: "div" },
+    { kind: "punct", text: ">" },
+  ],
+  [
+    { kind: "plain", text: "  );" },
+  ],
+  [
+    { kind: "punct", text: "}" },
+  ],
+];
+
+const TOGGLE_CODE: ReadonlyArray<ReadonlyArray<CodeToken>> = [
+  [
+    { kind: "comment", text: "// components/Toggle.tsx" },
+  ],
+  [
+    { kind: "punct", text: "interface " },
+    { kind: "tag", text: "ToggleProps" },
+    { kind: "punct", text: " {" },
+  ],
+  [
+    { kind: "plain", text: "  value: " },
+    { kind: "attr", text: "boolean" },
+    { kind: "punct", text: ";" },
+  ],
+  [
+    { kind: "plain", text: "  glow?: " },
+    { kind: "attr", text: "boolean" },
+    { kind: "punct", text: ";" },
+  ],
+  [
+    { kind: "plain", text: "  onChange: " },
+    { kind: "punct", text: "(next: " },
+    { kind: "attr", text: "boolean" },
+    { kind: "punct", text: ") => void;" },
+  ],
+  [
+    { kind: "punct", text: "}" },
+  ],
+  [{ kind: "plain", text: "" }],
+  [
+    { kind: "punct", text: "export function " },
+    { kind: "tag", text: "Toggle" },
+    { kind: "punct", text: "({ value, glow, onChange }: " },
+    { kind: "tag", text: "ToggleProps" },
+    { kind: "punct", text: ") {" },
+  ],
+  [
+    { kind: "plain", text: "  return (" },
+  ],
+  [
+    { kind: "plain", text: "    " },
+    { kind: "punct", text: "<" },
+    { kind: "tag", text: "button" },
+    { kind: "plain", text: " " },
+    { kind: "attr", text: "role" },
+    { kind: "punct", text: "=" },
+    { kind: "string", text: '"switch"' },
+  ],
+  [
+    { kind: "plain", text: "      " },
+    { kind: "attr", text: "aria-checked" },
+    { kind: "punct", text: "={value}" },
+    { kind: "plain", text: " " },
+    { kind: "attr", text: "onClick" },
+    { kind: "punct", text: "={() => onChange(!value)}" },
+  ],
+  [
+    { kind: "plain", text: "      " },
+    { kind: "attr", text: "className" },
+    { kind: "punct", text: "={cn(" },
+  ],
+  [
+    { kind: "plain", text: "        " },
+    { kind: "string", text: '"h-7 w-14 rounded-full transition"' },
+    { kind: "punct", text: "," },
+  ],
+  [
+    { kind: "plain", text: "        glow && value && " },
+    { kind: "string", text: '"shadow-[0_0_20px_var(--accent)]"' },
+    { kind: "punct", text: "," },
+  ],
+  [
+    { kind: "plain", text: "      )}" },
+    { kind: "punct", text: " />" },
   ],
   [
     { kind: "plain", text: "  );" },
@@ -247,22 +411,35 @@ export function EriIDE(): React.ReactElement {
   const [tick, setTick] = useState<number>(0);
   const [annual, setAnnual] = useState<boolean>(false);
   const [pausedAt, setPausedAt] = useState<number | null>(null);
+  const [activeFile, setActiveFile] = useState<FileId>("page.tsx");
   const lastInteractRef = useRef<number>(0);
+
+  const isPageActive = activeFile === "page.tsx";
 
   useEffect(() => {
     const id = window.setInterval(() => {
+      // Resume after 5s of idle only if back on page.tsx.
       if (
         pausedAt !== null &&
+        isPageActive &&
         Date.now() - lastInteractRef.current >= IDLE_RESUME_MS
       ) {
         setPausedAt(null);
       }
-      if (pausedAt === null) {
+      // Loop only runs when on page.tsx and not paused.
+      if (pausedAt === null && isPageActive) {
         setTick((prev) => prev + 1);
       }
     }, TICK_MS);
     return () => window.clearInterval(id);
-  }, [pausedAt]);
+  }, [pausedAt, isPageActive]);
+
+  const handleFileSelect = (file: FileId): void => {
+    if (file === activeFile) return;
+    lastInteractRef.current = Date.now();
+    setActiveFile(file);
+    setPausedAt((prev) => prev ?? Date.now());
+  };
 
   const elapsedMs = tick * TICK_MS;
   const totalMs = STEP_MS * STEP_COUNT;
@@ -365,40 +542,58 @@ export function EriIDE(): React.ReactElement {
 
       <div className="grid grid-cols-1 lg:grid-cols-[200px_1.15fr_1fr] min-h-[520px]">
         {/* Sidebar — file tree */}
-        <Sidebar />
+        <Sidebar activeFile={activeFile} onSelect={handleFileSelect} />
 
         {/* Editor pane */}
         <div className="flex flex-col border-l border-r border-white/[0.06] bg-[#0c0c0c]">
-          <TabBar />
+          <TabBar activeFile={activeFile} onSelect={handleFileSelect} />
           <CodePane
-            codeLines={codeLines}
-            activeLineIndex={step.codeLineIndex}
-            denoising={denoising}
+            codeLines={
+              isPageActive
+                ? codeLines
+                : activeFile === "layout.tsx"
+                  ? LAYOUT_CODE
+                  : TOGGLE_CODE
+            }
+            activeLineIndex={isPageActive ? step.codeLineIndex : -1}
+            denoising={isPageActive ? denoising : false}
             denoiseFraction={denoiseFraction}
             resolveFraction={resolveFraction}
-            showNewLine={showNewLine}
+            showNewLine={isPageActive ? showNewLine : false}
             currentStepNewCode={step.newCode}
           />
           <VoiceInputBar
-            voicePhraseShown={voicePhraseShown}
-            voiceActive={voiceActive}
-            compiledVisible={compiledVisible}
+            voicePhraseShown={isPageActive ? voicePhraseShown : ""}
+            voiceActive={isPageActive ? voiceActive : false}
+            compiledVisible={isPageActive ? compiledVisible : false}
             compiledPrompt={step.compiledPrompt}
             routedTo={step.routedTo}
-            routingActive={routingActive}
-            routingShown={routingShown}
+            routingActive={isPageActive ? routingActive : false}
+            routingShown={isPageActive ? routingShown : false}
+            idle={!isPageActive}
+            idlePrompt={
+              activeFile === "layout.tsx"
+                ? "browsing layout.tsx · say something to ship"
+                : "browsing Toggle.tsx · say something to ship"
+            }
           />
         </div>
 
-        {/* Preview pane */}
-        <PreviewPane
-          target={step.target}
-          gazeProgress={gazeProgress}
-          flags={prototypeFlags}
-          onToggleClick={handleToggleClick}
-          paused={pausedAt !== null}
-          targetLabel={step.targetLabel}
-        />
+        {/* Preview pane — branches on active file */}
+        {isPageActive ? (
+          <PreviewPane
+            target={step.target}
+            gazeProgress={gazeProgress}
+            flags={prototypeFlags}
+            onToggleClick={handleToggleClick}
+            paused={pausedAt !== null}
+            targetLabel={step.targetLabel}
+          />
+        ) : activeFile === "layout.tsx" ? (
+          <LayoutPreview />
+        ) : (
+          <TogglePreview />
+        )}
       </div>
 
       {/* Status bar */}
@@ -406,12 +601,21 @@ export function EriIDE(): React.ReactElement {
         stepIndex={stepIndex}
         routedTo={step.routedTo}
         paused={pausedAt !== null}
+        activeFile={activeFile}
       />
     </div>
   );
 }
 
-function Sidebar(): React.ReactElement {
+interface SidebarProps {
+  readonly activeFile: FileId;
+  readonly onSelect: (file: FileId) => void;
+}
+
+function Sidebar({
+  activeFile,
+  onSelect,
+}: SidebarProps): React.ReactElement {
   return (
     <aside className="hidden lg:flex flex-col bg-[#080808] py-4 px-3 text-[12px] font-mono">
       <p className="text-paper/35 text-[10px] uppercase tracking-wider mb-3 px-2">
@@ -421,9 +625,25 @@ function Sidebar(): React.ReactElement {
       <FileTreeNode label="src" expanded depth={1} />
       <FileTreeNode label="app" expanded depth={2} />
       <FileTreeNode label="pricing" expanded depth={3} />
-      <FileTreeNode label="page.tsx" depth={4} active />
-      <FileTreeNode label="layout.tsx" depth={4} />
-      <FileTreeNode label="components" depth={2} />
+      <FileTreeNode
+        label="page.tsx"
+        depth={4}
+        active={activeFile === "page.tsx"}
+        onSelect={() => onSelect("page.tsx")}
+      />
+      <FileTreeNode
+        label="layout.tsx"
+        depth={4}
+        active={activeFile === "layout.tsx"}
+        onSelect={() => onSelect("layout.tsx")}
+      />
+      <FileTreeNode label="components" expanded depth={2} />
+      <FileTreeNode
+        label="Toggle.tsx"
+        depth={3}
+        active={activeFile === "Toggle.tsx"}
+        onSelect={() => onSelect("Toggle.tsx")}
+      />
       <FileTreeNode label="lib" depth={2} />
       <div className="mt-auto border-t border-white/[0.04] pt-3 px-2">
         <p className="text-paper/40 text-[10px] flex items-center gap-2">
@@ -443,6 +663,7 @@ interface FileTreeNodeProps {
   readonly depth: number;
   readonly expanded?: boolean;
   readonly active?: boolean;
+  readonly onSelect?: () => void;
 }
 
 function FileTreeNode({
@@ -450,17 +671,16 @@ function FileTreeNode({
   depth,
   expanded,
   active,
+  onSelect,
 }: FileTreeNodeProps): React.ReactElement {
   const isFile = label.includes(".");
-  return (
-    <div
-      className={`flex items-center gap-1.5 py-0.5 rounded-sm transition-colors ${
-        active
-          ? "bg-accent/[0.06] text-paper"
-          : "text-paper/60 hover:text-paper/85"
-      }`}
-      style={{ paddingLeft: `${depth * 10 + 6}px` }}
-    >
+  const baseClass = `flex items-center gap-1.5 py-0.5 rounded-sm transition-colors w-full text-left ${
+    active
+      ? "bg-accent/[0.06] text-paper"
+      : "text-paper/60 hover:text-paper/85"
+  }`;
+  const inner = (
+    <>
       {!isFile && (
         <span className="text-paper/35 text-[9px]" aria-hidden>
           {expanded ? "▾" : "▸"}
@@ -472,22 +692,71 @@ function FileTreeNode({
         </span>
       ) : null}
       <span className={active ? "text-accent" : ""}>{label}</span>
+    </>
+  );
+  if (isFile && onSelect) {
+    return (
+      <button
+        type="button"
+        onClick={onSelect}
+        className={`${baseClass} cursor-pointer`}
+        style={{ paddingLeft: `${depth * 10 + 6}px` }}
+      >
+        {inner}
+      </button>
+    );
+  }
+  return (
+    <div
+      className={baseClass}
+      style={{ paddingLeft: `${depth * 10 + 6}px` }}
+    >
+      {inner}
     </div>
   );
 }
 
-function TabBar(): React.ReactElement {
+interface TabBarProps {
+  readonly activeFile: FileId;
+  readonly onSelect: (file: FileId) => void;
+}
+
+const TAB_FILES: ReadonlyArray<FileId> = ["page.tsx", "layout.tsx", "Toggle.tsx"];
+
+function TabBar({
+  activeFile,
+  onSelect,
+}: TabBarProps): React.ReactElement {
   return (
-    <div className="flex items-center border-b border-white/[0.06] bg-[#0a0a0a] text-[12px] font-mono">
-      <div className="flex items-center gap-2 px-4 py-2 border-r border-white/[0.06] bg-[#0c0c0c] text-paper/85">
-        <span className="text-paper/40 text-[10px]" aria-hidden>◇</span>
-        pricing.tsx
-        <span className="text-paper/30 text-[9px] ml-1">●</span>
-      </div>
-      <div className="flex items-center gap-2 px-4 py-2 text-paper/40">
-        <span className="text-paper/25 text-[10px]" aria-hidden>◇</span>
-        layout.tsx
-      </div>
+    <div className="flex items-center border-b border-white/[0.06] bg-[#0a0a0a] text-[12px] font-mono overflow-x-auto">
+      {TAB_FILES.map((file) => {
+        const isActive = file === activeFile;
+        return (
+          <button
+            key={file}
+            type="button"
+            onClick={() => onSelect(file)}
+            className={`flex items-center gap-2 px-4 py-2 border-r border-white/[0.06] transition-colors cursor-pointer ${
+              isActive
+                ? "bg-[#0c0c0c] text-paper/85"
+                : "text-paper/40 hover:text-paper/65 hover:bg-white/[0.02]"
+            }`}
+          >
+            <span
+              className={`text-[10px] ${
+                isActive ? "text-paper/40" : "text-paper/25"
+              }`}
+              aria-hidden
+            >
+              ◇
+            </span>
+            {file}
+            {isActive ? (
+              <span className="text-paper/30 text-[9px] ml-1">●</span>
+            ) : null}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -615,6 +884,8 @@ interface VoiceInputBarProps {
   readonly routedTo: string;
   readonly routingActive: boolean;
   readonly routingShown: boolean;
+  readonly idle?: boolean;
+  readonly idlePrompt?: string;
 }
 
 function VoiceInputBar({
@@ -625,6 +896,8 @@ function VoiceInputBar({
   routedTo,
   routingActive,
   routingShown,
+  idle,
+  idlePrompt,
 }: VoiceInputBarProps): React.ReactElement {
   return (
     <div className="border-t border-white/[0.06] bg-[#080808] px-4 py-3 flex flex-col gap-2">
@@ -633,12 +906,13 @@ function VoiceInputBar({
           className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-accent/40 mt-px shrink-0"
           aria-hidden
           style={{
-            background: voiceActive ? "rgba(224,255,79,0.12)" : "transparent",
+            background:
+              !idle && voiceActive ? "rgba(224,255,79,0.12)" : "transparent",
           }}
         >
           <svg
             viewBox="0 0 24 24"
-            className="h-3 w-3 text-accent"
+            className={`h-3 w-3 ${idle ? "text-paper/35" : "text-accent"}`}
             fill="none"
             stroke="currentColor"
             strokeWidth="2"
@@ -647,50 +921,60 @@ function VoiceInputBar({
             <path d="M5 11a7 7 0 0 0 14 0" strokeLinecap="round" />
           </svg>
         </span>
-        <p className="font-mono text-[12px] text-paper/85 truncate flex-1">
-          <span className="text-paper/40">"</span>
-          {voicePhraseShown}
-          <span
-            className="inline-block w-[1px] h-[12px] align-middle ml-0.5"
-            style={{
-              background: "var(--accent)",
-              animation: "caretBlink 1s steps(2) infinite",
-            }}
-            aria-hidden
-          />
-          <span className="text-paper/40">"</span>
-        </p>
+        {idle ? (
+          <p className="font-mono text-[12px] text-paper/40 italic truncate flex-1">
+            {idlePrompt ?? "ready · say something to ship"}
+          </p>
+        ) : (
+          <p className="font-mono text-[12px] text-paper/85 truncate flex-1">
+            <span className="text-paper/40">"</span>
+            {voicePhraseShown}
+            <span
+              className="inline-block w-[1px] h-[12px] align-middle ml-0.5"
+              style={{
+                background: "var(--accent)",
+                animation: "caretBlink 1s steps(2) infinite",
+              }}
+              aria-hidden
+            />
+            <span className="text-paper/40">"</span>
+          </p>
+        )}
       </div>
-      <p
-        className="font-mono text-[11px] text-paper/55 pl-8 truncate"
-        style={{
-          opacity: compiledVisible ? 1 : 0,
-          transition: "opacity 240ms ease-out",
-        }}
-        aria-hidden={!compiledVisible}
-      >
-        <span className="text-accent/70">✦ compiled ·</span> {compiledPrompt}
-      </p>
-      <p
-        className="font-mono text-[11px] pl-8 truncate flex items-center gap-2"
-        style={{
-          opacity: routingShown ? 1 : 0,
-          transition: "opacity 240ms ease-out",
-        }}
-        aria-hidden={!routingShown}
-      >
-        <span className="text-paper/45">→ routed ·</span>
-        <span
-          className="text-accent/85"
-          style={{
-            animation: routingActive
-              ? "annualGlow 1.2s ease-in-out infinite"
-              : "none",
-          }}
-        >
-          {routedTo}
-        </span>
-      </p>
+      {!idle && (
+        <>
+          <p
+            className="font-mono text-[11px] text-paper/55 pl-8 truncate"
+            style={{
+              opacity: compiledVisible ? 1 : 0,
+              transition: "opacity 240ms ease-out",
+            }}
+            aria-hidden={!compiledVisible}
+          >
+            <span className="text-accent/70">✦ compiled ·</span> {compiledPrompt}
+          </p>
+          <p
+            className="font-mono text-[11px] pl-8 truncate flex items-center gap-2"
+            style={{
+              opacity: routingShown ? 1 : 0,
+              transition: "opacity 240ms ease-out",
+            }}
+            aria-hidden={!routingShown}
+          >
+            <span className="text-paper/45">→ routed ·</span>
+            <span
+              className="text-accent/85"
+              style={{
+                animation: routingActive
+                  ? "annualGlow 1.2s ease-in-out infinite"
+                  : "none",
+              }}
+            >
+              {routedTo}
+            </span>
+          </p>
+        </>
+      )}
     </div>
   );
 }
@@ -938,29 +1222,231 @@ function PreviewPane({
   );
 }
 
+function LayoutPreview(): React.ReactElement {
+  return (
+    <div className="relative bg-[#0a0a0a]">
+      <div className="flex items-center justify-between px-4 py-2 border-b border-white/[0.06]">
+        <p className="font-mono text-[11px] text-paper/45 uppercase tracking-wider">
+          Preview · layout shell
+        </p>
+        <span className="font-mono text-[10px] text-paper/35">
+          rendered server-side
+        </span>
+      </div>
+      <div className="px-6 py-6 flex flex-col gap-4" style={{ minHeight: "440px" }}>
+        {/* Mock site header */}
+        <div className="rounded-md border border-white/[0.08] bg-[#0c0c0c]">
+          <div className="flex items-center justify-between px-4 py-3">
+            <div className="flex items-center gap-2">
+              <span
+                className="font-display text-paper text-[15px]"
+                style={{ letterSpacing: "-0.05em", fontWeight: 500 }}
+              >
+                pricing-app
+              </span>
+            </div>
+            <div className="flex items-center gap-4 font-mono text-[11px] text-paper/55">
+              <span>docs</span>
+              <span>pricing</span>
+              <span>sign in</span>
+              <span className="rounded-sm bg-accent/15 text-accent px-2 py-0.5">
+                start free
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Mock main content area */}
+        <div className="flex-1 rounded-md border border-dashed border-white/[0.10] bg-[#080808] p-6">
+          <p className="font-mono text-[10px] text-paper/35 uppercase tracking-wider mb-3">
+            &lt;main&gt; · children
+          </p>
+          <div className="space-y-2">
+            <div className="h-3 w-1/3 rounded bg-white/[0.08]" />
+            <div className="h-2 w-2/3 rounded bg-white/[0.05]" />
+            <div className="h-2 w-1/2 rounded bg-white/[0.05]" />
+          </div>
+          <div className="mt-6 grid grid-cols-3 gap-3">
+            {[0, 1, 2].map((i) => (
+              <div
+                key={i}
+                className="h-20 rounded border border-white/[0.06] bg-white/[0.02]"
+              />
+            ))}
+          </div>
+        </div>
+
+        {/* Mock footer */}
+        <div className="rounded-md border border-white/[0.06] bg-[#0c0c0c] px-4 py-3 flex items-center justify-between font-mono text-[10px] text-paper/40">
+          <span>© 2026 pricing-app</span>
+          <span className="flex items-center gap-2">
+            <span className="h-1.5 w-1.5 rounded-full bg-[#41d57c]" aria-hidden />
+            status
+          </span>
+        </div>
+
+        <p className="font-mono text-[10px] text-paper/35 italic">
+          metadata · "Pricing — pricing-app" → injected on every child route
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function TogglePreview(): React.ReactElement {
+  const [demoValue, setDemoValue] = useState<boolean>(false);
+  return (
+    <div className="relative bg-[#0a0a0a]">
+      <div className="flex items-center justify-between px-4 py-2 border-b border-white/[0.06]">
+        <p className="font-mono text-[11px] text-paper/45 uppercase tracking-wider">
+          Preview · component
+        </p>
+        <span className="font-mono text-[10px] text-paper/35">
+          Toggle / story
+        </span>
+      </div>
+      <div className="px-6 py-6 flex flex-col gap-6" style={{ minHeight: "440px" }}>
+        <div>
+          <p className="font-mono text-[10px] text-paper/35 uppercase tracking-wider mb-3">
+            interactive · click to flip
+          </p>
+          <div className="rounded-md border border-white/[0.08] bg-[#0c0c0c] p-6 flex items-center gap-4">
+            <button
+              type="button"
+              role="switch"
+              aria-checked={demoValue}
+              aria-label="Toggle"
+              onClick={() => setDemoValue((p) => !p)}
+              className="relative h-8 w-16 rounded-full border transition-all duration-500 cursor-pointer"
+              style={{
+                borderColor: "rgba(255,255,255,0.10)",
+                background: demoValue
+                  ? "rgba(224,255,79,0.18)"
+                  : "rgba(255,255,255,0.06)",
+                animation: demoValue
+                  ? "annualGlow 1.8s ease-in-out infinite"
+                  : "none",
+              }}
+            >
+              <span
+                className="absolute top-1 left-1 h-6 w-6 rounded-full"
+                style={{
+                  transform: demoValue ? "translateX(32px)" : "translateX(0)",
+                  transition:
+                    "transform 220ms cubic-bezier(0.32, 0.72, 0, 1), background 220ms ease",
+                  background: demoValue
+                    ? "var(--accent)"
+                    : "rgba(245,242,236,0.85)",
+                }}
+                aria-hidden
+              />
+            </button>
+            <span className="font-mono text-[12px] text-paper/65">
+              value={String(demoValue)}
+            </span>
+          </div>
+        </div>
+
+        <div>
+          <p className="font-mono text-[10px] text-paper/35 uppercase tracking-wider mb-3">
+            states
+          </p>
+          <div className="grid grid-cols-3 gap-3">
+            <ToggleSwatch label="off" value={false} glow={false} />
+            <ToggleSwatch label="on" value={true} glow={false} />
+            <ToggleSwatch label="on + glow" value={true} glow />
+          </div>
+        </div>
+
+        <div className="rounded-md border border-white/[0.06] bg-[#080808] px-4 py-3">
+          <p className="font-mono text-[10px] text-paper/45 uppercase tracking-wider mb-2">
+            used by
+          </p>
+          <div className="font-mono text-[11px] text-paper/65 space-y-1">
+            <p>app/pricing/page.tsx · billing-cycle</p>
+            <p className="text-paper/40">components/SettingsPanel.tsx · dark-mode</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+interface ToggleSwatchProps {
+  readonly label: string;
+  readonly value: boolean;
+  readonly glow: boolean;
+}
+
+function ToggleSwatch({
+  label,
+  value,
+  glow,
+}: ToggleSwatchProps): React.ReactElement {
+  const isGlowing = glow && value;
+  return (
+    <div className="rounded-md border border-white/[0.06] bg-[#0c0c0c] p-4 flex flex-col items-start gap-3">
+      <div
+        className="relative h-6 w-12 rounded-full border"
+        style={{
+          borderColor: "rgba(255,255,255,0.10)",
+          background: isGlowing
+            ? "rgba(224,255,79,0.18)"
+            : "rgba(255,255,255,0.06)",
+          animation: isGlowing
+            ? "annualGlow 1.8s ease-in-out infinite"
+            : "none",
+        }}
+      >
+        <span
+          className="absolute top-1 left-1 h-4 w-4 rounded-full"
+          style={{
+            transform: value ? "translateX(24px)" : "translateX(0)",
+            transition: "transform 220ms cubic-bezier(0.32, 0.72, 0, 1)",
+            background: isGlowing
+              ? "var(--accent)"
+              : "rgba(245,242,236,0.85)",
+          }}
+          aria-hidden
+        />
+      </div>
+      <p className="font-mono text-[10px] text-paper/55">{label}</p>
+    </div>
+  );
+}
+
 interface StatusBarProps {
   readonly stepIndex: number;
   readonly routedTo: string;
   readonly paused: boolean;
+  readonly activeFile: FileId;
 }
 
 function StatusBar({
   stepIndex,
   routedTo,
   paused,
+  activeFile,
 }: StatusBarProps): React.ReactElement {
+  const isPage = activeFile === "page.tsx";
   return (
     <div className="flex items-center justify-between px-4 py-1.5 border-t border-white/[0.06] bg-[#080808] font-mono text-[10px] text-paper/45">
       <div className="flex items-center gap-3">
         <span>main</span>
         <span className="text-paper/25">·</span>
-        <span>line {stepIndex + 1}, col 1</span>
+        <span>{activeFile}</span>
+        {isPage ? (
+          <>
+            <span className="text-paper/25">·</span>
+            <span>line {stepIndex + 1}, col 1</span>
+          </>
+        ) : null}
         <span className="text-paper/25">·</span>
         <span>TypeScript React</span>
       </div>
       <div className="flex items-center gap-2">
         <span className="h-1.5 w-1.5 rounded-full bg-accent pulse-dot" aria-hidden />
-        <span>{routedTo}</span>
+        <span>{isPage ? routedTo : "eri · idle"}</span>
         {paused ? (
           <>
             <span className="text-paper/25 ml-2">·</span>
