@@ -1,10 +1,12 @@
-<svg width="279" height="184" viewBox="0 0 279 184" fill="none" xmlns="http://www.w3.org/2000/svg">
-<rect width="279" height="184" fill="white"/>
-<rect x="126.999" y="125" width="24" height="24" rx="5" fill="black"/>
-<line x1="12.5" y1="62.5004" x2="12.5" y2="171.5" stroke="black" stroke-width="25" stroke-linecap="round"/>
-<path d="M150.999 0.5C144.096 0.5 138.499 6.09644 138.499 13C138.499 19.9036 144.096 25.5 150.999 25.5V13V0.5ZM278.999 13V0.5L150.999 0.5V13V25.5L278.999 25.5V13Z" fill="black"/>
-<line x1="266.5" y1="25.0003" x2="266.5" y2="184" stroke="black" stroke-width="25"/>
-<line y1="171.5" x2="254" y2="171.5" stroke="black" stroke-width="25"/>
-<circle cx="202.999" cy="67" r="29" fill="black"/>
-<circle cx="214.999" cy="56" r="15" fill="white"/>
+<svg width="64" height="64" viewBox="0 0 279 279" xmlns="http://www.w3.org/2000/svg">
+  <rect width="279" height="279" rx="48" fill="#0c0c0c"/>
+  <g transform="translate(0, 47.5)">
+    <rect x="126.999" y="125" width="24" height="24" rx="5" fill="#e0ff4f"/>
+    <line x1="12.5" y1="62.5004" x2="12.5" y2="171.5" stroke="#e0ff4f" stroke-width="25" stroke-linecap="round"/>
+    <path d="M150.999 0.5C144.096 0.5 138.499 6.09644 138.499 13C138.499 19.9036 144.096 25.5 150.999 25.5V13V0.5ZM278.999 13V0.5L150.999 0.5V13V25.5L278.999 25.5V13Z" fill="#e0ff4f"/>
+    <line x1="266.5" y1="25.0003" x2="266.5" y2="184" stroke="#e0ff4f" stroke-width="25"/>
+    <line y1="171.5" x2="254" y2="171.5" stroke="#e0ff4f" stroke-width="25"/>
+    <circle cx="202.999" cy="67" r="29" fill="#e0ff4f"/>
+    <circle cx="214.999" cy="56" r="15" fill="#0c0c0c"/>
+  </g>
 </svg>
