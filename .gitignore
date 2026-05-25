@@ -2,6 +2,7 @@
 **/*.proptest-regressions
 **/cargo-target
 **/target
+graphify-out/
 .webrtc-sys/
 **/venv
 **/.direnv
