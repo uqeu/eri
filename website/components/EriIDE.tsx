@@ -1,14 +1,14 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 // EriIDE — an interactive, IDE-style demo of the eri loop.
 //
-// Layout: sidebar (file tree) · editor pane (tabs + code + voice input) ·
-// preview pane (live rendered output). A scene loop walks through four
-// voice-driven edits; the preview is clickable so you can verify "yes,
-// this is real React state, not a video". After 5s of user interaction
-// the auto-loop resumes.
+// Three files, three scene decks: a pricing card (interactive toggle), an
+// analytics dashboard (KPIs + sparkline + bar chart), and a forecast chart
+// (confidence band + draggable prediction point). Each file's auto-loop walks
+// through ~4 voice-driven edits. Click any preview to pause; 5s of idle and
+// the loop resumes.
 
 const STEP_MS = 4200;
 const TICK_MS = 90;
@@ -16,7 +16,6 @@ const STEP_COUNT = 4;
 const IDLE_RESUME_MS = 5000;
 const ANNUAL_OSCILLATE_MS = 1700;
 
-// Sub-phase timing inside a single step (ms).
 const PHASE_GAZE_END = 900;
 const PHASE_VOICE_START = 900;
 const PHASE_VOICE_END = 2300;
@@ -26,9 +25,7 @@ const PHASE_DENOISE_START = 2200;
 const PHASE_DENOISE_END = 3400;
 const PHASE_RESOLVE_END = 4000;
 
-type TargetId = "headline" | "toggle" | "price" | "cta";
-
-type FileId = "page.tsx" | "layout.tsx" | "Toggle.tsx";
+type FileId = "page.tsx" | "Dashboard.tsx" | "Forecast.tsx";
 
 interface CodeToken {
   readonly kind: "plain" | "tag" | "attr" | "string" | "punct" | "comment";
@@ -36,7 +33,7 @@ interface CodeToken {
 }
 
 interface LoopStep {
-  readonly target: TargetId;
+  readonly target: string;
   readonly targetLabel: string;
   readonly voicePhrase: string;
   readonly compiledPrompt: string;
@@ -45,18 +42,16 @@ interface LoopStep {
   readonly newCode: ReadonlyArray<CodeToken>;
 }
 
-const CODE_BASE: ReadonlyArray<ReadonlyArray<CodeToken>> = [
-  [
-    { kind: "comment", text: "// app/pricing/page.tsx" },
-  ],
+// ---------- page.tsx (pricing) ----------
+
+const PAGE_CODE: ReadonlyArray<ReadonlyArray<CodeToken>> = [
+  [{ kind: "comment", text: "// app/pricing/page.tsx" }],
   [
     { kind: "punct", text: "export default function " },
     { kind: "tag", text: "Pricing" },
     { kind: "punct", text: "() {" },
   ],
-  [
-    { kind: "plain", text: "  return (" },
-  ],
+  [{ kind: "plain", text: "  return (" }],
   [
     { kind: "plain", text: "    " },
     { kind: "punct", text: "<" },
@@ -117,177 +112,11 @@ const CODE_BASE: ReadonlyArray<ReadonlyArray<CodeToken>> = [
     { kind: "tag", text: "section" },
     { kind: "punct", text: ">" },
   ],
-  [
-    { kind: "plain", text: "  );" },
-  ],
-  [
-    { kind: "punct", text: "}" },
-  ],
+  [{ kind: "plain", text: "  );" }],
+  [{ kind: "punct", text: "}" }],
 ];
 
-const LAYOUT_CODE: ReadonlyArray<ReadonlyArray<CodeToken>> = [
-  [
-    { kind: "comment", text: "// app/pricing/layout.tsx" },
-  ],
-  [
-    { kind: "punct", text: "export const " },
-    { kind: "plain", text: "metadata" },
-    { kind: "punct", text: " = {" },
-  ],
-  [
-    { kind: "plain", text: "  title: " },
-    { kind: "string", text: '"Pricing — pricing-app"' },
-    { kind: "punct", text: "," },
-  ],
-  [
-    { kind: "plain", text: "  description: " },
-    { kind: "string", text: '"One plan. Predictable cost."' },
-    { kind: "punct", text: "," },
-  ],
-  [
-    { kind: "punct", text: "};" },
-  ],
-  [{ kind: "plain", text: "" }],
-  [
-    { kind: "punct", text: "export default function " },
-    { kind: "tag", text: "PricingLayout" },
-    { kind: "punct", text: "({ children }) {" },
-  ],
-  [
-    { kind: "plain", text: "  return (" },
-  ],
-  [
-    { kind: "plain", text: "    " },
-    { kind: "punct", text: "<" },
-    { kind: "tag", text: "div" },
-    { kind: "plain", text: " " },
-    { kind: "attr", text: "className" },
-    { kind: "punct", text: "=" },
-    { kind: "string", text: '"min-h-screen"' },
-    { kind: "punct", text: ">" },
-  ],
-  [
-    { kind: "plain", text: "      " },
-    { kind: "punct", text: "<" },
-    { kind: "tag", text: "SiteHeader" },
-    { kind: "plain", text: " />" },
-  ],
-  [
-    { kind: "plain", text: "      " },
-    { kind: "punct", text: "<" },
-    { kind: "tag", text: "main" },
-    { kind: "plain", text: " " },
-    { kind: "attr", text: "className" },
-    { kind: "punct", text: "=" },
-    { kind: "string", text: '"container py-16"' },
-    { kind: "punct", text: ">{children}</" },
-    { kind: "tag", text: "main" },
-    { kind: "punct", text: ">" },
-  ],
-  [
-    { kind: "plain", text: "      " },
-    { kind: "punct", text: "<" },
-    { kind: "tag", text: "SiteFooter" },
-    { kind: "plain", text: " />" },
-  ],
-  [
-    { kind: "plain", text: "    " },
-    { kind: "punct", text: "</" },
-    { kind: "tag", text: "div" },
-    { kind: "punct", text: ">" },
-  ],
-  [
-    { kind: "plain", text: "  );" },
-  ],
-  [
-    { kind: "punct", text: "}" },
-  ],
-];
-
-const TOGGLE_CODE: ReadonlyArray<ReadonlyArray<CodeToken>> = [
-  [
-    { kind: "comment", text: "// components/Toggle.tsx" },
-  ],
-  [
-    { kind: "punct", text: "interface " },
-    { kind: "tag", text: "ToggleProps" },
-    { kind: "punct", text: " {" },
-  ],
-  [
-    { kind: "plain", text: "  value: " },
-    { kind: "attr", text: "boolean" },
-    { kind: "punct", text: ";" },
-  ],
-  [
-    { kind: "plain", text: "  glow?: " },
-    { kind: "attr", text: "boolean" },
-    { kind: "punct", text: ";" },
-  ],
-  [
-    { kind: "plain", text: "  onChange: " },
-    { kind: "punct", text: "(next: " },
-    { kind: "attr", text: "boolean" },
-    { kind: "punct", text: ") => void;" },
-  ],
-  [
-    { kind: "punct", text: "}" },
-  ],
-  [{ kind: "plain", text: "" }],
-  [
-    { kind: "punct", text: "export function " },
-    { kind: "tag", text: "Toggle" },
-    { kind: "punct", text: "({ value, glow, onChange }: " },
-    { kind: "tag", text: "ToggleProps" },
-    { kind: "punct", text: ") {" },
-  ],
-  [
-    { kind: "plain", text: "  return (" },
-  ],
-  [
-    { kind: "plain", text: "    " },
-    { kind: "punct", text: "<" },
-    { kind: "tag", text: "button" },
-    { kind: "plain", text: " " },
-    { kind: "attr", text: "role" },
-    { kind: "punct", text: "=" },
-    { kind: "string", text: '"switch"' },
-  ],
-  [
-    { kind: "plain", text: "      " },
-    { kind: "attr", text: "aria-checked" },
-    { kind: "punct", text: "={value}" },
-    { kind: "plain", text: " " },
-    { kind: "attr", text: "onClick" },
-    { kind: "punct", text: "={() => onChange(!value)}" },
-  ],
-  [
-    { kind: "plain", text: "      " },
-    { kind: "attr", text: "className" },
-    { kind: "punct", text: "={cn(" },
-  ],
-  [
-    { kind: "plain", text: "        " },
-    { kind: "string", text: '"h-7 w-14 rounded-full transition"' },
-    { kind: "punct", text: "," },
-  ],
-  [
-    { kind: "plain", text: "        glow && value && " },
-    { kind: "string", text: '"shadow-[0_0_20px_var(--accent)]"' },
-    { kind: "punct", text: "," },
-  ],
-  [
-    { kind: "plain", text: "      )}" },
-    { kind: "punct", text: " />" },
-  ],
-  [
-    { kind: "plain", text: "  );" },
-  ],
-  [
-    { kind: "punct", text: "}" },
-  ],
-];
-
-const STEPS: ReadonlyArray<LoopStep> = [
+const PAGE_STEPS: ReadonlyArray<LoopStep> = [
   {
     target: "headline",
     targetLabel: "h1.hero-headline",
@@ -378,27 +207,352 @@ const STEPS: ReadonlyArray<LoopStep> = [
   },
 ];
 
-interface PrototypeFlags {
-  readonly headlineTight: boolean;
-  readonly toggleGlowEnabled: boolean;
-  readonly priceFadeEnabled: boolean;
-  readonly ctaHalo: boolean;
-  readonly annual: boolean;
-}
+// ---------- Dashboard.tsx ----------
 
-interface Point {
-  readonly x: number;
-  readonly y: number;
-}
+const DASHBOARD_CODE: ReadonlyArray<ReadonlyArray<CodeToken>> = [
+  [{ kind: "comment", text: "// components/Dashboard.tsx" }],
+  [
+    { kind: "punct", text: "import { " },
+    { kind: "tag", text: "Sparkline" },
+    { kind: "punct", text: ", " },
+    { kind: "tag", text: "BarChart" },
+    { kind: "punct", text: ", " },
+    { kind: "tag", text: "KPICard" },
+    { kind: "punct", text: " } from " },
+    { kind: "string", text: '"@/charts"' },
+    { kind: "punct", text: ";" },
+  ],
+  [{ kind: "plain", text: "" }],
+  [
+    { kind: "punct", text: "export function " },
+    { kind: "tag", text: "Dashboard" },
+    { kind: "punct", text: "() {" },
+  ],
+  [{ kind: "plain", text: "  return (" }],
+  [
+    { kind: "plain", text: "    " },
+    { kind: "punct", text: "<" },
+    { kind: "tag", text: "div" },
+    { kind: "plain", text: " " },
+    { kind: "attr", text: "className" },
+    { kind: "punct", text: "=" },
+    { kind: "string", text: '"grid gap-4"' },
+    { kind: "punct", text: ">" },
+  ],
+  [
+    { kind: "plain", text: "      " },
+    { kind: "punct", text: "<" },
+    { kind: "tag", text: "KPICard" },
+    { kind: "plain", text: " " },
+    { kind: "attr", text: "label" },
+    { kind: "punct", text: "=" },
+    { kind: "string", text: '"MRR"' },
+    { kind: "plain", text: " " },
+    { kind: "attr", text: "value" },
+    { kind: "punct", text: "={" },
+    { kind: "plain", text: "24840" },
+    { kind: "punct", text: "} />" },
+  ],
+  [
+    { kind: "plain", text: "      " },
+    { kind: "punct", text: "<" },
+    { kind: "tag", text: "Sparkline" },
+    { kind: "plain", text: " " },
+    { kind: "attr", text: "data" },
+    { kind: "punct", text: "={" },
+    { kind: "plain", text: "revenue7d" },
+    { kind: "punct", text: "} />" },
+  ],
+  [
+    { kind: "plain", text: "      " },
+    { kind: "punct", text: "<" },
+    { kind: "tag", text: "BarChart" },
+    { kind: "plain", text: " " },
+    { kind: "attr", text: "data" },
+    { kind: "punct", text: "={" },
+    { kind: "plain", text: "signupsByWeek" },
+    { kind: "punct", text: "} />" },
+  ],
+  [
+    { kind: "plain", text: "    " },
+    { kind: "punct", text: "</" },
+    { kind: "tag", text: "div" },
+    { kind: "punct", text: ">" },
+  ],
+  [{ kind: "plain", text: "  );" }],
+  [{ kind: "punct", text: "}" }],
+];
 
-type TargetPositions = Readonly<Record<TargetId, Point>>;
+const DASHBOARD_STEPS: ReadonlyArray<LoopStep> = [
+  {
+    target: "kpi",
+    targetLabel: "KPICard.delta",
+    voicePhrase: "add deltas to the kpis",
+    compiledPrompt:
+      "add prev-period delta prop to KPICard with up/down arrow and color",
+    routedTo: "eri engine · diffusion",
+    codeLineIndex: 6,
+    newCode: [
+      { kind: "plain", text: "      " },
+      { kind: "punct", text: "<" },
+      { kind: "tag", text: "KPICard" },
+      { kind: "plain", text: " " },
+      { kind: "attr", text: "label" },
+      { kind: "punct", text: "=" },
+      { kind: "string", text: '"MRR"' },
+      { kind: "plain", text: " " },
+      { kind: "attr", text: "value" },
+      { kind: "punct", text: "={" },
+      { kind: "plain", text: "24840" },
+      { kind: "punct", text: "}" },
+      { kind: "plain", text: " " },
+      { kind: "attr", text: "delta" },
+      { kind: "punct", text: "={" },
+      { kind: "plain", text: "0.124" },
+      { kind: "punct", text: "} />" },
+    ],
+  },
+  {
+    target: "sparkline",
+    targetLabel: "Sparkline.tint",
+    voicePhrase: "tint the sparkline by trend",
+    compiledPrompt:
+      "color sparkline accent based on first vs last value (rising = accent, falling = warm)",
+    routedTo: "Claude Sonnet 4.6 · careful diffs",
+    codeLineIndex: 7,
+    newCode: [
+      { kind: "plain", text: "      " },
+      { kind: "punct", text: "<" },
+      { kind: "tag", text: "Sparkline" },
+      { kind: "plain", text: " " },
+      { kind: "attr", text: "data" },
+      { kind: "punct", text: "={" },
+      { kind: "plain", text: "revenue7d" },
+      { kind: "punct", text: "}" },
+      { kind: "plain", text: " " },
+      { kind: "attr", text: "tint" },
+      { kind: "punct", text: "=" },
+      { kind: "string", text: '"trend"' },
+      { kind: "punct", text: " />" },
+    ],
+  },
+  {
+    target: "bars",
+    targetLabel: "BarChart.highlight",
+    voicePhrase: "highlight the latest bar",
+    compiledPrompt:
+      "highlight latest bar in BarChart with accent fill and inner glow",
+    routedTo: "eri engine · diffusion",
+    codeLineIndex: 8,
+    newCode: [
+      { kind: "plain", text: "      " },
+      { kind: "punct", text: "<" },
+      { kind: "tag", text: "BarChart" },
+      { kind: "plain", text: " " },
+      { kind: "attr", text: "data" },
+      { kind: "punct", text: "={" },
+      { kind: "plain", text: "signupsByWeek" },
+      { kind: "punct", text: "}" },
+      { kind: "plain", text: " " },
+      { kind: "attr", text: "highlight" },
+      { kind: "punct", text: "=" },
+      { kind: "string", text: '"latest"' },
+      { kind: "punct", text: " />" },
+    ],
+  },
+  {
+    target: "tooltip",
+    targetLabel: "BarChart.tooltip",
+    voicePhrase: "show a tooltip on hover",
+    compiledPrompt:
+      "add hover tooltip with value + week label to BarChart bars",
+    routedTo: "Claude Opus 4.7 · long horizon",
+    codeLineIndex: 8,
+    newCode: [
+      { kind: "plain", text: "      " },
+      { kind: "punct", text: "<" },
+      { kind: "tag", text: "BarChart" },
+      { kind: "plain", text: " " },
+      { kind: "attr", text: "data" },
+      { kind: "punct", text: "={" },
+      { kind: "plain", text: "signupsByWeek" },
+      { kind: "punct", text: "}" },
+      { kind: "plain", text: " " },
+      { kind: "attr", text: "highlight" },
+      { kind: "punct", text: "=" },
+      { kind: "string", text: '"latest"' },
+      { kind: "punct", text: " " },
+      { kind: "attr", text: "tooltips" },
+      { kind: "punct", text: " />" },
+    ],
+  },
+];
 
-const FALLBACK_POSITIONS: TargetPositions = {
-  headline: { x: 160, y: 80 },
-  toggle: { x: 200, y: 160 },
-  price: { x: 160, y: 230 },
-  cta: { x: 140, y: 320 },
+// ---------- Forecast.tsx ----------
+
+const FORECAST_CODE: ReadonlyArray<ReadonlyArray<CodeToken>> = [
+  [{ kind: "comment", text: "// components/Forecast.tsx" }],
+  [
+    { kind: "punct", text: "import { " },
+    { kind: "tag", text: "LineChart" },
+    { kind: "punct", text: ", " },
+    { kind: "tag", text: "Band" },
+    { kind: "punct", text: ", " },
+    { kind: "tag", text: "Anomaly" },
+    { kind: "punct", text: " } from " },
+    { kind: "string", text: '"@/charts"' },
+    { kind: "punct", text: ";" },
+  ],
+  [{ kind: "plain", text: "" }],
+  [
+    { kind: "punct", text: "export function " },
+    { kind: "tag", text: "Forecast" },
+    { kind: "punct", text: "() {" },
+  ],
+  [
+    { kind: "plain", text: "  const points = " },
+    { kind: "tag", text: "useForecast" },
+    { kind: "punct", text: "({ horizon: " },
+    { kind: "plain", text: "14" },
+    { kind: "punct", text: " });" },
+  ],
+  [{ kind: "plain", text: "  return (" }],
+  [
+    { kind: "plain", text: "    " },
+    { kind: "punct", text: "<" },
+    { kind: "tag", text: "LineChart" },
+    { kind: "plain", text: " " },
+    { kind: "attr", text: "data" },
+    { kind: "punct", text: "={" },
+    { kind: "plain", text: "points" },
+    { kind: "punct", text: "} />" },
+  ],
+  [{ kind: "plain", text: "  );" }],
+  [{ kind: "punct", text: "}" }],
+];
+
+const FORECAST_STEPS: ReadonlyArray<LoopStep> = [
+  {
+    target: "horizon",
+    targetLabel: "useForecast.horizon",
+    voicePhrase: "stretch the horizon to 30 days",
+    compiledPrompt:
+      "extend forecast horizon from 14 to 30 days, keep historical fixed",
+    routedTo: "eri engine · diffusion",
+    codeLineIndex: 4,
+    newCode: [
+      { kind: "plain", text: "  const points = " },
+      { kind: "tag", text: "useForecast" },
+      { kind: "punct", text: "({ horizon: " },
+      { kind: "plain", text: "30" },
+      { kind: "punct", text: " });" },
+    ],
+  },
+  {
+    target: "band",
+    targetLabel: "Band.confidence",
+    voicePhrase: "show the confidence band",
+    compiledPrompt:
+      "render p10/p90 confidence band beneath forecast segment with accent tint",
+    routedTo: "Claude Sonnet 4.6 · careful diffs",
+    codeLineIndex: 6,
+    newCode: [
+      { kind: "plain", text: "    " },
+      { kind: "punct", text: "<" },
+      { kind: "tag", text: "LineChart" },
+      { kind: "plain", text: " " },
+      { kind: "attr", text: "data" },
+      { kind: "punct", text: "={" },
+      { kind: "plain", text: "points" },
+      { kind: "punct", text: "}>" },
+      { kind: "plain", text: " " },
+      { kind: "punct", text: "<" },
+      { kind: "tag", text: "Band" },
+      { kind: "plain", text: " " },
+      { kind: "attr", text: "lower" },
+      { kind: "punct", text: "={" },
+      { kind: "plain", text: "p10" },
+      { kind: "punct", text: "} " },
+      { kind: "attr", text: "upper" },
+      { kind: "punct", text: "={" },
+      { kind: "plain", text: "p90" },
+      { kind: "punct", text: "} />" },
+      { kind: "punct", text: "</" },
+      { kind: "tag", text: "LineChart" },
+      { kind: "punct", text: ">" },
+    ],
+  },
+  {
+    target: "anomaly",
+    targetLabel: "Anomaly.dots",
+    voicePhrase: "mark the anomalies",
+    compiledPrompt:
+      "render outlier points as accent dots with z-score > 2 threshold",
+    routedTo: "Claude Opus 4.7 · long horizon",
+    codeLineIndex: 6,
+    newCode: [
+      { kind: "plain", text: "    " },
+      { kind: "punct", text: "<" },
+      { kind: "tag", text: "LineChart" },
+      { kind: "plain", text: " " },
+      { kind: "attr", text: "data" },
+      { kind: "punct", text: "={" },
+      { kind: "plain", text: "points" },
+      { kind: "punct", text: "}>" },
+      { kind: "punct", text: "<" },
+      { kind: "tag", text: "Band" },
+      { kind: "plain", text: " ..." },
+      { kind: "punct", text: " /><" },
+      { kind: "tag", text: "Anomaly" },
+      { kind: "plain", text: " " },
+      { kind: "attr", text: "points" },
+      { kind: "punct", text: "={" },
+      { kind: "plain", text: "outliers" },
+      { kind: "punct", text: "} />" },
+      { kind: "punct", text: "</" },
+      { kind: "tag", text: "LineChart" },
+      { kind: "punct", text: ">" },
+    ],
+  },
+  {
+    target: "drag",
+    targetLabel: "LineChart.onDrag",
+    voicePhrase: "let me drag the next prediction",
+    compiledPrompt:
+      "wire onPointDrag handler on the t+1 forecast point, update model state",
+    routedTo: "eri engine · diffusion",
+    codeLineIndex: 6,
+    newCode: [
+      { kind: "plain", text: "    " },
+      { kind: "punct", text: "<" },
+      { kind: "tag", text: "LineChart" },
+      { kind: "plain", text: " " },
+      { kind: "attr", text: "data" },
+      { kind: "punct", text: "={" },
+      { kind: "plain", text: "points" },
+      { kind: "punct", text: "}" },
+      { kind: "plain", text: " " },
+      { kind: "attr", text: "onPointDrag" },
+      { kind: "punct", text: "={" },
+      { kind: "plain", text: "rebase" },
+      { kind: "punct", text: "}>..." },
+      { kind: "punct", text: "</" },
+      { kind: "tag", text: "LineChart" },
+      { kind: "punct", text: ">" },
+    ],
+  },
+];
+
+const FILES: Record<
+  FileId,
+  { readonly codeBase: ReadonlyArray<ReadonlyArray<CodeToken>>; readonly steps: ReadonlyArray<LoopStep> }
+> = {
+  "page.tsx": { codeBase: PAGE_CODE, steps: PAGE_STEPS },
+  "Dashboard.tsx": { codeBase: DASHBOARD_CODE, steps: DASHBOARD_STEPS },
+  "Forecast.tsx": { codeBase: FORECAST_CODE, steps: FORECAST_STEPS },
 };
+
+// ---------- shared helpers ----------
 
 function clamp01(v: number): number {
   return Math.max(0, Math.min(1, v));
@@ -407,52 +561,82 @@ function easeOut(t: number): number {
   return 1 - Math.pow(1 - t, 3);
 }
 
-function diffBadgeLabel(stepIndex: number): string {
-  switch (stepIndex) {
-    case 0:
-      return "tracking-tight applied";
-    case 1:
-      return "glow prop added";
-    case 2:
-      return "fade prop added";
-    case 3:
-      return "halo prop added";
-    default:
-      return "diff applied";
-  }
+function diffBadgeLabel(activeFile: FileId, stepIndex: number): string {
+  const stepDescriptors: Record<FileId, ReadonlyArray<string>> = {
+    "page.tsx": [
+      "tracking-tight applied",
+      "glow prop added",
+      "fade prop added",
+      "halo prop added",
+    ],
+    "Dashboard.tsx": [
+      "delta prop added",
+      "sparkline tinted",
+      "latest bar highlighted",
+      "tooltips wired",
+    ],
+    "Forecast.tsx": [
+      "horizon extended",
+      "confidence band added",
+      "anomalies marked",
+      "drag-to-rebase enabled",
+    ],
+  };
+  return stepDescriptors[activeFile][stepIndex] ?? "diff applied";
 }
+
+// ---------- shared types ----------
+
+interface SceneFlags {
+  readonly a: boolean;
+  readonly b: boolean;
+  readonly c: boolean;
+  readonly d: boolean;
+}
+
+// ============================================================
+//   Main component
+// ============================================================
 
 export function EriIDE(): React.ReactElement {
   const [tick, setTick] = useState<number>(0);
-  const [annual, setAnnual] = useState<boolean>(false);
   const [pausedAt, setPausedAt] = useState<number | null>(null);
   const [activeFile, setActiveFile] = useState<FileId>("page.tsx");
+  // Page-specific interactive state.
+  const [annual, setAnnual] = useState<boolean>(false);
+  // Forecast-specific interactive state — user-drag of t+1 prediction.
+  const [forecastNudge, setForecastNudge] = useState<number>(0);
   const lastInteractRef = useRef<number>(0);
 
-  const isPageActive = activeFile === "page.tsx";
+  // Active deck.
+  const active = FILES[activeFile];
+  const activeSteps = active.steps;
+  const activeCodeBase = active.codeBase;
 
+  // Tick advances unless user is "paused" (clicked an interactive thing).
   useEffect(() => {
     const id = window.setInterval(() => {
-      // Resume after 5s of idle only if back on page.tsx.
       if (
         pausedAt !== null &&
-        isPageActive &&
         Date.now() - lastInteractRef.current >= IDLE_RESUME_MS
       ) {
         setPausedAt(null);
       }
-      // Loop only runs when on page.tsx and not paused.
-      if (pausedAt === null && isPageActive) {
+      if (pausedAt === null) {
         setTick((prev) => prev + 1);
       }
     }, TICK_MS);
     return () => window.clearInterval(id);
-  }, [pausedAt, isPageActive]);
+  }, [pausedAt]);
 
   const handleFileSelect = (file: FileId): void => {
     if (file === activeFile) return;
-    lastInteractRef.current = Date.now();
     setActiveFile(file);
+    setTick(0); // restart cycle for new file
+  };
+
+  const handlePreviewInteract = (): void => {
+    lastInteractRef.current = Date.now();
     setPausedAt((prev) => prev ?? Date.now());
   };
 
@@ -461,11 +645,12 @@ export function EriIDE(): React.ReactElement {
   const cycleMs = elapsedMs % totalMs;
   const stepIndex = Math.floor(cycleMs / STEP_MS);
   const inStepMs = cycleMs % STEP_MS;
-  const step = STEPS[stepIndex] ?? STEPS[0]!;
+  const step = activeSteps[stepIndex] ?? activeSteps[0]!;
 
   const appliedSteps: ReadonlyArray<number> = [...Array(stepIndex).keys()];
   const denoiseFraction = clamp01(
-    (inStepMs - PHASE_DENOISE_START) / (PHASE_DENOISE_END - PHASE_DENOISE_START),
+    (inStepMs - PHASE_DENOISE_START) /
+      (PHASE_DENOISE_END - PHASE_DENOISE_START),
   );
   const resolveFraction = clamp01(
     (inStepMs - PHASE_DENOISE_END) / (PHASE_RESOLVE_END - PHASE_DENOISE_END),
@@ -474,12 +659,12 @@ export function EriIDE(): React.ReactElement {
   const denoising =
     inStepMs >= PHASE_DENOISE_START && inStepMs < PHASE_DENOISE_END;
 
-  const codeLines = CODE_BASE.map((line, idx) => {
+  const codeLines = activeCodeBase.map((line, idx) => {
     const overrideStepIdx = [...appliedSteps]
       .reverse()
-      .find((sIdx) => STEPS[sIdx]?.codeLineIndex === idx);
+      .find((sIdx) => activeSteps[sIdx]?.codeLineIndex === idx);
     if (overrideStepIdx !== undefined) {
-      return STEPS[overrideStepIdx]!.newCode;
+      return activeSteps[overrideStepIdx]!.newCode;
     }
     return line;
   });
@@ -496,17 +681,17 @@ export function EriIDE(): React.ReactElement {
     inStepMs >= PHASE_ROUTE_START && inStepMs < PHASE_ROUTE_END;
   const routingShown = inStepMs >= PHASE_ROUTE_START;
 
-  const headlineTightAdded =
-    stepIndex > 0 || (stepIndex === 0 && showNewLine);
-  const toggleGlowAdded =
-    stepIndex > 1 || (stepIndex === 1 && showNewLine);
-  const priceFadeAdded =
-    stepIndex > 2 || (stepIndex === 2 && showNewLine);
-  const ctaHaloAdded =
-    stepIndex > 3 || (stepIndex === 3 && showNewLine);
+  const sceneFlags: SceneFlags = {
+    a: stepIndex > 0 || (stepIndex === 0 && showNewLine),
+    b: stepIndex > 1 || (stepIndex === 1 && showNewLine),
+    c: stepIndex > 2 || (stepIndex === 2 && showNewLine),
+    d: stepIndex > 3 || (stepIndex === 3 && showNewLine),
+  };
 
+  // Page: drive annual toggle by scene state (unless user is paused).
   useEffect(() => {
     if (pausedAt !== null) return;
+    if (activeFile !== "page.tsx") return;
     let next: boolean;
     if (stepIndex >= 2) {
       const subPhase = Math.floor(inStepMs / ANNUAL_OSCILLATE_MS) % 2;
@@ -518,28 +703,28 @@ export function EriIDE(): React.ReactElement {
     }
     if (next !== annual) setAnnual(next);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pausedAt, stepIndex, inStepMs, showNewLine]);
+  }, [pausedAt, activeFile, stepIndex, inStepMs, showNewLine]);
+
+  // Forecast: reset nudge when leaving the file.
+  useEffect(() => {
+    if (activeFile !== "Forecast.tsx") setForecastNudge(0);
+  }, [activeFile]);
 
   const handleToggleClick = (): void => {
-    lastInteractRef.current = Date.now();
-    setPausedAt((prev) => prev ?? Date.now());
+    handlePreviewInteract();
     setAnnual((prev) => !prev);
   };
 
   const gazeProgress = clamp01(inStepMs / PHASE_GAZE_END);
 
-  const prototypeFlags: PrototypeFlags = {
-    headlineTight: headlineTightAdded,
-    toggleGlowEnabled: toggleGlowAdded,
-    priceFadeEnabled: priceFadeAdded,
-    ctaHalo: ctaHaloAdded,
-    annual,
-  };
+  const modifiedLineIndices = appliedSteps
+    .map((s) => activeSteps[s]?.codeLineIndex)
+    .filter((n): n is number => typeof n === "number");
 
   return (
     <div className="relative rounded-xl border border-white/[0.08] bg-[#0b0b0b] overflow-hidden shadow-[0_20px_60px_-20px_rgba(0,0,0,0.6)]">
       {/* Title bar */}
-      <div className="flex items-center justify-between px-4 py-2 border-b border-white/[0.06] bg-[#0a0a0a]">
+      <div className="relative flex items-center justify-between px-4 py-2 border-b border-white/[0.06] bg-[#0a0a0a]">
         <div className="flex items-center gap-2">
           <span className="h-3 w-3 rounded-full bg-[#ff5f57]" aria-hidden />
           <span className="h-3 w-3 rounded-full bg-[#febc2e]" aria-hidden />
@@ -555,74 +740,63 @@ export function EriIDE(): React.ReactElement {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[200px_1.15fr_1fr] min-h-[520px]">
-        {/* Sidebar — file tree */}
+      <div className="grid grid-cols-1 lg:grid-cols-[200px_1.15fr_1fr] min-h-[560px]">
         <Sidebar activeFile={activeFile} onSelect={handleFileSelect} />
 
-        {/* Editor pane */}
-        <div className="flex flex-col border-l border-r border-white/[0.06] bg-[#0c0c0c]">
+        <div className="flex flex-col border-l border-r border-white/[0.06] bg-[#0c0c0c] min-w-0">
           <TabBar activeFile={activeFile} onSelect={handleFileSelect} />
           <CodePane
-            codeLines={
-              isPageActive
-                ? codeLines
-                : activeFile === "layout.tsx"
-                  ? LAYOUT_CODE
-                  : TOGGLE_CODE
-            }
-            activeLineIndex={isPageActive ? step.codeLineIndex : -1}
-            denoising={isPageActive ? denoising : false}
+            codeLines={codeLines}
+            activeLineIndex={step.codeLineIndex}
+            denoising={denoising}
             denoiseFraction={denoiseFraction}
             resolveFraction={resolveFraction}
-            showNewLine={isPageActive ? showNewLine : false}
+            showNewLine={showNewLine}
             currentStepNewCode={step.newCode}
-            modifiedLineIndices={
-              isPageActive
-                ? appliedSteps
-                    .map((s) => STEPS[s]?.codeLineIndex)
-                    .filter((n): n is number => typeof n === "number")
-                : []
-            }
-            showAppliedBadge={
-              isPageActive && showNewLine && resolveFraction < 1
-            }
-            appliedBadgeLabel={diffBadgeLabel(stepIndex)}
+            modifiedLineIndices={modifiedLineIndices}
+            showAppliedBadge={showNewLine && resolveFraction < 1}
+            appliedBadgeLabel={diffBadgeLabel(activeFile, stepIndex)}
           />
           <VoiceInputBar
-            voicePhraseShown={isPageActive ? voicePhraseShown : ""}
-            voiceActive={isPageActive ? voiceActive : false}
-            compiledVisible={isPageActive ? compiledVisible : false}
+            voicePhraseShown={voicePhraseShown}
+            voiceActive={voiceActive}
+            compiledVisible={compiledVisible}
             compiledPrompt={step.compiledPrompt}
             routedTo={step.routedTo}
-            routingActive={isPageActive ? routingActive : false}
-            routingShown={isPageActive ? routingShown : false}
-            idle={!isPageActive}
-            idlePrompt={
-              activeFile === "layout.tsx"
-                ? "browsing layout.tsx · say something to ship"
-                : "browsing Toggle.tsx · say something to ship"
-            }
+            routingActive={routingActive}
+            routingShown={routingShown}
           />
         </div>
 
-        {/* Preview pane — branches on active file */}
-        {isPageActive ? (
-          <PreviewPane
+        {activeFile === "page.tsx" ? (
+          <PagePreview
             target={step.target}
             gazeProgress={gazeProgress}
-            flags={prototypeFlags}
+            flags={sceneFlags}
+            annual={annual}
             onToggleClick={handleToggleClick}
             paused={pausedAt !== null}
             targetLabel={step.targetLabel}
           />
-        ) : activeFile === "layout.tsx" ? (
-          <LayoutPreview />
+        ) : activeFile === "Dashboard.tsx" ? (
+          <DashboardPreview
+            flags={sceneFlags}
+            targetLabel={step.targetLabel}
+            onInteract={handlePreviewInteract}
+          />
         ) : (
-          <TogglePreview />
+          <ForecastPreview
+            flags={sceneFlags}
+            targetLabel={step.targetLabel}
+            forecastNudge={forecastNudge}
+            onForecastNudge={(v) => {
+              handlePreviewInteract();
+              setForecastNudge(v);
+            }}
+          />
         )}
       </div>
 
-      {/* Status bar */}
       <StatusBar
         stepIndex={stepIndex}
         routedTo={step.routedTo}
@@ -632,6 +806,10 @@ export function EriIDE(): React.ReactElement {
     </div>
   );
 }
+
+// ============================================================
+//   Sidebar
+// ============================================================
 
 interface SidebarProps {
   readonly activeFile: FileId;
@@ -657,18 +835,18 @@ function Sidebar({
         active={activeFile === "page.tsx"}
         onSelect={() => onSelect("page.tsx")}
       />
-      <FileTreeNode
-        label="layout.tsx"
-        depth={4}
-        active={activeFile === "layout.tsx"}
-        onSelect={() => onSelect("layout.tsx")}
-      />
       <FileTreeNode label="components" expanded depth={2} />
       <FileTreeNode
-        label="Toggle.tsx"
+        label="Dashboard.tsx"
         depth={3}
-        active={activeFile === "Toggle.tsx"}
-        onSelect={() => onSelect("Toggle.tsx")}
+        active={activeFile === "Dashboard.tsx"}
+        onSelect={() => onSelect("Dashboard.tsx")}
+      />
+      <FileTreeNode
+        label="Forecast.tsx"
+        depth={3}
+        active={activeFile === "Forecast.tsx"}
+        onSelect={() => onSelect("Forecast.tsx")}
       />
       <FileTreeNode label="lib" depth={2} />
       <div className="mt-auto border-t border-white/[0.04] pt-3 px-2">
@@ -733,21 +911,26 @@ function FileTreeNode({
     );
   }
   return (
-    <div
-      className={baseClass}
-      style={{ paddingLeft: `${depth * 10 + 6}px` }}
-    >
+    <div className={baseClass} style={{ paddingLeft: `${depth * 10 + 6}px` }}>
       {inner}
     </div>
   );
 }
+
+// ============================================================
+//   TabBar
+// ============================================================
 
 interface TabBarProps {
   readonly activeFile: FileId;
   readonly onSelect: (file: FileId) => void;
 }
 
-const TAB_FILES: ReadonlyArray<FileId> = ["page.tsx", "layout.tsx", "Toggle.tsx"];
+const TAB_FILES: ReadonlyArray<FileId> = [
+  "page.tsx",
+  "Dashboard.tsx",
+  "Forecast.tsx",
+];
 
 function TabBar({
   activeFile,
@@ -786,6 +969,10 @@ function TabBar({
     </div>
   );
 }
+
+// ============================================================
+//   CodePane + CodeLineRow
+// ============================================================
 
 interface CodePaneProps {
   readonly codeLines: ReadonlyArray<ReadonlyArray<CodeToken>>;
@@ -895,7 +1082,6 @@ function CodeLineRow({
       <span className="min-w-0 truncate">
         {tokens.map((tok, ti) => {
           if (denoising && Math.random() < (1 - denoiseFraction) * 0.4) {
-            // Render a denoise shimmer character instead of the real one.
             return (
               <span
                 key={`tok-${ti}`}
@@ -937,6 +1123,10 @@ function tokenClass(kind: CodeToken["kind"]): string {
   }
 }
 
+// ============================================================
+//   VoiceInputBar
+// ============================================================
+
 interface VoiceInputBarProps {
   readonly voicePhraseShown: string;
   readonly voiceActive: boolean;
@@ -945,8 +1135,6 @@ interface VoiceInputBarProps {
   readonly routedTo: string;
   readonly routingActive: boolean;
   readonly routingShown: boolean;
-  readonly idle?: boolean;
-  readonly idlePrompt?: string;
 }
 
 function VoiceInputBar({
@@ -957,8 +1145,6 @@ function VoiceInputBar({
   routedTo,
   routingActive,
   routingShown,
-  idle,
-  idlePrompt,
 }: VoiceInputBarProps): React.ReactElement {
   return (
     <div className="border-t border-white/[0.06] bg-[#080808] px-4 py-3 flex flex-col gap-2">
@@ -967,13 +1153,12 @@ function VoiceInputBar({
           className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-accent/40 mt-px shrink-0"
           aria-hidden
           style={{
-            background:
-              !idle && voiceActive ? "rgba(224,255,79,0.12)" : "transparent",
+            background: voiceActive ? "rgba(224,255,79,0.12)" : "transparent",
           }}
         >
           <svg
             viewBox="0 0 24 24"
-            className={`h-3 w-3 ${idle ? "text-paper/35" : "text-accent"}`}
+            className="h-3 w-3 text-accent"
             fill="none"
             stroke="currentColor"
             strokeWidth="2"
@@ -982,88 +1167,105 @@ function VoiceInputBar({
             <path d="M5 11a7 7 0 0 0 14 0" strokeLinecap="round" />
           </svg>
         </span>
-        {idle ? (
-          <p className="font-mono text-[12px] text-paper/40 italic truncate flex-1">
-            {idlePrompt ?? "ready · say something to ship"}
-          </p>
-        ) : (
-          <p className="font-mono text-[12px] text-paper/85 truncate flex-1">
-            <span className="text-paper/40">"</span>
-            {voicePhraseShown}
-            <span
-              className="inline-block w-[1px] h-[12px] align-middle ml-0.5"
-              style={{
-                background: "var(--accent)",
-                animation: "caretBlink 1s steps(2) infinite",
-              }}
-              aria-hidden
-            />
-            <span className="text-paper/40">"</span>
-          </p>
-        )}
+        <p className="font-mono text-[12px] text-paper/85 truncate flex-1">
+          <span className="text-paper/40">"</span>
+          {voicePhraseShown}
+          <span
+            className="inline-block w-[1px] h-[12px] align-middle ml-0.5"
+            style={{
+              background: "var(--accent)",
+              animation: "caretBlink 1s steps(2) infinite",
+            }}
+            aria-hidden
+          />
+          <span className="text-paper/40">"</span>
+        </p>
       </div>
-      {!idle && (
-        <>
-          <p
-            className="font-mono text-[11px] text-paper/55 pl-8 truncate"
-            style={{
-              opacity: compiledVisible ? 1 : 0,
-              transition: "opacity 240ms ease-out",
-            }}
-            aria-hidden={!compiledVisible}
-          >
-            <span className="text-accent/70">✦ compiled ·</span> {compiledPrompt}
-          </p>
-          <p
-            className="font-mono text-[11px] pl-8 truncate flex items-center gap-2"
-            style={{
-              opacity: routingShown ? 1 : 0,
-              transition: "opacity 240ms ease-out",
-            }}
-            aria-hidden={!routingShown}
-          >
-            <span className="text-paper/45">→ routed ·</span>
-            <span
-              className="text-accent/85"
-              style={{
-                animation: routingActive
-                  ? "annualGlow 1.2s ease-in-out infinite"
-                  : "none",
-              }}
-            >
-              {routedTo}
-            </span>
-          </p>
-        </>
-      )}
+      <p
+        className="font-mono text-[11px] text-paper/55 pl-8 truncate"
+        style={{
+          opacity: compiledVisible ? 1 : 0,
+          transition: "opacity 240ms ease-out",
+        }}
+        aria-hidden={!compiledVisible}
+      >
+        <span className="text-accent/70">✦ compiled ·</span> {compiledPrompt}
+      </p>
+      <p
+        className="font-mono text-[11px] pl-8 truncate flex items-center gap-2"
+        style={{
+          opacity: routingShown ? 1 : 0,
+          transition: "opacity 240ms ease-out",
+        }}
+        aria-hidden={!routingShown}
+      >
+        <span className="text-paper/45">→ routed ·</span>
+        <span
+          className="text-accent/85"
+          style={{
+            animation: routingActive
+              ? "annualGlow 1.2s ease-in-out infinite"
+              : "none",
+          }}
+        >
+          {routedTo}
+        </span>
+      </p>
     </div>
   );
 }
 
-interface PreviewPaneProps {
-  readonly target: TargetId;
+// ============================================================
+//   PagePreview (existing pricing card)
+// ============================================================
+
+interface Point {
+  readonly x: number;
+  readonly y: number;
+}
+
+type PageTargetId = "headline" | "toggle" | "price" | "cta";
+
+const PAGE_TARGET_ORDER: ReadonlyArray<PageTargetId> = [
+  "headline",
+  "toggle",
+  "price",
+  "cta",
+];
+
+const PAGE_FALLBACK_POSITIONS: Record<PageTargetId, Point> = {
+  headline: { x: 160, y: 80 },
+  toggle: { x: 200, y: 160 },
+  price: { x: 160, y: 230 },
+  cta: { x: 140, y: 320 },
+};
+
+interface PagePreviewProps {
+  readonly target: string;
   readonly gazeProgress: number;
-  readonly flags: PrototypeFlags;
+  readonly flags: SceneFlags;
+  readonly annual: boolean;
   readonly onToggleClick: () => void;
   readonly paused: boolean;
   readonly targetLabel: string;
 }
 
-function PreviewPane({
+function PagePreview({
   target,
   gazeProgress,
   flags,
+  annual,
   onToggleClick,
   paused,
   targetLabel,
-}: PreviewPaneProps): React.ReactElement {
+}: PagePreviewProps): React.ReactElement {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const headlineRef = useRef<HTMLHeadingElement | null>(null);
   const toggleRef = useRef<HTMLButtonElement | null>(null);
   const priceRef = useRef<HTMLDivElement | null>(null);
   const ctaRef = useRef<HTMLButtonElement | null>(null);
-  const [positions, setPositions] = useState<TargetPositions>(
-    FALLBACK_POSITIONS,
+  const [positions, setPositions] = useState<Record<PageTargetId, Point>>(
+    PAGE_FALLBACK_POSITIONS,
   );
 
   useLayoutEffect(() => {
@@ -1079,7 +1281,7 @@ function PreviewPane({
           y: r.top - c.top + r.height / 2,
         };
       };
-      const next: Partial<Record<TargetId, Point>> = {};
+      const next: Partial<Record<PageTargetId, Point>> = {};
       const h = m(headlineRef.current);
       const t = m(toggleRef.current);
       const p = m(priceRef.current);
@@ -1095,22 +1297,24 @@ function PreviewPane({
     return () => window.removeEventListener("resize", measure);
   }, []);
 
-  const TARGET_ORDER: ReadonlyArray<TargetId> = [
-    "headline",
-    "toggle",
-    "price",
-    "cta",
-  ];
-  const idx = TARGET_ORDER.indexOf(target);
+  const pageTarget = (PAGE_TARGET_ORDER.includes(target as PageTargetId)
+    ? (target as PageTargetId)
+    : "headline") as PageTargetId;
+  const idx = PAGE_TARGET_ORDER.indexOf(pageTarget);
   const prevTarget =
-    TARGET_ORDER[(idx + TARGET_ORDER.length - 1) % TARGET_ORDER.length]!;
+    PAGE_TARGET_ORDER[(idx + PAGE_TARGET_ORDER.length - 1) %
+      PAGE_TARGET_ORDER.length]!;
   const from = positions[prevTarget];
-  const to = positions[target];
+  const to = positions[pageTarget];
   const gazeX = from.x + (to.x - from.x) * easeOut(gazeProgress);
   const gazeY = from.y + (to.y - from.y) * easeOut(gazeProgress);
 
-  const priceText = flags.annual ? "$240/yr" : "$25/mo";
-  const toggleHasGlow = flags.toggleGlowEnabled && flags.annual;
+  const headlineTight = flags.a;
+  const toggleGlowEnabled = flags.b;
+  const priceFadeEnabled = flags.c;
+  const ctaHalo = flags.d;
+  const priceText = annual ? "$240/yr" : "$25/mo";
+  const toggleHasGlow = toggleGlowEnabled && annual;
 
   return (
     <div className="relative bg-[#0a0a0a]">
@@ -1130,7 +1334,6 @@ function PreviewPane({
         className="relative px-6 py-8"
         style={{ minHeight: "440px" }}
       >
-        {/* Gaze ring */}
         <div
           aria-hidden
           className="pointer-events-none absolute h-10 w-10 rounded-full"
@@ -1150,7 +1353,7 @@ function PreviewPane({
           style={{
             fontWeight: 500,
             fontSize: "26px",
-            letterSpacing: flags.headlineTight ? "-0.04em" : "-0.005em",
+            letterSpacing: headlineTight ? "-0.04em" : "-0.005em",
           }}
         >
           Pricing that scales with you
@@ -1162,7 +1365,7 @@ function PreviewPane({
         <div className="mt-6 flex items-center gap-3">
           <span
             className={`font-mono text-[12px] transition-colors ${
-              flags.annual ? "text-paper/55" : "text-paper/85"
+              annual ? "text-paper/55" : "text-paper/85"
             }`}
           >
             Monthly
@@ -1171,13 +1374,13 @@ function PreviewPane({
             ref={toggleRef}
             type="button"
             role="switch"
-            aria-checked={flags.annual}
+            aria-checked={annual}
             aria-label="Toggle billing cycle"
             onClick={onToggleClick}
             className="relative h-7 w-14 rounded-full border transition-all duration-500 cursor-pointer"
             style={{
               borderColor:
-                target === "toggle"
+                pageTarget === "toggle"
                   ? "rgba(224,255,79,0.45)"
                   : "rgba(255,255,255,0.10)",
               background: toggleHasGlow
@@ -1191,7 +1394,7 @@ function PreviewPane({
             <span
               className="absolute top-1 left-1 h-5 w-5 rounded-full"
               style={{
-                transform: flags.annual ? "translateX(28px)" : "translateX(0)",
+                transform: annual ? "translateX(28px)" : "translateX(0)",
                 transition:
                   "transform 220ms cubic-bezier(0.32, 0.72, 0, 1), background 220ms ease",
                 background: toggleHasGlow
@@ -1203,7 +1406,7 @@ function PreviewPane({
           </button>
           <span
             className={`font-mono text-[12px] transition-colors ${
-              flags.annual ? "text-paper/85" : "text-paper/55"
+              annual ? "text-paper/85" : "text-paper/55"
             }`}
           >
             Annual
@@ -1229,20 +1432,20 @@ function PreviewPane({
           className="mt-6 inline-flex items-baseline gap-2 rounded-md border px-5 py-4 transition-all duration-500"
           style={{
             borderColor:
-              target === "price"
+              pageTarget === "price"
                 ? "rgba(224,255,79,0.45)"
                 : "rgba(255,255,255,0.08)",
             background: "rgba(255,255,255,0.02)",
           }}
         >
           <span
-            key={flags.priceFadeEnabled ? priceText : "static-price"}
+            key={priceFadeEnabled ? priceText : "static-price"}
             className="font-display text-paper"
             style={{
               fontWeight: 500,
               fontSize: "36px",
               letterSpacing: "-0.02em",
-              animation: flags.priceFadeEnabled
+              animation: priceFadeEnabled
                 ? "diffResolve 0.5s ease-out"
                 : undefined,
             }}
@@ -1261,13 +1464,13 @@ function PreviewPane({
             className="rounded-md px-5 py-2.5 font-display text-[14px] transition-all duration-500 relative"
             style={{
               fontWeight: 500,
-              background: flags.ctaHalo ? "var(--accent)" : "rgba(255,255,255,0.06)",
-              color: flags.ctaHalo ? "var(--bg-primary)" : "var(--text-primary)",
+              background: ctaHalo ? "var(--accent)" : "rgba(255,255,255,0.06)",
+              color: ctaHalo ? "var(--bg-primary)" : "var(--text-primary)",
               border:
-                target === "cta"
+                pageTarget === "cta"
                   ? "1px solid rgba(224,255,79,0.5)"
                   : "1px solid rgba(255,255,255,0.10)",
-              animation: flags.ctaHalo
+              animation: ctaHalo
                 ? "ctaHalo 1.6s ease-in-out infinite"
                 : "none",
             }}
@@ -1283,198 +1486,661 @@ function PreviewPane({
   );
 }
 
-function LayoutPreview(): React.ReactElement {
+// ============================================================
+//   DashboardPreview — KPIs + sparkline + bar chart
+// ============================================================
+
+interface DashboardPreviewProps {
+  readonly flags: SceneFlags;
+  readonly targetLabel: string;
+  readonly onInteract: () => void;
+}
+
+const SPARK_DATA: ReadonlyArray<number> = [
+  18, 22, 21, 24, 26, 23, 27, 29, 28, 31, 34, 33, 36, 38, 37, 40, 42, 41, 45,
+  46, 48, 47, 50, 52,
+];
+
+const BAR_DATA: ReadonlyArray<{ label: string; value: number }> = [
+  { label: "W34", value: 22 },
+  { label: "W35", value: 29 },
+  { label: "W36", value: 26 },
+  { label: "W37", value: 33 },
+  { label: "W38", value: 41 },
+  { label: "W39", value: 38 },
+  { label: "W40", value: 47 },
+  { label: "W41", value: 58 },
+];
+
+function DashboardPreview({
+  flags,
+  targetLabel,
+  onInteract,
+}: DashboardPreviewProps): React.ReactElement {
+  const [hoveredBar, setHoveredBar] = useState<number | null>(null);
+
+  const deltasOn = flags.a;
+  const sparkTinted = flags.b;
+  const latestHighlighted = flags.c;
+  const tooltipsOn = flags.d;
+
   return (
     <div className="relative bg-[#0a0a0a]">
       <div className="flex items-center justify-between px-4 py-2 border-b border-white/[0.06]">
         <p className="font-mono text-[11px] text-paper/45 uppercase tracking-wider">
-          Preview · layout shell
+          Preview · dashboard
         </p>
-        <span className="font-mono text-[10px] text-paper/35">
-          rendered server-side
-        </span>
-      </div>
-      <div className="px-6 py-6 flex flex-col gap-4" style={{ minHeight: "440px" }}>
-        {/* Mock site header */}
-        <div className="rounded-md border border-white/[0.08] bg-[#0c0c0c]">
-          <div className="flex items-center justify-between px-4 py-3">
-            <div className="flex items-center gap-2">
-              <span
-                className="font-display text-paper text-[15px]"
-                style={{ letterSpacing: "-0.05em", fontWeight: 500 }}
-              >
-                pricing-app
-              </span>
-            </div>
-            <div className="flex items-center gap-4 font-mono text-[11px] text-paper/55">
-              <span>docs</span>
-              <span>pricing</span>
-              <span>sign in</span>
-              <span className="rounded-sm bg-accent/15 text-accent px-2 py-0.5">
-                start free
-              </span>
-            </div>
-          </div>
-        </div>
-
-        {/* Mock main content area */}
-        <div className="flex-1 rounded-md border border-dashed border-white/[0.10] bg-[#080808] p-6">
-          <p className="font-mono text-[10px] text-paper/35 uppercase tracking-wider mb-3">
-            &lt;main&gt; · children
-          </p>
-          <div className="space-y-2">
-            <div className="h-3 w-1/3 rounded bg-white/[0.08]" />
-            <div className="h-2 w-2/3 rounded bg-white/[0.05]" />
-            <div className="h-2 w-1/2 rounded bg-white/[0.05]" />
-          </div>
-          <div className="mt-6 grid grid-cols-3 gap-3">
-            {[0, 1, 2].map((i) => (
-              <div
-                key={i}
-                className="h-20 rounded border border-white/[0.06] bg-white/[0.02]"
-              />
-            ))}
-          </div>
-        </div>
-
-        {/* Mock footer */}
-        <div className="rounded-md border border-white/[0.06] bg-[#0c0c0c] px-4 py-3 flex items-center justify-between font-mono text-[10px] text-paper/40">
-          <span>© 2026 pricing-app</span>
-          <span className="flex items-center gap-2">
-            <span className="h-1.5 w-1.5 rounded-full bg-[#41d57c]" aria-hidden />
-            status
+        <div className="flex items-center gap-1.5">
+          <span className="h-1.5 w-1.5 rounded-full bg-accent pulse-dot" aria-hidden />
+          <span className="font-mono text-[10px] text-paper/45">
+            looking · {targetLabel}
           </span>
         </div>
+      </div>
+      <div className="px-6 py-6 flex flex-col gap-5" style={{ minHeight: "440px" }}>
+        {/* KPI row */}
+        <div className="grid grid-cols-3 gap-3">
+          <KPICard label="MRR" value="$24.8k" delta={0.124} showDelta={deltasOn} />
+          <KPICard
+            label="Active users"
+            value="1,284"
+            delta={0.083}
+            showDelta={deltasOn}
+          />
+          <KPICard label="Churn" value="2.1%" delta={-0.014} showDelta={deltasOn} />
+        </div>
 
-        <p className="font-mono text-[10px] text-paper/35 italic">
-          metadata · "Pricing — pricing-app" → injected on every child route
-        </p>
+        {/* Sparkline */}
+        <div className="rounded-md border border-white/[0.08] bg-[#0c0c0c] p-4">
+          <div className="flex items-baseline justify-between mb-3">
+            <p className="font-mono text-[10px] text-paper/45 uppercase tracking-wider">
+              revenue · 24w
+            </p>
+            <p className="font-mono text-[11px] text-paper/65">
+              $52.4k
+              {sparkTinted ? (
+                <span className="ml-2 text-accent">↑ 18%</span>
+              ) : null}
+            </p>
+          </div>
+          <Sparkline data={SPARK_DATA} tint={sparkTinted ? "rise" : null} />
+        </div>
+
+        {/* Bar chart */}
+        <div className="rounded-md border border-white/[0.08] bg-[#0c0c0c] p-4 flex-1">
+          <div className="flex items-baseline justify-between mb-3">
+            <p className="font-mono text-[10px] text-paper/45 uppercase tracking-wider">
+              signups · weekly
+            </p>
+            {tooltipsOn && hoveredBar !== null ? (
+              <p className="font-mono text-[11px] text-paper/85">
+                {BAR_DATA[hoveredBar]!.label} ·{" "}
+                <span className="text-accent">{BAR_DATA[hoveredBar]!.value}</span>
+              </p>
+            ) : (
+              <p className="font-mono text-[11px] text-paper/65">
+                {BAR_DATA[BAR_DATA.length - 1]!.value} this week
+              </p>
+            )}
+          </div>
+          <BarChart
+            data={BAR_DATA}
+            highlightLatest={latestHighlighted}
+            tooltipsOn={tooltipsOn}
+            hoveredBar={hoveredBar}
+            onHover={(i) => {
+              if (tooltipsOn) {
+                onInteract();
+                setHoveredBar(i);
+              }
+            }}
+            onLeave={() => {
+              if (tooltipsOn) setHoveredBar(null);
+            }}
+          />
+        </div>
       </div>
     </div>
   );
 }
 
-function TogglePreview(): React.ReactElement {
-  const [demoValue, setDemoValue] = useState<boolean>(false);
+interface KPICardProps {
+  readonly label: string;
+  readonly value: string;
+  readonly delta: number;
+  readonly showDelta: boolean;
+}
+
+function KPICard({
+  label,
+  value,
+  delta,
+  showDelta,
+}: KPICardProps): React.ReactElement {
+  const positive = delta >= 0;
+  return (
+    <div className="rounded-md border border-white/[0.08] bg-[#0c0c0c] px-4 py-3">
+      <p className="font-mono text-[10px] text-paper/40 uppercase tracking-wider mb-1.5">
+        {label}
+      </p>
+      <p
+        className="font-display text-paper"
+        style={{ fontSize: "22px", fontWeight: 500, letterSpacing: "-0.02em" }}
+      >
+        {value}
+      </p>
+      <div
+        className="mt-1 h-4 font-mono text-[11px] flex items-center gap-1 transition-opacity duration-500"
+        style={{ opacity: showDelta ? 1 : 0 }}
+        aria-hidden={!showDelta}
+      >
+        <span className={positive ? "text-accent" : "text-[#ff8a6a]"}>
+          {positive ? "↑" : "↓"} {(Math.abs(delta) * 100).toFixed(1)}%
+        </span>
+        <span className="text-paper/35">vs last 7d</span>
+      </div>
+    </div>
+  );
+}
+
+interface SparklineProps {
+  readonly data: ReadonlyArray<number>;
+  readonly tint: "rise" | "fall" | null;
+}
+
+function Sparkline({ data, tint }: SparklineProps): React.ReactElement {
+  const w = 540;
+  const h = 80;
+  const pad = 6;
+  const min = Math.min(...data);
+  const max = Math.max(...data);
+  const points = data.map((v, i) => {
+    const x = pad + (i / (data.length - 1)) * (w - pad * 2);
+    const y = pad + (1 - (v - min) / (max - min || 1)) * (h - pad * 2);
+    return { x, y };
+  });
+  const path = points
+    .map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`)
+    .join(" ");
+  const areaPath = `${path} L ${points[points.length - 1]!.x} ${h} L ${points[0]!.x} ${h} Z`;
+  const stroke = tint === "rise" ? "var(--accent)" : "rgba(245,242,236,0.6)";
+  const fillStops = tint === "rise"
+    ? "stop-color='rgba(224,255,79,0.25)'"
+    : "stop-color='rgba(245,242,236,0.10)'";
+  const last = points[points.length - 1]!;
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} className="w-full block" preserveAspectRatio="none">
+      <defs>
+        <linearGradient id="sparkFill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" {...{}}
+            stopColor={tint === "rise" ? "rgba(224,255,79,0.25)" : "rgba(245,242,236,0.10)"}
+          />
+          <stop
+            offset="100%"
+            stopColor={tint === "rise" ? "rgba(224,255,79,0)" : "rgba(245,242,236,0)"}
+          />
+        </linearGradient>
+      </defs>
+      <path d={areaPath} fill="url(#sparkFill)" />
+      <path
+        d={path}
+        fill="none"
+        stroke={stroke}
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        style={{ transition: "stroke 400ms ease" }}
+      />
+      <circle
+        cx={last.x}
+        cy={last.y}
+        r="3"
+        fill={stroke}
+        style={{ transition: "fill 400ms ease" }}
+      />
+      <circle
+        cx={last.x}
+        cy={last.y}
+        r="6"
+        fill={tint === "rise" ? "rgba(224,255,79,0.25)" : "rgba(245,242,236,0.12)"}
+      >
+        <animate
+          attributeName="r"
+          values="6;10;6"
+          dur="1.6s"
+          repeatCount="indefinite"
+        />
+        <animate
+          attributeName="opacity"
+          values="0.8;0;0.8"
+          dur="1.6s"
+          repeatCount="indefinite"
+        />
+      </circle>
+      {/* Unused mute to silence lint */}
+      <text fill="transparent">{fillStops}</text>
+    </svg>
+  );
+}
+
+interface BarChartProps {
+  readonly data: ReadonlyArray<{ label: string; value: number }>;
+  readonly highlightLatest: boolean;
+  readonly tooltipsOn: boolean;
+  readonly hoveredBar: number | null;
+  readonly onHover: (i: number) => void;
+  readonly onLeave: () => void;
+}
+
+function BarChart({
+  data,
+  highlightLatest,
+  tooltipsOn,
+  hoveredBar,
+  onHover,
+  onLeave,
+}: BarChartProps): React.ReactElement {
+  const w = 540;
+  const h = 140;
+  const pad = 8;
+  const max = Math.max(...data.map((d) => d.value));
+  const barWidth = (w - pad * 2) / data.length - 6;
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} className="w-full block">
+      {data.map((d, i) => {
+        const x = pad + i * ((w - pad * 2) / data.length) + 3;
+        const barH = (d.value / max) * (h - pad * 2 - 14);
+        const y = h - pad - barH;
+        const isLatest = i === data.length - 1;
+        const isHovered = tooltipsOn && i === hoveredBar;
+        const fill =
+          highlightLatest && isLatest
+            ? "var(--accent)"
+            : isHovered
+              ? "rgba(224,255,79,0.55)"
+              : "rgba(245,242,236,0.18)";
+        return (
+          <g key={d.label}>
+            <rect
+              x={x}
+              y={y}
+              width={barWidth}
+              height={barH}
+              rx="2"
+              fill={fill}
+              style={{ transition: "fill 280ms ease, y 280ms ease, height 280ms ease" }}
+              onMouseEnter={() => onHover(i)}
+              onMouseLeave={onLeave}
+              cursor={tooltipsOn ? "pointer" : "default"}
+            />
+            <text
+              x={x + barWidth / 2}
+              y={h - 1}
+              textAnchor="middle"
+              className="font-mono"
+              fontSize="9"
+              fill="rgba(245,242,236,0.35)"
+            >
+              {d.label}
+            </text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+// ============================================================
+//   ForecastPreview — line chart, confidence band, draggable point
+// ============================================================
+
+interface ForecastPreviewProps {
+  readonly flags: SceneFlags;
+  readonly targetLabel: string;
+  readonly forecastNudge: number;
+  readonly onForecastNudge: (v: number) => void;
+}
+
+const HISTORICAL: ReadonlyArray<number> = [
+  62, 64, 63, 67, 66, 69, 71, 70, 73, 76, 75, 79, 82, 80, 84, 86, 85, 89, 88,
+  92,
+];
+const FORECAST_BASE: ReadonlyArray<number> = [
+  93, 95, 96, 98, 100, 101, 103, 105, 106, 108, 110, 111, 113, 115,
+];
+
+function ForecastPreview({
+  flags,
+  targetLabel,
+  forecastNudge,
+  onForecastNudge,
+}: ForecastPreviewProps): React.ReactElement {
+  const horizonLong = flags.a;
+  const bandVisible = flags.b;
+  const anomaliesVisible = flags.c;
+  const dragEnabled = flags.d;
+
+  const forecastValues = useMemo(() => {
+    const horizon = horizonLong ? FORECAST_BASE.length : 7;
+    const baseSlice = FORECAST_BASE.slice(0, horizon);
+    const result = [...baseSlice];
+    if (dragEnabled && forecastNudge !== 0 && result.length > 0) {
+      result[0] = (result[0] ?? 0) + forecastNudge;
+      for (let i = 1; i < result.length; i++) {
+        result[i] = (result[i] ?? 0) + forecastNudge * 0.6 ** i;
+      }
+    }
+    return result;
+  }, [horizonLong, forecastNudge, dragEnabled]);
+
   return (
     <div className="relative bg-[#0a0a0a]">
       <div className="flex items-center justify-between px-4 py-2 border-b border-white/[0.06]">
         <p className="font-mono text-[11px] text-paper/45 uppercase tracking-wider">
-          Preview · component
+          Preview · forecast
         </p>
-        <span className="font-mono text-[10px] text-paper/35">
-          Toggle / story
-        </span>
-      </div>
-      <div className="px-6 py-6 flex flex-col gap-6" style={{ minHeight: "440px" }}>
-        <div>
-          <p className="font-mono text-[10px] text-paper/35 uppercase tracking-wider mb-3">
-            interactive · click to flip
-          </p>
-          <div className="rounded-md border border-white/[0.08] bg-[#0c0c0c] p-6 flex items-center gap-4">
-            <button
-              type="button"
-              role="switch"
-              aria-checked={demoValue}
-              aria-label="Toggle"
-              onClick={() => setDemoValue((p) => !p)}
-              className="relative h-8 w-16 rounded-full border transition-all duration-500 cursor-pointer"
-              style={{
-                borderColor: "rgba(255,255,255,0.10)",
-                background: demoValue
-                  ? "rgba(224,255,79,0.18)"
-                  : "rgba(255,255,255,0.06)",
-                animation: demoValue
-                  ? "annualGlow 1.8s ease-in-out infinite"
-                  : "none",
-              }}
-            >
-              <span
-                className="absolute top-1 left-1 h-6 w-6 rounded-full"
-                style={{
-                  transform: demoValue ? "translateX(32px)" : "translateX(0)",
-                  transition:
-                    "transform 220ms cubic-bezier(0.32, 0.72, 0, 1), background 220ms ease",
-                  background: demoValue
-                    ? "var(--accent)"
-                    : "rgba(245,242,236,0.85)",
-                }}
-                aria-hidden
-              />
-            </button>
-            <span className="font-mono text-[12px] text-paper/65">
-              value={String(demoValue)}
-            </span>
-          </div>
+        <div className="flex items-center gap-1.5">
+          <span className="h-1.5 w-1.5 rounded-full bg-accent pulse-dot" aria-hidden />
+          <span className="font-mono text-[10px] text-paper/45">
+            looking · {targetLabel}
+          </span>
         </div>
-
+      </div>
+      <div className="px-6 py-6 flex flex-col gap-4" style={{ minHeight: "440px" }}>
         <div>
-          <p className="font-mono text-[10px] text-paper/35 uppercase tracking-wider mb-3">
-            states
-          </p>
-          <div className="grid grid-cols-3 gap-3">
-            <ToggleSwatch label="off" value={false} glow={false} />
-            <ToggleSwatch label="on" value={true} glow={false} />
-            <ToggleSwatch label="on + glow" value={true} glow />
+          <div className="flex items-baseline justify-between mb-3">
+            <p className="font-mono text-[10px] text-paper/45 uppercase tracking-wider">
+              daily active · forecast
+            </p>
+            <p className="font-mono text-[11px] text-paper/65">
+              horizon{" "}
+              <span className="text-accent">
+                {horizonLong ? FORECAST_BASE.length : 7}d
+              </span>
+              {dragEnabled && forecastNudge !== 0 ? (
+                <span className="ml-3 text-paper/65">
+                  rebased{" "}
+                  <span
+                    className={forecastNudge > 0 ? "text-accent" : "text-[#ff8a6a]"}
+                  >
+                    {forecastNudge > 0 ? "+" : ""}
+                    {forecastNudge.toFixed(0)}
+                  </span>
+                </span>
+              ) : null}
+            </p>
           </div>
+          <ForecastChart
+            historical={HISTORICAL}
+            forecast={forecastValues}
+            bandVisible={bandVisible}
+            anomaliesVisible={anomaliesVisible}
+            dragEnabled={dragEnabled}
+            forecastNudge={forecastNudge}
+            onNudge={onForecastNudge}
+          />
         </div>
 
         <div className="rounded-md border border-white/[0.06] bg-[#080808] px-4 py-3">
           <p className="font-mono text-[10px] text-paper/45 uppercase tracking-wider mb-2">
-            used by
+            model · used by
           </p>
           <div className="font-mono text-[11px] text-paper/65 space-y-1">
-            <p>app/pricing/page.tsx · billing-cycle</p>
-            <p className="text-paper/40">components/SettingsPanel.tsx · dark-mode</p>
+            <p>app/analytics/page.tsx · daily-active forecast</p>
+            <p className="text-paper/40">
+              jobs/retrain.ts · nightly · last run 4h ago
+            </p>
           </div>
+          {dragEnabled ? (
+            <p className="mt-3 font-mono text-[10px] text-accent">
+              ✦ drag the first forecast point to rebase the prediction
+            </p>
+          ) : null}
         </div>
       </div>
     </div>
   );
 }
 
-interface ToggleSwatchProps {
-  readonly label: string;
-  readonly value: boolean;
-  readonly glow: boolean;
+interface ForecastChartProps {
+  readonly historical: ReadonlyArray<number>;
+  readonly forecast: ReadonlyArray<number>;
+  readonly bandVisible: boolean;
+  readonly anomaliesVisible: boolean;
+  readonly dragEnabled: boolean;
+  readonly forecastNudge: number;
+  readonly onNudge: (v: number) => void;
 }
 
-function ToggleSwatch({
-  label,
-  value,
-  glow,
-}: ToggleSwatchProps): React.ReactElement {
-  const isGlowing = glow && value;
+function ForecastChart({
+  historical,
+  forecast,
+  bandVisible,
+  anomaliesVisible,
+  dragEnabled,
+  forecastNudge,
+  onNudge,
+}: ForecastChartProps): React.ReactElement {
+  const w = 560;
+  const h = 220;
+  const padX = 12;
+  const padY = 16;
+  const all = [...historical, ...forecast];
+  const min = Math.min(...all) - 10;
+  const max = Math.max(...all) + 10;
+  const total = historical.length + forecast.length - 1;
+
+  const xFor = (i: number): number =>
+    padX + (i / total) * (w - padX * 2);
+  const yFor = (v: number): number =>
+    padY + (1 - (v - min) / (max - min)) * (h - padY * 2);
+
+  const histPoints = historical.map((v, i) => ({ x: xFor(i), y: yFor(v) }));
+  const forecastPoints = forecast.map((v, i) => ({
+    x: xFor(historical.length - 1 + i),
+    y: yFor(v),
+  }));
+
+  const histPath = histPoints
+    .map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`)
+    .join(" ");
+  const forecastPath = [histPoints[histPoints.length - 1]!, ...forecastPoints]
+    .map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`)
+    .join(" ");
+
+  // Confidence band: spread widens with horizon.
+  const bandUpper = forecastPoints.map((p, i) => ({
+    x: p.x,
+    y: yFor(forecast[i]! + (4 + i * 0.8)),
+  }));
+  const bandLower = forecastPoints.map((p, i) => ({
+    x: p.x,
+    y: yFor(forecast[i]! - (4 + i * 0.8)),
+  }));
+  const bandPath = [
+    `M ${bandUpper[0]!.x} ${bandUpper[0]!.y}`,
+    ...bandUpper.slice(1).map((p) => `L ${p.x} ${p.y}`),
+    ...bandLower
+      .slice()
+      .reverse()
+      .map((p) => `L ${p.x} ${p.y}`),
+    "Z",
+  ].join(" ");
+
+  // Anomalies = top 2 historical residuals from a linear trend.
+  const anomalyIdxs: ReadonlyArray<number> = [4, 13];
+
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const draggingRef = useRef<boolean>(false);
+
+  const handleDown = (e: React.PointerEvent<SVGCircleElement>): void => {
+    if (!dragEnabled) return;
+    draggingRef.current = true;
+    (e.target as Element).setPointerCapture(e.pointerId);
+  };
+  const handleMove = (e: React.PointerEvent<SVGSVGElement>): void => {
+    if (!dragEnabled || !draggingRef.current || !svgRef.current) return;
+    const rect = svgRef.current.getBoundingClientRect();
+    const ratio = (e.clientY - rect.top) / rect.height;
+    const yVal = max - ratio * (max - min);
+    const baseVal = FORECAST_BASE[0]!;
+    const next = clamp(yVal - baseVal, -30, 30);
+    onNudge(next);
+  };
+  const handleUp = (e: React.PointerEvent): void => {
+    draggingRef.current = false;
+    if ("releasePointerCapture" in e.target) {
+      (e.target as Element).releasePointerCapture(e.pointerId);
+    }
+  };
+
   return (
-    <div className="rounded-md border border-white/[0.06] bg-[#0c0c0c] p-4 flex flex-col items-start gap-3">
-      <div
-        className="relative h-6 w-12 rounded-full border"
-        style={{
-          borderColor: "rgba(255,255,255,0.10)",
-          background: isGlowing
-            ? "rgba(224,255,79,0.18)"
-            : "rgba(255,255,255,0.06)",
-          animation: isGlowing
-            ? "annualGlow 1.8s ease-in-out infinite"
-            : "none",
-        }}
-      >
-        <span
-          className="absolute top-1 left-1 h-4 w-4 rounded-full"
-          style={{
-            transform: value ? "translateX(24px)" : "translateX(0)",
-            transition: "transform 220ms cubic-bezier(0.32, 0.72, 0, 1)",
-            background: isGlowing
-              ? "var(--accent)"
-              : "rgba(245,242,236,0.85)",
-          }}
-          aria-hidden
+    <svg
+      ref={svgRef}
+      viewBox={`0 0 ${w} ${h}`}
+      className="w-full block"
+      onPointerMove={handleMove}
+      onPointerUp={handleUp}
+      style={{ touchAction: "none", cursor: dragEnabled ? "ns-resize" : "default" }}
+    >
+      {/* Grid lines */}
+      {[0.25, 0.5, 0.75].map((g) => (
+        <line
+          key={g}
+          x1={padX}
+          y1={padY + g * (h - padY * 2)}
+          x2={w - padX}
+          y2={padY + g * (h - padY * 2)}
+          stroke="rgba(245,242,236,0.04)"
+          strokeWidth="1"
         />
-      </div>
-      <p className="font-mono text-[10px] text-paper/55">{label}</p>
-    </div>
+      ))}
+      {/* Today divider */}
+      <line
+        x1={xFor(historical.length - 1)}
+        y1={padY}
+        x2={xFor(historical.length - 1)}
+        y2={h - padY}
+        stroke="rgba(245,242,236,0.12)"
+        strokeDasharray="2 4"
+      />
+      <text
+        x={xFor(historical.length - 1) + 4}
+        y={padY + 8}
+        className="font-mono"
+        fontSize="9"
+        fill="rgba(245,242,236,0.35)"
+      >
+        today
+      </text>
+
+      {/* Confidence band */}
+      {bandVisible ? (
+        <path
+          d={bandPath}
+          fill="rgba(224,255,79,0.10)"
+          stroke="rgba(224,255,79,0.18)"
+          strokeWidth="0.5"
+          style={{ animation: "diffResolve 0.5s ease-out" }}
+        />
+      ) : null}
+
+      {/* Historical line */}
+      <path
+        d={histPath}
+        fill="none"
+        stroke="rgba(245,242,236,0.85)"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+
+      {/* Forecast line (dashed) */}
+      <path
+        d={forecastPath}
+        fill="none"
+        stroke="var(--accent)"
+        strokeWidth="1.5"
+        strokeDasharray="3 3"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        style={{ transition: "d 280ms ease" }}
+      />
+
+      {/* Anomaly dots */}
+      {anomaliesVisible
+        ? anomalyIdxs.map((i) => {
+            if (i >= historical.length) return null;
+            const v = historical[i]!;
+            return (
+              <g key={i} style={{ animation: "diffResolve 0.5s ease-out" }}>
+                <circle
+                  cx={xFor(i)}
+                  cy={yFor(v)}
+                  r="6"
+                  fill="rgba(255,138,106,0.18)"
+                />
+                <circle
+                  cx={xFor(i)}
+                  cy={yFor(v)}
+                  r="3"
+                  fill="#ff8a6a"
+                />
+              </g>
+            );
+          })
+        : null}
+
+      {/* Last historical dot */}
+      <circle
+        cx={histPoints[histPoints.length - 1]!.x}
+        cy={histPoints[histPoints.length - 1]!.y}
+        r="3"
+        fill="rgba(245,242,236,0.85)"
+      />
+
+      {/* First forecast dot (draggable when dragEnabled) */}
+      {forecastPoints.length > 0 ? (
+        <>
+          <circle
+            cx={forecastPoints[0]!.x}
+            cy={forecastPoints[0]!.y}
+            r={dragEnabled ? 10 : 4}
+            fill={dragEnabled ? "rgba(224,255,79,0.22)" : "transparent"}
+            style={{ transition: "r 280ms ease, fill 280ms ease" }}
+          />
+          <circle
+            cx={forecastPoints[0]!.x}
+            cy={forecastPoints[0]!.y}
+            r="4"
+            fill="var(--accent)"
+            onPointerDown={handleDown}
+            style={{ cursor: dragEnabled ? "ns-resize" : "default" }}
+          />
+          {dragEnabled ? (
+            <text
+              x={forecastPoints[0]!.x + 10}
+              y={forecastPoints[0]!.y - 6}
+              className="font-mono"
+              fontSize="9"
+              fill="var(--accent)"
+            >
+              drag ↕
+            </text>
+          ) : null}
+        </>
+      ) : null}
+    </svg>
   );
 }
+
+function clamp(v: number, lo: number, hi: number): number {
+  return Math.max(lo, Math.min(hi, v));
+}
+
+// ============================================================
+//   StatusBar
+// ============================================================
 
 interface StatusBarProps {
   readonly stepIndex: number;
@@ -1489,25 +2155,20 @@ function StatusBar({
   paused,
   activeFile,
 }: StatusBarProps): React.ReactElement {
-  const isPage = activeFile === "page.tsx";
   return (
     <div className="flex items-center justify-between px-4 py-1.5 border-t border-white/[0.06] bg-[#080808] font-mono text-[10px] text-paper/45">
       <div className="flex items-center gap-3">
         <span>main</span>
         <span className="text-paper/25">·</span>
         <span>{activeFile}</span>
-        {isPage ? (
-          <>
-            <span className="text-paper/25">·</span>
-            <span>line {stepIndex + 1}, col 1</span>
-          </>
-        ) : null}
+        <span className="text-paper/25">·</span>
+        <span>line {stepIndex + 1}, col 1</span>
         <span className="text-paper/25">·</span>
         <span>TypeScript React</span>
       </div>
       <div className="flex items-center gap-2">
         <span className="h-1.5 w-1.5 rounded-full bg-accent pulse-dot" aria-hidden />
-        <span>{isPage ? routedTo : "eri · idle"}</span>
+        <span>{routedTo}</span>
         {paused ? (
           <>
             <span className="text-paper/25 ml-2">·</span>
