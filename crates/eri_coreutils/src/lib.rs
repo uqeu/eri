@@ -429,6 +429,36 @@ async fn dispatch_inner(
         "eri/inference/iterate" => {
             services::iterate::iterate(request.params.clone(), tier_state, services).await
         }
+        "eri/ship/run" => {
+            services::ship::run(request.params.clone(), tier_state, services).await
+        }
+        "eri/slash/run" => {
+            services::slash::run(request.params.clone(), tier_state, services).await
+        }
+        "eri/memory/recall" => {
+            services::memory::recall(request.params.clone(), tier_state, services).await
+        }
+        "eri/memory/remember" => {
+            services::memory::remember(request.params.clone(), tier_state, services).await
+        }
+        "eri/memory/forget" => {
+            services::memory::forget(request.params.clone(), tier_state, services).await
+        }
+        "eri/memory/patterns" => {
+            services::memory::patterns(request.params.clone(), tier_state, services).await
+        }
+        "eri/background/enable" => {
+            services::background::enable(request.params.clone(), tier_state, services).await
+        }
+        "eri/background/disable" => {
+            services::background::disable(request.params.clone(), tier_state, services).await
+        }
+        "eri/background/approveBash" => {
+            services::background::approve_bash(request.params.clone(), tier_state, services).await
+        }
+        "eri/background/trusted" => {
+            services::background::trusted(request.params.clone(), tier_state, services).await
+        }
         "eri/agent/run" => {
             require_feature(tier_state, "agentMode").await?;
             Ok(serde_json::json!({ "stub": true }))
@@ -577,6 +607,12 @@ async fn dispatch_inner(
         "eri/preview/load" => services::preview::load(request.params.clone(), services).await,
         "eri/preview/gaze" => services::preview::gaze(request.params.clone(), services).await,
         "eri/preview/status" => services::preview::status(request.params.clone(), services).await,
+        "eri/preview/loadHtml" => {
+            services::preview::load_html(request.params.clone(), services).await
+        }
+        "eri/preview/discover" => {
+            services::preview::discover(request.params.clone(), services).await
+        }
 
         // --- Gaze sidecar (free tier; local-only, never leaves the machine) ---
         "eri/gaze/start" => services::gaze::start(request.params.clone(), services).await,

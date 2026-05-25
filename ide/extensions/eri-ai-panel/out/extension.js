@@ -34,6 +34,9 @@ const review_1 = require("./review");
 const statusBar_1 = require("./statusBar");
 const account_1 = require("./account");
 const agents_1 = require("./agents");
+const ship_1 = require("./ship");
+const registry_1 = require("./slash/registry");
+const snippets_1 = require("./snippets");
 var gaze_2 = require("./gaze/gaze");
 Object.defineProperty(exports, "getCurrentGazeTarget", { enumerable: true, get: function () { return gaze_2.getCurrentTarget; } });
 Object.defineProperty(exports, "getEditorGazeContext", { enumerable: true, get: function () { return gaze_2.getEditorGazeContext; } });
@@ -64,6 +67,9 @@ let review = null;
 let statusBar = null;
 let account = null;
 let agents = null;
+let ship = null;
+let slashRegistry = null;
+let snippets = null;
 function activate(context) {
     const binaryPath = (0, sidecar_1.resolveBinaryPath)(context);
     secretsStore = new secrets_1.SecretsStore(context.secrets, context.globalState);
@@ -136,6 +142,24 @@ function activate(context) {
         preview?.fireShouldOpen(url);
     }));
     skills = (0, skills_1.activateSkills)(context, () => sidecar);
+    // Ship activates after `apply` so the orchestrator is available, and after
+    // `account` so the tier gate is wired. Progress goes straight to the panel
+    // webview as `eri/ship/progress` messages.
+    slashRegistry = (0, registry_1.activateSlashRegistry)(context, () => sidecar);
+    void slashRegistry;
+    snippets = (0, snippets_1.activateSnippets)(context);
+    void snippets;
+    ship = (0, ship_1.activateShip)(context, {
+        getSidecar: () => sidecar,
+        applyOrchestrator: apply.orchestrator,
+        account,
+        onProgress: (state) => {
+            panelProvider?.postToWebview({
+                method: "eri/ship/progress",
+                params: state,
+            });
+        },
+    });
     onboarding = (0, onboarding_1.activateOnboarding)(context, () => sidecar);
     settingsHub = (0, settingsHub_1.activateSettingsHub)(context);
     codemaps = (0, codemaps_1.activateCodemaps)(context, () => sidecar);
@@ -258,6 +282,12 @@ function deactivate() {
     account = null;
     agents?.dispose();
     agents = null;
+    ship?.dispose();
+    ship = null;
+    slashRegistry?.dispose();
+    slashRegistry = null;
+    snippets?.dispose();
+    snippets = null;
     byokView = null;
     secretsStore = null;
 }
@@ -266,6 +296,7 @@ function handleNotification(notification) {
     gaze?.forward(notification);
     terminalVoiceGaze?.forward(notification);
     visualEditor?.forward(notification);
+    ship?.forward(notification);
     maybeRelayGazeToPreview(notification);
     switch (notification.method) {
         case "eri/ready":

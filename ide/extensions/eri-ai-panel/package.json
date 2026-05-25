@@ -70,6 +70,12 @@
     "onCommand:eri.agents.addCustom",
     "onCommand:eri.agents.showCurrent",
     "onCommand:eri.agents.setActive",
+    "onCommand:eri.ship.run",
+    "onCommand:eri.ship.cancel",
+    "onCommand:eri.slash.pick",
+    "onCommand:eri.slash.run",
+    "onCommand:eri.snippets.pick",
+    "onCommand:eri.snippets.openUserDir",
     "onUri"
   ],
   "categories": [
@@ -369,7 +375,27 @@
       { "command": "eri.agents.detectCli",     "title": "eri: Detect Local CLI Agents",          "icon": "$(refresh)" },
       { "command": "eri.agents.addCustom",     "title": "eri: Add Custom Agent" },
       { "command": "eri.agents.showCurrent",   "title": "eri: Show Current Agent" },
-      { "command": "eri.agents.setActive",     "title": "eri: Set Active Agent" }
+      { "command": "eri.agents.setActive",     "title": "eri: Set Active Agent" },
+      { "command": "eri.ship.run",             "title": "eri: Ship (tandem build/check)",       "icon": "$(rocket)" },
+      { "command": "eri.ship.cancel",          "title": "eri: Cancel Ship" },
+      { "command": "eri.slash.pick",           "title": "eri: Slash Command…",                  "icon": "$(symbol-event)" },
+      { "command": "eri.slash.ship",           "title": "eri: /ship" },
+      { "command": "eri.slash.plan",           "title": "eri: /plan" },
+      { "command": "eri.slash.execute",        "title": "eri: /execute" },
+      { "command": "eri.slash.test",           "title": "eri: /test" },
+      { "command": "eri.slash.refactor",       "title": "eri: /refactor" },
+      { "command": "eri.slash.explain",        "title": "eri: /explain" },
+      { "command": "eri.slash.recall",         "title": "eri: /recall" },
+      { "command": "eri.slash.remember",       "title": "eri: /remember" },
+      { "command": "eri.slash.forget",         "title": "eri: /forget" },
+      { "command": "eri.slash.voice",          "title": "eri: /voice" },
+      { "command": "eri.slash.agent",          "title": "eri: /agent (switch persona)" },
+      { "command": "eri.slash.cost",           "title": "eri: /cost" },
+      { "command": "eri.slash.quota",          "title": "eri: /quota" },
+      { "command": "eri.slash.learn",          "title": "eri: /learn" },
+      { "command": "eri.slash.sketch",         "title": "eri: /sketch" },
+      { "command": "eri.snippets.pick",        "title": "eri: Pick Snippet (#)",                "icon": "$(symbol-snippet)" },
+      { "command": "eri.snippets.openUserDir", "title": "eri: Open Snippets Folder" }
     ],
     "walkthroughs": [
       {

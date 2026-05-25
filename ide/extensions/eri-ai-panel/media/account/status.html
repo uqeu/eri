@@ -274,6 +274,102 @@
     usageCard.appendChild(actions);
 
     content.appendChild(usageCard);
+
+    // Plan picker — 4 tier cards with "Switch to this plan" buttons. Hits
+    // the same /api/billing/checkout endpoint the website pricing page uses.
+    content.appendChild(renderPlanPicker(state.tierKey));
+  }
+
+  function renderPlanPicker(currentTierKey) {
+    const card = el("div", { className: "card" });
+    card.appendChild(el("strong", { text: "Switch plan" }));
+    card.appendChild(
+      el("div", {
+        className: "muted",
+        text: "Pricing in eri's sandbox · cancel any time.",
+        style: { marginTop: "2px", fontSize: "11px", marginBottom: "10px" },
+      }),
+    );
+    const tiers = [
+      {
+        slug: "free",
+        key: "free",
+        label: "Free",
+        price: "$0",
+        cadence: "forever",
+        bullets: ["150 Mercury turns / mo", "No frontier tokens"],
+      },
+      {
+        slug: "starter",
+        key: "starter",
+        label: "Individual I",
+        price: "$15",
+        cadence: "/ mo",
+        bullets: ["200k frontier tokens", "Cross-session memory"],
+      },
+      {
+        slug: "pro",
+        key: "pro",
+        label: "Individual II",
+        price: "$30",
+        cadence: "/ mo",
+        bullets: ["750k frontier tokens", "Multi-model + background agents"],
+      },
+      {
+        slug: "pro_plus",
+        key: "proPlus",
+        label: "Individual III",
+        price: "$60",
+        cadence: "/ mo",
+        bullets: ["4M frontier tokens", "Private brain (preview)"],
+      },
+    ];
+    for (const t of tiers) {
+      const row = el("div", {
+        style: {
+          display: "grid",
+          gridTemplateColumns: "1fr auto",
+          alignItems: "center",
+          gap: "12px",
+          padding: "8px 0",
+          borderTop: "1px solid var(--border)",
+        },
+      });
+      const left = el("div");
+      const head = el("div");
+      head.appendChild(
+        el("span", {
+          text: t.label + " · ",
+          style: { fontWeight: "500" },
+        }),
+      );
+      head.appendChild(
+        el("span", { className: "num", text: t.price }),
+      );
+      head.appendChild(el("span", { className: "muted", text: " " + t.cadence }));
+      left.appendChild(head);
+      const sub = el("div", {
+        className: "muted",
+        text: t.bullets.join(" · "),
+        style: { fontSize: "11px", marginTop: "2px" },
+      });
+      left.appendChild(sub);
+      row.appendChild(left);
+
+      const isCurrent = currentTierKey === t.key;
+      const btn = el("button", {
+        text: isCurrent ? "Current plan" : "Switch",
+        style: isCurrent ? { opacity: "0.55", cursor: "default" } : {},
+      });
+      if (!isCurrent) {
+        btn.addEventListener("click", () =>
+          vscode.postMessage({ type: "switchPlan", slug: t.slug }),
+        );
+      }
+      row.appendChild(btn);
+      card.appendChild(row);
+    }
+    return card;
   }
 
   window.addEventListener("message", (event) => {

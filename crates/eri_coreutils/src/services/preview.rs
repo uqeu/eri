@@ -176,6 +176,107 @@ pub async fn gaze(params: Value, _services: &Services) -> Result<Value, Dispatch
     Ok(json!({ "ok": true }))
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LoadHtmlParams {
+    /// Raw HTML to render. Written to a temp file then loaded via the
+    /// existing `load` path so the Swift binary doesn't need a new message
+    /// type.
+    content: String,
+    /// Optional file stem so the temp file has a recognizable name
+    /// (e.g. `"sketch-blue-button"`). Defaults to `"sketch"`.
+    #[serde(default)]
+    name: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DiscoverReport {
+    detected_url: Option<String>,
+    scanned_ports: Vec<u16>,
+}
+
+/// `eri/preview/loadHtml` — render an HTML string into a temp file and
+/// load it into the preview window. Used by `/sketch` to surface Mercury-
+/// generated mockups without a roundtrip through the user's filesystem.
+pub async fn load_html(params: Value, services: &Services) -> Result<Value, DispatchError> {
+    let parsed: LoadHtmlParams =
+        serde_json::from_value(params).map_err(|e| DispatchError::BadParams(e.to_string()))?;
+    if parsed.content.trim().is_empty() {
+        return Err(DispatchError::BadParams("empty_html".into()));
+    }
+    let stem = parsed.name.unwrap_or_else(|| "sketch".to_string());
+    // Persistent path under ~/.eri/sketches/ so the user can revisit and
+    // gaze events keep working between reloads.
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."));
+    let dir = home.join(".eri").join("sketches");
+    std::fs::create_dir_all(&dir).map_err(|e| DispatchError::Other(anyhow::anyhow!(e)))?;
+    let filename = format!("{}-{}.html", sanitize_stem(&stem), now_seconds());
+    let path = dir.join(filename);
+    std::fs::write(&path, parsed.content.as_bytes())
+        .map_err(|e| DispatchError::Other(anyhow::anyhow!(e)))?;
+    let url = format!("file://{}", path.to_string_lossy());
+
+    {
+        let mut guard = services.preview.lock().await;
+        guard.last_url = Some(url.clone());
+    }
+    send_message(&json!({ "type": "load", "url": url }))
+        .await
+        .map_err(DispatchError::Other)?;
+    Ok(json!({ "ok": true, "path": path.to_string_lossy(), "url": url }))
+}
+
+/// `eri/preview/discover` — scan common dev-server ports on localhost,
+/// returning the first 200-ish responder. Cheap, used on workspace open
+/// so the IDE can auto-open the preview when a dev server is already up.
+pub async fn discover(_params: Value, _services: &Services) -> Result<Value, DispatchError> {
+    const PORTS: &[u16] = &[3000, 3001, 4173, 5173, 5500, 8000, 8080];
+    let mut detected: Option<String> = None;
+    for &port in PORTS {
+        if port_responds(port).await {
+            detected = Some(format!("http://localhost:{port}"));
+            break;
+        }
+    }
+    let report = DiscoverReport {
+        detected_url: detected,
+        scanned_ports: PORTS.to_vec(),
+    };
+    serde_json::to_value(report).map_err(|e| DispatchError::Other(e.into()))
+}
+
+async fn port_responds(port: u16) -> bool {
+    use tokio::net::TcpStream;
+    use tokio::time::timeout;
+    timeout(
+        Duration::from_millis(150),
+        TcpStream::connect(("127.0.0.1", port)),
+    )
+    .await
+    .map(|r| r.is_ok())
+    .unwrap_or(false)
+}
+
+fn sanitize_stem(stem: &str) -> String {
+    stem.chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
+        .take(40)
+        .collect::<String>()
+        .trim_matches('-')
+        .to_string()
+}
+
+fn now_seconds() -> u64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
 pub async fn status(_params: Value, services: &Services) -> Result<Value, DispatchError> {
     let mut guard = services.preview.lock().await;
     // Drop dead children so `running` reflects reality.

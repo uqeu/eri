@@ -38,6 +38,9 @@ import { activateReview, ReviewHandle } from "./review";
 import { activateStatusBar, EriStatusBarHandle } from "./statusBar";
 import { activateAccount, AccountHandle } from "./account";
 import { activateAgents, AgentsHandle } from "./agents";
+import { activateShip, ShipHandle } from "./ship";
+import { activateSlashRegistry, SlashRegistryHandle } from "./slash/registry";
+import { activateSnippets, SnippetsHandle } from "./snippets";
 
 export { getCurrentTarget as getCurrentGazeTarget, getEditorGazeContext } from "./gaze/gaze";
 
@@ -68,6 +71,9 @@ let review: ReviewHandle | null = null;
 let statusBar: EriStatusBarHandle | null = null;
 let account: AccountHandle | null = null;
 let agents: AgentsHandle | null = null;
+let ship: ShipHandle | null = null;
+let slashRegistry: SlashRegistryHandle | null = null;
+let snippets: SnippetsHandle | null = null;
 
 export function activate(context: vscode.ExtensionContext): void {
   const binaryPath = resolveBinaryPath(context);
@@ -155,6 +161,24 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
   );
   skills = activateSkills(context, () => sidecar);
+  // Ship activates after `apply` so the orchestrator is available, and after
+  // `account` so the tier gate is wired. Progress goes straight to the panel
+  // webview as `eri/ship/progress` messages.
+  slashRegistry = activateSlashRegistry(context, () => sidecar);
+  void slashRegistry;
+  snippets = activateSnippets(context);
+  void snippets;
+  ship = activateShip(context, {
+    getSidecar: () => sidecar,
+    applyOrchestrator: apply.orchestrator,
+    account,
+    onProgress: (state) => {
+      panelProvider?.postToWebview({
+        method: "eri/ship/progress",
+        params: state,
+      });
+    },
+  });
   onboarding = activateOnboarding(context, () => sidecar);
   settingsHub = activateSettingsHub(context);
   codemaps = activateCodemaps(context, () => sidecar);
@@ -306,6 +330,12 @@ export function deactivate(): void {
   account = null;
   agents?.dispose();
   agents = null;
+  ship?.dispose();
+  ship = null;
+  slashRegistry?.dispose();
+  slashRegistry = null;
+  snippets?.dispose();
+  snippets = null;
   byokView = null;
   secretsStore = null;
 }
@@ -315,6 +345,7 @@ function handleNotification(notification: SidecarNotification): void {
   gaze?.forward(notification);
   terminalVoiceGaze?.forward(notification);
   visualEditor?.forward(notification);
+  ship?.forward(notification);
   maybeRelayGazeToPreview(notification);
   switch (notification.method) {
     case "eri/ready":

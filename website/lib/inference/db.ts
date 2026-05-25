@@ -36,6 +36,7 @@ export interface TokenBucketRow {
   tokens_used: number;
   tokens_included: number;
   tokens_overage: number;
+  mercury_turns_used: number;
   warned_at: Date | null;
   updated_at: Date;
 }
@@ -160,6 +161,7 @@ interface RawTokenBucket {
   tokens_used: string | number;
   tokens_included: string | number;
   tokens_overage: string | number;
+  mercury_turns_used: string | number | null;
   warned_at: Date | string | null;
   updated_at: Date | string;
 }
@@ -177,6 +179,9 @@ function mapTokenBucket(row: RawTokenBucket): TokenBucketRow {
     tokens_used: toBigInt(row.tokens_used),
     tokens_included: toBigInt(row.tokens_included),
     tokens_overage: toBigInt(row.tokens_overage),
+    mercury_turns_used: row.mercury_turns_used === null
+      ? 0
+      : toBigInt(row.mercury_turns_used),
     warned_at: toDateOrNull(row.warned_at),
     updated_at: toDate(row.updated_at),
   };
@@ -219,6 +224,7 @@ export async function upsertTokenBucket(input: {
       tokens_included = EXCLUDED.tokens_included,
       tokens_overage = EXCLUDED.tokens_overage,
       tokens_used = 0,
+      mercury_turns_used = 0,
       warned_at = NULL,
       updated_at = now()
     RETURNING *
@@ -243,6 +249,25 @@ export async function incrementTokensUsed(
   const rows = await sql()<RawTokenBucket[]>`
     UPDATE token_buckets
     SET tokens_used = tokens_used + ${delta},
+        updated_at = now()
+    WHERE user_id = ${userId}
+    RETURNING *
+  `;
+  const row = rows[0];
+  return row ? mapTokenBucket(row) : null;
+}
+
+/**
+ * Atomically bump `mercury_turns_used`. Mercury is `bill: false` so this is
+ * a separate counter from `tokens_used` — used by ensureMercuryTurnAvailable
+ * to enforce the per-tier MERCURY_TURN_LIMITS rate cap.
+ */
+export async function incrementMercuryTurns(
+  userId: string,
+): Promise<TokenBucketRow | null> {
+  const rows = await sql()<RawTokenBucket[]>`
+    UPDATE token_buckets
+    SET mercury_turns_used = mercury_turns_used + 1,
         updated_at = now()
     WHERE user_id = ${userId}
     RETURNING *

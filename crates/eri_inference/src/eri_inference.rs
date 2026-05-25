@@ -23,6 +23,8 @@ pub mod goose_backend;
 pub mod integrations;
 pub mod intent;
 pub mod llm_provider;
+pub mod memory;
+pub mod personas;
 pub mod pr;
 pub mod pr_workflow;
 pub mod providers;

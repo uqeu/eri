@@ -106,6 +106,23 @@ export class AccountStatusPanel {
         await this.deps.signOut();
         this.push();
         return;
+      case "switchPlan": {
+        const slug = (raw as { slug?: unknown }).slug;
+        if (typeof slug !== "string" || slug.length === 0) {
+          return;
+        }
+        // `slug` is constrained to one of the 4 tier slugs by the webview's
+        // tier list — anything else is dropped here as a guard.
+        const allowed = new Set(["free", "starter", "pro", "pro_plus"]);
+        if (!allowed.has(slug)) {
+          return;
+        }
+        const url = `${this.deps.billingUrl}/api/billing/checkout?plan=${encodeURIComponent(
+          slug,
+        )}&billing=monthly`;
+        await vscode.env.openExternal(vscode.Uri.parse(url));
+        return;
+      }
       default:
         return;
     }

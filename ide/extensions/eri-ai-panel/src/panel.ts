@@ -33,6 +33,13 @@ export class EriPanelProvider implements vscode.WebviewViewProvider {
       void vscode.commands.executeCommand("eri.agents.switch");
       return;
     }
+    if (message.method === "eri/ship/runFromPanel") {
+      // The Ship button on the panel surfaces the same input flow as the
+      // palette command — let the ship module own UX (input box, free-tier
+      // upgrade modal, withProgress notification).
+      void vscode.commands.executeCommand("eri.ship.run");
+      return;
+    }
     this.getSidecar()?.notify(message.method, message.params ?? {});
   }
 
@@ -166,9 +173,17 @@ export class EriPanelProvider implements vscode.WebviewViewProvider {
   <div style="font-size: 11px; color: var(--muted); margin-top: 6px;" id="stream-meta">idle</div>
 </div>
 
+<div class="section" id="ship-section" style="display: none;">
+  <div class="section-label">Ship — Builder / Checker</div>
+  <div id="ship-builders" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px;"></div>
+  <div id="ship-checker" style="border-top: 1px solid var(--border); padding-top: 8px;"></div>
+  <div id="ship-totals" style="font-size: 11px; color: var(--muted); margin-top: 6px;"></div>
+</div>
+
 <div class="actions">
   <button class="action primary" id="btn-accept">Accept</button>
   <button class="action" id="btn-reject">Reject</button>
+  <button class="action" id="btn-ship" title="Ship to frontier models">🚀 Ship</button>
 </div>
 
 <script>
@@ -176,6 +191,7 @@ const vscode = acquireVsCodeApi();
 function send(method, params) { vscode.postMessage({ method: method, params: params || {} }); }
 document.getElementById('btn-accept').addEventListener('click', () => send('eri/iteration/accept'));
 document.getElementById('btn-reject').addEventListener('click', () => send('eri/iteration/reject'));
+document.getElementById('btn-ship').addEventListener('click', () => send('eri/ship/runFromPanel'));
 document.getElementById('model-pill').addEventListener('click', () => send('eri/agents/openPicker'));
 const agentLabelEl = document.getElementById('agent-label');
 const agentDotEl = document.getElementById('agent-dot');
@@ -203,6 +219,59 @@ function addIterationRow(label, stage) {
   iterationsEl.prepend(row);
 }
 
+const shipSectionEl = document.getElementById('ship-section');
+const shipBuildersEl = document.getElementById('ship-builders');
+const shipCheckerEl = document.getElementById('ship-checker');
+const shipTotalsEl = document.getElementById('ship-totals');
+
+function renderShip(state) {
+  if (!state) { shipSectionEl.style.display = 'none'; return; }
+  shipSectionEl.style.display = 'block';
+  shipBuildersEl.textContent = '';
+  for (const b of (state.builders || [])) {
+    const row = document.createElement('div');
+    row.style.padding = '6px';
+    row.style.border = '1px solid var(--border)';
+    row.style.borderRadius = '4px';
+    row.style.fontSize = '11px';
+    const label = document.createElement('div');
+    label.textContent = b.model;
+    label.style.fontWeight = '500';
+    const status = document.createElement('div');
+    status.style.color = 'var(--muted)';
+    if (b.status === 'pending')      status.textContent = '· waiting';
+    else if (b.status === 'running') status.textContent = '· building…';
+    else if (b.status === 'done')    status.textContent = '✓ ' + ((b.tokensOut || 0) + ' tok out');
+    else if (b.status === 'failed')  status.textContent = '⚠ ' + (b.reason || 'failed');
+    row.appendChild(label);
+    row.appendChild(status);
+    shipBuildersEl.appendChild(row);
+  }
+  shipCheckerEl.textContent = '';
+  const cLabel = document.createElement('div');
+  cLabel.textContent = (state.checker && state.checker.model) || '';
+  cLabel.style.fontSize = '11px';
+  cLabel.style.fontWeight = '500';
+  const cStatus = document.createElement('div');
+  cStatus.style.fontSize = '11px';
+  cStatus.style.color = 'var(--muted)';
+  const c = state.checker || {};
+  if (c.status === 'pending')      cStatus.textContent = '· waiting for builders';
+  else if (c.status === 'running') cStatus.textContent = '· checking… (' + (c.tokensStreamed || 0) + ' tok streamed)';
+  else if (c.status === 'done')    cStatus.textContent = '✓ merged ' + ((c.tokensOut || 0) + ' tok');
+  else if (c.status === 'failed')  cStatus.textContent = '⚠ checker failed';
+  shipCheckerEl.appendChild(cLabel);
+  shipCheckerEl.appendChild(cStatus);
+  if (state.totals) {
+    shipTotalsEl.textContent = state.totals.tokensIn + ' in / ' + state.totals.tokensOut + ' out · ' +
+      (state.totals.costMicros / 1000).toFixed(2) + 'm μ$';
+  } else if (state.failureReason) {
+    shipTotalsEl.textContent = '⚠ ' + state.failureReason;
+  } else {
+    shipTotalsEl.textContent = '';
+  }
+}
+
 window.addEventListener('message', (event) => {
   const method = event.data && event.data.method;
   const params = (event.data && event.data.params) || {};
@@ -221,6 +290,9 @@ window.addEventListener('message', (event) => {
       break;
     case 'eri/agents/active':
       setAgent(params.label, params.kind);
+      break;
+    case 'eri/ship/progress':
+      renderShip(params);
       break;
   }
 });

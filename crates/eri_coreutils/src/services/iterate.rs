@@ -325,20 +325,52 @@ fn event_to_wire(ev: &StreamEvent) -> EventWire {
     }
 }
 
-/// Build the full set of [`BudgetPart`]s from the request. Mandatory parts
-/// (priority 0) are the prompt itself; file payloads come in at priority 5
-/// with a min_keep so very short files survive a truncation pass; auto-
-/// attached rules land at priority 2.
-fn build_parts(prompt: &str, open_files: &[OpenFileWire], rules: &[String]) -> Vec<BudgetPart> {
-    let mut parts: Vec<BudgetPart> = Vec::with_capacity(open_files.len() + rules.len() + 2);
+/// Build the full set of [`BudgetPart`]s from the request. Layering:
+///
+/// - **Priority 0 (mandatory)**: persona system prompt, the user prompt,
+///   and explicit project facts (`ERI.md` / `.eri/AGENT.md`).
+/// - **Priority 2**: auto-attached rules.
+/// - **Priority 5**: file payloads, with `min_keep=200` so very short
+///   files survive a truncation pass.
+///
+/// The persona layer (above the agent registry) lets the user swap the
+/// agent identity with a one-line file (`.eri/persona`) or a user-defined
+/// `<workspace>/.eri/agents/<name>.md`. See `eri_inference::personas`.
+fn build_parts(
+    workspace: &std::path::Path,
+    prompt: &str,
+    open_files: &[OpenFileWire],
+    rules: &[String],
+) -> Vec<BudgetPart> {
+    let mut parts: Vec<BudgetPart> =
+        Vec::with_capacity(open_files.len() + rules.len() + 4);
+
+    // Persona system prompt — replaces the previous hard-coded `system:base`.
+    let active = eri_inference::personas::read_active(workspace);
+    let persona = eri_inference::personas::resolve(workspace, &active);
     parts.push(BudgetPart::new(
-        "system:base",
+        "system:persona",
         0,
-        "You are eri, a careful coding assistant. \
-         When asked to modify files, respond with aider-style search/replace blocks. \
-         Otherwise respond in plain prose.",
+        persona.system_prompt.clone(),
     ));
+
+    // Project facts (Phase 8c) — read `<workspace>/ERI.md` and the git-
+    // ignored `.eri/AGENT.md` variant. Priority 0 so they survive truncation.
+    for (label, body) in load_project_facts(workspace) {
+        parts.push(BudgetPart::new(label, 0, body));
+    }
+
+    // Learned patterns (Phase 8b) — recent observations from the local
+    // memory store, formatted as `## What I've learned about you`. Priority 1
+    // sits above rules (2) but is droppable on tight budgets.
+    if let Some(block) = load_learned_block(workspace) {
+        parts.push(
+            BudgetPart::new("system:learned", 1, block).with_min_keep(0),
+        );
+    }
+
     parts.push(BudgetPart::new("user:prompt", 0, prompt));
+
     for f in open_files {
         let label = format!("ctx:file:{}", f.path);
         parts.push(BudgetPart::new(label, 5, f.content.clone()).with_min_keep(200));
@@ -347,6 +379,45 @@ fn build_parts(prompt: &str, open_files: &[OpenFileWire], rules: &[String]) -> V
         parts.push(BudgetPart::new(format!("system:rule:{i}"), 2, rule.clone()));
     }
     parts
+}
+
+/// Format the local memory store's recent observations as a system-prompt
+/// block. Returns `None` when the store doesn't exist yet or has no
+/// observations for this workspace — failure is non-fatal because memory
+/// is enrichment, not a precondition.
+fn load_learned_block(workspace: &std::path::Path) -> Option<String> {
+    let store = eri_inference::memory::MemoryStore::open().ok()?;
+    let patterns = store.top_patterns(workspace, 20);
+    if patterns.is_empty() {
+        return None;
+    }
+    let formatted = eri_inference::memory::format_learned_block(&patterns);
+    if formatted.is_empty() {
+        None
+    } else {
+        Some(formatted)
+    }
+}
+
+/// Read the workspace's explicit project memory files: `ERI.md` at the
+/// root and `.eri/AGENT.md` for the git-ignored variant. Missing files
+/// return nothing — both are opt-in. Returns one entry per file so
+/// `build_parts` can label them distinctly in the budget plan.
+fn load_project_facts(workspace: &std::path::Path) -> Vec<(&'static str, String)> {
+    let mut out = Vec::new();
+    if let Ok(body) = std::fs::read_to_string(workspace.join("ERI.md")) {
+        let trimmed = body.trim();
+        if !trimmed.is_empty() {
+            out.push(("system:project_facts:eri_md", trimmed.to_string()));
+        }
+    }
+    if let Ok(body) = std::fs::read_to_string(workspace.join(".eri").join("AGENT.md")) {
+        let trimmed = body.trim();
+        if !trimmed.is_empty() {
+            out.push(("system:project_facts:agent_md", trimmed.to_string()));
+        }
+    }
+    out
 }
 
 /// Load active rules for the workspace as a list of body strings. Returns
@@ -446,7 +517,7 @@ pub async fn iterate(
     };
 
     let rules = load_rules(&p.workspace, &prompt_ctx);
-    let parts = build_parts(&p.prompt, &p.open_files, &rules);
+    let parts = build_parts(&p.workspace, &p.prompt, &p.open_files, &rules);
 
     let provider_keys = collect_provider_keys(services).await;
     let req = BrainIterationRequest {

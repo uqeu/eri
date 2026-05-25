@@ -39,22 +39,25 @@ const PRICE_ENV: Record<PaidPlan, Record<BillingCadence, string>> = {
   },
 };
 
-// Test-mode (sandbox) price IDs created in the eri labs Stripe account on
-// 2026-05-20 at the locked tier prices ($15 / $25 / $45 / $30). Used as a
-// fallback when ERI_PRICE_* env vars aren't set, so the checkout flow works
-// out of the box in dev. Production must override with live-mode IDs.
+// Test-mode (sandbox) price IDs in the eri labs Stripe account
+// (acct_1TYCWf4evv030ZvB). Locked tier prices: $15 Starter / $30 Pro /
+// $60 Pro+ / $30 Teams. Pro + Pro+ migrated 2026-05-25 from $25/$45 →
+// $30/$60; the old prices live on but are `active: false` so existing
+// subscriptions keep resolving via `tierForPriceId`. All new prices carry
+// `metadata.tier` so the webhook resolves via `mapStripePriceToTier`
+// without depending on this fallback table.
 const TEST_PRICE_IDS: Record<PaidPlan, Record<BillingCadence, string>> = {
   starter: {
     monthly: "price_1TZEdZ4evv030ZvBoREq7XUd",
     yearly: "price_1TZEde4evv030ZvBIwXkK6W4",
   },
   pro: {
-    monthly: "price_1TZEiR4evv030ZvBALDZ0WI1",
-    yearly: "price_1TZEdo4evv030ZvBbgW93xHr",
+    monthly: "price_1TatSf4evv030ZvBebjzOA1D", // $30/mo, metadata.tier=pro
+    yearly: "price_1TatSi4evv030ZvBKCHTlvZg",  // $288/yr ($24/mo), metadata.tier=pro
   },
   pro_plus: {
-    monthly: "price_1TZEds4evv030ZvBLyuqklxG",
-    yearly: "price_1TZEdx4evv030ZvBqpxdekKS",
+    monthly: "price_1TatSk4evv030ZvB7Oavc2Kx", // $60/mo, metadata.tier=pro_plus
+    yearly: "price_1TatSm4evv030ZvB3YG2YVZO",  // $576/yr ($48/mo), metadata.tier=pro_plus
   },
   teams: {
     monthly: "price_1TZEe14evv030ZvBTIzgg3bX",

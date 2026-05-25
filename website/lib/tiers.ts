@@ -37,11 +37,26 @@ export interface TokenBudget {
 }
 
 export const TIER_TOKEN_BUDGETS: Record<TierName, TokenBudget> = {
-  Free:    { included:    25_000, ghost:   5_000 },
-  Starter: { included:   500_000, ghost: 100_000 },
-  Pro:     { included: 1_000_000, ghost: 200_000 },
-  "Pro+":  { included: 3_000_000, ghost: 500_000 },
-  Teams:   { included: 2_500_000, ghost: 500_000 },
+  Free:    { included:         0, ghost:         0 },
+  Starter: { included:   200_000, ghost:    40_000 },
+  Pro:     { included:   750_000, ghost:   150_000 },
+  "Pro+":  { included: 4_000_000, ghost:   800_000 },
+  Teams:   { included: 3_000_000, ghost:   600_000 },
+};
+
+/**
+ * Mercury (diffusion engine) is FREE at the provider level — Inception's
+ * per-turn cost is negligible — but we still rate-limit it per tier to
+ * stop abuse. The Free allowance is intentionally generous enough that a
+ * first-session demo feels unlimited, then converts: "wow, but I want to
+ * ship it" → paid tier with frontier tokens.
+ */
+export const MERCURY_TURN_LIMITS: Record<TierName, number> = {
+  Free:    150,
+  Starter: 2_000,
+  Pro:     10_000,
+  "Pro+":  50_000,
+  Teams:   30_000,
 };
 
 /**

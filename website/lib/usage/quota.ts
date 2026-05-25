@@ -1,5 +1,6 @@
 import {
   getTokenBucket,
+  incrementMercuryTurns,
   incrementTokensUsed,
   insertUsageRecord,
   markBucketWarned,
@@ -9,7 +10,12 @@ import {
   updateBucketAllowance,
   upsertTokenBucket,
 } from "@/lib/inference/db";
-import { normalizeTier, TIER_TOKEN_BUDGETS, type TierName } from "@/lib/tiers";
+import {
+  MERCURY_TURN_LIMITS,
+  normalizeTier,
+  TIER_TOKEN_BUDGETS,
+  type TierName,
+} from "@/lib/tiers";
 
 /**
  * Tier-based ghost-limit enforcement for the inference proxy.
@@ -124,6 +130,42 @@ export async function recordUsage(
     await markBucketWarned(record.user_id);
   }
   return { bucket, crossedIntoGhost: crossed };
+}
+
+export interface MercuryTurnCheck {
+  ok: boolean;
+  used: number;
+  limit: number;
+  resetAt: Date;
+}
+
+/**
+ * Mercury turn gate (separate from frontier-token quota). Mercury is free
+ * per-call, so this exists only to keep Free-tier abuse bounded. Caller
+ * should refuse the request when `ok === false` and surface the limit/reset.
+ */
+export async function ensureMercuryTurnAvailable(
+  userId: string,
+  tierSlug: string,
+): Promise<MercuryTurnCheck> {
+  const tier = normalizeTier(tierSlug);
+  const bucket = await getOrCreateBucket(userId, tier);
+  const limit = MERCURY_TURN_LIMITS[tier];
+  const used = bucket.mercury_turns_used;
+  return {
+    ok: used < limit,
+    used,
+    limit,
+    resetAt: bucket.period_end,
+  };
+}
+
+/**
+ * Atomically bump the Mercury turn counter. Called after a successful
+ * `/api/v1/inference/iterate` proxy round-trip.
+ */
+export async function recordMercuryTurn(userId: string): Promise<void> {
+  await incrementMercuryTurns(userId);
 }
 
 /**

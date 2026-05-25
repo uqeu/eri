@@ -62,7 +62,37 @@ function activatePreview(context, getSidecar) {
     const statusInterval = setInterval(() => {
         void client.status().catch(() => undefined);
     }, 1000);
-    context.subscriptions.push(openCmd, closeCmd, reloadCmd, openShouldOpenSub, shouldOpenEmitter, { dispose: () => clearInterval(statusInterval) });
+    // One-shot dev-server autodetect (Phase 10). After a short delay so the
+    // sidecar has fully booted, ask the Swift side which common port is
+    // already serving. If it finds one AND `eri.preview.autoOpen` is true,
+    // open the preview with that URL. Silent on failure.
+    const autoOpenTimer = setTimeout(async () => {
+        const autoOpen = vscode.workspace
+            .getConfiguration("eri.preview")
+            .get("autoOpen", true);
+        if (!autoOpen) {
+            return;
+        }
+        const sidecar = getSidecar();
+        if (!sidecar) {
+            return;
+        }
+        try {
+            const report = await sidecar.request("eri/preview/discover", {});
+            if (report.detectedUrl) {
+                shouldOpenEmitter.fire(report.detectedUrl);
+            }
+        }
+        catch {
+            // Silent — discover is best-effort.
+        }
+    }, 2_000);
+    context.subscriptions.push(openCmd, closeCmd, reloadCmd, openShouldOpenSub, shouldOpenEmitter, {
+        dispose: () => {
+            clearInterval(statusInterval);
+            clearTimeout(autoOpenTimer);
+        },
+    });
     const handle = {
         client,
         onShouldOpen: shouldOpenEmitter.event,
