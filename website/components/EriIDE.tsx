@@ -407,6 +407,21 @@ function easeOut(t: number): number {
   return 1 - Math.pow(1 - t, 3);
 }
 
+function diffBadgeLabel(stepIndex: number): string {
+  switch (stepIndex) {
+    case 0:
+      return "tracking-tight applied";
+    case 1:
+      return "glow prop added";
+    case 2:
+      return "fade prop added";
+    case 3:
+      return "halo prop added";
+    default:
+      return "diff applied";
+  }
+}
+
 export function EriIDE(): React.ReactElement {
   const [tick, setTick] = useState<number>(0);
   const [annual, setAnnual] = useState<boolean>(false);
@@ -561,6 +576,17 @@ export function EriIDE(): React.ReactElement {
             resolveFraction={resolveFraction}
             showNewLine={isPageActive ? showNewLine : false}
             currentStepNewCode={step.newCode}
+            modifiedLineIndices={
+              isPageActive
+                ? appliedSteps
+                    .map((s) => STEPS[s]?.codeLineIndex)
+                    .filter((n): n is number => typeof n === "number")
+                : []
+            }
+            showAppliedBadge={
+              isPageActive && showNewLine && resolveFraction < 1
+            }
+            appliedBadgeLabel={diffBadgeLabel(stepIndex)}
           />
           <VoiceInputBar
             voicePhraseShown={isPageActive ? voicePhraseShown : ""}
@@ -769,6 +795,9 @@ interface CodePaneProps {
   readonly resolveFraction: number;
   readonly showNewLine: boolean;
   readonly currentStepNewCode: ReadonlyArray<CodeToken>;
+  readonly modifiedLineIndices: ReadonlyArray<number>;
+  readonly showAppliedBadge: boolean;
+  readonly appliedBadgeLabel: string;
 }
 
 function CodePane({
@@ -779,14 +808,22 @@ function CodePane({
   resolveFraction,
   showNewLine,
   currentStepNewCode,
+  modifiedLineIndices,
+  showAppliedBadge,
+  appliedBadgeLabel,
 }: CodePaneProps): React.ReactElement {
   return (
-    <div className="flex-1 px-4 py-3 font-mono text-[12px] leading-[1.65] overflow-hidden">
+    <div className="relative flex-1 px-4 py-3 font-mono text-[12px] leading-[1.65] overflow-hidden">
       {codeLines.map((line, idx) => {
         const isActive = idx === activeLineIndex;
         const showDenoise = isActive && denoising;
         const showResolved = isActive && showNewLine;
         const displayLine = showResolved ? currentStepNewCode : line;
+        const gutter: "+" | "~" | null = showDenoise
+          ? "~"
+          : showResolved || modifiedLineIndices.includes(idx)
+            ? "+"
+            : null;
         return (
           <CodeLineRow
             key={`line-${idx}`}
@@ -796,9 +833,19 @@ function CodePane({
             denoiseFraction={denoiseFraction}
             resolveFraction={showResolved ? resolveFraction : 1}
             resolvedHighlight={showResolved}
+            gutter={gutter}
           />
         );
       })}
+      {showAppliedBadge ? (
+        <div
+          className="absolute top-3 right-4 flex items-center gap-1.5 rounded-full border border-accent/40 bg-accent/[0.12] px-2.5 py-0.5 font-mono text-[10px] text-accent"
+          style={{ animation: "diffResolve 0.6s ease-out" }}
+        >
+          <span aria-hidden>✦</span>
+          {appliedBadgeLabel}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -810,6 +857,7 @@ interface CodeLineRowProps {
   readonly denoiseFraction: number;
   readonly resolveFraction: number;
   readonly resolvedHighlight: boolean;
+  readonly gutter?: "+" | "~" | null;
 }
 
 function CodeLineRow({
@@ -819,15 +867,28 @@ function CodeLineRow({
   denoiseFraction,
   resolveFraction,
   resolvedHighlight,
+  gutter,
 }: CodeLineRowProps): React.ReactElement {
   const bg = resolvedHighlight
     ? `rgba(224,255,79,${0.10 * (1 - resolveFraction)})`
     : "transparent";
+  const gutterColor =
+    gutter === "+"
+      ? "text-accent"
+      : gutter === "~"
+        ? "text-[#a8d1ff]"
+        : "text-transparent";
   return (
     <div
       className="flex gap-3 transition-colors duration-300"
       style={{ background: bg }}
     >
+      <span
+        className={`${gutterColor} text-[11px] w-3 text-center shrink-0 select-none font-mono`}
+        aria-hidden
+      >
+        {gutter ?? "·"}
+      </span>
       <span className="text-paper/25 text-[11px] w-6 text-right shrink-0 select-none">
         {lineNo}
       </span>
