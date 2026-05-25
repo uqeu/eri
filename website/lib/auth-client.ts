@@ -112,29 +112,49 @@ export function setSession(response: AuthSuccessResponse): void {
   });
 }
 
+// Single-flight refresh: concurrent callers (header + device page + any
+// reload()) all await the same Promise instead of firing N parallel POSTs
+// against /api/auth/refresh. Without this dedupe, single-use refresh tokens
+// race — the first POST consumes + rotates the token, every other POST sees
+// "already consumed" → 401 → would clearRefreshCookie() and wipe the
+// session we just successfully refreshed.
+let refreshInFlight: Promise<PublicUser | null> | null = null;
+
 async function refreshSession(): Promise<PublicUser | null> {
+  if (refreshInFlight) return refreshInFlight;
   const refresh = readRefreshCookie();
   if (!refresh) return null;
-  try {
-    const response = await fetch("/api/auth/refresh", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ refresh_token: refresh }),
-    });
-    if (!response.ok) {
-      clearRefreshCookie();
+  refreshInFlight = (async (): Promise<PublicUser | null> => {
+    try {
+      const response = await fetch("/api/auth/refresh", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ refresh_token: refresh }),
+      });
+      if (response.status === 401 || response.status === 403) {
+        // Server explicitly says the refresh token is bad — wipe.
+        clearRefreshCookie();
+        return null;
+      }
+      if (!response.ok) {
+        // Transient (5xx, network blip) — keep the cookie so a retry can
+        // succeed. The caller just gets `null` for this attempt.
+        return null;
+      }
+      const body: unknown = await response.json();
+      if (!isAuthSuccess(body)) {
+        clearRefreshCookie();
+        return null;
+      }
+      setSession(body);
+      return body.user;
+    } catch {
       return null;
+    } finally {
+      refreshInFlight = null;
     }
-    const body: unknown = await response.json();
-    if (!isAuthSuccess(body)) {
-      clearRefreshCookie();
-      return null;
-    }
-    setSession(body);
-    return body.user;
-  } catch {
-    return null;
-  }
+  })();
+  return refreshInFlight;
 }
 
 async function fetchMe(token: string): Promise<PublicUser | null> {

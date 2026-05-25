@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useState } from "react";
 import { authedFetch, useUser } from "@/lib/auth-client";
 
 type Action = "approve" | "deny";
@@ -49,18 +49,10 @@ function CodeChip({ code }: { code: string }): JSX.Element {
 function DevicePageInner(): JSX.Element {
   const search = useSearchParams();
   const code = search.get("code") ?? "";
-  const { user, loading, reload } = useUser();
+  const { user, loading } = useUser();
   const [status, setStatus] = useState<Status>("idle");
   const [result, setResult] = useState<Action | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-
-  // Force-refresh the session on mount so a freshly-signed-in user lands here
-  // without the "Sign in to authorize" stale-state race. useUser caches the
-  // last-known state at module scope; the first render of this page can see
-  // a null user even when the cookie is valid, so we always re-check.
-  useEffect(() => {
-    void reload();
-  }, [reload]);
 
   async function handleAction(action: Action): Promise<void> {
     if (!code || status === "submitting") return;

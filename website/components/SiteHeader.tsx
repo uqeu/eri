@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { signOut, useUser } from "@/lib/auth-client";
 
 interface SiteHeaderProps {
@@ -14,7 +15,16 @@ const NAV_LINKS: ReadonlyArray<{ href: string; label: string }> = [
   { href: "/changelog", label: "Changelog" },
 ];
 
+// Routes that already render their own logo + nav via DashboardShell — the
+// global SiteHeader would be a duplicate, so we suppress it on these paths.
+const DASHBOARD_PREFIXES = ["/dashboard", "/billing", "/usage", "/account"];
+
 export function SiteHeader({ variant = "transparent" }: SiteHeaderProps) {
+  const pathname = usePathname();
+  if (pathname && DASHBOARD_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`))) {
+    return null;
+  }
+
   const wrapperClass =
     variant === "solid"
       ? "sticky top-0 z-40 border-b border-border bg-bg/90 backdrop-blur-md"
