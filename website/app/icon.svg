@@ -1,0 +1,10 @@
+<svg width="32" height="32" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <rect width="32" height="32" rx="7" fill="#0c0c0c"/>
+  <defs>
+    <mask id="cresc">
+      <rect width="32" height="32" fill="white"/>
+      <circle cx="20.5" cy="11.5" r="6.6" fill="black"/>
+    </mask>
+  </defs>
+  <circle cx="16" cy="16.5" r="9" fill="#e0ff4f" mask="url(#cresc)"/>
+</svg>
