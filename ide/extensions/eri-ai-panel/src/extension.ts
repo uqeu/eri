@@ -206,14 +206,13 @@ export function activate(context: vscode.ExtensionContext): void {
     getBanner: (): { email: string; tierLabel: string } | null => {
       const session = accountCapture?.store.current() ?? null;
       if (!session) return null;
-      const labels: Record<string, string> = {
-        free: "Free",
-        pro: "Pro",
-        proPlus: "Pro+",
-        team: "Team",
-        enterprise: "Enterprise",
-      };
-      return { email: session.email, tierLabel: labels[session.tier] ?? "Free" };
+      // Pull labels from the canonical TIER_LABELS map so the BYOK banner
+      // stays in sync with the rest of the IDE (status bar, status webview).
+      // No local fallback table — drift between this file and types.ts is
+      // exactly the bug we fixed when we moved to backend slugs.
+      const label =
+        require("./account/types").TIER_LABELS[session.tier] ?? "Free";
+      return { email: session.email, tierLabel: label };
     },
     onChange: bannerEmitter.event,
   };

@@ -209,6 +209,40 @@ export interface UsageSummary {
   recent_24h: { requests: number; tokens: number };
 }
 
+/**
+ * Flat camelCase shape with **tier slugs** (not display names) — what
+ * the IDE's `UsageClient.parseUsage` actually consumes. We keep
+ * `UsageSummary` as the internal nested shape for SSR / dashboard pages
+ * and derive this wire form for the API boundary.
+ */
+export interface IdeUsageWire {
+  tier: string;
+  tokensUsed: number;
+  tokensIncluded: number;
+  tokensGhost: number;
+  remainingIncluded: number;
+  remainingGhost: number;
+  softCapWarning: boolean;
+  periodEnd: string;
+}
+
+export async function buildUsageWireForIde(
+  userId: string,
+  tierSlug: string,
+): Promise<IdeUsageWire> {
+  const summary = await buildUsageSummary(userId, tierSlug);
+  return {
+    tier: tierSlug,
+    tokensUsed: summary.tokens.used,
+    tokensIncluded: summary.tokens.included,
+    tokensGhost: summary.tokens.ghost,
+    remainingIncluded: summary.tokens.remaining_included,
+    remainingGhost: summary.tokens.remaining_ghost,
+    softCapWarning: summary.soft_cap_warning,
+    periodEnd: summary.period.end,
+  };
+}
+
 export async function buildUsageSummary(
   userId: string,
   tierSlug: string,

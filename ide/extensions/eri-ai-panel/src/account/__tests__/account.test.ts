@@ -209,7 +209,7 @@ async function testDeviceCodeFlowApprovesAndFetchesMe(): Promise<void> {
       );
       return Promise.resolve(
         new Response(
-          JSON.stringify({ userId: "u_42", email: "k@e.dev", tier: "proPlus" }),
+          JSON.stringify({ userId: "u_42", email: "k@e.dev", tier: "pro_plus" }),
           { status: 200 },
         ),
       );
@@ -227,7 +227,7 @@ async function testDeviceCodeFlowApprovesAndFetchesMe(): Promise<void> {
   const session = await flow.run();
   assert.equal(session.token, "tok_xyz");
   assert.equal(session.userId, "u_42");
-  assert.equal(session.tier, "proPlus");
+  assert.equal(session.tier, "pro_plus");
 }
 
 async function testUsageClientHandles401(): Promise<void> {

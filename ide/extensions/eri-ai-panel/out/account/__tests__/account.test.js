@@ -175,7 +175,7 @@ async function testDeviceCodeFlowApprovesAndFetchesMe() {
         }
         if (url.endsWith("/api/v1/me")) {
             node_assert_1.strict.equal(init?.headers?.authorization, "Bearer tok_xyz");
-            return Promise.resolve(new Response(JSON.stringify({ userId: "u_42", email: "k@e.dev", tier: "proPlus" }), { status: 200 }));
+            return Promise.resolve(new Response(JSON.stringify({ userId: "u_42", email: "k@e.dev", tier: "pro_plus" }), { status: 200 }));
         }
         throw new Error(`unexpected ${url}`);
     });
@@ -189,7 +189,7 @@ async function testDeviceCodeFlowApprovesAndFetchesMe() {
     const session = await flow.run();
     node_assert_1.strict.equal(session.token, "tok_xyz");
     node_assert_1.strict.equal(session.userId, "u_42");
-    node_assert_1.strict.equal(session.tier, "proPlus");
+    node_assert_1.strict.equal(session.tier, "pro_plus");
 }
 async function testUsageClientHandles401() {
     let unauthorized = 0;
