@@ -132,6 +132,41 @@ export async function revokeApiToken(id: string): Promise<void> {
   `;
 }
 
+/**
+ * List every API token issued to a user (active + revoked). The /devices
+ * page renders the active set with a Revoke button; revoked tokens are
+ * shown grayed out as history. Sorted newest-first.
+ */
+export async function listApiTokensByUser(
+  userId: string,
+): Promise<ApiTokenRow[]> {
+  const rows = await sql()<RawApiToken[]>`
+    SELECT * FROM api_tokens
+    WHERE user_id = ${userId}
+    ORDER BY created_at DESC
+  `;
+  return rows.map(mapApiToken);
+}
+
+/**
+ * Revoke a token only if it belongs to the asking user. Returns true on
+ * success, false on not-found / wrong-owner / already-revoked (callers
+ * respond 404 either way — don't leak whether the token id exists for
+ * someone else).
+ */
+export async function revokeApiTokenForUser(
+  tokenId: string,
+  userId: string,
+): Promise<boolean> {
+  const rows = await sql()<{ id: string }[]>`
+    UPDATE api_tokens
+    SET revoked_at = now()
+    WHERE id = ${tokenId} AND user_id = ${userId} AND revoked_at IS NULL
+    RETURNING id
+  `;
+  return rows.length > 0;
+}
+
 export async function insertUsageRecord(input: UsageRecordInput): Promise<void> {
   const id = input.id ?? newUsageRecordId();
   await sql()`

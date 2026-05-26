@@ -14,6 +14,7 @@ const NAV: ReadonlyArray<NavItem> = [
   { href: "/dashboard", label: "Dashboard" },
   { href: "/billing", label: "Billing" },
   { href: "/usage", label: "Usage" },
+  { href: "/devices", label: "Devices" },
   { href: "/account", label: "Account" },
 ];
 

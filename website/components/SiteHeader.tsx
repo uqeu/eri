@@ -17,7 +17,13 @@ const NAV_LINKS: ReadonlyArray<{ href: string; label: string }> = [
 
 // Routes that already render their own logo + nav via DashboardShell — the
 // global SiteHeader would be a duplicate, so we suppress it on these paths.
-const DASHBOARD_PREFIXES = ["/dashboard", "/billing", "/usage", "/account"];
+const DASHBOARD_PREFIXES = [
+  "/dashboard",
+  "/billing",
+  "/usage",
+  "/devices",
+  "/account",
+];
 
 export function SiteHeader({ variant = "transparent" }: SiteHeaderProps) {
   const pathname = usePathname();
