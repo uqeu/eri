@@ -1,0 +1,45 @@
+{
+  "name": "@eri/sdk",
+  "version": "0.1.0",
+  "description": "TypeScript SDK for eri — the voice-first agentic IDE that also lives in your terminal.",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "tsx --test src/**/*.test.ts",
+    "clean": "rm -rf dist"
+  },
+  "keywords": [
+    "eri",
+    "ai",
+    "agent",
+    "ide",
+    "mcp",
+    "tandem",
+    "voice"
+  ],
+  "author": "eri",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.4.0"
+  }
+}

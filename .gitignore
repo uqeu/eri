@@ -24,6 +24,12 @@ graphify-out/
 .swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
 .venv
 .venv-gaze
+# eri SDK build artefacts
+packages/*/dist
+packages/*/node_modules
+packages/*/.venv
+packages/*/*.egg-info
+packages/*/build
 .vscode
 .wrangler
 .perf-runs
@@ -39,7 +45,6 @@ graphify-out/
 /snap
 /zed.xcworkspace
 DerivedData/
-Packages
 xcuserdata/
 crates/docs_preprocessor/actions.json
 
