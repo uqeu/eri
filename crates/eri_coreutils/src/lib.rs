@@ -495,6 +495,9 @@ async fn dispatch_inner(
         "eri/background/trusted" => {
             services::background::trusted(request.params.clone(), tier_state, services).await
         }
+        "eri/background/rules" => {
+            services::background::rules(request.params.clone(), tier_state, services).await
+        }
         "eri/agent/run" => {
             require_feature(tier_state, "agentMode").await?;
             Ok(serde_json::json!({ "stub": true }))

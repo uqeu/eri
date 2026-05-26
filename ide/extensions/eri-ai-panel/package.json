@@ -579,6 +579,11 @@
           "default": false,
           "description": "After a successful /ship on an auto-created branch, automatically run `gh pr create --fill --web` to open a draft PR."
         },
+        "eri.background.rulesEnabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable event-triggered Janitor rules: when a file save matches a `save:<glob>` rule in `.eri/janitor.json`, eri dispatches the configured slash command (debounced 1s per rule)."
+        },
         "eri.model": {
           "type": "string",
           "enum": ["mercury-2", "mercury-2-coder", "claude-opus-4-7", "claude-sonnet-4-6", "gpt-5", "gemini-2.5-pro"],

@@ -31,6 +31,7 @@ pub mod graph;
 pub mod hooks;
 pub mod index;
 pub mod iterate;
+pub mod janitor_rules;
 pub mod mcp;
 pub mod memory;
 pub mod preview;

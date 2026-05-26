@@ -38,6 +38,7 @@ import { activateReview, ReviewHandle } from "./review";
 import { activateStatusBar, EriStatusBarHandle } from "./statusBar";
 import { activateAccount, AccountHandle } from "./account";
 import { activateAgents, AgentsHandle } from "./agents";
+import { activateJanitorRulesWatcher } from "./background/janitorRulesWatcher";
 import { activateShip, ShipHandle } from "./ship";
 import { activateSlashRegistry, SlashRegistryHandle } from "./slash/registry";
 import { activateSnippets, SnippetsHandle } from "./snippets";
@@ -131,6 +132,20 @@ export function activate(context: vscode.ExtensionContext): void {
   composer = activateComposer(context, () => sidecar, atMentions);
   checkpoints = activateCheckpoints(context, () => sidecar);
   apply = activateApply(context, () => sidecar);
+
+  // Phase 17a — opt-in event-triggered Janitor rules. The watcher
+  // consults `.eri/janitor.json` and fires the configured slash
+  // commands on matching save events. Disabled unless the user flips
+  // `eri.background.rulesEnabled`.
+  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (workspaceRoot) {
+    context.subscriptions.push(
+      activateJanitorRulesWatcher(context, {
+        workspaceRoot,
+        getSidecar: () => sidecar,
+      }),
+    );
+  }
   // Auto-open the Swift preview window whenever an iteration applies an
   // `index.html` build. Gated by `eri.preview.autoOpenOnBuild`. The hook
   // looks at the apply orchestrator's `committed` event, which is the only

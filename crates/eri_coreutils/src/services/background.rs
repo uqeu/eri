@@ -27,6 +27,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::services::janitor_rules::load_rules as load_janitor_rules;
 use crate::services::Services;
 use crate::{DispatchError, SharedTierState};
 
@@ -137,6 +138,21 @@ pub async fn trusted(
         commands,
     };
     serde_json::to_value(report).map_err(|e| DispatchError::Other(e.into()))
+}
+
+/// `eri/background/rules` — read `<workspace>/.eri/janitor.json` and return
+/// the parsed rule set. Missing file → empty list (the IDE just stays
+/// quiet); malformed JSON → BadParams so the user knows to fix it.
+pub async fn rules(
+    params: Value,
+    _tier_state: &SharedTierState,
+    _services: &Arc<Services>,
+) -> Result<Value, DispatchError> {
+    let p: WorkspaceOnly = serde_json::from_value(params)
+        .map_err(|e| DispatchError::BadParams(format!("eri/background/rules: {e}")))?;
+    let parsed =
+        load_janitor_rules(&p.workspace).map_err(|e| DispatchError::BadParams(e))?;
+    serde_json::to_value(parsed).map_err(|e| DispatchError::Other(e.into()))
 }
 
 async fn require_pro_tier(tier_state: &SharedTierState) -> Result<(), DispatchError> {
