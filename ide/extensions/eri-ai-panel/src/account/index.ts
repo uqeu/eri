@@ -20,6 +20,25 @@ import { EriSession, UsageSummary } from "./types";
 
 const DEFAULT_BASE_URL = "https://eri.dev";
 
+/**
+ * Minimal sidecar surface we need from `activateAccount`. Defined here
+ * rather than importing `Sidecar` directly so the account module stays
+ * independent of the sidecar transport implementation (and so tests can
+ * stub it with a single-method fake).
+ */
+export interface AccountSidecar {
+  request<T = unknown>(method: string, params?: unknown): Promise<T>;
+}
+
+export interface AccountOptions {
+  /**
+   * Resolve the live sidecar handle on demand. The sidecar can be `null`
+   * during start-up or after a crash; callers swallow errors so account
+   * activity never blocks on the session-push side channel.
+   */
+  readonly getSidecar?: () => AccountSidecar | null;
+}
+
 export interface AccountHandle {
   readonly store: SessionStore;
   readonly usage: UsageClient;
@@ -27,7 +46,10 @@ export interface AccountHandle {
   dispose(): void;
 }
 
-export function activateAccount(context: vscode.ExtensionContext): AccountHandle {
+export function activateAccount(
+  context: vscode.ExtensionContext,
+  options: AccountOptions = {},
+): AccountHandle {
   const getBaseUrl = (): string => {
     const value = vscode.workspace
       .getConfiguration("eri.account")
@@ -95,11 +117,26 @@ export function activateAccount(context: vscode.ExtensionContext): AccountHandle
   });
   context.subscriptions.push(uriHandler);
 
+  // Push the sign-in's user_id into the sidecar so per-user state (local
+  // memory partition today) resolves to the right scope. Best-effort —
+  // sidecar may be null during start-up or after a crash; swallow errors
+  // so the UI flow is never gated on the side-channel push.
+  const pushSession = (session: EriSession | null): void => {
+    const sidecar = options.getSidecar?.();
+    if (!sidecar) return;
+    const method = session ? "eri/account/setSession" : "eri/account/clearSession";
+    const params = session ? { userId: session.userId } : {};
+    sidecar
+      .request(method, params)
+      .catch((err) => console.warn(`[eri] ${method} push failed`, err));
+  };
+
   // Reflect session into status bar + webview, and (re)start usage polling.
   let pollHandle: vscode.Disposable | null = null;
   const sessionListener = store.onChange((session: EriSession | null) => {
     statusBar.setSession(session);
     panel.push();
+    pushSession(session);
     pollHandle?.dispose();
     pollHandle = null;
     if (session) {
@@ -120,6 +157,12 @@ export function activateAccount(context: vscode.ExtensionContext): AccountHandle
   void store.hydrate().then(() => {
     const session = store.current();
     statusBar.setSession(session);
+    // Push the hydrated session into the sidecar so the sidecar's memory
+    // partition is correct from the first JSON-RPC call. If hydrate runs
+    // before the sidecar finishes start-up the push is a no-op; the
+    // sessionListener above re-fires whenever the user signs in/out so
+    // the sidecar always catches up.
+    pushSession(session);
     if (session) {
       pollHandle = usage.startPolling(getRefreshSec());
     }

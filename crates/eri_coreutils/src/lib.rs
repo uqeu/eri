@@ -626,6 +626,12 @@ async fn dispatch_inner(
         "eri/account/sign_out" => {
             services::account::sign_out(request.params.clone(), services).await
         }
+        "eri/account/setSession" => {
+            services::account::set_session(request.params.clone(), services).await
+        }
+        "eri/account/clearSession" => {
+            services::account::clear_session(request.params.clone(), services).await
+        }
 
         // --- Crash + Sentry (free tier; local-only observability) ---
         "eri/crash/recent" => services::crash::recent(request.params.clone(), services).await,

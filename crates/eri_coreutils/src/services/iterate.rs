@@ -341,6 +341,7 @@ fn build_parts(
     prompt: &str,
     open_files: &[OpenFileWire],
     rules: &[String],
+    user_id: Option<&str>,
 ) -> Vec<BudgetPart> {
     let mut parts: Vec<BudgetPart> =
         Vec::with_capacity(open_files.len() + rules.len() + 4);
@@ -363,7 +364,10 @@ fn build_parts(
     // Learned patterns (Phase 8b) — recent observations from the local
     // memory store, formatted as `## What I've learned about you`. Priority 1
     // sits above rules (2) but is droppable on tight budgets.
-    if let Some(block) = load_learned_block(workspace) {
+    //
+    // `user_id` scopes the store to the active signed-in user so two
+    // accounts on the same machine don't see each other's patterns.
+    if let Some(block) = load_learned_block(workspace, user_id) {
         parts.push(
             BudgetPart::new("system:learned", 1, block).with_min_keep(0),
         );
@@ -385,8 +389,11 @@ fn build_parts(
 /// block. Returns `None` when the store doesn't exist yet or has no
 /// observations for this workspace — failure is non-fatal because memory
 /// is enrichment, not a precondition.
-fn load_learned_block(workspace: &std::path::Path) -> Option<String> {
-    let store = eri_inference::memory::MemoryStore::open().ok()?;
+fn load_learned_block(
+    workspace: &std::path::Path,
+    user_id: Option<&str>,
+) -> Option<String> {
+    let store = eri_inference::memory::MemoryStore::open_for(user_id).ok()?;
     let patterns = store.top_patterns(workspace, 20);
     if patterns.is_empty() {
         return None;
@@ -517,7 +524,14 @@ pub async fn iterate(
     };
 
     let rules = load_rules(&p.workspace, &prompt_ctx);
-    let parts = build_parts(&p.workspace, &p.prompt, &p.open_files, &rules);
+    let user_id = services.current_user_id().await;
+    let parts = build_parts(
+        &p.workspace,
+        &p.prompt,
+        &p.open_files,
+        &rules,
+        user_id.as_deref(),
+    );
 
     let provider_keys = collect_provider_keys(services).await;
     let req = BrainIterationRequest {

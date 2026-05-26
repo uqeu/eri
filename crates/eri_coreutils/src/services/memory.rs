@@ -81,11 +81,12 @@ impl From<&Observation> for ObservationWire {
 pub async fn recall(
     params: Value,
     _tier_state: &SharedTierState,
-    _services: &Arc<Services>,
+    services: &Arc<Services>,
 ) -> Result<Value, DispatchError> {
     let p: RecallParams = serde_json::from_value(params)
         .map_err(|e| DispatchError::BadParams(format!("eri/memory/recall: {e}")))?;
-    let store = MemoryStore::open()
+    let user_id = services.current_user_id().await;
+    let store = MemoryStore::open_for(user_id.as_deref())
         .map_err(|e| DispatchError::Other(anyhow::anyhow!("memory open: {e}")))?;
     let hits: Vec<ObservationWire> = store
         .recall(&p.query, &p.workspace, p.limit)
@@ -98,11 +99,12 @@ pub async fn recall(
 pub async fn remember(
     params: Value,
     _tier_state: &SharedTierState,
-    _services: &Arc<Services>,
+    services: &Arc<Services>,
 ) -> Result<Value, DispatchError> {
     let p: RememberParams = serde_json::from_value(params)
         .map_err(|e| DispatchError::BadParams(format!("eri/memory/remember: {e}")))?;
-    let mut store = MemoryStore::open()
+    let user_id = services.current_user_id().await;
+    let mut store = MemoryStore::open_for(user_id.as_deref())
         .map_err(|e| DispatchError::Other(anyhow::anyhow!("memory open: {e}")))?;
     let pinned = collectors::remember_fact(&mut store, &p.workspace, &p.text)
         .map_err(|e| DispatchError::Other(anyhow::anyhow!("memory write: {e}")))?;
@@ -115,11 +117,12 @@ pub async fn remember(
 pub async fn forget(
     params: Value,
     _tier_state: &SharedTierState,
-    _services: &Arc<Services>,
+    services: &Arc<Services>,
 ) -> Result<Value, DispatchError> {
     let p: ForgetParams = serde_json::from_value(params)
         .map_err(|e| DispatchError::BadParams(format!("eri/memory/forget: {e}")))?;
-    let mut store = MemoryStore::open()
+    let user_id = services.current_user_id().await;
+    let mut store = MemoryStore::open_for(user_id.as_deref())
         .map_err(|e| DispatchError::Other(anyhow::anyhow!("memory open: {e}")))?;
     let removed = store
         .forget(&p.target)
@@ -130,11 +133,12 @@ pub async fn forget(
 pub async fn patterns(
     params: Value,
     _tier_state: &SharedTierState,
-    _services: &Arc<Services>,
+    services: &Arc<Services>,
 ) -> Result<Value, DispatchError> {
     let p: CommonParams = serde_json::from_value(params)
         .map_err(|e| DispatchError::BadParams(format!("eri/memory/patterns: {e}")))?;
-    let store = MemoryStore::open()
+    let user_id = services.current_user_id().await;
+    let store = MemoryStore::open_for(user_id.as_deref())
         .map_err(|e| DispatchError::Other(anyhow::anyhow!("memory open: {e}")))?;
     let hits = store.top_patterns(&p.workspace, 20);
     let formatted = format_learned_block(&hits);
@@ -148,8 +152,11 @@ pub async fn patterns(
 /// Tier-gated nightly prune. The dispatcher hooks this on sidecar startup
 /// + every 6 hours via `tokio::time::interval`. Not exposed as RPC; this
 /// is a helper that callers (the scheduler) use directly.
-pub fn prune_for_tier(tier: &str) -> std::io::Result<usize> {
+///
+/// `user_id` partitions the prune to the signed-in user's store. Pass
+/// `None` to prune the anonymous local-only file.
+pub fn prune_for_tier(tier: &str, user_id: Option<&str>) -> std::io::Result<usize> {
     let window = RetentionWindow::from_tier(tier);
-    let mut store = MemoryStore::open()?;
+    let mut store = MemoryStore::open_for(user_id)?;
     store.prune(window)
 }

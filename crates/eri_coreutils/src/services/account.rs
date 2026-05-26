@@ -1,10 +1,16 @@
 //! Sidecar handlers for the eri.dev account endpoints:
 //!
-//! * `eri/account/usage`    → proxies `GET /api/v1/usage` with the session bearer.
-//! * `eri/account/me`       → proxies `GET /api/v1/me` with the session bearer.
-//! * `eri/account/sign_out` → clears the cached session token and makes a best-
+//! * `eri/account/usage`        → proxies `GET /api/v1/usage` with the session bearer.
+//! * `eri/account/me`           → proxies `GET /api/v1/me` with the session bearer.
+//! * `eri/account/sign_out`     → clears the cached session token and makes a best-
 //!   effort `POST /api/v1/auth/revoke` so the IDE never has to talk to the
 //!   eri.dev origin directly (and so the extension sandbox stays narrow).
+//! * `eri/account/setSession`   → IDE pushes the active user_id into the sidecar
+//!   so per-user state (memory partition, …) resolves to the right scope. The
+//!   bearer token continues to live in the SecretCache; only the user_id
+//!   travels through this call.
+//! * `eri/account/clearSession` → drops the user_id snapshot. Called on
+//!   sign-out so subsequent calls fall back to anonymous-mode paths.
 //!
 //! All three are free-tier — they describe the user's own account, not a paid
 //! feature, and the IDE polls usage frequently to drive the status bar.
@@ -43,6 +49,42 @@ struct OverQuotaBody {
     remaining: Option<i64>,
 }
 
+/// Parameters for `eri/account/setSession`. The IDE pushes the active
+/// sign-in's `user_id` so the sidecar can partition local state (memory
+/// file path today) per account.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SetSessionParams {
+    user_id: String,
+}
+
+/// `eri/account/setSession` handler. Stash the active user_id on Services.
+/// Idempotent — re-calling with the same id is a no-op.
+pub async fn set_session(
+    params: Value,
+    services: &Services,
+) -> Result<Value, DispatchError> {
+    let p: SetSessionParams = serde_json::from_value(params)
+        .map_err(|e| DispatchError::BadParams(format!("eri/account/setSession: {e}")))?;
+    let trimmed = p.user_id.trim();
+    if trimmed.is_empty() {
+        return Err(DispatchError::BadParams(
+            "eri/account/setSession: user_id must be non-empty".into(),
+        ));
+    }
+    services.set_session_user(trimmed.to_string()).await;
+    Ok(serde_json::json!({ "ok": true }))
+}
+
+/// `eri/account/clearSession` handler. Drops the cached user_id.
+pub async fn clear_session(
+    _params: Value,
+    services: &Services,
+) -> Result<Value, DispatchError> {
+    services.clear_session().await;
+    Ok(serde_json::json!({ "ok": true }))
+}
+
 /// `eri/account/usage` handler. Returns whatever JSON the backend produces.
 pub async fn usage(_params: Value, services: &Services) -> Result<Value, DispatchError> {
     proxy_get(services, USAGE_PATH).await
@@ -68,6 +110,7 @@ pub async fn sign_out(_params: Value, services: &Services) -> Result<Value, Disp
         .secrets
         .clear(ERI_SESSION_PROVIDER, ERI_SESSION_FIELD)
         .await;
+    services.clear_session().await;
 
     let revoked = match bearer {
         Some(token) => {
@@ -217,5 +260,34 @@ mod tests {
             map_over_quota(body),
             DispatchError::OverQuota { .. }
         ));
+    }
+
+    #[tokio::test]
+    async fn set_session_stores_user_id_on_services() {
+        let services = Services::new();
+        let params = serde_json::json!({ "userId": "  user_abc  " });
+        let result = set_session(params, services.as_ref()).await.unwrap();
+        assert_eq!(result, serde_json::json!({ "ok": true }));
+        // user_id is trimmed before storage.
+        assert_eq!(services.current_user_id().await.as_deref(), Some("user_abc"));
+    }
+
+    #[tokio::test]
+    async fn set_session_rejects_empty_user_id() {
+        let services = Services::new();
+        let result = set_session(serde_json::json!({ "userId": "   " }), services.as_ref()).await;
+        assert!(matches!(result, Err(DispatchError::BadParams(_))));
+        // No state change on rejection.
+        assert!(services.current_user_id().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn clear_session_drops_user_id_snapshot() {
+        let services = Services::new();
+        services.set_session_user("user_xyz").await;
+        assert!(services.current_user_id().await.is_some());
+        let result = clear_session(serde_json::json!({}), services.as_ref()).await.unwrap();
+        assert_eq!(result, serde_json::json!({ "ok": true }));
+        assert!(services.current_user_id().await.is_none());
     }
 }

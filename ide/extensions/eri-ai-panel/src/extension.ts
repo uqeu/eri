@@ -98,7 +98,7 @@ export function activate(context: vscode.ExtensionContext): void {
   sidecar.start();
 
   statusBar = activateStatusBar(context);
-  account = activateAccount(context);
+  account = activateAccount(context, { getSidecar: () => sidecar });
 
   agents = activateAgents(context, {
     secrets: secretsStore,

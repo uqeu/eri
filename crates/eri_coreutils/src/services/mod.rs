@@ -64,6 +64,23 @@ pub struct TabDownloadState {
     pub error: Option<String>,
 }
 
+/// In-memory snapshot of the active eri sign-in. The IDE pushes this into
+/// the sidecar on hydrate / sign-in / sign-out via the `eri/account/setSession`
+/// and `eri/account/clearSession` RPCs so handlers that partition state by
+/// user (today: memory store paths) can resolve the right scope without each
+/// JSON-RPC method carrying a `userId` field.
+///
+/// The bearer token itself stays in the [`SecretCache`] — only the user_id
+/// lives here, and it is never written to disk.
+#[derive(Debug, Default, Clone)]
+pub struct SessionSnapshot {
+    pub user_id: Option<String>,
+}
+
+/// Process-shared session state. `Arc<RwLock<...>>` because reads (every
+/// memory call) dominate writes (sign-in / sign-out events).
+pub type SharedSessionState = Arc<RwLock<SessionSnapshot>>;
+
 /// Long-lived per-workspace handles.
 pub struct Services {
     /// Open `Index` per workspace. We hold an `Arc<Mutex<Index>>` for each
@@ -107,6 +124,10 @@ pub struct Services {
     pub notifier: Option<Arc<dyn Notifier>>,
     /// Live Swift preview window state (child process + last URL).
     pub preview: preview::SharedPreviewState,
+    /// Active eri sign-in snapshot. Pushed by the IDE via
+    /// `eri/account/setSession` and consulted by handlers that partition
+    /// local state by user (today: memory store path resolution).
+    pub session: SharedSessionState,
 }
 
 impl Default for Services {
@@ -138,6 +159,7 @@ impl Default for Services {
             voice: voice::SharedVoiceState::default(),
             notifier: None,
             preview: Arc::new(Mutex::new(preview::PreviewState::default())),
+            session: Arc::new(RwLock::new(SessionSnapshot::default())),
         }
     }
 }
@@ -183,5 +205,23 @@ impl Services {
         self.secrets
             .get_or_fetch(self.host_client.as_deref(), provider_id, field_key)
             .await
+    }
+
+    /// Snapshot the active sign-in's user_id, if any. Cloned out so callers
+    /// don't hold the session lock across awaits.
+    pub async fn current_user_id(&self) -> Option<String> {
+        self.session.read().await.user_id.clone()
+    }
+
+    /// Push a new sign-in into the sidecar's session snapshot. Idempotent.
+    pub async fn set_session_user(&self, user_id: impl Into<String>) {
+        let mut guard = self.session.write().await;
+        guard.user_id = Some(user_id.into());
+    }
+
+    /// Clear the active sign-in (sign-out, sidecar restart, etc.).
+    pub async fn clear_session(&self) {
+        let mut guard = self.session.write().await;
+        guard.user_id = None;
     }
 }
