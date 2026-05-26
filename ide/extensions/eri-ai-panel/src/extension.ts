@@ -147,6 +147,36 @@ export function activate(context: vscode.ExtensionContext): void {
     );
   }
 
+  // Phase 23 — onboarding modal. Fires on first sign-in via the
+  // session listener below; can also be run manually via the command
+  // palette ("eri: Run onboarding").
+  context.subscriptions.push(
+    vscode.commands.registerCommand("eri.onboarding.run", async () => {
+      const { runOnboarding } = await import("./onboarding/buildStyleQuestions");
+      const result = await runOnboarding();
+      if (!result) return;
+      vscode.window.showInformationMessage(
+        `eri — preferences written to ${result.preferencesPath}.`,
+      );
+      if (result.themeSuggestion) {
+        await vscode.commands.executeCommand(
+          "eri.themes.setActive",
+          { slug: result.themeSuggestion },
+        );
+      }
+    }),
+  );
+  // First-time fire — flips a globalState flag so we never prompt twice.
+  context.subscriptions.push(
+    account.store.onChange((session) => {
+      if (!session) return;
+      const flag = "eri.onboarding.completedV1";
+      if (context.globalState.get<boolean>(flag)) return;
+      void context.globalState.update(flag, true);
+      void vscode.commands.executeCommand("eri.onboarding.run");
+    }),
+  );
+
   // Phase 21b — `/document <path-or-url>` command. Reads a local file
   // or downloads an HTTP target, extracts text (PDFs get heuristic
   // parsing; everything else is read as UTF-8), opens a paginated

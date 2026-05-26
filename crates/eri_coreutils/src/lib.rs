@@ -501,6 +501,9 @@ async fn dispatch_inner(
         "eri/autosubscribe/list" => {
             services::autosubscribe::list(request.params.clone(), tier_state, services).await
         }
+        "eri/docs/lookup" => {
+            services::docs_cache::lookup(request.params.clone(), tier_state, services).await
+        }
         "eri/themes/list" => {
             services::themes::list(request.params.clone(), tier_state, services).await
         }

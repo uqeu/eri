@@ -27,6 +27,7 @@ pub mod brain;
 pub mod checkpoints;
 pub mod codemaps;
 pub mod crash;
+pub mod docs_cache;
 pub mod gaze;
 pub mod graph;
 pub mod hooks;
