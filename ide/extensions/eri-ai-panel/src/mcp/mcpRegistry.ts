@@ -163,7 +163,61 @@ export function activateMcp(
     },
   );
 
-  context.subscriptions.push(restartCommand, openConfigCommand, viewToolsCommand);
+  // Phase 17c — MCP hub picker for one-click install of curated servers.
+  // Lives in mcpHub.ts; we register the command + addServer hook here
+  // since they share configPath + sidecarGetter context.
+  const openHubCommand = vscode.commands.registerCommand(
+    "eri.mcp.openHub",
+    async () => {
+      const { openMcpHub } = await import("./mcpHub");
+      await openMcpHub();
+    },
+  );
+  const addServerCommand = vscode.commands.registerCommand(
+    "eri.mcp.addServer",
+    async (preset: {
+      id: string;
+      command: string;
+      args: string[];
+      displayName?: string;
+    }) => {
+      if (!preset || typeof preset.id !== "string") return;
+      await ensureConfigFile(configPath);
+      try {
+        const raw = await vscode.workspace.fs.readFile(
+          vscode.Uri.file(configPath),
+        );
+        const text = Buffer.from(raw).toString("utf8");
+        const json = JSON.parse(text) as {
+          mcpServers?: Record<string, unknown>;
+        };
+        const servers = json.mcpServers ?? {};
+        servers[preset.id] = {
+          command: preset.command,
+          args: preset.args,
+        };
+        json.mcpServers = servers;
+        const out = JSON.stringify(json, null, 2) + "\n";
+        await vscode.workspace.fs.writeFile(
+          vscode.Uri.file(configPath),
+          Buffer.from(out, "utf8"),
+        );
+        sidecarGetter()?.notify("eri/mcp/restartAll", {});
+      } catch (err) {
+        throw err instanceof Error
+          ? err
+          : new Error("failed to persist MCP server config");
+      }
+    },
+  );
+
+  context.subscriptions.push(
+    restartCommand,
+    openConfigCommand,
+    viewToolsCommand,
+    openHubCommand,
+    addServerCommand,
+  );
 
   installWatcher();
   loadAndPush();
