@@ -42,6 +42,9 @@ export class MercuryAgent implements AgentBackend {
       // the IDE and sidecar sides; safe to call even when there are 0
       // diagnostics (returns []).
       diagnostics: collectActiveDiagnostics(),
+      // Phase 16a — multimodal image attachments. Empty when the user
+      // didn't pin any images via @Image.
+      images: turn.context.images ?? [],
     });
     yield {
       kind: "done",

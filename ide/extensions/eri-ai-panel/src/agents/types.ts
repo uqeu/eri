@@ -65,9 +65,19 @@ export interface AgentContextFile {
   readonly content: string;
 }
 
+export interface AgentContextImage {
+  readonly mime: string;
+  /** `data:<mime>;base64,<payload>` URI. Never persisted by the sidecar. */
+  readonly dataUri: string;
+  readonly name?: string;
+  readonly sizeBytes?: number;
+}
+
 export interface AgentContext {
   readonly files: ReadonlyArray<AgentContextFile>;
   readonly voiceInput?: boolean;
+  /** Multimodal image attachments (Phase 16a). */
+  readonly images?: ReadonlyArray<AgentContextImage>;
 }
 
 export interface AgentTurn {

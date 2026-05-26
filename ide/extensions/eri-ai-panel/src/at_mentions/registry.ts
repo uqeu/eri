@@ -14,7 +14,8 @@ export type AtMentionKind =
   | "recentChanges"
   | "linterErrors"
   | "definitions"
-  | "codemap";
+  | "codemap"
+  | "image";
 
 export interface AtMentionDescriptor {
   readonly id: AtMentionKind;
@@ -108,6 +109,13 @@ export const AT_MENTION_KINDS: ReadonlyArray<AtMentionDescriptor> = [
     token: "@Codemap",
     icon: "$(graph)",
     description: "Attach a saved codemap (module/hotspot/function/data)",
+  },
+  {
+    id: "image",
+    label: "Image",
+    token: "@Image",
+    icon: "$(file-media)",
+    description: "Attach a screenshot or design mock as a multimodal input",
   },
 ];
 

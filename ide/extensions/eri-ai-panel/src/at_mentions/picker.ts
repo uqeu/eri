@@ -79,7 +79,56 @@ export class AtMentionPicker {
       case "linterErrors": return this.pickLinterErrors(descriptor);
       case "definitions": return this.pickDefinitions(descriptor);
       case "codemap": return this.pickCodemap(descriptor);
+      case "image": return this.pickImage(descriptor);
       default: return undefined;
+    }
+  }
+
+  /**
+   * Multimodal image attachment. Opens a native file picker filtered to
+   * PNG / JPEG / WebP / GIF, reads the file, encodes it as a `data:` URI
+   * the model providers can ingest as an image content block. We do NOT
+   * upload anywhere — the URI travels with the next turn and stays in
+   * memory; nothing persists.
+   */
+  private async pickImage(
+    _descriptor: AtMentionDescriptor,
+  ): Promise<AtMentionChip | undefined> {
+    const uris = await vscode.window.showOpenDialog({
+      title: "@Image — pick a screenshot or design",
+      canSelectFiles: true,
+      canSelectFolders: false,
+      canSelectMany: false,
+      filters: {
+        "Images": ["png", "jpg", "jpeg", "webp", "gif"],
+      },
+    });
+    if (!uris || uris.length === 0) return undefined;
+    const uri = uris[0];
+    try {
+      const bytes = await vscode.workspace.fs.readFile(uri);
+      const mime = guessImageMime(uri.fsPath);
+      // Bound the payload — 8MB is way more than any frontier model
+      // accepts as a single image, and avoids accidental memory blow-ups.
+      if (bytes.byteLength > 8 * 1024 * 1024) {
+        vscode.window.showWarningMessage(
+          "Image too large (>8MB). Resize or screenshot a smaller area.",
+        );
+        return undefined;
+      }
+      const base64 = Buffer.from(bytes).toString("base64");
+      const dataUri = `data:${mime};base64,${base64}`;
+      const name = uri.fsPath.split(/[/\\]/).pop() ?? "image";
+      return {
+        kind: "image",
+        label: name,
+        subtitle: `${mime} · ${formatBytes(bytes.byteLength)}`,
+        payload: { mime, dataUri, name, sizeBytes: bytes.byteLength },
+      };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      vscode.window.showErrorMessage(`eri @Image — failed to read file: ${msg}`);
+      return undefined;
     }
   }
 
@@ -456,4 +505,27 @@ export function allDescriptors(): ReadonlyArray<AtMentionDescriptor> {
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+function guessImageMime(filePath: string): string {
+  const ext = filePath.toLowerCase().split(".").pop() ?? "";
+  switch (ext) {
+    case "png":
+      return "image/png";
+    case "jpg":
+    case "jpeg":
+      return "image/jpeg";
+    case "webp":
+      return "image/webp";
+    case "gif":
+      return "image/gif";
+    default:
+      return "application/octet-stream";
+  }
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n}B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)}KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)}MB`;
 }

@@ -65,6 +65,30 @@ struct DiagnosticWire {
     source: Option<String>,
 }
 
+/// Image attachment travelling alongside the prompt. The actual
+/// multimodal dispatch to Sonnet / GPT-4o happens upstream in the
+/// proxy; here we accept the payload, surface a descriptive
+/// `system:images` BudgetPart so the model knows what the user
+/// attached, and forward the URIs to the brain layer for future
+/// vision routing.
+#[derive(Debug, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct ImageWire {
+    /// MIME type — `image/png`, `image/jpeg`, etc.
+    mime: String,
+    /// `data:<mime>;base64,<payload>` URI. Lives in memory only; never
+    /// persisted to disk by the sidecar.
+    #[allow(dead_code)]
+    data_uri: String,
+    /// File name from the picker — surfaced to the model so it can
+    /// refer to the attachment by name in its response.
+    #[serde(default)]
+    name: Option<String>,
+    /// Optional size hint for debug + budget heuristics.
+    #[serde(default)]
+    size_bytes: Option<u64>,
+}
+
 /// Wire shape of `eri/inference/iterate` params.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -79,6 +103,10 @@ struct IterateParams {
     /// Optional — older IDE builds still ship just `linter_errors_count`.
     #[serde(default)]
     diagnostics: Vec<DiagnosticWire>,
+    /// Multimodal image attachments (Phase 16a). Empty when no images
+    /// are pinned.
+    #[serde(default)]
+    images: Vec<ImageWire>,
     #[serde(default)]
     voice_input: bool,
     #[serde(default)]
@@ -368,6 +396,7 @@ fn build_parts(
     rules: &[String],
     user_id: Option<&str>,
     diagnostics: &[DiagnosticWire],
+    images: &[ImageWire],
 ) -> Vec<BudgetPart> {
     let mut parts: Vec<BudgetPart> =
         Vec::with_capacity(open_files.len() + rules.len() + 5);
@@ -409,6 +438,16 @@ fn build_parts(
         );
     }
 
+    // Multimodal image attachments (Phase 16a). The dispatch layer is
+    // responsible for routing the actual `data:` URIs to a vision-capable
+    // model; here we emit a textual `system:images` part so the model has
+    // a stable reference to the attachments in the conversation.
+    if let Some(block) = format_images_block(images) {
+        parts.push(
+            BudgetPart::new("system:images", 1, block).with_min_keep(0),
+        );
+    }
+
     parts.push(BudgetPart::new("user:prompt", 0, prompt));
 
     for f in open_files {
@@ -419,6 +458,30 @@ fn build_parts(
         parts.push(BudgetPart::new(format!("system:rule:{i}"), 2, rule.clone()));
     }
     parts
+}
+
+/// Format attached images as a textual `## Images attached` block so
+/// the model has a stable reference to the multimodal content blocks
+/// the dispatch layer will inject separately. The actual `data:` URIs
+/// never travel in the system prompt — they're routed via the proxy's
+/// multimodal content path.
+fn format_images_block(images: &[ImageWire]) -> Option<String> {
+    if images.is_empty() {
+        return None;
+    }
+    let mut out = String::from("## Images attached\n");
+    for (i, img) in images.iter().enumerate() {
+        let name = img.name.as_deref().unwrap_or("image");
+        let size = img
+            .size_bytes
+            .map(|n| format!(" · {} bytes", n))
+            .unwrap_or_default();
+        out.push_str(&format!("{}. {} ({}{})\n", i + 1, name, img.mime, size));
+    }
+    out.push_str(
+        "These are visible to the model as image content blocks in the same turn.\n",
+    );
+    Some(out)
 }
 
 /// Format the active linter / language-server diagnostics as a
@@ -628,6 +691,7 @@ pub async fn iterate(
         &rules,
         user_id.as_deref(),
         &p.diagnostics,
+        &p.images,
     );
 
     let provider_keys = collect_provider_keys(services).await;
@@ -824,6 +888,25 @@ mod tests {
     #[test]
     fn format_diagnostics_block_is_none_when_empty() {
         assert!(format_diagnostics_block(&[]).is_none());
+    }
+
+    #[test]
+    fn format_images_block_includes_name_and_mime() {
+        let images = vec![ImageWire {
+            mime: "image/png".into(),
+            data_uri: "data:image/png;base64,xyz".into(),
+            name: Some("hero.png".into()),
+            size_bytes: Some(234_000),
+        }];
+        let block = format_images_block(&images).expect("non-empty");
+        assert!(block.contains("hero.png"));
+        assert!(block.contains("image/png"));
+        assert!(block.contains("234000 bytes"));
+    }
+
+    #[test]
+    fn format_images_block_is_none_when_empty() {
+        assert!(format_images_block(&[]).is_none());
     }
 
     #[tokio::test]

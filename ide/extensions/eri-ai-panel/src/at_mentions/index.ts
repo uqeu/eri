@@ -115,6 +115,7 @@ export function activateAtMentions(
     vscode.commands.registerCommand("eri.mentions.pickRecentChanges", () => pickAndDispatch("recentChanges")),
     vscode.commands.registerCommand("eri.mentions.pickLinterErrors", () => pickAndDispatch("linterErrors")),
     vscode.commands.registerCommand("eri.mentions.pickDefinitions", () => pickAndDispatch("definitions")),
+    vscode.commands.registerCommand("eri.mentions.pickImage", () => pickAndDispatch("image")),
     { dispose: () => settings.dispose() },
   );
 
@@ -166,6 +167,7 @@ function renderInlineToken(chip: AtMentionChip): string {
     case "linterErrors": return "@LinterErrors";
     case "definitions": return `@Definitions ${chip.label}`;
     case "codemap": return `@Codemap ${chip.label}`;
+    case "image": return `@Image ${chip.label}`;
     default: return "@Mention";
   }
 }
