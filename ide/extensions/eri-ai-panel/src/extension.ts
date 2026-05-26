@@ -146,6 +146,95 @@ export function activate(context: vscode.ExtensionContext): void {
       }),
     );
   }
+
+  // Phase 21b — `/document <path-or-url>` command. Reads a local file
+  // or downloads an HTTP target, extracts text (PDFs get heuristic
+  // parsing; everything else is read as UTF-8), opens a paginated
+  // markdown summary the user can chat against.
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "eri.document.run",
+      async (args?: { target?: string }) => {
+        const target =
+          args?.target ??
+          (await vscode.window.showInputBox({
+            prompt: "/document — paste a file path or URL",
+            placeHolder: "./paper.pdf or https://arxiv.org/abs/...",
+            ignoreFocusOut: true,
+          }));
+        if (!target) return;
+        try {
+          const { runDocument, showDocumentResult } = await import("./document");
+          const result = await vscode.window.withProgress(
+            {
+              location: vscode.ProgressLocation.Notification,
+              title: `eri /document — extracting ${target}…`,
+              cancellable: false,
+            },
+            () => runDocument({ target }),
+          );
+          await showDocumentResult(result);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          vscode.window.showErrorMessage(`eri /document failed: ${msg}`);
+        }
+      },
+    ),
+  );
+
+  // Phase 21a — `/tracer <github-url> <query>` command. Clones a
+  // remote repo into ~/.eri/sandboxes/<sha>/, indexes it, runs a
+  // search, opens the markdown report. Tear-down happens when the
+  // user dismisses the result document.
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "eri.tracer.run",
+      async (args?: { url?: string; query?: string }) => {
+        const sc = sidecar;
+        if (!sc) {
+          vscode.window.showWarningMessage(
+            "eri /tracer — sidecar not running.",
+          );
+          return;
+        }
+        const { runTracer, showTracerResultDocument, parseTracerArgs } =
+          await import("./tracer");
+        let url = args?.url;
+        let query = args?.query;
+        if (!url || !query) {
+          const free = await vscode.window.showInputBox({
+            prompt: "/tracer — paste `<github-url> <query>`",
+            placeHolder: "https://github.com/anthropics/anthropic-sdk-python how does streaming work?",
+            ignoreFocusOut: true,
+          });
+          if (!free) return;
+          const parsed = parseTracerArgs(free);
+          if (!parsed) {
+            vscode.window.showWarningMessage(
+              "Provide both a URL and a query.",
+            );
+            return;
+          }
+          url = parsed.url;
+          query = parsed.query;
+        }
+        try {
+          const result = await vscode.window.withProgress(
+            {
+              location: vscode.ProgressLocation.Notification,
+              title: `eri /tracer — cloning + indexing ${url}…`,
+              cancellable: false,
+            },
+            () => runTracer({ url: url!, query: query!, sidecar: sc }),
+          );
+          await showTracerResultDocument(result);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          vscode.window.showErrorMessage(`eri /tracer failed: ${msg}`);
+        }
+      },
+    ),
+  );
   // Auto-open the Swift preview window whenever an iteration applies an
   // `index.html` build. Gated by `eri.preview.autoOpenOnBuild`. The hook
   // looks at the apply orchestrator's `committed` event, which is the only

@@ -1,0 +1,130 @@
+// `/document <path-or-url>` — Nia parity (Phase 21b).
+//
+// Reads a local file path or downloads an HTTP(S) URL, extracts text
+// (PDFs get heuristic text extraction; other files are read as UTF-8),
+// renders a paginated markdown summary, and opens the result in a
+// virtual document the user can chat against by selecting passages.
+
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
+import * as vscode from "vscode";
+import {
+  cachePathFor,
+  cacheRoot,
+  extractPdfText,
+  isHttpUrl,
+  isPdfFilename,
+  renderDocumentSummary,
+} from "./pure";
+
+export {
+  cachePathFor,
+  isHttpUrl,
+  isPdfFilename,
+  renderDocumentSummary,
+  extractPdfText,
+} from "./pure";
+
+const HTTP_TIMEOUT_MS = 30_000;
+const MAX_DOWNLOAD_BYTES = 32 * 1024 * 1024; // 32MB
+
+export interface DocumentRunOptions {
+  readonly target: string;
+}
+
+export interface DocumentResult {
+  readonly target: string;
+  readonly markdown: string;
+  readonly cachePath: string;
+}
+
+export async function runDocument(opts: DocumentRunOptions): Promise<DocumentResult> {
+  const target = opts.target.trim();
+  if (!target) {
+    throw new Error("/document needs a path or URL");
+  }
+  await fs.mkdir(cacheRoot(), { recursive: true });
+  const cachePath = cachePathFor(target);
+  const bytes = isHttpUrl(target)
+    ? await downloadToCache(target, cachePath)
+    : await readLocalFile(target, cachePath);
+  const looksPdf =
+    isPdfFilename(target) ||
+    looksLikePdfMagic(bytes) ||
+    target.endsWith(".pdf");
+  const markdown = looksPdf
+    ? renderDocumentSummary(target, extractPdfText(bytes).pages)
+    : renderDocumentSummary(target, [
+        { pageNumber: 1, text: Buffer.from(bytes).toString("utf8") },
+      ]);
+  return { target, markdown, cachePath };
+}
+
+export async function showDocumentResult(result: DocumentResult): Promise<void> {
+  const doc = await vscode.workspace.openTextDocument({
+    content: result.markdown,
+    language: "markdown",
+  });
+  await vscode.window.showTextDocument(doc, { preview: false });
+}
+
+async function downloadToCache(url: string, cachePath: string): Promise<Uint8Array> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), HTTP_TIMEOUT_MS);
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status} ${response.statusText}`);
+    }
+    const reader = response.body?.getReader();
+    if (!reader) {
+      throw new Error("response body missing");
+    }
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      if (value) {
+        total += value.length;
+        if (total > MAX_DOWNLOAD_BYTES) {
+          throw new Error(
+            `download exceeded ${MAX_DOWNLOAD_BYTES.toLocaleString()} bytes`,
+          );
+        }
+        chunks.push(value);
+      }
+    }
+    const bytes = Buffer.concat(chunks);
+    await fs.writeFile(cachePath, bytes);
+    return bytes;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function readLocalFile(target: string, cachePath: string): Promise<Uint8Array> {
+  // Resolve relative to the active workspace if not absolute.
+  let resolved = target;
+  if (!path.isAbsolute(target)) {
+    const workspace = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (workspace) {
+      resolved = path.join(workspace, target);
+    }
+  }
+  const bytes = await fs.readFile(resolved);
+  await fs.writeFile(cachePath, bytes);
+  return bytes;
+}
+
+function looksLikePdfMagic(buf: Uint8Array): boolean {
+  // PDF files start with "%PDF-".
+  return (
+    buf.length > 4 &&
+    buf[0] === 0x25 &&
+    buf[1] === 0x50 &&
+    buf[2] === 0x44 &&
+    buf[3] === 0x46 &&
+    buf[4] === 0x2d
+  );
+}

@@ -142,6 +142,66 @@ export const SLASH_COMMANDS: ReadonlyArray<SlashCommand> = [
     placeholder: "what to sketch",
     dispatch: { kind: "sidecarSlash" },
   },
+  {
+    key: "tracer",
+    label: "/tracer",
+    description: "Clone a repo into a sandbox, index it, answer a query (Nia parity)",
+    placeholder: "https://github.com/foo/bar what is the streaming API?",
+    dispatch: {
+      kind: "command",
+      command: "eri.tracer.run",
+      argument: (args) => {
+        const trimmed = args.trim();
+        if (!trimmed) return {};
+        const idx = trimmed.search(/\s/);
+        if (idx < 0) return { url: trimmed, query: "" };
+        return {
+          url: trimmed.slice(0, idx),
+          query: trimmed.slice(idx + 1).trim(),
+        };
+      },
+    },
+  },
+  {
+    key: "document",
+    label: "/document",
+    description: "Extract text + citations from a PDF or paper URL",
+    placeholder: "./paper.pdf or https://arxiv.org/abs/...",
+    dispatch: {
+      kind: "command",
+      command: "eri.document.run",
+      argument: (args) => ({ target: args.trim() }),
+    },
+  },
+  {
+    key: "new",
+    label: "/new",
+    description: "Scaffold a starter project from a template",
+    placeholder: "template slug — e.g. saas-next, spa-vite, api-rust",
+    dispatch: {
+      kind: "command",
+      command: "eri.templates.scaffold",
+      argument: (args) => ({ slug: args.trim() }),
+    },
+  },
+  {
+    key: "theme",
+    label: "/theme",
+    description: "Switch the active theme (or `list` to browse)",
+    placeholder: "anthropic | linear | stripe | vercel | …",
+    dispatch: {
+      kind: "command",
+      command: "eri.themes.setActive",
+      argument: (args) => ({ slug: args.trim() }),
+    },
+  },
+  {
+    key: "preference",
+    label: "/preference",
+    description: "Set a build preference — `codeStyle.semicolons=false`",
+    placeholder: "key.path=value",
+    dispatch: { kind: "sidecarSlash" },
+  },
 ];
 
 export interface SlashRegistryHandle extends vscode.Disposable {

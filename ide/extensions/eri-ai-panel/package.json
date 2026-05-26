@@ -361,6 +361,8 @@
       { "command": "eri.terminals.routeToCli",    "title": "eri: Route Prompt to Running CLI" },
       { "command": "eri.mcp.openHub",             "title": "eri: MCP Hub (browse + install)",    "icon": "$(extensions)" },
       { "command": "eri.mcp.addServer",           "title": "eri: Add MCP Server" },
+      { "command": "eri.tracer.run",              "title": "eri: /tracer (sandboxed repo Q&A)",  "icon": "$(github)" },
+      { "command": "eri.document.run",            "title": "eri: /document (PDF / paper extract)", "icon": "$(file-pdf)" },
       { "command": "eri.terminals.rerunBlock",    "title": "eri: Re-run Captured Block" },
       { "command": "eri.visualEditor.open",          "title": "eri: Open Visual Editor",            "icon": "$(browser)" },
       { "command": "eri.visualEditor.setUrl",        "title": "eri: Visual Editor - Set Dev Server URL" },
