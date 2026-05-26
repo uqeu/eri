@@ -17,7 +17,9 @@ export type AuditEventKind =
   | "block.sentToChat"
   | "layout.save"
   | "layout.restore"
-  | "layout.delete";
+  | "layout.delete"
+  | "layout.preset.quad"
+  | "terminal.routedToCli";
 
 export interface AuditEvent {
   readonly kind: AuditEventKind;

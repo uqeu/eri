@@ -13,6 +13,7 @@ import {
 } from "./state";
 import { BlockStore, TerminalBlock } from "./blocks";
 import { SavedLayoutRef } from "./layouts";
+import { CliKind, cliGlyph, cliLabel } from "./cliDetect";
 
 // View item kinds ---------------------------------------------------------
 
@@ -49,15 +50,18 @@ export class TerminalNode extends vscode.TreeItem {
     public readonly terminal: vscode.Terminal | undefined,
     status: TerminalStatus,
     lastCommand: string | null,
+    cliKind: CliKind | null = null,
   ) {
     super(record.name, vscode.TreeItemCollapsibleState.None);
     this.id = `terminal:${record.key}`;
     this.contextValue = record.nameLocked
       ? "eri.terminal.locked"
       : "eri.terminal";
-    this.iconPath = iconForStatus(status, record.icon);
-    this.description = describe(status, lastCommand);
-    this.tooltip = buildTooltip(record, status, lastCommand);
+    this.iconPath = cliKind
+      ? new vscode.ThemeIcon(cliGlyph(cliKind), new vscode.ThemeColor("charts.purple"))
+      : iconForStatus(status, record.icon);
+    this.description = describe(status, lastCommand, cliKind);
+    this.tooltip = buildTooltip(record, status, lastCommand, cliKind);
     if (terminal) {
       this.command = {
         command: "eri.terminals.reveal",
@@ -115,6 +119,7 @@ export interface TerminalRuntime {
   status(key: string): TerminalStatus;
   lastCommand(key: string): string | null;
   resolveTerminal(key: string): vscode.Terminal | undefined;
+  cliKind?(key: string): CliKind | null;
 }
 
 function iconForStatus(
@@ -145,6 +150,7 @@ function iconForStatus(
 function describe(
   status: TerminalStatus,
   lastCommand: string | null,
+  cliKind: CliKind | null,
 ): string {
   const badge = (() => {
     switch (status) {
@@ -158,21 +164,26 @@ function describe(
         return "✗ failed";
     }
   })();
+  const cliBadge = cliKind ? `🤖 ${cliLabel(cliKind)} · ` : "";
   if (lastCommand && lastCommand.length > 0) {
-    return `${badge} · ${lastCommand}`;
+    return `${cliBadge}${badge} · ${lastCommand}`;
   }
-  return badge;
+  return `${cliBadge}${badge}`;
 }
 
 function buildTooltip(
   record: TerminalRecord,
   status: TerminalStatus,
   lastCommand: string | null,
+  cliKind: CliKind | null,
 ): string {
   const parts = [
     `Name: ${record.name}${record.nameLocked ? " (locked)" : ""}`,
     `Status: ${status}`,
   ];
+  if (cliKind) {
+    parts.push(`Running: ${cliLabel(cliKind)}`);
+  }
   if (record.cwd) {
     parts.push(`Cwd: ${record.cwd}`);
   }
@@ -267,8 +278,9 @@ export class TerminalsTreeProvider
     return members.map((record) => {
       const status = this.runtime.status(record.key);
       const lastCommand = this.runtime.lastCommand(record.key);
+      const cliKind = this.runtime.cliKind?.(record.key) ?? null;
       const terminal = this.runtime.resolveTerminal(record.key);
-      return new TerminalNode(record, terminal, status, lastCommand);
+      return new TerminalNode(record, terminal, status, lastCommand, cliKind);
     });
   }
 

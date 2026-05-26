@@ -19,6 +19,7 @@ import { inferTerminalName, stripPromptPrefix } from "./autoName";
 import { AuditSink, makeEvent } from "./auditLog";
 import { TerminalRuntime, TerminalStatus } from "./treeProvider";
 import { BlockStore, TerminalBlock } from "./blocks";
+import { CliKind, detectCli } from "./cliDetect";
 
 const IDLE_THRESHOLD_MS = 30_000;
 
@@ -29,6 +30,18 @@ interface Slot {
   lastCommand: string | null;
   lastActivityMs: number;
   lastExitCode: number | null;
+  /**
+   * Command line of the currently-running execution (live only between
+   * `onDidStartTerminalShellExecution` and `onDidEndTerminalShellExecution`).
+   * `null` when the terminal is idle.
+   */
+  runningCommand: string | null;
+  /**
+   * CLI kind currently running in this terminal (`"claude" | "codex" | "aider"`).
+   * Used by the chat composer to route prompts into an already-running CLI
+   * subprocess instead of forcing the user to pick the terminal.
+   */
+  cliKind: CliKind | null;
 }
 
 export class TerminalsRuntime implements TerminalRuntime {
@@ -91,6 +104,33 @@ export class TerminalsRuntime implements TerminalRuntime {
     return this.slots.get(terminal)?.lastCommand ?? null;
   }
 
+  /**
+   * The CLI kind running in this terminal right now (`"claude" | "codex" | "aider"`),
+   * or `null` when the terminal is idle / running something else.
+   */
+  cliKind(key: TerminalKey): CliKind | null {
+    const terminal = this.keyToTerminal.get(key);
+    if (!terminal) return null;
+    return this.slots.get(terminal)?.cliKind ?? null;
+  }
+
+  /**
+   * The first live terminal currently running the given CLI, or `undefined`
+   * when no terminal is hosting it. Used by `/agent claudeCode` and friends
+   * to pipe prompts into an existing subprocess instead of spawning a new
+   * one. Iteration order matches insertion order so the oldest matching
+   * terminal wins — the user's "primary" claude-code session is usually the
+   * first one they spawned.
+   */
+  findCliTerminal(kind: CliKind): vscode.Terminal | undefined {
+    for (const slot of this.slots.values()) {
+      if (slot.cliKind === kind) {
+        return slot.terminal;
+      }
+    }
+    return undefined;
+  }
+
   liveSlots(): ReadonlyArray<Slot> {
     return [...this.slots.values()];
   }
@@ -131,6 +171,8 @@ export class TerminalsRuntime implements TerminalRuntime {
       lastCommand: reused ? null : null,
       lastActivityMs: Date.now(),
       lastExitCode: null,
+      runningCommand: null,
+      cliKind: null,
     };
     this.slots.set(terminal, slot);
     this.keyToTerminal.set(finalKey, terminal);
@@ -186,7 +228,10 @@ export class TerminalsRuntime implements TerminalRuntime {
     }
     slot.status = "running";
     slot.lastActivityMs = Date.now();
-    slot.lastCommand = event.execution.commandLine?.value ?? slot.lastCommand;
+    const command = event.execution.commandLine?.value ?? slot.lastCommand;
+    slot.lastCommand = command;
+    slot.runningCommand = command ?? null;
+    slot.cliKind = detectCli(command);
     this.emitter.fire(slot.key);
   }
 
@@ -199,6 +244,8 @@ export class TerminalsRuntime implements TerminalRuntime {
     slot.lastExitCode = exit;
     slot.status = exit === 0 ? "exited-ok" : exit === null ? "idle" : "exited-fail";
     slot.lastActivityMs = Date.now();
+    slot.runningCommand = null;
+    slot.cliKind = null;
     const command = event.execution.commandLine?.value;
     if (command) {
       slot.lastCommand = command;

@@ -31,6 +31,7 @@ import {
   TerminalNode,
   TerminalsTreeProvider,
 } from "./treeProvider";
+import { CliKind, cliLabel } from "./cliDetect";
 
 const ICON_CHOICES = [
   "terminal",
@@ -288,6 +289,15 @@ export function registerTerminalCommands(deps: CommandDeps): vscode.Disposable {
       "eri.terminals.openRecipe",
       async () => openRecipeCommand(deps),
     ),
+    vscode.commands.registerCommand(
+      "eri.terminals.layoutQuad",
+      async () => layoutQuadCommand(deps),
+    ),
+    vscode.commands.registerCommand(
+      "eri.terminals.routeToCli",
+      async (kind: CliKind, prompt: string) =>
+        routeToCliCommand(deps, kind, prompt),
+    ),
   );
 
   return vscode.Disposable.from(...subs);
@@ -352,6 +362,99 @@ async function spawnInGroupCommand(deps: CommandDeps): Promise<void> {
       upsertTerminal(snap, { ...record, groupId }),
     );
   }, 250);
+}
+
+/**
+ * 4-pane quad layout — opens a fresh group named "Quad", spawns four
+ * terminals in it, and splits the editor area so they sit in a 2×2 grid.
+ * The user can then drop CLIs into each pane (`claude` top-left,
+ * `codex` top-right, ad-hoc shell bottom-left, log tail bottom-right is
+ * the canonical "agent control room" arrangement we recommend).
+ */
+async function layoutQuadCommand(deps: CommandDeps): Promise<void> {
+  const cwd = deps.workspaceFsPath;
+  const groupId = await deps.runtime.createGroup("Quad", "grid");
+  // VS Code's terminal splitter operates on the currently-focused terminal,
+  // so spawn → focus → split sequentially. Use small awaits so the events
+  // settle before we issue the next layout command.
+  const created: vscode.Terminal[] = [];
+  for (let i = 0; i < 4; i++) {
+    const t = vscode.window.createTerminal({ name: `Quad ${i + 1}`, cwd });
+    created.push(t);
+    t.show();
+    if (i === 1) {
+      // Right of pane 1.
+      await vscode.commands.executeCommand(
+        "workbench.action.terminal.splitInActiveWorkspace",
+      );
+    } else if (i === 2 || i === 3) {
+      // Split below the previously-focused pane (rotates between
+      // bottom-left and bottom-right when the user has moved focus
+      // manually — close enough for the preset).
+      await vscode.commands.executeCommand(
+        "workbench.action.terminal.split",
+      );
+    }
+    // Small breathing room for shell integration to bind so the runtime
+    // adopt callback associates the right group id below.
+    await new Promise((resolve) => setTimeout(resolve, 60));
+  }
+  // Move each freshly-created terminal into the Quad group.
+  setTimeout(() => {
+    for (const t of created) {
+      const key = deps.runtime.resolveKey(t);
+      if (!key) continue;
+      const snap = deps.store.current();
+      const record = snap.terminals.find((r) => r.key === key);
+      if (!record || record.groupId === groupId) continue;
+      void deps.store.apply(
+        upsertTerminal(snap, { ...record, groupId }),
+      );
+    }
+  }, 300);
+  void deps.audit.append(
+    makeEvent("layout.preset.quad", { groupId, count: created.length }),
+  );
+}
+
+/**
+ * Pipe a prompt into the terminal currently running the requested CLI.
+ * Returns `true` when a matching terminal was found (and the prompt was
+ * sent). Callers (the chat composer / slash dispatcher) use this to avoid
+ * spawning a fresh subprocess when the user already has `claude` /
+ * `codex` / `aider` running in a terminal.
+ *
+ * When no matching terminal exists, this is a no-op so the caller can
+ * fall back to spawning. We deliberately do NOT spawn from here — the
+ * spawn path lives in the CliAgent backend and has different lifecycle
+ * semantics (process ownership, stdio piping, etc).
+ */
+async function routeToCliCommand(
+  deps: CommandDeps,
+  kind: CliKind,
+  prompt: string,
+): Promise<boolean> {
+  if (!kind || !prompt) {
+    return false;
+  }
+  const terminal = deps.runtime.findCliTerminal(kind);
+  if (!terminal) {
+    return false;
+  }
+  terminal.show(true);
+  terminal.sendText(prompt, true);
+  void deps.audit.append(
+    makeEvent("terminal.routedToCli", {
+      kind,
+      terminalName: terminal.name,
+      promptLen: prompt.length,
+    }),
+  );
+  vscode.window.setStatusBarMessage(
+    `routed to ${cliLabel(kind)} in ${terminal.name}`,
+    2_500,
+  );
+  return true;
 }
 
 async function findCommandQuickPick(deps: CommandDeps): Promise<void> {
