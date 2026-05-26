@@ -22,6 +22,7 @@
  * the registry adds `gpt-5` / `gemini-2.5-pro`, swap `DEFAULT_PLAN`.
  */
 
+import { checkModelAllowed } from "./cost_guard";
 import { extractUsage, estimateCostMicros, type UsageCounts } from "./tokens";
 import {
   getMasterKey,
@@ -390,6 +391,22 @@ export async function* runTandem(
 ): AsyncGenerator<TandemEvent> {
   const plan = input.plan ?? DEFAULT_PLAN;
   const builderPrompt = buildBuilderPrompt(input.instructions, input.workspaceFiles);
+
+  // Cost guard: refuse to dispatch Opus / o1 / gpt-5-pro through eri's
+  // master keys. Caller can bypass by switching to BYOK. Reject up-front
+  // so a tandem with one bad slot doesn't waste the survivors' tokens.
+  if (!input.byokKeys) {
+    for (const slot of [...plan.builders, plan.checker]) {
+      const guard = checkModelAllowed(slot.model);
+      if (!guard.allowed) {
+        yield {
+          kind: "ship_failed",
+          reason: `model_not_allowed:${slot.model} (${guard.reason}); suggested=${guard.suggested}`,
+        };
+        return;
+      }
+    }
+  }
 
   // Phase 1: both builders in parallel. Non-streaming for builders keeps
   // the UI simple — we show "running" → "done" with token counts. Streaming

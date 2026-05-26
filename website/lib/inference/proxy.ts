@@ -10,6 +10,7 @@ import {
   extractUsage,
   type UsageCounts,
 } from "./tokens";
+import { checkModelAllowed } from "./cost_guard";
 import {
   getMasterKey,
   isProviderId,
@@ -135,7 +136,8 @@ export async function runProxy(
   if (!parsed.ok) return parsed.response;
   const body = parsed.value;
 
-  // 4) BYOK fallback path — no quota, no billing, no master key.
+  // 4) BYOK fallback path — no quota, no billing, no master key, no cost
+  //    guard (the user pays whatever they want with their own key).
   const byok = readBYOK(request);
   if (byok.active && byok.apiKey) {
     return forwardAndLog({
@@ -147,6 +149,22 @@ export async function runProxy(
       upstreamUrl: resolveUpstreamUrl(options, body),
       apiKey: byok.apiKey,
       bill: false,
+    });
+  }
+
+  // 4b) Cost guard — block Opus / o1 / gpt-5-pro on the eri proxy. We pay
+  //    for these out of our master keys, and eri's positioning is "thrifty
+  //    harness over the cheapest capable models". Set ERI_ALLOW_PREMIUM=true
+  //    in Vercel env if you need to bypass.
+  const cost = checkModelAllowed(modelFromBody(body));
+  if (!cost.allowed) {
+    return jsonError(403, {
+      error: "model_not_allowed",
+      reason: cost.reason,
+      suggested: cost.suggested,
+      message:
+        "This model is too expensive for the eri proxy. Use a cheaper model, " +
+        "switch to BYOK (x-eri-byok: true), or contact us if you need it unlocked.",
     });
   }
 
