@@ -1,0 +1,26 @@
+{
+  "name": "eri-wizard",
+  "version": "0.1.0",
+  "description": "Interactive setup for eri — pairs with `npx eri-wizard`.",
+  "type": "module",
+  "bin": {
+    "eri-wizard": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "tsx --test src/**/*.test.ts",
+    "start": "tsx src/cli.ts"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.4.0"
+  }
+}
