@@ -1,0 +1,52 @@
+{
+  "name": "eri-companion",
+  "displayName": "eri (companion)",
+  "description": "Ask eri / plan / ship / memory recall from vanilla VS Code — no fork required. The full IDE (voice, gaze, diffusion preview, tandem ship) lives at tryeri.ca.",
+  "version": "0.1.0",
+  "publisher": "eri",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": ["AI", "Chat", "Other"],
+  "keywords": ["eri", "ai", "agent"],
+  "icon": "media/icon.png",
+  "activationEvents": [
+    "onCommand:eri.companion.ask",
+    "onCommand:eri.companion.plan",
+    "onCommand:eri.companion.ship",
+    "onCommand:eri.companion.signIn",
+    "onCommand:eri.companion.memory.recall",
+    "onCommand:eri.companion.memory.remember"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      { "command": "eri.companion.ask",    "title": "eri: Ask",          "category": "eri" },
+      { "command": "eri.companion.plan",   "title": "eri: Plan",         "category": "eri" },
+      { "command": "eri.companion.ship",   "title": "eri: Ship",         "category": "eri" },
+      { "command": "eri.companion.signIn", "title": "eri: Sign in",      "category": "eri" },
+      { "command": "eri.companion.memory.recall",   "title": "eri: Memory — recall",   "category": "eri" },
+      { "command": "eri.companion.memory.remember", "title": "eri: Memory — remember", "category": "eri" }
+    ],
+    "configuration": {
+      "title": "eri (companion)",
+      "properties": {
+        "eri.companion.baseUrl": {
+          "type": "string",
+          "default": "https://tryeri.ca",
+          "description": "API host. Set to your self-hosted eri instance if you run one."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "watch": "tsc -p tsconfig.json --watch"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.95.0",
+    "typescript": "^5.4.0"
+  }
+}
