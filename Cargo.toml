@@ -21,6 +21,7 @@ members = [
     "crates/eri_inference",
     "crates/eri_iterator",
     "crates/eri_mcp",
+    "crates/eri_mcp_server",
     "crates/eri_router",
     "crates/eri_settings",
     "crates/eri_slack",
