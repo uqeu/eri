@@ -5,22 +5,17 @@ export function Hero(): React.ReactElement {
     <section className="bg-bg text-text">
       <div className="container pt-32 pb-20 lg:pt-44 lg:pb-28">
         <div className="max-w-3xl">
-          <span className="inline-flex items-center gap-2 rounded-full border border-border px-3 py-1 font-mono text-[11px] uppercase tracking-[0.18em] text-text-sec mb-8">
-            <span className="inline-block h-1 w-1 rounded-full bg-demo-accent" aria-hidden />
-            agentic · invite-only
-          </span>
 
           <h1
             className="text-h1 text-balance mb-6 leading-[1.02]"
             style={{ letterSpacing: "-0.03em", fontWeight: 500 }}
           >
-            An agentic editor that learns how you think.
+            An agentic editor that builds at the speed you think.
           </h1>
 
           <p className="text-text-sec text-[17px] leading-[1.55] max-w-prose mb-9">
             eri listens to your voice, watches where you point, and remembers
-            how you build — then ships the diff under your gaze. It gets sharper
-            every session you give it.
+            how you build. It gets sharper every session you give it.
           </p>
 
           <div className="flex flex-wrap items-center gap-3">

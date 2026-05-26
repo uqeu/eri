@@ -142,59 +142,9 @@ export function FooterBig(): React.ReactElement {
               </ul>
             </div>
           ))}
-        </div>
-
-        <div className="mt-16 flex flex-col gap-2 border-t border-border pt-6 font-mono text-[11px] text-text-sec sm:flex-row sm:items-start sm:justify-between">
-          <span className="inline-flex items-center gap-2">
-            <span
-              aria-hidden
-              className="h-1.5 w-1.5 rounded-full bg-demo-accent"
-            />
-            BYOK keys never leave your machine — stored in OS Keychain, never
-            synced to our servers.
-          </span>
-        </div>
-
-        <div className="container flex flex-col md:flex-row items-start md:items-center justify-between gap-4 mt-12 pt-6 border-t border-border text-text-sec text-[13px]">
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[12px]">
-            <span>© {year} eri</span>
-            <span aria-hidden className="text-text-ter">
-              ·
-            </span>
-            <span>independent project · ontario, canada</span>
-          </div>
-          <div className="flex items-center gap-4 font-mono text-[12px]">
-            <Link
-              href="/status"
-              className="inline-flex items-center gap-2 hover:text-text transition-colors"
-            >
-              <span
-                aria-hidden
-                className="h-1.5 w-1.5 rounded-full bg-[#41d57c] shadow-[0_0_8px_rgba(65,213,124,0.7)]"
-              />
-              status
-            </Link>
-            <span aria-hidden className="text-text-ter">
-              ·
-            </span>
-            <Link
-              href="/legal/disclaimer"
-              className="hover:text-text transition-colors"
-            >
-              provided as-is
-            </Link>
-          </div>
-        </div>
+        </div>    
       </div>
 
-      <div
-        aria-hidden
-        className="pointer-events-none relative -mt-2 select-none overflow-hidden text-center"
-      >
-        <span className="font-display text-[clamp(72px,18vw,260px)] leading-[0.85] tracking-tight text-text/[0.05]">
-          eri.
-        </span>
-      </div>
     </footer>
   );
 }
