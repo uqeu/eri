@@ -498,6 +498,9 @@ async fn dispatch_inner(
         "eri/background/rules" => {
             services::background::rules(request.params.clone(), tier_state, services).await
         }
+        "eri/autosubscribe/list" => {
+            services::autosubscribe::list(request.params.clone(), tier_state, services).await
+        }
         "eri/agent/run" => {
             require_feature(tier_state, "agentMode").await?;
             Ok(serde_json::json!({ "stub": true }))
