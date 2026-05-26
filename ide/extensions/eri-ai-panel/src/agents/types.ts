@@ -8,6 +8,19 @@
 
 export type AgentKind = "mercury" | "proxy" | "byok" | "cli" | "auto";
 
+/**
+ * Where this agent appears in the picker UI:
+ *  - "default" — the single visible "eri" entry users actually pick. Today
+ *    that's just the auto agent, which routes via the brain layer to the
+ *    proxy variants under the hood.
+ *  - "byok"    — surfaced under a "Bring your own keys" disclosure.
+ *  - "cli"     — surfaced under "External CLIs" (Claude Code, Codex, Aider).
+ *  - "hidden"  — present in the registry so the brain can dispatch through
+ *    it, but never shown to the user. Mercury + the three proxy variants
+ *    fall here — the user picks "eri", we route internally.
+ */
+export type AgentSurface = "default" | "byok" | "cli" | "hidden";
+
 export type AgentVendor =
   | "eri"
   | "anthropic"
@@ -39,6 +52,12 @@ export interface AgentDescriptor {
   readonly binaryArgs?: ReadonlyArray<string>;
   /** Custom user-defined agents come from disk; built-ins are coded. */
   readonly source: "builtin" | "user";
+  /**
+   * Picker grouping. Defaults to "default" for backwards compat with
+   * user-defined agents; built-ins set this explicitly in builtins.ts so
+   * we can hide the internal proxy variants.
+   */
+  readonly surface?: AgentSurface;
 }
 
 export interface AgentContextFile {
