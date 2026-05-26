@@ -32,6 +32,12 @@ struct RecallParams {
     query: String,
     #[serde(default = "default_limit")]
     limit: usize,
+    /// Phase 20 — when true, recall ranks observations by cosine
+    /// similarity between the query and per-observation embeddings.
+    /// Falls back to the keyword path when false / absent so older
+    /// IDE builds keep working.
+    #[serde(default)]
+    semantic: bool,
 }
 
 fn default_limit() -> usize {
@@ -86,14 +92,33 @@ pub async fn recall(
     let p: RecallParams = serde_json::from_value(params)
         .map_err(|e| DispatchError::BadParams(format!("eri/memory/recall: {e}")))?;
     let user_id = services.current_user_id().await;
-    let store = MemoryStore::open_for(user_id.as_deref())
+    let mut store = MemoryStore::open_for(user_id.as_deref())
         .map_err(|e| DispatchError::Other(anyhow::anyhow!("memory open: {e}")))?;
+    if p.semantic && !p.query.is_empty() {
+        let scored = store
+            .recall_semantic(&p.query, &p.workspace, p.limit)
+            .map_err(|e| DispatchError::Other(anyhow::anyhow!("memory recall: {e}")))?;
+        let hits: Vec<serde_json::Value> = scored
+            .iter()
+            .map(|(o, score)| {
+                let wire = ObservationWire::from(o);
+                serde_json::json!({
+                    "id": wire.id,
+                    "ts_ms": wire.ts_ms,
+                    "kind": wire.kind,
+                    "body": wire.body,
+                    "score": score,
+                })
+            })
+            .collect();
+        return Ok(serde_json::json!({ "results": hits, "mode": "semantic" }));
+    }
     let hits: Vec<ObservationWire> = store
         .recall(&p.query, &p.workspace, p.limit)
         .iter()
         .map(ObservationWire::from)
         .collect();
-    Ok(serde_json::json!({ "results": hits }))
+    Ok(serde_json::json!({ "results": hits, "mode": "keyword" }))
 }
 
 pub async fn remember(

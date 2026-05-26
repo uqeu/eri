@@ -23,6 +23,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 
 pub mod collectors;
+pub mod embeddings;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Observation {
@@ -36,6 +37,11 @@ pub struct Observation {
     /// Free-form JSON-stringified payload. Keeps the column schemaless
     /// during v1 — typed accessors live in the collectors module.
     pub body: String,
+    /// v2 hash-embedding of `body`. Empty vector on older observations
+    /// that pre-date v2; `recall_semantic` lazily computes + persists
+    /// the missing vectors so a single recall warms the cache.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub embedding: Vec<f32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -168,7 +174,9 @@ impl MemoryStore {
         fs::write(&self.path, raw)
     }
 
-    /// Append an observation and persist.
+    /// Append an observation and persist. v2: the body's hash-embedding
+    /// is computed at insert time so semantic recall has the vector
+    /// already cached and never pays a recompute cost on the read path.
     pub fn insert(&mut self, kind: &str, workspace: &Path, body: &str) -> io::Result<Observation> {
         let observation = Observation {
             id: new_id(),
@@ -176,11 +184,48 @@ impl MemoryStore {
             kind: kind.to_string(),
             workspace_hash: workspace_hash(workspace),
             body: body.to_string(),
+            embedding: embeddings::embed_text(body),
         };
         let cloned = observation.clone();
         self.file.observations.push(observation);
         self.save()?;
         Ok(cloned)
+    }
+
+    /// Semantic recall (Phase 20). Embeds the query, ranks all
+    /// observations by cosine similarity, returns the top `limit`.
+    /// Filters by workspace so cross-workspace observations only show
+    /// up when their kind is `"fact"` (same scope rule as the keyword
+    /// recall). Observations missing an embedding (pre-v2 entries)
+    /// get one lazily and `save()` is called once if any were filled.
+    pub fn recall_semantic(
+        &mut self,
+        query: &str,
+        workspace: &Path,
+        limit: usize,
+    ) -> io::Result<Vec<(Observation, f32)>> {
+        let query_vec = embeddings::embed_text(query);
+        let hash = workspace_hash(workspace);
+        let mut dirty = false;
+        for o in self.file.observations.iter_mut() {
+            if o.embedding.is_empty() {
+                o.embedding = embeddings::embed_text(&o.body);
+                dirty = true;
+            }
+        }
+        if dirty {
+            self.save()?;
+        }
+        let mut scored: Vec<(Observation, f32)> = self
+            .file
+            .observations
+            .iter()
+            .filter(|o| o.workspace_hash == hash || o.kind == "fact")
+            .map(|o| (o.clone(), embeddings::cosine(&query_vec, &o.embedding)))
+            .collect();
+        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        scored.truncate(limit);
+        Ok(scored)
     }
 
     pub fn all(&self) -> &[Observation] {
@@ -368,6 +413,7 @@ mod tests {
             kind: "fact".into(),
             workspace_hash: workspace_hash(dir.path()),
             body: "ancient".into(),
+            embedding: Vec::new(),
         });
         store.insert("fact", dir.path(), "fresh").unwrap();
         store.prune(RetentionWindow::Day).unwrap();
@@ -381,6 +427,58 @@ mod tests {
         assert_eq!(RetentionWindow::from_tier("starter"), RetentionWindow::Month);
         assert_eq!(RetentionWindow::from_tier("pro"), RetentionWindow::Half);
         assert_eq!(RetentionWindow::from_tier("pro_plus"), RetentionWindow::Forever);
+    }
+
+    #[test]
+    fn insert_populates_embedding() {
+        let (dir, mut store) = open_temp();
+        let obs = store
+            .insert("fact", dir.path(), "the user prefers pnpm")
+            .unwrap();
+        assert!(!obs.embedding.is_empty());
+        assert_eq!(obs.embedding.len(), embeddings::DIM);
+    }
+
+    #[test]
+    fn recall_semantic_ranks_related_observations_higher() {
+        let (dir, mut store) = open_temp();
+        let ws = dir.path();
+        store.insert("fact", ws, "I use pnpm as my package manager").unwrap();
+        store.insert("fact", ws, "blue and purple are my favourite colours").unwrap();
+        let hits = store
+            .recall_semantic("what package manager do you use", ws, 2)
+            .unwrap();
+        assert_eq!(hits.len(), 2);
+        assert!(
+            hits[0].0.body.contains("pnpm"),
+            "expected pnpm fact at #1; got {}",
+            hits[0].0.body
+        );
+    }
+
+    #[test]
+    fn recall_semantic_backfills_missing_embeddings() {
+        let (dir, mut store) = open_temp();
+        // Inject a pre-v2 observation with no embedding.
+        store.file.observations.push(Observation {
+            id: "legacy".into(),
+            ts_ms: now_ms(),
+            kind: "fact".into(),
+            workspace_hash: workspace_hash(dir.path()),
+            body: "I prefer dark themes".into(),
+            embedding: Vec::new(),
+        });
+        let hits = store
+            .recall_semantic("dark themes", dir.path(), 1)
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        // After recall, the legacy observation's embedding is filled.
+        let stored = store
+            .all()
+            .iter()
+            .find(|o| o.id == "legacy")
+            .expect("legacy still there");
+        assert!(!stored.embedding.is_empty());
     }
 
     #[test]
