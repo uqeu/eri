@@ -54,12 +54,18 @@ function formatTokens(value: number): string {
   return value.toString();
 }
 
+interface DeviceLite {
+  id: string;
+  revoked: boolean;
+}
+
 export default function DashboardPage() {
   const { user } = useUser();
   const [subscription, setSubscription] = useState<SubscriptionSummary | null>(
     null,
   );
   const [usage, setUsage] = useState<UsageSummary | null>(null);
+  const [activeDevices, setActiveDevices] = useState<number | null>(null);
   const [portalLoading, setPortalLoading] = useState<boolean>(false);
   const [portalError, setPortalError] = useState<string | null>(null);
 
@@ -68,9 +74,10 @@ export default function DashboardPage() {
     let cancelled = false;
     async function load(): Promise<void> {
       try {
-        const [subRes, usageRes] = await Promise.all([
+        const [subRes, usageRes, devicesRes] = await Promise.all([
           authedFetch("/api/billing/subscription"),
           authedFetch("/api/usage/summary"),
+          authedFetch("/api/auth/devices"),
         ]);
         if (subRes.ok) {
           const body: unknown = await subRes.json();
@@ -79,6 +86,18 @@ export default function DashboardPage() {
         if (usageRes.ok) {
           const body: unknown = await usageRes.json();
           if (!cancelled && isUsage(body)) setUsage(body);
+        }
+        if (devicesRes.ok) {
+          const body: unknown = await devicesRes.json();
+          if (
+            !cancelled &&
+            typeof body === "object" &&
+            body !== null &&
+            Array.isArray((body as { devices?: unknown }).devices)
+          ) {
+            const list = (body as { devices: DeviceLite[] }).devices;
+            setActiveDevices(list.filter((d) => !d.revoked).length);
+          }
         }
       } catch {
         // Swallow — individual cards show their own loading state.
@@ -216,6 +235,46 @@ export default function DashboardPage() {
           </p>
         </section>
       </div>
+
+      <section className="mt-6 border border-white/10 rounded-lg p-6 bg-white/[0.02]">
+        <div className="flex items-center justify-between">
+          <h2 className="font-display text-xl tracking-tight">
+            Connected devices
+          </h2>
+          <Link
+            href="/devices"
+            className="text-xs text-muted hover:text-paper transition"
+          >
+            Manage →
+          </Link>
+        </div>
+        {activeDevices === null ? (
+          <p className="mt-4 text-sm text-muted">Loading…</p>
+        ) : activeDevices === 0 ? (
+          <div className="mt-4">
+            <p className="text-sm text-paper">
+              No eri IDE has connected to your account yet.
+            </p>
+            <p className="mt-2 text-sm text-muted leading-relaxed">
+              When the eri IDE is open on your machine, run{" "}
+              <code className="font-mono text-[12px] bg-white/5 border border-white/10 rounded px-1.5 py-0.5">
+                eri.account.signIn
+              </code>{" "}
+              from the command palette. We'll bring you back here to approve
+              the device, then drop a bearer token into your macOS Keychain.
+            </p>
+          </div>
+        ) : (
+          <p className="mt-4 text-sm text-paper">
+            <span className="font-display text-3xl text-paper">
+              {activeDevices}
+            </span>
+            <span className="ml-2 text-muted">
+              active {activeDevices === 1 ? "device" : "devices"}
+            </span>
+          </p>
+        )}
+      </section>
 
       <section className="mt-10">
         <h2 className="font-display text-xl tracking-tight">Quick links</h2>
