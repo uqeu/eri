@@ -1,7 +1,13 @@
 import * as vscode from "vscode";
 import { ApplyOrchestrator } from "../apply/orchestrator";
 import { AccountHandle } from "../account";
-import { isOverQuotaError, showOverQuotaModal } from "../account/overQuotaModal";
+import {
+  isOverQuotaError,
+  isRateLimitedError,
+  parseRateLimitedPayload,
+  showOverQuotaModal,
+  showRateLimitToast,
+} from "../account/overQuotaModal";
 import { Sidecar, SidecarNotification } from "../sidecar";
 import { ShipClient } from "./shipClient";
 import { TandemProgressReducer } from "./tandemProgress";
@@ -150,6 +156,13 @@ export function activateShip(
       const message = error instanceof Error ? error.message : String(error);
       if (isOverQuotaError(error)) {
         await showOverQuotaModal({ tier: session?.tier });
+        return;
+      }
+      if (isRateLimitedError(error)) {
+        await showRateLimitToast({
+          ...parseRateLimitedPayload(error),
+          statusBar: options.account?.statusBar,
+        });
         return;
       }
       vscode.window.showErrorMessage(`Ship failed: ${message}`);

@@ -32,7 +32,7 @@ export async function POST(request: Request): Promise<Response> {
     });
   }
 
-  const rateLimited = rateLimitToken(auth.apiToken.id);
+  const rateLimited = rateLimitToken(auth.apiToken.id, { tier: auth.user.tier });
   if (rateLimited) return rateLimited;
 
   let body: ShipRequestBody;

@@ -99,6 +99,15 @@ const TAB_DOWNLOADING_SENTINEL: &str = "__DOWNLOADING__";
 /// without parsing free-form English. Mirrors HTTP 402 / Payment Required.
 pub const OVER_QUOTA_CODE: i32 = -32402;
 
+/// JSON-RPC -32429: the eri.dev inference proxy returned HTTP 429
+/// `rate_limit`. The user is INSIDE their monthly budget but has hit
+/// the short-window (per-hour, per-day, …) throttle. Paired with a
+/// JSON-shaped message
+/// `{"tier":"pro","window":"hour","resetAt":"2026-05-26T16:42:00Z"}` so
+/// the IDE shows a non-blocking toast with a clock, not the upgrade
+/// modal. Mirrors HTTP 429 / Too Many Requests.
+pub const RATE_LIMIT_CODE: i32 = -32429;
+
 #[derive(Clone, Debug, Default)]
 pub struct TierState {
     // Retained for telemetry / future per-tier branching even though feature
@@ -156,6 +165,16 @@ pub enum DispatchError {
     /// tier quota. The IDE surfaces this with an upgrade CTA instead of the
     /// generic error toast.
     OverQuota { tier: String, remaining: i64 },
+    /// The user is inside their monthly budget but hit a short-window
+    /// throttle (per-hour / per-day cap). The IDE surfaces a non-blocking
+    /// toast with the reset time instead of the upgrade modal — the
+    /// terminal and local features (gaze, voice, Mercury sketch) are still
+    /// usable while waiting for the window to roll over.
+    RateLimited {
+        tier: String,
+        window: String,
+        reset_at: String,
+    },
     Other(anyhow::Error),
 }
 
@@ -183,6 +202,19 @@ impl DispatchError {
                     "OVER_QUOTA: {{\"tier\":\"{}\",\"remaining\":{}}}",
                     tier.replace('"', ""),
                     remaining
+                ),
+            },
+            DispatchError::RateLimited {
+                tier,
+                window,
+                reset_at,
+            } => RpcError {
+                code: RATE_LIMIT_CODE,
+                message: format!(
+                    "RATE_LIMIT: {{\"tier\":\"{}\",\"window\":\"{}\",\"resetAt\":\"{}\"}}",
+                    tier.replace('"', ""),
+                    window.replace('"', ""),
+                    reset_at.replace('"', "")
                 ),
             },
             DispatchError::Other(err) => {
@@ -280,6 +312,9 @@ pub async fn dispatch(
                     DispatchError::OverQuota { tier, remaining } => {
                         format!("OVER_QUOTA: tier={tier} remaining={remaining}")
                     }
+                    DispatchError::RateLimited { tier, window, reset_at } => {
+                        format!("RATE_LIMIT: tier={tier} window={window} resetAt={reset_at}")
+                    }
                     DispatchError::Other(e) => e.to_string(),
                 };
                 fire_hooks_safe(
@@ -304,6 +339,7 @@ pub async fn dispatch(
             Err(DispatchError::FeatureLocked(_)) => (AuditStatus::Skipped, Some("feature_locked")),
             Err(DispatchError::BadParams(_)) => (AuditStatus::Error, Some("bad_params")),
             Err(DispatchError::OverQuota { .. }) => (AuditStatus::Error, Some("over_quota")),
+            Err(DispatchError::RateLimited { .. }) => (AuditStatus::Error, Some("rate_limited")),
             Err(DispatchError::Other(e)) => (
                 AuditStatus::Error,
                 Some(audit::audit_error_kind(&e.to_string())),

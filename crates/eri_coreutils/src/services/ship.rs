@@ -136,6 +136,34 @@ pub async fn run(
             .unwrap_or(0);
         return Err(DispatchError::OverQuota { tier, remaining });
     }
+    if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+        // Best effort to extract { tier, window, resetAt } so the IDE
+        // can drive the clock toast instead of the paywall modal.
+        let payload = response.json::<serde_json::Value>().await.ok();
+        let tier = payload
+            .as_ref()
+            .and_then(|v| v.get("tier"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("free")
+            .to_string();
+        let window = payload
+            .as_ref()
+            .and_then(|v| v.get("window"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("minute")
+            .to_string();
+        let reset_at = payload
+            .as_ref()
+            .and_then(|v| v.get("resetAt"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        return Err(DispatchError::RateLimited {
+            tier,
+            window,
+            reset_at,
+        });
+    }
     if !status.is_success() {
         let text = response.text().await.unwrap_or_default();
         return Err(DispatchError::Other(anyhow::anyhow!(

@@ -49,6 +49,23 @@ struct OverQuotaBody {
     remaining: Option<i64>,
 }
 
+/// Shape returned by the eri.dev backend for a rate-limited response.
+/// Distinct from `over_quota`: the user is INSIDE their monthly budget
+/// but has hit a short-window throttle. Surfaces a clock toast in the
+/// IDE instead of the paywall modal.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RateLimitedBody {
+    #[serde(default)]
+    error: Option<String>,
+    #[serde(default)]
+    tier: Option<String>,
+    #[serde(default)]
+    window: Option<String>,
+    #[serde(default)]
+    reset_at: Option<String>,
+}
+
 /// Parameters for `eri/account/setSession`. The IDE pushes the active
 /// sign-in's `user_id` so the sidecar can partition local state (memory
 /// file path today) per account.
@@ -171,6 +188,10 @@ async fn get_blocking(url: String, bearer: String) -> Result<Value, DispatchErro
                 let body = response.into_string().unwrap_or_default();
                 Err(map_over_quota(&body))
             }
+            Err(ureq::Error::Status(429, response)) => {
+                let body = response.into_string().unwrap_or_default();
+                Err(map_rate_limited(&body))
+            }
             Err(ureq::Error::Status(status, response)) => {
                 // Truncate body — it may carry HTML stack traces from upstream
                 // proxies; we just need a code for the IDE.
@@ -224,6 +245,27 @@ fn map_over_quota(body: &str) -> DispatchError {
     }
 }
 
+/// Decode the backend's rate-limit envelope into a structured dispatch
+/// error. Falls back to opaque defaults when the body isn't the expected
+/// shape so the IDE always gets a usable code.
+pub(crate) fn map_rate_limited(body: &str) -> DispatchError {
+    let parsed: Result<RateLimitedBody, _> = serde_json::from_str(body);
+    match parsed {
+        Ok(payload) if payload.error.as_deref() == Some("rate_limited") => {
+            DispatchError::RateLimited {
+                tier: payload.tier.unwrap_or_else(|| "free".to_string()),
+                window: payload.window.unwrap_or_else(|| "minute".to_string()),
+                reset_at: payload.reset_at.unwrap_or_default(),
+            }
+        }
+        _ => DispatchError::RateLimited {
+            tier: "free".to_string(),
+            window: "minute".to_string(),
+            reset_at: String::new(),
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -248,6 +290,31 @@ mod tests {
                 assert_eq!(remaining, 0);
             }
             other => panic!("expected OverQuota, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn map_rate_limited_parses_well_formed_envelope() {
+        let body = r#"{"error":"rate_limited","tier":"pro","window":"minute","resetAt":"2026-05-26T16:42:00Z"}"#;
+        match map_rate_limited(body) {
+            DispatchError::RateLimited { tier, window, reset_at } => {
+                assert_eq!(tier, "pro");
+                assert_eq!(window, "minute");
+                assert_eq!(reset_at, "2026-05-26T16:42:00Z");
+            }
+            other => panic!("expected RateLimited, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn map_rate_limited_falls_back_on_garbage_body() {
+        match map_rate_limited("not json") {
+            DispatchError::RateLimited { tier, window, reset_at } => {
+                assert_eq!(tier, "free");
+                assert_eq!(window, "minute");
+                assert_eq!(reset_at, "");
+            }
+            other => panic!("expected RateLimited, got {other:?}"),
         }
     }
 

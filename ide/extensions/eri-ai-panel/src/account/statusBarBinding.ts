@@ -17,9 +17,21 @@ const ACCENT_WARN = "#E5C07B";
 const ACCENT_BAD = "#EF4444";
 const MUTED = "#9AA4AD";
 
+export interface RateLimitBadge {
+  readonly window: string;
+  /** ISO-8601 timestamp at which the throttle window resets. */
+  readonly resetAt: string;
+}
+
 export interface AccountStatusBarHandle {
   setSession(session: EriSession | null): void;
   setUsage(usage: UsageSummary | null): void;
+  /**
+   * Set or clear the rate-limit badge. While set, the status bar shows
+   * "rate-limited until 4:42pm" in red until the window rolls over.
+   * Pass `null` to clear (e.g. after a successful retry).
+   */
+  setRateLimit(rl: RateLimitBadge | null): void;
   dispose(): void;
 }
 
@@ -35,8 +47,20 @@ export function activateAccountStatusBar(
 
   let session: EriSession | null = null;
   let usage: UsageSummary | null = null;
+  let rateLimit: RateLimitBadge | null = null;
+  let rateLimitTimer: NodeJS.Timeout | undefined;
 
   const render = (): void => {
+    // Rate-limit badge always wins — the user needs to see why their
+    // last call bounced even when signed-in + within monthly budget.
+    if (rateLimit) {
+      item.text = `$(watch) eri · rate-limited · ${formatResetClock(rateLimit.resetAt)}`;
+      item.tooltip = `Hit ${rateLimit.window} cap. Resets ${formatResetTime(rateLimit.resetAt)}.\nTerminal and Mercury still work.`;
+      item.color = ACCENT_BAD;
+      item.command = SHOW_STATUS_COMMAND;
+      item.show();
+      return;
+    }
     if (!session) {
       item.text = "$(sparkle) eri · sign in to use";
       item.tooltip = "Sign in to eri to enable hosted models.";
@@ -63,6 +87,13 @@ export function activateAccountStatusBar(
     item.show();
   };
 
+  const clearRateLimitTimer = (): void => {
+    if (rateLimitTimer) {
+      clearTimeout(rateLimitTimer);
+      rateLimitTimer = undefined;
+    }
+  };
+
   render();
 
   return {
@@ -74,10 +105,52 @@ export function activateAccountStatusBar(
       usage = next;
       render();
     },
+    setRateLimit(next: RateLimitBadge | null): void {
+      clearRateLimitTimer();
+      rateLimit = next;
+      if (next) {
+        const target = Date.parse(next.resetAt);
+        if (Number.isFinite(target)) {
+          const delay = Math.max(1_000, target - Date.now());
+          // Refresh clock label every 30s + clear when reset passes.
+          rateLimitTimer = setTimeout(() => {
+            rateLimit = null;
+            render();
+          }, delay);
+        }
+      }
+      render();
+    },
     dispose(): void {
+      clearRateLimitTimer();
       item.dispose();
     },
   };
+}
+
+function formatResetClock(iso: string): string {
+  const target = Date.parse(iso);
+  if (!Number.isFinite(target)) return "soon";
+  const deltaMs = target - Date.now();
+  if (deltaMs <= 0) return "now";
+  const totalSec = Math.ceil(deltaMs / 1000);
+  if (totalSec < 60) return `${totalSec}s`;
+  const min = Math.ceil(totalSec / 60);
+  if (min < 60) return `${min}m`;
+  const hr = Math.floor(min / 60);
+  const remMin = min % 60;
+  return remMin > 0 ? `${hr}h${remMin}m` : `${hr}h`;
+}
+
+function formatResetTime(iso: string): string {
+  const target = Date.parse(iso);
+  if (!Number.isFinite(target)) return "soon";
+  const d = new Date(target);
+  // 4:42pm-style local time.
+  return d.toLocaleTimeString(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+  });
 }
 
 function buildSignedInTooltip(
