@@ -27,6 +27,13 @@ use eri_inference::{
     costs, deploy_to_vercel, extract_partial_html_body, template_by_slug,
 };
 
+mod agent;
+mod agent_cmd;
+mod auth;
+mod client;
+mod config;
+mod memory;
+
 const ERI_CLI_VERSION: &str = env!("CARGO_PKG_VERSION");
 const DEFAULT_OUTPUT_FILE: &str = "index.html";
 const DEFAULT_DENOISING_STEPS: u32 = 12;
@@ -80,28 +87,178 @@ pub enum Command {
         #[arg(long, default_value = DEFAULT_OUTPUT_FILE)]
         output: PathBuf,
     },
-    /// Deploy whatever's at ./index.html to Vercel (--prod --yes).
+    /// Deploy whatever's at ./index.html to Vercel (--prod --yes), OR
+    /// run the agent's tandem ship pipeline when an intent is given.
     Ship {
-        /// Use this directory as the deploy root instead of the cwd.
+        /// What to ship — when given, runs the tandem builder/checker.
+        /// Empty → deploy ./index.html to Vercel (old behaviour).
+        intent: Option<String>,
+        /// Use this directory as the deploy root instead of the cwd
+        /// (Vercel mode only).
         #[arg(long)]
         dir: Option<PathBuf>,
     },
+    /// Deploy ./index.html to Vercel (--prod --yes). Same as
+    /// `eri ship` without an intent.
+    Deploy {
+        #[arg(long)]
+        dir: Option<PathBuf>,
+    },
+    /// Send a one-off question through eri's brain router.
+    Ask {
+        /// The question to ask.
+        prompt: Vec<String>,
+    },
+    /// Generate a step-by-step plan for a goal (Architect persona).
+    Plan {
+        /// The goal to plan.
+        prompt: Vec<String>,
+    },
+    /// Add tests for a path or the whole workspace (Tester persona).
+    Test {
+        /// Optional scope — a file or directory.
+        #[arg(default_value = "")]
+        scope: String,
+    },
+    /// Suggest a refactor for a scope (Architect persona).
+    Refactor {
+        /// Optional scope — a file, function, or directory.
+        #[arg(default_value = "")]
+        scope: String,
+    },
+    /// Explain a file, function, or `file:line` range.
+    Explain {
+        /// The target — `src/foo.ts`, `src/foo.ts:42`, or `MyClass#method`.
+        target: String,
+    },
+    /// Mercury sketch — fast HTML draft from a description.
+    Sketch {
+        /// What to sketch.
+        prompt: Vec<String>,
+    },
+    /// eri.dev authentication commands.
+    #[command(subcommand)]
+    Auth(AuthCommand),
+    /// Persona / agent switcher mirrors the IDE's /agent slash command.
+    #[command(subcommand)]
+    Agent(AgentCommand),
+    /// Memory — recall, remember, forget.
+    #[command(subcommand)]
+    Memory(MemoryCommand),
+    /// Show the active sign-in + tier + remaining quota. Alias of
+    /// `eri auth status`.
+    Status,
+}
+
+#[derive(Subcommand, Debug, PartialEq, Eq)]
+pub enum AuthCommand {
+    /// Open a browser, sign in via the device-code flow, store the
+    /// bearer at `~/.config/eri/credentials.json`.
+    Login,
+    /// Show the active sign-in + tier + remaining quota.
+    Status,
+    /// Drop the local credentials. Server-side bearer revoke is best-
+    /// effort (run `eri auth login` again to refresh).
+    Logout,
+}
+
+#[derive(Subcommand, Debug, PartialEq, Eq)]
+pub enum AgentCommand {
+    /// List built-in + workspace personas.
+    List,
+    /// Set the active persona for this workspace.
+    Set { name: String },
+}
+
+#[derive(Subcommand, Debug, PartialEq, Eq)]
+pub enum MemoryCommand {
+    /// Keyword-search the memory store.
+    Recall {
+        query: String,
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+    },
+    /// Pin a fact to memory.
+    Remember { text: String },
+    /// Drop an observation by id, or "all" to clear everything.
+    Forget { target: String },
 }
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
-    match run(cli.command) {
+    let rt = match tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(rt) => rt,
+        Err(err) => {
+            eprintln!("error: build tokio runtime: {err}");
+            return ExitCode::FAILURE;
+        }
+    };
+    match rt.block_on(dispatch(cli.command)) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            // Errors print to stderr; stdout stays clean for piping the
-            // success-path output (e.g. the generated file path).
             eprintln!("error: {error}");
             ExitCode::FAILURE
         }
     }
 }
 
+async fn dispatch(command: Command) -> anyhow::Result<()> {
+    match command {
+        // -- existing Mercury HTML commands (sync) --
+        Command::Build {
+            prompt,
+            deploy,
+            output,
+        } => run_build(&prompt, deploy, &output).map_err(anyhow::Error::from),
+        Command::Iterate { instruction, file } => {
+            run_iterate(&instruction, &file).map_err(anyhow::Error::from)
+        }
+        Command::ListTemplates => {
+            print_templates();
+            Ok(())
+        }
+        Command::Scaffold { slug, output } => {
+            run_scaffold(&slug, &output).map_err(anyhow::Error::from)
+        }
+        Command::Deploy { dir } => {
+            run_deploy(dir.as_deref()).map_err(anyhow::Error::from)
+        }
+        Command::Ship { intent, dir } => {
+            // `eri ship` with no args → legacy Vercel deploy. With an
+            // intent → agent tandem ship.
+            match intent {
+                None => run_deploy(dir.as_deref()).map_err(anyhow::Error::from),
+                Some(intent) => agent::ship(intent.trim()).await,
+            }
+        }
+        // -- new agent-mode commands (async) --
+        Command::Ask { prompt } => agent::ask(&prompt.join(" ")).await,
+        Command::Plan { prompt } => agent::plan(&prompt.join(" ")).await,
+        Command::Test { scope } => agent::test(&scope).await,
+        Command::Refactor { scope } => agent::refactor(&scope).await,
+        Command::Explain { target } => agent::explain(&target).await,
+        Command::Sketch { prompt } => agent::sketch(&prompt.join(" ")).await,
+        Command::Auth(AuthCommand::Login) => auth::login().await.map(|_| ()),
+        Command::Auth(AuthCommand::Status) => auth::status().await,
+        Command::Auth(AuthCommand::Logout) => auth::logout(),
+        Command::Status => auth::status().await,
+        Command::Agent(AgentCommand::List) => agent_cmd::list(),
+        Command::Agent(AgentCommand::Set { name }) => agent_cmd::set(&name),
+        Command::Memory(MemoryCommand::Recall { query, limit }) => {
+            memory::recall(&query, limit).await
+        }
+        Command::Memory(MemoryCommand::Remember { text }) => memory::remember(&text).await,
+        Command::Memory(MemoryCommand::Forget { target }) => memory::forget(&target).await,
+    }
+}
+
+#[allow(dead_code)]
 pub fn run(command: Command) -> Result<(), CliError> {
+    // Legacy sync entry-point kept for tests + back-compat. New async
+    // surface is `dispatch`.
     match command {
         Command::Build {
             prompt,
@@ -114,7 +271,21 @@ pub fn run(command: Command) -> Result<(), CliError> {
             Ok(())
         }
         Command::Scaffold { slug, output } => run_scaffold(&slug, &output),
-        Command::Ship { dir } => run_ship(dir.as_deref()),
+        Command::Ship { intent: None, dir } => run_deploy(dir.as_deref()),
+        Command::Ship { intent: Some(_), .. }
+        | Command::Deploy { .. }
+        | Command::Ask { .. }
+        | Command::Plan { .. }
+        | Command::Test { .. }
+        | Command::Refactor { .. }
+        | Command::Explain { .. }
+        | Command::Sketch { .. }
+        | Command::Auth(_)
+        | Command::Agent(_)
+        | Command::Memory(_)
+        | Command::Status => Err(CliError::User(
+            "agent-mode commands require the async dispatcher (`main`)".into(),
+        )),
     }
 }
 
@@ -201,7 +372,7 @@ fn run_scaffold(slug: &str, output: &Path) -> Result<(), CliError> {
     Ok(())
 }
 
-fn run_ship(dir: Option<&Path>) -> Result<(), CliError> {
+fn run_deploy(dir: Option<&Path>) -> Result<(), CliError> {
     let cwd = PathBuf::from(".");
     let deploy_dir = dir.unwrap_or(&cwd);
     let url = deploy_to_vercel(deploy_dir).map_err(CliError::from)?;
@@ -509,7 +680,10 @@ mod tests {
     fn parses_ship_without_dir() {
         let cli = Cli::parse_from(["eri", "ship"]);
         match cli.command {
-            Command::Ship { dir } => assert!(dir.is_none()),
+            Command::Ship { dir, intent } => {
+                assert!(dir.is_none());
+                assert!(intent.is_none());
+            }
             other => panic!("expected Ship, got {other:?}"),
         }
     }
@@ -518,9 +692,53 @@ mod tests {
     fn parses_ship_with_dir() {
         let cli = Cli::parse_from(["eri", "ship", "--dir", "build/"]);
         match cli.command {
-            Command::Ship { dir } => assert_eq!(dir, Some(PathBuf::from("build/"))),
+            Command::Ship { dir, intent } => {
+                assert_eq!(dir, Some(PathBuf::from("build/")));
+                assert!(intent.is_none());
+            }
             other => panic!("expected Ship, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn parses_ship_with_intent_routes_to_tandem() {
+        let cli = Cli::parse_from(["eri", "ship", "add stripe checkout"]);
+        match cli.command {
+            Command::Ship { intent, dir } => {
+                assert_eq!(intent.as_deref(), Some("add stripe checkout"));
+                assert!(dir.is_none());
+            }
+            other => panic!("expected Ship, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_ask_subcommand() {
+        let cli = Cli::parse_from(["eri", "ask", "what", "is", "tokio?"]);
+        match cli.command {
+            Command::Ask { prompt } => {
+                assert_eq!(prompt, vec!["what", "is", "tokio?"]);
+            }
+            other => panic!("expected Ask, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_memory_recall_with_limit() {
+        let cli = Cli::parse_from(["eri", "memory", "recall", "blue", "--limit", "5"]);
+        match cli.command {
+            Command::Memory(MemoryCommand::Recall { query, limit }) => {
+                assert_eq!(query, "blue");
+                assert_eq!(limit, 5);
+            }
+            other => panic!("expected Memory(Recall), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_auth_login() {
+        let cli = Cli::parse_from(["eri", "auth", "login"]);
+        assert_eq!(cli.command, Command::Auth(AuthCommand::Login));
     }
 
     #[test]
