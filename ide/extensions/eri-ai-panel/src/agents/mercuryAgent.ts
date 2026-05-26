@@ -3,6 +3,7 @@
 
 import { Sidecar } from "../sidecar";
 import { AgentBackend, AgentDescriptor, AgentStreamEvent, AgentTurn } from "./types";
+import { collectActiveDiagnostics } from "../composer/diagnosticsCollector";
 
 export interface MercuryAgentOptions {
   readonly getSidecar: () => Sidecar | null;
@@ -36,6 +37,11 @@ export class MercuryAgent implements AgentBackend {
       prompt: turn.prompt,
       workspaceRoot: turn.workspaceRoot,
       context: turn.context,
+      // Phase 16b — surface active linter/LSP diagnostics so the model
+      // sees what's broken before editing. Aggressively capped on both
+      // the IDE and sidecar sides; safe to call even when there are 0
+      // diagnostics (returns []).
+      diagnostics: collectActiveDiagnostics(),
     });
     yield {
       kind: "done",

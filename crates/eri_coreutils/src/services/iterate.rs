@@ -44,6 +44,27 @@ struct OpenFileWire {
     content: String,
 }
 
+/// One linter / language-server diagnostic surfaced from the IDE. Threaded
+/// through `eri/inference/iterate` so the model sees what's broken in the
+/// active + open files BEFORE it edits, instead of having to guess from
+/// the file content alone.
+#[derive(Debug, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct DiagnosticWire {
+    path: String,
+    line: u32,
+    /// `"error" | "warning" | "info" | "hint"`. Loose union so the wire
+    /// stays compatible with VS Code's `DiagnosticSeverity` enum + LSP.
+    #[serde(default)]
+    severity: String,
+    #[serde(default)]
+    message: String,
+    /// Linter / language-server source — `"eslint"`, `"tsc"`, `"rust-analyzer"`,
+    /// etc. Helps the model weigh which complaint to act on first.
+    #[serde(default)]
+    source: Option<String>,
+}
+
 /// Wire shape of `eri/inference/iterate` params.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -54,6 +75,10 @@ struct IterateParams {
     open_files: Vec<OpenFileWire>,
     #[serde(default)]
     linter_errors_count: usize,
+    /// Active linter / language-server diagnostics for the open file set.
+    /// Optional — older IDE builds still ship just `linter_errors_count`.
+    #[serde(default)]
+    diagnostics: Vec<DiagnosticWire>,
     #[serde(default)]
     voice_input: bool,
     #[serde(default)]
@@ -342,9 +367,10 @@ fn build_parts(
     open_files: &[OpenFileWire],
     rules: &[String],
     user_id: Option<&str>,
+    diagnostics: &[DiagnosticWire],
 ) -> Vec<BudgetPart> {
     let mut parts: Vec<BudgetPart> =
-        Vec::with_capacity(open_files.len() + rules.len() + 4);
+        Vec::with_capacity(open_files.len() + rules.len() + 5);
 
     // Persona system prompt — replaces the previous hard-coded `system:base`.
     let active = eri_inference::personas::read_active(workspace);
@@ -373,6 +399,16 @@ fn build_parts(
         );
     }
 
+    // Active linter / language-server diagnostics (Phase 16b) — formatted
+    // as a Markdown list so the model can see what's broken in the open
+    // files BEFORE editing. Priority 2 (between learned patterns and
+    // user rules); fully droppable when the budget is tight.
+    if let Some(block) = format_diagnostics_block(diagnostics) {
+        parts.push(
+            BudgetPart::new("system:diagnostics", 2, block).with_min_keep(0),
+        );
+    }
+
     parts.push(BudgetPart::new("user:prompt", 0, prompt));
 
     for f in open_files {
@@ -383,6 +419,66 @@ fn build_parts(
         parts.push(BudgetPart::new(format!("system:rule:{i}"), 2, rule.clone()));
     }
     parts
+}
+
+/// Format the active linter / language-server diagnostics as a
+/// `## Live diagnostics` Markdown block ready for system-prompt
+/// injection. Returns `None` when the IDE sent no diagnostics — the
+/// caller drops the part rather than wasting tokens on an empty header.
+///
+/// Sorted: errors first (so the model addresses them before warnings),
+/// then within a severity by `path:line`. Capped at the top 40 entries
+/// + a `…and N more` footer so a 1000-warning ESLint sweep doesn't blow
+/// the prompt budget.
+fn format_diagnostics_block(diagnostics: &[DiagnosticWire]) -> Option<String> {
+    if diagnostics.is_empty() {
+        return None;
+    }
+    const SEVERITY_ORDER: [&str; 4] = ["error", "warning", "info", "hint"];
+    let mut sorted: Vec<&DiagnosticWire> = diagnostics.iter().collect();
+    sorted.sort_by(|a, b| {
+        let rank = |s: &str| {
+            SEVERITY_ORDER
+                .iter()
+                .position(|x| x.eq_ignore_ascii_case(s))
+                .unwrap_or(SEVERITY_ORDER.len())
+        };
+        rank(&a.severity)
+            .cmp(&rank(&b.severity))
+            .then_with(|| a.path.cmp(&b.path))
+            .then_with(|| a.line.cmp(&b.line))
+    });
+    let mut out = String::from("## Live diagnostics\n");
+    const MAX: usize = 40;
+    let shown = sorted.iter().take(MAX);
+    for d in shown {
+        let sev_glyph = match d.severity.to_ascii_lowercase().as_str() {
+            "error" => "✗",
+            "warning" => "⚠",
+            "info" => "ℹ",
+            "hint" => "·",
+            _ => "·",
+        };
+        let src = d
+            .source
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .map(|s| format!(" [{s}]"))
+            .unwrap_or_default();
+        let line = format!(
+            "{} {}:{}{} {}\n",
+            sev_glyph,
+            d.path,
+            d.line.max(1),
+            src,
+            d.message
+        );
+        out.push_str(&line);
+    }
+    if sorted.len() > MAX {
+        out.push_str(&format!("…and {} more\n", sorted.len() - MAX));
+    }
+    Some(out)
 }
 
 /// Format the local memory store's recent observations as a system-prompt
@@ -531,6 +627,7 @@ pub async fn iterate(
         &p.open_files,
         &rules,
         user_id.as_deref(),
+        &p.diagnostics,
     );
 
     let provider_keys = collect_provider_keys(services).await;
@@ -670,6 +767,63 @@ mod tests {
             tier: "test".into(),
             features: set,
         }))
+    }
+
+    #[test]
+    fn format_diagnostics_block_orders_errors_first() {
+        let diagnostics = vec![
+            DiagnosticWire {
+                path: "src/foo.ts".into(),
+                line: 10,
+                severity: "warning".into(),
+                message: "unused import".into(),
+                source: Some("eslint".into()),
+            },
+            DiagnosticWire {
+                path: "src/bar.ts".into(),
+                line: 3,
+                severity: "error".into(),
+                message: "Type 'string' is not assignable to 'number'.".into(),
+                source: Some("tsc".into()),
+            },
+        ];
+        let block = format_diagnostics_block(&diagnostics).expect("non-empty");
+        let err_idx = block.find("✗ src/bar.ts").expect("error present");
+        let warn_idx = block.find("⚠ src/foo.ts").expect("warning present");
+        assert!(err_idx < warn_idx, "errors must sort before warnings");
+        assert!(block.contains("[tsc]"));
+        assert!(block.contains("[eslint]"));
+    }
+
+    #[test]
+    fn format_diagnostics_block_caps_long_lists() {
+        let mut diagnostics: Vec<DiagnosticWire> = Vec::new();
+        for i in 0..55u32 {
+            diagnostics.push(DiagnosticWire {
+                path: format!("src/x{i:03}.ts"),
+                line: i + 1,
+                severity: "warning".into(),
+                message: format!("warning {i:03}"),
+                source: None,
+            });
+        }
+        let block = format_diagnostics_block(&diagnostics).expect("non-empty");
+        assert!(
+            block.contains("…and 15 more"),
+            "expected cap footer, got: {block}"
+        );
+        // Body lines start with the severity glyph; count them to confirm
+        // the cap (40 entries) — the footer line is separate.
+        let body_lines = block
+            .lines()
+            .filter(|l| l.starts_with('✗') || l.starts_with('⚠'))
+            .count();
+        assert_eq!(body_lines, 40);
+    }
+
+    #[test]
+    fn format_diagnostics_block_is_none_when_empty() {
+        assert!(format_diagnostics_block(&[]).is_none());
     }
 
     #[tokio::test]
