@@ -569,6 +569,16 @@
           "minimum": 5,
           "description": "Interval (seconds) for refreshing the signed-in user's token usage in the status bar."
         },
+        "eri.ship.autoBranch": {
+          "type": "boolean",
+          "default": false,
+          "description": "Switch onto a fresh `eri/ship-<slug>-<stamp>` branch before each /ship apply so the commit doesn't land on your working branch."
+        },
+        "eri.ship.autoOpenPr": {
+          "type": "boolean",
+          "default": false,
+          "description": "After a successful /ship on an auto-created branch, automatically run `gh pr create --fill --web` to open a draft PR."
+        },
         "eri.model": {
           "type": "string",
           "enum": ["mercury-2", "mercury-2-coder", "claude-opus-4-7", "claude-sonnet-4-6", "gpt-5", "gemini-2.5-pro"],
