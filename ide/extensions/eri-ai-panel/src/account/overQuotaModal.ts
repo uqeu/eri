@@ -31,8 +31,15 @@ export async function showOverQuotaModal(
   );
 
   if (action === "Upgrade") {
+    // Honour the configured account base URL so self-hosted + staging
+    // installs route to the right billing page (production default is
+    // tryeri.ca; older builds had eri.dev as the placeholder).
+    const baseUrl =
+      vscode.workspace
+        .getConfiguration("eri.account")
+        .get<string>("baseUrl", "https://tryeri.ca") || "https://tryeri.ca";
     await vscode.env.openExternal(
-      vscode.Uri.parse("https://eri.dev/dashboard/billing"),
+      vscode.Uri.parse(`${baseUrl.replace(/\/+$/, "")}/dashboard/billing`),
     );
   } else if (action === "Use my own keys") {
     await vscode.commands.executeCommand("eri.byok.setKey");

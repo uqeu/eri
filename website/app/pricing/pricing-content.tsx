@@ -240,6 +240,28 @@ const COMPARISON: ReadonlyArray<ComparisonCategory> = [
     ],
   },
   {
+    title: "Terminal + scripts",
+    rows: [
+      {
+        label: "Terminal CLI (`eri ask`, `eri ship`, `eri plan`…)",
+        values: [no, yes, yes, yes],
+        note: "Sign in once via `eri auth login`; the bearer roams across machines.",
+      },
+      { label: "TypeScript SDK (`@eri/sdk`)", values: [no, yes, yes, yes] },
+      { label: "Python SDK (`pip install eri`)", values: [no, yes, yes, yes] },
+      {
+        label: "Drop-in MCP server (Claude Code / Cursor / Cline)",
+        values: [no, yes, yes, yes],
+        note: "`brew install eri-mcp-server` and your client gets eri's brain.",
+      },
+      {
+        label: "VS Code companion extension",
+        values: [no, yes, yes, yes],
+        note: "If you stay on vanilla VS Code, you still get ask/plan/ship.",
+      },
+    ],
+  },
+  {
     title: "Customer service",
     rows: [
       { label: "Community Discord", values: [yes, yes, yes, yes] },
@@ -272,6 +294,18 @@ const FAQ: ReadonlyArray<FaqItem> = [
   {
     q: "What is BYOK?",
     a: "Bring your own provider keys on paid tiers — eri reads them from macOS Keychain. We never proxy, mirror, or sync them. Paid tiers also include eri-cloud credits if you'd rather not bring keys.",
+  },
+  {
+    q: "Do I need an API key to use eri?",
+    a: "Inside the eri.app desktop you sign in once and we issue a bearer (`eri_sk_…`) you never see; the IDE uses it transparently. Outside the desktop — terminal CLI, npm SDK, Python SDK, MCP server, the VS Code companion — that same bearer is what authenticates every call. Sign in with `eri auth login`, copy from the Devices page, or set `ERI_API_KEY` in your env and you're in.",
+  },
+  {
+    q: "Why do paid plans exist at all? eri seems local-first.",
+    a: "Mercury (the diffusion engine) is genuinely free at the provider level — Inception's per-turn cost is negligible. But when a turn calls Sonnet 4.5, GPT-4o, or Gemini for reasoning the model bill is real ($3–$15 per million tokens), and that's what the paid tiers cover: cloud frontier-token allowances, sustained throughput, and the eri-cloud agents (auto-review, background janitor) that need to run on our infra instead of yours.",
+  },
+  {
+    q: "What's the cost breakdown, transparently?",
+    a: "Roughly: $1–$2/user/month in infra (Vercel, Supabase, voice transcription), $0.50/user/month for Mercury, and the rest depends on how heavily the user hits the frontier proxy. Pro covers ~750k input + output tokens of Sonnet/Haiku-mix routing. Pro+ covers ~4M. Once you exceed the cap you can keep using eri locally + BYOK; no metered overage, no surprise bill.",
   },
   {
     q: "What happens when I hit my monthly cap?",
@@ -1024,6 +1058,43 @@ export function PricingContent(): React.ReactElement {
           <p className="mt-6 text-[11px] text-muted leading-relaxed max-w-2xl">
             <span className="text-accent">*</span> Usage must be reasonable.
           </p>
+        </div>
+      </section>
+
+      <section className="border-b border-white/10">
+        <div className="mx-auto max-w-3xl px-6 py-24 sm:py-32">
+          <p className="font-mono text-xs uppercase tracking-[0.25em] text-muted">
+            Transparent economics
+          </p>
+          <h2 className="mt-4 font-display text-3xl sm:text-5xl tracking-tight text-balance">
+            Why these prices exist,{" "}
+            <span className="italic text-paper">in one paragraph.</span>
+          </h2>
+          <div className="mt-8 space-y-4 text-base text-paper/80 leading-relaxed">
+            <p>
+              Mercury (eri's diffusion engine) is genuinely cheap to run, so
+              Free + every paid tier ships generous Mercury allowances. The
+              real cost of running eri at scale is{" "}
+              <em className="text-paper">frontier reasoning</em> — Sonnet 4.5,
+              GPT-4o, Gemini Flash Thinking — billed by Anthropic, OpenAI,
+              and Google at $3–$15 per million tokens. Each paid tier maps
+              directly to a monthly frontier budget we pay for on your behalf.
+            </p>
+            <p>
+              Pro covers roughly <strong className="text-paper">750k</strong>{" "}
+              input + output tokens of mixed Sonnet/Haiku routing —{" "}
+              <em>~25 ships, ~3,000 ask turns</em> in our usage data.
+              Pro+ covers <strong className="text-paper">~4M</strong> tokens.
+              When you exceed the budget, eri keeps working locally and via
+              BYOK; we never bill above the headline price.
+            </p>
+            <p>
+              Pricing is identical whether you reach eri through the
+              desktop, the terminal CLI, the npm SDK, the Python SDK, the
+              MCP server, or the VS Code companion. One bearer, one bucket,
+              one bill.
+            </p>
+          </div>
         </div>
       </section>
 
