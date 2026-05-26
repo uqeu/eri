@@ -59,6 +59,9 @@ pub async fn run(
         "agent" => handle_agent(&p.workspace, &p.args),
         "tracer" => handle_tracer(&p.args),
         "document" => handle_document(&p.args),
+        "theme" => handle_theme(&p.workspace, &p.args),
+        "new" => handle_new(&p.args),
+        "preference" => handle_preference(&p.workspace, &p.args),
         "recall" | "remember" | "forget" | "learn" | "cost" | "quota" => {
             SlashResult {
                 ok: false,
@@ -181,6 +184,184 @@ fn handle_document(args: &str) -> SlashResult {
     }
 }
 
+/// `/theme [<slug>]` — empty args lists the catalog client-side;
+/// non-empty args set the active theme by writing
+/// `<workspace>/.eri/theme.json`.
+fn handle_theme(workspace: &std::path::Path, args: &str) -> SlashResult {
+    let slug = args.trim();
+    if slug.is_empty() {
+        return SlashResult {
+            ok: false,
+            error: Some("dispatch_client".to_string()),
+            message: Some(
+                "Open the theme picker — /theme list shows the 80-theme catalog. /theme <slug> sets the active one."
+                    .into(),
+            ),
+            persona: None,
+            phase: None,
+        };
+    }
+    if slug == "list" {
+        return SlashResult {
+            ok: false,
+            error: Some("dispatch_client".to_string()),
+            message: Some("Open the theme picker.".into()),
+            persona: None,
+            phase: None,
+        };
+    }
+    // Validate the slug exists in the catalog before writing.
+    if super::themes::resolve_theme(slug).is_none() {
+        return SlashResult {
+            ok: false,
+            error: Some("unknown_theme".to_string()),
+            message: Some(format!("Unknown theme: {slug}. Try /theme list.")),
+            persona: None,
+            phase: None,
+        };
+    }
+    let path = workspace.join(".eri").join("theme.json");
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Err(err) =
+        std::fs::write(&path, format!("{{\n  \"active\": \"{slug}\"\n}}\n"))
+    {
+        return SlashResult {
+            ok: false,
+            error: Some("write_failed".to_string()),
+            message: Some(format!("Failed to write .eri/theme.json: {err}")),
+            persona: None,
+            phase: None,
+        };
+    }
+    SlashResult {
+        ok: true,
+        error: None,
+        message: Some(format!("Theme set to {slug}.")),
+        persona: None,
+        phase: None,
+    }
+}
+
+/// `/new [<slug>]` — empty opens the picker; with a slug, dispatches
+/// the IDE to scaffold the matching template into the empty workspace.
+fn handle_new(args: &str) -> SlashResult {
+    let slug = args.trim();
+    if slug.is_empty() {
+        return SlashResult {
+            ok: false,
+            error: Some("dispatch_client".to_string()),
+            message: Some("Open the template picker.".into()),
+            persona: None,
+            phase: None,
+        };
+    }
+    let known: bool = super::templates::builtin_templates()
+        .iter()
+        .any(|t| t.slug == slug);
+    if !known {
+        return SlashResult {
+            ok: false,
+            error: Some("unknown_template".to_string()),
+            message: Some(format!("Unknown template: {slug}. Try /new without args.")),
+            persona: None,
+            phase: None,
+        };
+    }
+    SlashResult {
+        ok: false,
+        error: Some("dispatch_client".to_string()),
+        message: Some(format!("Scaffold {slug} into the workspace.")),
+        persona: None,
+        phase: None,
+    }
+}
+
+/// `/preference key.path=value` — sets a single dotted-path preference
+/// in `<workspace>/.eri/preferences.json`. Values are parsed as JSON
+/// when possible; raw strings fall back to a plain string value.
+fn handle_preference(workspace: &std::path::Path, args: &str) -> SlashResult {
+    let trimmed = args.trim();
+    let Some(eq) = trimmed.find('=') else {
+        return SlashResult {
+            ok: false,
+            error: Some("bad_args".to_string()),
+            message: Some(
+                "Usage: /preference codeStyle.semicolons=false or /preference packageManager=pnpm"
+                    .into(),
+            ),
+            persona: None,
+            phase: None,
+        };
+    };
+    let path_part = trimmed[..eq].trim();
+    let value_part = trimmed[eq + 1..].trim();
+    if path_part.is_empty() || value_part.is_empty() {
+        return SlashResult {
+            ok: false,
+            error: Some("bad_args".to_string()),
+            message: Some("Key and value must both be non-empty.".into()),
+            persona: None,
+            phase: None,
+        };
+    }
+    let parsed_value = serde_json::from_str::<serde_json::Value>(value_part)
+        .unwrap_or_else(|_| serde_json::Value::String(value_part.to_string()));
+    let path = workspace.join(".eri").join("preferences.json");
+    let mut current: serde_json::Value = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::new()));
+    if !current.is_object() {
+        current = serde_json::Value::Object(serde_json::Map::new());
+    }
+    set_dotted_path(&mut current, path_part, parsed_value);
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let serialized = serde_json::to_string_pretty(&current).unwrap_or_default();
+    if let Err(err) = std::fs::write(&path, format!("{serialized}\n")) {
+        return SlashResult {
+            ok: false,
+            error: Some("write_failed".to_string()),
+            message: Some(format!("Failed to write .eri/preferences.json: {err}")),
+            persona: None,
+            phase: None,
+        };
+    }
+    SlashResult {
+        ok: true,
+        error: None,
+        message: Some(format!("Set {path_part}.")),
+        persona: None,
+        phase: None,
+    }
+}
+
+fn set_dotted_path(root: &mut serde_json::Value, path: &str, value: serde_json::Value) {
+    let parts: Vec<&str> = path.split('.').collect();
+    let mut cursor = root;
+    for (i, key) in parts.iter().enumerate() {
+        let last = i == parts.len() - 1;
+        if !cursor.is_object() {
+            *cursor = serde_json::Value::Object(serde_json::Map::new());
+        }
+        let obj = cursor.as_object_mut().expect("just made it an object");
+        if last {
+            obj.insert((*key).to_string(), value);
+            return;
+        }
+        let entry = obj
+            .entry((*key).to_string())
+            .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+        if !entry.is_object() {
+            *entry = serde_json::Value::Object(serde_json::Map::new());
+        }
+        cursor = entry;
+    }
+}
+
 fn looks_like_repo_url(url: &str) -> bool {
     url.starts_with("https://github.com/")
         || url.starts_with("https://gitlab.com/")
@@ -235,6 +416,70 @@ mod tests {
         let r2 = handle_document("https://arxiv.org/abs/2306.12345");
         assert_eq!(r1.error.as_deref(), Some("dispatch_client"));
         assert_eq!(r2.error.as_deref(), Some("dispatch_client"));
+    }
+
+    #[test]
+    fn theme_rejects_unknown_slug() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let r = handle_theme(dir.path(), "does-not-exist");
+        assert!(!r.ok);
+        assert_eq!(r.error.as_deref(), Some("unknown_theme"));
+    }
+
+    #[test]
+    fn theme_persists_known_slug_to_workspace_file() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let r = handle_theme(dir.path(), "linear");
+        assert!(r.ok);
+        let written = std::fs::read_to_string(dir.path().join(".eri").join("theme.json"))
+            .expect("theme file written");
+        assert!(written.contains("linear"));
+    }
+
+    #[test]
+    fn new_dispatches_known_template() {
+        let r = handle_new("saas-next");
+        assert_eq!(r.error.as_deref(), Some("dispatch_client"));
+    }
+
+    #[test]
+    fn new_rejects_unknown_template() {
+        let r = handle_new("not-a-template");
+        assert!(!r.ok);
+        assert_eq!(r.error.as_deref(), Some("unknown_template"));
+    }
+
+    #[test]
+    fn preference_writes_dotted_path() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let r = handle_preference(dir.path(), "codeStyle.semicolons=false");
+        assert!(r.ok, "expected ok, got {r:?}");
+        let raw = std::fs::read_to_string(dir.path().join(".eri").join("preferences.json"))
+            .expect("prefs file written");
+        let json: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(json.pointer("/codeStyle/semicolons"), Some(&serde_json::Value::Bool(false)));
+    }
+
+    #[test]
+    fn preference_falls_back_to_string_value() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let r = handle_preference(dir.path(), "packageManager=pnpm");
+        assert!(r.ok);
+        let raw = std::fs::read_to_string(dir.path().join(".eri").join("preferences.json"))
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(
+            json.pointer("/packageManager"),
+            Some(&serde_json::Value::String("pnpm".to_string()))
+        );
+    }
+
+    #[test]
+    fn preference_rejects_missing_equals() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let r = handle_preference(dir.path(), "no equals here");
+        assert!(!r.ok);
+        assert_eq!(r.error.as_deref(), Some("bad_args"));
     }
 }
 

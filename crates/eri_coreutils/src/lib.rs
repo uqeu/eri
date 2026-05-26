@@ -501,6 +501,18 @@ async fn dispatch_inner(
         "eri/autosubscribe/list" => {
             services::autosubscribe::list(request.params.clone(), tier_state, services).await
         }
+        "eri/themes/list" => {
+            services::themes::list(request.params.clone(), tier_state, services).await
+        }
+        "eri/themes/setActive" => {
+            services::themes::set_active(request.params.clone(), tier_state, services).await
+        }
+        "eri/templates/list" => {
+            services::templates::list(request.params.clone(), tier_state, services).await
+        }
+        "eri/preferences/load" => {
+            services::preferences::load(request.params.clone(), tier_state, services).await
+        }
         "eri/agent/run" => {
             require_feature(tier_state, "agentMode").await?;
             Ok(serde_json::json!({ "stub": true }))

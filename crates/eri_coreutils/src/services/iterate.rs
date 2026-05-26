@@ -448,6 +448,27 @@ fn build_parts(
         );
     }
 
+    // Active theme (Phase 23b) — design tokens injected at priority 1
+    // so generated UI matches the user's vibe from the first turn.
+    if let Some(theme) = crate::services::themes::active_theme(workspace) {
+        let block = crate::services::themes::format_theme_block(&theme);
+        parts.push(
+            BudgetPart::new("system:theme", 1, block).with_min_keep(0),
+        );
+    }
+
+    // Build preferences (Phase 23c) — the durable per-user "how to
+    // build" doc. Priority 1; capped at ~600 tokens by the formatter.
+    let (prefs_merged, _sources) =
+        crate::services::preferences::merge_preferences(workspace);
+    if let Some(block) =
+        crate::services::preferences::format_preferences_block(&prefs_merged)
+    {
+        parts.push(
+            BudgetPart::new("system:preferences", 1, block).with_min_keep(0),
+        );
+    }
+
     parts.push(BudgetPart::new("user:prompt", 0, prompt));
 
     for f in open_files {
