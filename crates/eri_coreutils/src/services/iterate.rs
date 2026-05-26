@@ -565,23 +565,46 @@ fn load_learned_block(
     }
 }
 
-/// Read the workspace's explicit project memory files: `ERI.md` at the
-/// root and `.eri/AGENT.md` for the git-ignored variant. Missing files
-/// return nothing — both are opt-in. Returns one entry per file so
-/// `build_parts` can label them distinctly in the budget plan.
+/// Read the workspace's explicit project memory files. eri honours the
+/// emerging 2026 `AGENTS.md` / `AGENT.md` convention used by Cursor,
+/// Cline, Claude Code, and other agentic IDEs in addition to its own
+/// `ERI.md` so users don't need to maintain a duplicate file when they
+/// switch tooling.
+///
+/// Lookup order (first hit wins per filename slot):
+///   1. `<workspace>/ERI.md`           — eri-native, takes precedence
+///   2. `<workspace>/AGENTS.md`        — 2026 community standard (committed)
+///   3. `<workspace>/AGENT.md`         — singular variant some tools emit
+///   4. `<workspace>/.eri/AGENT.md`    — eri-specific, gitignored variant
+///
+/// All hits are returned (deduped by canonical content) so a project
+/// that maintains both a committed `AGENTS.md` and a personal
+/// `.eri/AGENT.md` keeps both layers. Missing files return nothing —
+/// every entry is opt-in.
 fn load_project_facts(workspace: &std::path::Path) -> Vec<(&'static str, String)> {
+    let candidates: &[(&str, &'static str)] = &[
+        ("ERI.md", "system:project_facts:eri_md"),
+        ("AGENTS.md", "system:project_facts:agents_md"),
+        ("AGENT.md", "system:project_facts:agent_md"),
+        (".eri/AGENT.md", "system:project_facts:eri_agent_md"),
+    ];
     let mut out = Vec::new();
-    if let Ok(body) = std::fs::read_to_string(workspace.join("ERI.md")) {
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for (relpath, label) in candidates {
+        let path = workspace.join(relpath);
+        let Ok(body) = std::fs::read_to_string(&path) else {
+            continue;
+        };
         let trimmed = body.trim();
-        if !trimmed.is_empty() {
-            out.push(("system:project_facts:eri_md", trimmed.to_string()));
+        if trimmed.is_empty() {
+            continue;
         }
-    }
-    if let Ok(body) = std::fs::read_to_string(workspace.join(".eri").join("AGENT.md")) {
-        let trimmed = body.trim();
-        if !trimmed.is_empty() {
-            out.push(("system:project_facts:agent_md", trimmed.to_string()));
+        // Dedup by content so two tools writing identical bytes don't
+        // double-count toward the budget.
+        if !seen.insert(trimmed.to_string()) {
+            continue;
         }
+        out.push((*label, trimmed.to_string()));
     }
     out
 }
@@ -907,6 +930,48 @@ mod tests {
     #[test]
     fn format_images_block_is_none_when_empty() {
         assert!(format_images_block(&[]).is_none());
+    }
+
+    #[test]
+    fn load_project_facts_reads_agents_md_alias() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(dir.path().join("AGENTS.md"), "use pnpm always").unwrap();
+        let facts = load_project_facts(dir.path());
+        assert_eq!(facts.len(), 1);
+        assert_eq!(facts[0].0, "system:project_facts:agents_md");
+        assert_eq!(facts[0].1, "use pnpm always");
+    }
+
+    #[test]
+    fn load_project_facts_dedupes_identical_content() {
+        let dir = tempfile::TempDir::new().unwrap();
+        // Two files with identical bytes should only appear once in the budget.
+        std::fs::write(dir.path().join("ERI.md"), "team is khai").unwrap();
+        std::fs::write(dir.path().join("AGENTS.md"), "team is khai").unwrap();
+        let facts = load_project_facts(dir.path());
+        assert_eq!(facts.len(), 1, "deduped by content");
+        // Lookup order means ERI.md wins.
+        assert_eq!(facts[0].0, "system:project_facts:eri_md");
+    }
+
+    #[test]
+    fn load_project_facts_returns_all_distinct_layers() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(dir.path().join("ERI.md"), "core fact").unwrap();
+        std::fs::write(dir.path().join("AGENTS.md"), "community fact").unwrap();
+        std::fs::create_dir_all(dir.path().join(".eri")).unwrap();
+        std::fs::write(dir.path().join(".eri").join("AGENT.md"), "private fact").unwrap();
+        let facts = load_project_facts(dir.path());
+        assert_eq!(facts.len(), 3);
+        let labels: Vec<&str> = facts.iter().map(|(l, _)| *l).collect();
+        assert_eq!(
+            labels,
+            vec![
+                "system:project_facts:eri_md",
+                "system:project_facts:agents_md",
+                "system:project_facts:eri_agent_md",
+            ]
+        );
     }
 
     #[tokio::test]
