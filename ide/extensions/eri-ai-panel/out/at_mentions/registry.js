@@ -86,6 +86,13 @@ exports.AT_MENTION_KINDS = [
         icon: "$(graph)",
         description: "Attach a saved codemap (module/hotspot/function/data)",
     },
+    {
+        id: "image",
+        label: "Image",
+        token: "@Image",
+        icon: "$(file-media)",
+        description: "Attach a screenshot or design mock as a multimodal input",
+    },
 ];
 // Storage key for per-workspace enable/disable toggles. Persisted via
 // context.globalState because the user picks once and rarely changes.

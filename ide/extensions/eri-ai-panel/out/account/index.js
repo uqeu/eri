@@ -19,7 +19,7 @@ const statusBarBinding_1 = require("./statusBarBinding");
 const commands_1 = require("./commands");
 const deepLinkSource_1 = require("./deepLinkSource");
 const DEFAULT_BASE_URL = "https://eri.dev";
-function activateAccount(context) {
+function activateAccount(context, options = {}) {
     const getBaseUrl = () => {
         const value = vscode.workspace
             .getConfiguration("eri.account")
@@ -81,11 +81,26 @@ function activateAccount(context) {
         },
     });
     context.subscriptions.push(uriHandler);
+    // Push the sign-in's user_id into the sidecar so per-user state (local
+    // memory partition today) resolves to the right scope. Best-effort —
+    // sidecar may be null during start-up or after a crash; swallow errors
+    // so the UI flow is never gated on the side-channel push.
+    const pushSession = (session) => {
+        const sidecar = options.getSidecar?.();
+        if (!sidecar)
+            return;
+        const method = session ? "eri/account/setSession" : "eri/account/clearSession";
+        const params = session ? { userId: session.userId } : {};
+        sidecar
+            .request(method, params)
+            .catch((err) => console.warn(`[eri] ${method} push failed`, err));
+    };
     // Reflect session into status bar + webview, and (re)start usage polling.
     let pollHandle = null;
     const sessionListener = store.onChange((session) => {
         statusBar.setSession(session);
         panel.push();
+        pushSession(session);
         pollHandle?.dispose();
         pollHandle = null;
         if (session) {
@@ -105,6 +120,12 @@ function activateAccount(context) {
     void store.hydrate().then(() => {
         const session = store.current();
         statusBar.setSession(session);
+        // Push the hydrated session into the sidecar so the sidecar's memory
+        // partition is correct from the first JSON-RPC call. If hydrate runs
+        // before the sidecar finishes start-up the push is a no-op; the
+        // sessionListener above re-fires whenever the user signs in/out so
+        // the sidecar always catches up.
+        pushSession(session);
         if (session) {
             pollHandle = usage.startPolling(getRefreshSec());
         }

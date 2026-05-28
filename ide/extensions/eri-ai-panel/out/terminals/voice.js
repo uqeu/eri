@@ -39,6 +39,18 @@ function activateTerminalVoice(context, options) {
     return handle;
 }
 async function handleTranscript(transcript, options) {
+    // View intents (zoom / scroll / navigate) take precedence so
+    // "show me the hero headline" doesn't get treated as terminal focus.
+    if (options.tryDispatchView) {
+        try {
+            const handled = await options.tryDispatchView(transcript);
+            if (handled)
+                return;
+        }
+        catch (err) {
+            console.error("voice view-intent dispatch threw:", err);
+        }
+    }
     const terminals = snapshotTerminals(options);
     const match = (0, intentMatcher_1.matchTerminalIntent)(transcript, terminals, {
         gazeAttendedTerminalId: options.gaze?.attendedTerminalId(),

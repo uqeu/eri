@@ -30,7 +30,10 @@ class ComposerView {
             localResourceRoots: [this.context.extensionUri],
         });
         const model = this.readDefaultModel();
-        this.panel.webview.html = (0, composerView_html_1.renderComposerHtml)(model);
+        const themeSlug = vscode.workspace
+            .getConfiguration("eri.layout")
+            .get("themeSlug", "anthropic");
+        this.panel.webview.html = (0, composerView_html_1.renderComposerHtml)(model, themeSlug);
         this.panel.webview.onDidReceiveMessage((message) => this.handleWebviewMessage(message));
         this.panel.onDidDispose(() => {
             this.panel = null;

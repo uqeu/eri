@@ -66,6 +66,10 @@
     "onCommand:eri.account.showStatus",
     "onCommand:eri.account.openBilling",
     "onView:eri.agents",
+    "onView:eri.layoutSettings",
+    "onCommand:eri.layout.toggleMode",
+    "onCommand:eri.layout.setChatPosition",
+    "onCommand:eri.layout.openSettings",
     "onCommand:eri.agents.switch",
     "onCommand:eri.agents.detectCli",
     "onCommand:eri.agents.addCustom",
@@ -234,10 +238,19 @@
           "id": "eri.agents",
           "name": "Agents",
           "visibility": "collapsed"
+        },
+        {
+          "type": "webview",
+          "id": "eri.layoutSettings",
+          "name": "Layout",
+          "visibility": "collapsed"
         }
       ]
     },
     "commands": [
+      { "command": "eri.layout.toggleMode",        "title": "eri: Toggle Coder / eri Mode" },
+      { "command": "eri.layout.setChatPosition",   "title": "eri: Set Chat Position" },
+      { "command": "eri.layout.openSettings",      "title": "eri: Open Layout Settings" },
       { "command": "eri.openPreview",       "title": "eri: Open Diffusion Preview" },
       { "command": "eri.toggleMic",         "title": "eri: Toggle Voice" },
       { "command": "eri.inlineEdit",        "title": "eri: Inline Edit" },
@@ -638,6 +651,34 @@
           "type": "string",
           "default": "",
           "description": "Optional absolute path to the eri_preview Swift binary. Leave blank to use the bundled binary (or the dev checkout's scripts/eri_preview)."
+        },
+        "eri.layout.mode": {
+          "type": "string",
+          "enum": ["coder", "eri"],
+          "default": "coder",
+          "markdownDescription": "Layout mode. **Coder** keeps the workbench shell + floating Swift preview. **eri** hides the explorer and docks a centred preview beside the editor (Lovable / Base44 / v0 feel)."
+        },
+        "eri.layout.chatPosition": {
+          "type": "string",
+          "enum": ["left", "right", "bottom"],
+          "default": "right",
+          "description": "Where the eri Chat panel docks. Changing this re-registers the view."
+        },
+        "eri.layout.explorerHiddenInEriMode": {
+          "type": "boolean",
+          "default": true,
+          "description": "Hide the file explorer + sidebar when switching into eri mode."
+        },
+        "eri.layout.previewSurface": {
+          "type": "string",
+          "enum": ["auto", "swift", "webview"],
+          "default": "auto",
+          "markdownDescription": "Preview surface. **Auto** uses Swift in coder mode and the embedded WebviewPanel in eri mode. Override only if you need a specific surface for the whole session."
+        },
+        "eri.layout.themeSlug": {
+          "type": "string",
+          "default": "anthropic",
+          "description": "Active marketplace theme slug. Open the eri theme hub to pick from the 80-theme catalog."
         },
         "eri.tab.enabled": {
           "type": "boolean",

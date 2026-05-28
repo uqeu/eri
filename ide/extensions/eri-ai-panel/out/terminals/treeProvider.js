@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.TerminalsTreeProvider = exports.PlaceholderNode = exports.LayoutNode = exports.LayoutsRootNode = exports.TerminalNode = exports.GroupNode = void 0;
 const vscode = require("vscode");
 const state_1 = require("./state");
+const cliDetect_1 = require("./cliDetect");
 class GroupNode extends vscode.TreeItem {
     group;
     kind = "group";
@@ -26,7 +27,7 @@ class TerminalNode extends vscode.TreeItem {
     record;
     terminal;
     kind = "terminal";
-    constructor(record, terminal, status, lastCommand) {
+    constructor(record, terminal, status, lastCommand, cliKind = null) {
         super(record.name, vscode.TreeItemCollapsibleState.None);
         this.record = record;
         this.terminal = terminal;
@@ -34,9 +35,11 @@ class TerminalNode extends vscode.TreeItem {
         this.contextValue = record.nameLocked
             ? "eri.terminal.locked"
             : "eri.terminal";
-        this.iconPath = iconForStatus(status, record.icon);
-        this.description = describe(status, lastCommand);
-        this.tooltip = buildTooltip(record, status, lastCommand);
+        this.iconPath = cliKind
+            ? new vscode.ThemeIcon((0, cliDetect_1.cliGlyph)(cliKind), new vscode.ThemeColor("charts.purple"))
+            : iconForStatus(status, record.icon);
+        this.description = describe(status, lastCommand, cliKind);
+        this.tooltip = buildTooltip(record, status, lastCommand, cliKind);
         if (terminal) {
             this.command = {
                 command: "eri.terminals.reveal",
@@ -100,7 +103,7 @@ function iconForStatus(status, customIcon) {
             return new vscode.ThemeIcon("error", new vscode.ThemeColor("charts.red"));
     }
 }
-function describe(status, lastCommand) {
+function describe(status, lastCommand, cliKind) {
     const badge = (() => {
         switch (status) {
             case "running":
@@ -113,16 +116,20 @@ function describe(status, lastCommand) {
                 return "✗ failed";
         }
     })();
+    const cliBadge = cliKind ? `🤖 ${(0, cliDetect_1.cliLabel)(cliKind)} · ` : "";
     if (lastCommand && lastCommand.length > 0) {
-        return `${badge} · ${lastCommand}`;
+        return `${cliBadge}${badge} · ${lastCommand}`;
     }
-    return badge;
+    return `${cliBadge}${badge}`;
 }
-function buildTooltip(record, status, lastCommand) {
+function buildTooltip(record, status, lastCommand, cliKind) {
     const parts = [
         `Name: ${record.name}${record.nameLocked ? " (locked)" : ""}`,
         `Status: ${status}`,
     ];
+    if (cliKind) {
+        parts.push(`Running: ${(0, cliDetect_1.cliLabel)(cliKind)}`);
+    }
     if (record.cwd) {
         parts.push(`Cwd: ${record.cwd}`);
     }
@@ -194,8 +201,9 @@ class TerminalsTreeProvider {
         return members.map((record) => {
             const status = this.runtime.status(record.key);
             const lastCommand = this.runtime.lastCommand(record.key);
+            const cliKind = this.runtime.cliKind?.(record.key) ?? null;
             const terminal = this.runtime.resolveTerminal(record.key);
-            return new TerminalNode(record, terminal, status, lastCommand);
+            return new TerminalNode(record, terminal, status, lastCommand, cliKind);
         });
     }
     // Drag-and-drop --------------------------------------------------------

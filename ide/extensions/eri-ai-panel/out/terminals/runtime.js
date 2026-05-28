@@ -10,6 +10,7 @@ const state_1 = require("./state");
 const cwdGrouping_1 = require("./cwdGrouping");
 const autoName_1 = require("./autoName");
 const auditLog_1 = require("./auditLog");
+const cliDetect_1 = require("./cliDetect");
 const IDLE_THRESHOLD_MS = 30_000;
 class TerminalsRuntime {
     store;
@@ -54,6 +55,32 @@ class TerminalsRuntime {
         }
         return this.slots.get(terminal)?.lastCommand ?? null;
     }
+    /**
+     * The CLI kind running in this terminal right now (`"claude" | "codex" | "aider"`),
+     * or `null` when the terminal is idle / running something else.
+     */
+    cliKind(key) {
+        const terminal = this.keyToTerminal.get(key);
+        if (!terminal)
+            return null;
+        return this.slots.get(terminal)?.cliKind ?? null;
+    }
+    /**
+     * The first live terminal currently running the given CLI, or `undefined`
+     * when no terminal is hosting it. Used by `/agent claudeCode` and friends
+     * to pipe prompts into an existing subprocess instead of spawning a new
+     * one. Iteration order matches insertion order so the oldest matching
+     * terminal wins — the user's "primary" claude-code session is usually the
+     * first one they spawned.
+     */
+    findCliTerminal(kind) {
+        for (const slot of this.slots.values()) {
+            if (slot.cliKind === kind) {
+                return slot.terminal;
+            }
+        }
+        return undefined;
+    }
     liveSlots() {
         return [...this.slots.values()];
     }
@@ -91,6 +118,8 @@ class TerminalsRuntime {
             lastCommand: reused ? null : null,
             lastActivityMs: Date.now(),
             lastExitCode: null,
+            runningCommand: null,
+            cliKind: null,
         };
         this.slots.set(terminal, slot);
         this.keyToTerminal.set(finalKey, terminal);
@@ -139,7 +168,10 @@ class TerminalsRuntime {
         }
         slot.status = "running";
         slot.lastActivityMs = Date.now();
-        slot.lastCommand = event.execution.commandLine?.value ?? slot.lastCommand;
+        const command = event.execution.commandLine?.value ?? slot.lastCommand;
+        slot.lastCommand = command;
+        slot.runningCommand = command ?? null;
+        slot.cliKind = (0, cliDetect_1.detectCli)(command);
         this.emitter.fire(slot.key);
     }
     handleEnd(event) {
@@ -151,6 +183,8 @@ class TerminalsRuntime {
         slot.lastExitCode = exit;
         slot.status = exit === 0 ? "exited-ok" : exit === null ? "idle" : "exited-fail";
         slot.lastActivityMs = Date.now();
+        slot.runningCommand = null;
+        slot.cliKind = null;
         const command = event.execution.commandLine?.value;
         if (command) {
             slot.lastCommand = command;

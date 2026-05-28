@@ -66,9 +66,27 @@ class AtMentionResolvers {
                 return this.resolveDefinitions(chip);
             case "codemap":
                 return this.resolveCodemap(chip);
+            case "image":
+                return this.resolveImage(chip);
             default:
                 return assertNever(chip.kind);
         }
+    }
+    /**
+     * Image chips travel as their own attachment side-channel — the
+     * resolved context block carries just a description so the model has
+     * a textual reference (`[image: hero.png, 234KB]`). The actual
+     * `data:` URI moves through the multimodal `images` payload on the
+     * iterate notification, not through the system-prompt budget.
+     */
+    async resolveImage(chip) {
+        const name = stringField(chip.payload, "name") ?? "image";
+        const mime = stringField(chip.payload, "mime") ?? "image/png";
+        const body = `[image attached: ${name} (${mime})]`;
+        return {
+            heading: `@Image ${name}`,
+            body,
+        };
     }
     async resolveCodemap(chip) {
         const name = stringField(chip.payload, "name") ?? chip.label;

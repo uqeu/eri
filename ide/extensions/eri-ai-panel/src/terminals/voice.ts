@@ -42,6 +42,13 @@ export interface VoiceWiringOptions {
   readonly blocks?: TerminalBlocksProvider;
   readonly gaze?: GazeAttention;
   readonly groups?: TerminalGroupResolver;
+  /**
+   * Optional pre-dispatcher for view-control intents (zoom / scroll /
+   * navigate). Runs BEFORE the terminal classifier. When it returns
+   * true the transcript is considered handled and no terminal-intent
+   * matching happens for that transcript.
+   */
+  readonly tryDispatchView?: (transcript: string) => Promise<boolean>;
   // Test hook — when set, replaces the real vscode terminal collection
   // and status-bar message side-effects.
   readonly testHooks?: VoiceTestHooks;
@@ -93,6 +100,16 @@ async function handleTranscript(
   transcript: string,
   options: VoiceWiringOptions,
 ): Promise<void> {
+  // View intents (zoom / scroll / navigate) take precedence so
+  // "show me the hero headline" doesn't get treated as terminal focus.
+  if (options.tryDispatchView) {
+    try {
+      const handled = await options.tryDispatchView(transcript);
+      if (handled) return;
+    } catch (err) {
+      console.error("voice view-intent dispatch threw:", err);
+    }
+  }
   const terminals = snapshotTerminals(options);
   const match = matchTerminalIntent(transcript, terminals, {
     gazeAttendedTerminalId: options.gaze?.attendedTerminalId(),

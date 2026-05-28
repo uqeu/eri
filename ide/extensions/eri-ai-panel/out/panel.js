@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.EriPanelProvider = void 0;
 const vscode = require("vscode");
+const eriTheme_1 = require("./theme/eriTheme");
 class EriPanelProvider {
     context;
     getSidecar;
@@ -45,6 +46,10 @@ class EriPanelProvider {
         // Self-contained webview HTML. All dynamic content from sidecar notifications
         // is inserted via textContent (see addIterationRow in the inline script),
         // not template strings, so there is no untrusted HTML injection.
+        const themeSlug = vscode.workspace
+            .getConfiguration("eri.layout")
+            .get("themeSlug", "anthropic");
+        const sharedCss = (0, eriTheme_1.eriThemeCss)({ theme: (0, eriTheme_1.resolveTheme)(themeSlug) });
         return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -52,15 +57,18 @@ class EriPanelProvider {
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
 <title>eri</title>
 <style>
+${sharedCss}
   :root {
-    color-scheme: dark;
-    --bg: var(--vscode-editor-background, #181818);
-    --fg: var(--vscode-editor-foreground, #d6d6dd);
-    --muted: #8b8b96;
-    --border: #292929;
+    /* Back-compat shims — older inline rules use these names. They point at
+       the canonical --eri-* tokens defined above (eriThemeCss) so the demo
+       palette stays in lock-step with the rest of the chrome. --eri-accent
+       is owned by eriThemeCss; we only shim the names not already there. */
+    --bg: var(--eri-bg);
+    --fg: var(--eri-text);
+    --muted: var(--eri-text-muted);
+    --border: var(--eri-border);
     --accent: #228df2;
-    --eri-accent: #e0ff4f;
-    --card: #212121;
+    --card: var(--eri-bg-card);
   }
   body {
     margin: 0;

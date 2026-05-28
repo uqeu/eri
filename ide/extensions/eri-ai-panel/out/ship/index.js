@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.activateShip = activateShip;
 const vscode = require("vscode");
 const overQuotaModal_1 = require("../account/overQuotaModal");
+const branchAutomation_1 = require("./branchAutomation");
 const shipClient_1 = require("./shipClient");
 const tandemProgress_1 = require("./tandemProgress");
 const ECONOMIC_EXTENSIONS = new Set([
@@ -85,6 +86,23 @@ function activateShip(context, options) {
                 vscode.window.showWarningMessage("Ship completed with no edits.");
                 return;
             }
+            // Phase 16c — opt-in branch automation. When enabled, swap onto a
+            // fresh `eri/ship-<slug>-<stamp>` branch BEFORE the apply commit
+            // lands so the ship doesn't pollute the user's current branch.
+            const autoBranch = vscode.workspace
+                .getConfiguration("eri.ship")
+                .get("autoBranch", false);
+            const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+            let createdBranch = null;
+            if (autoBranch && workspaceRoot) {
+                createdBranch = await (0, branchAutomation_1.switchToShipBranch)({ workspaceRoot }, instructions);
+                if (!createdBranch) {
+                    // Tell the user the automation didn't fire (no git, etc.) but
+                    // don't abort the ship — the commit will just land on the
+                    // current branch as before.
+                    vscode.window.showWarningMessage(`Couldn't create branch ${(0, branchAutomation_1.branchName)(instructions)}; shipping on current branch.`);
+                }
+            }
             // Hand off to the existing apply pipeline → diff viewer + checkpoint.
             const edits = await options.applyOrchestrator.stage(result.mergedPatchset);
             const applyResult = await options.applyOrchestrator.commit(edits.map((e) => ({ ...e, accepted: true })));
@@ -93,12 +111,36 @@ function activateShip(context, options) {
                 failed: applyResult.failed.length,
             });
             const survivorLabel = result.survivors.join(" + ");
-            vscode.window.showInformationMessage(`Shipped ${applyResult.applied.length} edits via ${survivorLabel}.`);
+            if (createdBranch) {
+                const autoOpenPr = vscode.workspace
+                    .getConfiguration("eri.ship")
+                    .get("autoOpenPr", false);
+                const action = await vscode.window.showInformationMessage(`Shipped ${applyResult.applied.length} edits via ${survivorLabel} on branch ${createdBranch}.`, "Open PR", "OK");
+                if (action === "Open PR" ||
+                    (autoOpenPr && workspaceRoot)) {
+                    const opened = workspaceRoot
+                        ? await (0, branchAutomation_1.openPullRequest)({ workspaceRoot })
+                        : false;
+                    if (!opened) {
+                        vscode.window.showWarningMessage("Couldn't open a PR — install GitHub CLI (`gh`) and run `gh auth login`.");
+                    }
+                }
+            }
+            else {
+                vscode.window.showInformationMessage(`Shipped ${applyResult.applied.length} edits via ${survivorLabel}.`);
+            }
         }
         catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             if ((0, overQuotaModal_1.isOverQuotaError)(error)) {
                 await (0, overQuotaModal_1.showOverQuotaModal)({ tier: session?.tier });
+                return;
+            }
+            if ((0, overQuotaModal_1.isRateLimitedError)(error)) {
+                await (0, overQuotaModal_1.showRateLimitToast)({
+                    ...(0, overQuotaModal_1.parseRateLimitedPayload)(error),
+                    statusBar: options.account?.statusBar,
+                });
                 return;
             }
             vscode.window.showErrorMessage(`Ship failed: ${message}`);

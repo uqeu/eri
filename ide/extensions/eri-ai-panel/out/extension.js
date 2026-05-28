@@ -34,9 +34,14 @@ const review_1 = require("./review");
 const statusBar_1 = require("./statusBar");
 const account_1 = require("./account");
 const agents_1 = require("./agents");
+const janitorRulesWatcher_1 = require("./background/janitorRulesWatcher");
 const ship_1 = require("./ship");
 const registry_1 = require("./slash/registry");
 const snippets_1 = require("./snippets");
+const layoutManager_1 = require("./layout/layoutManager");
+const layoutSettingsView_1 = require("./layout/layoutSettingsView");
+const surfaceCoordinator_1 = require("./preview/surfaceCoordinator");
+const intentDispatcher_1 = require("./terminals/intentDispatcher");
 var gaze_2 = require("./gaze/gaze");
 Object.defineProperty(exports, "getCurrentGazeTarget", { enumerable: true, get: function () { return gaze_2.getCurrentTarget; } });
 Object.defineProperty(exports, "getEditorGazeContext", { enumerable: true, get: function () { return gaze_2.getEditorGazeContext; } });
@@ -90,7 +95,7 @@ function activate(context) {
     });
     sidecar.start();
     statusBar = (0, statusBar_1.activateStatusBar)(context);
-    account = (0, account_1.activateAccount)(context);
+    account = (0, account_1.activateAccount)(context, { getSidecar: () => sidecar });
     agents = (0, agents_1.activateAgents)(context, {
         secrets: secretsStore,
         session: account.store,
@@ -105,6 +110,16 @@ function activate(context) {
     panelProvider = new panel_1.EriPanelProvider(context, () => sidecar);
     context.subscriptions.push(vscode.window.registerWebviewViewProvider("eri.panel", panelProvider));
     preview = (0, preview_1.activatePreview)(context, () => sidecar);
+    // Layout manager owns mode + chat position + preview surface choice;
+    // the preview surface coordinator routes preview lifecycle between the
+    // Swift window (coder mode) and the embedded WebviewPanel (eri mode).
+    const layoutManager = new layoutManager_1.LayoutManager();
+    context.subscriptions.push({ dispose: () => layoutManager.dispose() });
+    const previewCoordinator = (0, surfaceCoordinator_1.createPreviewSurfaceCoordinator)(context, preview, layoutManager);
+    const layoutSettingsView = new layoutSettingsView_1.LayoutSettingsViewProvider(layoutManager);
+    context.subscriptions.push(vscode.window.registerWebviewViewProvider(layoutSettingsView_1.LAYOUT_VIEW_ID, layoutSettingsView), { dispose: () => layoutSettingsView.dispose() });
+    // Mode-flip side effects (explorer visibility etc.) are best-effort.
+    context.subscriptions.push(layoutManager.onChange((state) => void (0, layoutManager_1.applyModeSideEffects)(state)));
     // Activate tier client right after sidecar starts so the very first
     // setContext + sidecar handshake reflects the user's real tier.
     tierClient = (0, tierClient_1.activateTierClient)(context, () => sidecar);
@@ -116,6 +131,109 @@ function activate(context) {
     composer = (0, composer_1.activateComposer)(context, () => sidecar, atMentions);
     checkpoints = (0, checkpoints_1.activateCheckpoints)(context, () => sidecar);
     apply = (0, apply_1.activateApply)(context, () => sidecar);
+    // Phase 17a — opt-in event-triggered Janitor rules. The watcher
+    // consults `.eri/janitor.json` and fires the configured slash
+    // commands on matching save events. Disabled unless the user flips
+    // `eri.background.rulesEnabled`.
+    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (workspaceRoot) {
+        context.subscriptions.push((0, janitorRulesWatcher_1.activateJanitorRulesWatcher)(context, {
+            workspaceRoot,
+            getSidecar: () => sidecar,
+        }));
+    }
+    // Phase 23 — onboarding modal. Fires on first sign-in via the
+    // session listener below; can also be run manually via the command
+    // palette ("eri: Run onboarding").
+    context.subscriptions.push(vscode.commands.registerCommand("eri.onboarding.run", async () => {
+        const { runOnboarding } = await Promise.resolve().then(() => require("./onboarding/buildStyleQuestions"));
+        const result = await runOnboarding();
+        if (!result)
+            return;
+        vscode.window.showInformationMessage(`eri — preferences written to ${result.preferencesPath}.`);
+        if (result.themeSuggestion) {
+            await vscode.commands.executeCommand("eri.themes.setActive", { slug: result.themeSuggestion });
+        }
+    }));
+    // First-time fire — flips a globalState flag so we never prompt twice.
+    context.subscriptions.push(account.store.onChange((session) => {
+        if (!session)
+            return;
+        const flag = "eri.onboarding.completedV1";
+        if (context.globalState.get(flag))
+            return;
+        void context.globalState.update(flag, true);
+        void vscode.commands.executeCommand("eri.onboarding.run");
+    }));
+    // Phase 21b — `/document <path-or-url>` command. Reads a local file
+    // or downloads an HTTP target, extracts text (PDFs get heuristic
+    // parsing; everything else is read as UTF-8), opens a paginated
+    // markdown summary the user can chat against.
+    context.subscriptions.push(vscode.commands.registerCommand("eri.document.run", async (args) => {
+        const target = args?.target ??
+            (await vscode.window.showInputBox({
+                prompt: "/document — paste a file path or URL",
+                placeHolder: "./paper.pdf or https://arxiv.org/abs/...",
+                ignoreFocusOut: true,
+            }));
+        if (!target)
+            return;
+        try {
+            const { runDocument, showDocumentResult } = await Promise.resolve().then(() => require("./document"));
+            const result = await vscode.window.withProgress({
+                location: vscode.ProgressLocation.Notification,
+                title: `eri /document — extracting ${target}…`,
+                cancellable: false,
+            }, () => runDocument({ target }));
+            await showDocumentResult(result);
+        }
+        catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            vscode.window.showErrorMessage(`eri /document failed: ${msg}`);
+        }
+    }));
+    // Phase 21a — `/tracer <github-url> <query>` command. Clones a
+    // remote repo into ~/.eri/sandboxes/<sha>/, indexes it, runs a
+    // search, opens the markdown report. Tear-down happens when the
+    // user dismisses the result document.
+    context.subscriptions.push(vscode.commands.registerCommand("eri.tracer.run", async (args) => {
+        const sc = sidecar;
+        if (!sc) {
+            vscode.window.showWarningMessage("eri /tracer — sidecar not running.");
+            return;
+        }
+        const { runTracer, showTracerResultDocument, parseTracerArgs } = await Promise.resolve().then(() => require("./tracer"));
+        let url = args?.url;
+        let query = args?.query;
+        if (!url || !query) {
+            const free = await vscode.window.showInputBox({
+                prompt: "/tracer — paste `<github-url> <query>`",
+                placeHolder: "https://github.com/anthropics/anthropic-sdk-python how does streaming work?",
+                ignoreFocusOut: true,
+            });
+            if (!free)
+                return;
+            const parsed = parseTracerArgs(free);
+            if (!parsed) {
+                vscode.window.showWarningMessage("Provide both a URL and a query.");
+                return;
+            }
+            url = parsed.url;
+            query = parsed.query;
+        }
+        try {
+            const result = await vscode.window.withProgress({
+                location: vscode.ProgressLocation.Notification,
+                title: `eri /tracer — cloning + indexing ${url}…`,
+                cancellable: false,
+            }, () => runTracer({ url: url, query: query, sidecar: sc }));
+            await showTracerResultDocument(result);
+        }
+        catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            vscode.window.showErrorMessage(`eri /tracer failed: ${msg}`);
+        }
+    }));
     // Auto-open the Swift preview window whenever an iteration applies an
     // `index.html` build. Gated by `eri.preview.autoOpenOnBuild`. The hook
     // looks at the apply orchestrator's `committed` event, which is the only
@@ -164,7 +282,7 @@ function activate(context) {
     settingsHub = (0, settingsHub_1.activateSettingsHub)(context);
     codemaps = (0, codemaps_1.activateCodemaps)(context, () => sidecar);
     graph = (0, graph_1.activateGraph)(context, () => sidecar);
-    terminalVoiceGaze = (0, terminals_1.activateTerminalVoiceGaze)(context, () => sidecar);
+    terminalVoiceGaze = (0, terminals_1.activateTerminalVoiceGaze)(context, () => sidecar, async (transcript) => (0, intentDispatcher_1.tryDispatchViewIntent)(transcript, { previewCoordinator, getSidecar: () => sidecar }));
     review = (0, review_1.activateReview)(context, () => sidecar);
     mcpPresets = (0, mcpPresets_1.activateMcpPresets)(context);
     hooks = (0, hooks_1.activateHooks)(context, () => sidecar);
@@ -215,10 +333,37 @@ function activate(context) {
         vscode.commands.executeCommand("workbench.view.extension.eri-activitybar").then(() => vscode.commands.executeCommand("eri.panel.focus"), () => undefined);
     }), vscode.commands.registerCommand("eri.openComposer", () => {
         composer?.open();
-    }), vscode.commands.registerCommand("eri.openAgentLayout", () => {
+    }), vscode.commands.registerCommand("eri.openAgentLayout", async () => {
+        // Cmd+E entrypoint — historically a stub. Now flips between coder
+        // and eri mode via LayoutManager; the panel keeps its previous
+        // notification for the inline UI affordance.
         panelProvider?.postToWebview({ method: "eri/ui/agentLayout", params: {} });
-    }), vscode.commands.registerCommand("eri.modeMenu", () => {
+        const next = layoutManager.current().mode === "coder" ? "eri" : "coder";
+        await layoutManager.setMode(next);
+    }), vscode.commands.registerCommand("eri.modeMenu", async () => {
         panelProvider?.postToWebview({ method: "eri/ui/modeMenu", params: {} });
+        const pick = await vscode.window.showQuickPick([
+            { label: "$(layout) Coder mode", value: "coder" },
+            { label: "$(sparkle) eri mode", value: "eri" },
+        ], { placeHolder: "Switch layout mode" });
+        if (pick)
+            await layoutManager.setMode(pick.value);
+    }), vscode.commands.registerCommand("eri.layout.toggleMode", async () => {
+        const next = layoutManager.current().mode === "coder" ? "eri" : "coder";
+        await layoutManager.setMode(next);
+    }), vscode.commands.registerCommand("eri.layout.setChatPosition", async (pos) => {
+        const value = pos
+            ?? (await vscode.window.showQuickPick([
+                { label: "Left", value: "left" },
+                { label: "Right", value: "right" },
+                { label: "Bottom", value: "bottom" },
+            ], { placeHolder: "Where should the eri chat panel dock?" }))?.value;
+        if (value === "left" || value === "right" || value === "bottom") {
+            await layoutManager.setChatPosition(value);
+        }
+    }), vscode.commands.registerCommand("eri.layout.openSettings", async () => {
+        await vscode.commands.executeCommand("workbench.view.extension.eri-activitybar");
+        await vscode.commands.executeCommand("eri.layoutSettings.focus");
     }), vscode.commands.registerCommand("eri.cycleModel", () => {
         sidecar?.notify("eri/model/cycle", {});
     }), vscode.commands.registerCommand("eri.acceptIteration", () => {

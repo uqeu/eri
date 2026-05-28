@@ -22,7 +22,19 @@ function activateAccountStatusBar(context) {
     context.subscriptions.push(item);
     let session = null;
     let usage = null;
+    let rateLimit = null;
+    let rateLimitTimer;
     const render = () => {
+        // Rate-limit badge always wins — the user needs to see why their
+        // last call bounced even when signed-in + within monthly budget.
+        if (rateLimit) {
+            item.text = `$(watch) eri · rate-limited · ${formatResetClock(rateLimit.resetAt)}`;
+            item.tooltip = `Hit ${rateLimit.window} cap. Resets ${formatResetTime(rateLimit.resetAt)}.\nTerminal and Mercury still work.`;
+            item.color = ACCENT_BAD;
+            item.command = SHOW_STATUS_COMMAND;
+            item.show();
+            return;
+        }
         if (!session) {
             item.text = "$(sparkle) eri · sign in to use";
             item.tooltip = "Sign in to eri to enable hosted models.";
@@ -48,6 +60,12 @@ function activateAccountStatusBar(context) {
         item.command = SHOW_STATUS_COMMAND;
         item.show();
     };
+    const clearRateLimitTimer = () => {
+        if (rateLimitTimer) {
+            clearTimeout(rateLimitTimer);
+            rateLimitTimer = undefined;
+        }
+    };
     render();
     return {
         setSession(next) {
@@ -58,10 +76,55 @@ function activateAccountStatusBar(context) {
             usage = next;
             render();
         },
+        setRateLimit(next) {
+            clearRateLimitTimer();
+            rateLimit = next;
+            if (next) {
+                const target = Date.parse(next.resetAt);
+                if (Number.isFinite(target)) {
+                    const delay = Math.max(1_000, target - Date.now());
+                    // Refresh clock label every 30s + clear when reset passes.
+                    rateLimitTimer = setTimeout(() => {
+                        rateLimit = null;
+                        render();
+                    }, delay);
+                }
+            }
+            render();
+        },
         dispose() {
+            clearRateLimitTimer();
             item.dispose();
         },
     };
+}
+function formatResetClock(iso) {
+    const target = Date.parse(iso);
+    if (!Number.isFinite(target))
+        return "soon";
+    const deltaMs = target - Date.now();
+    if (deltaMs <= 0)
+        return "now";
+    const totalSec = Math.ceil(deltaMs / 1000);
+    if (totalSec < 60)
+        return `${totalSec}s`;
+    const min = Math.ceil(totalSec / 60);
+    if (min < 60)
+        return `${min}m`;
+    const hr = Math.floor(min / 60);
+    const remMin = min % 60;
+    return remMin > 0 ? `${hr}h${remMin}m` : `${hr}h`;
+}
+function formatResetTime(iso) {
+    const target = Date.parse(iso);
+    if (!Number.isFinite(target))
+        return "soon";
+    const d = new Date(target);
+    // 4:42pm-style local time.
+    return d.toLocaleTimeString(undefined, {
+        hour: "numeric",
+        minute: "2-digit",
+    });
 }
 function buildSignedInTooltip(session, usage) {
     const md = new vscode.MarkdownString("", true);

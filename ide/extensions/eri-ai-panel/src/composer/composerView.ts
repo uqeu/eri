@@ -68,7 +68,10 @@ export class ComposerView {
     );
 
     const model = this.readDefaultModel();
-    this.panel.webview.html = renderComposerHtml(model);
+    const themeSlug = vscode.workspace
+      .getConfiguration("eri.layout")
+      .get<string>("themeSlug", "anthropic");
+    this.panel.webview.html = renderComposerHtml(model, themeSlug);
     this.panel.webview.onDidReceiveMessage((message) =>
       this.handleWebviewMessage(message),
     );

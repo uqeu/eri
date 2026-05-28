@@ -42,6 +42,10 @@ import { activateJanitorRulesWatcher } from "./background/janitorRulesWatcher";
 import { activateShip, ShipHandle } from "./ship";
 import { activateSlashRegistry, SlashRegistryHandle } from "./slash/registry";
 import { activateSnippets, SnippetsHandle } from "./snippets";
+import { LayoutManager, applyModeSideEffects } from "./layout/layoutManager";
+import { LAYOUT_VIEW_ID, LayoutSettingsViewProvider } from "./layout/layoutSettingsView";
+import { createPreviewSurfaceCoordinator, PreviewSurfaceCoordinator } from "./preview/surfaceCoordinator";
+import { tryDispatchViewIntent } from "./terminals/intentDispatcher";
 
 export { getCurrentTarget as getCurrentGazeTarget, getEditorGazeContext } from "./gaze/gaze";
 
@@ -119,6 +123,26 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   preview = activatePreview(context, () => sidecar);
+
+  // Layout manager owns mode + chat position + preview surface choice;
+  // the preview surface coordinator routes preview lifecycle between the
+  // Swift window (coder mode) and the embedded WebviewPanel (eri mode).
+  const layoutManager = new LayoutManager();
+  context.subscriptions.push({ dispose: () => layoutManager.dispose() });
+  const previewCoordinator: PreviewSurfaceCoordinator = createPreviewSurfaceCoordinator(
+    context,
+    preview,
+    layoutManager,
+  );
+  const layoutSettingsView = new LayoutSettingsViewProvider(layoutManager);
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(LAYOUT_VIEW_ID, layoutSettingsView),
+    { dispose: () => layoutSettingsView.dispose() },
+  );
+  // Mode-flip side effects (explorer visibility etc.) are best-effort.
+  context.subscriptions.push(
+    layoutManager.onChange((state) => void applyModeSideEffects(state)),
+  );
 
   // Activate tier client right after sidecar starts so the very first
   // setContext + sidecar handshake reflects the user's real tier.
@@ -317,7 +341,9 @@ export function activate(context: vscode.ExtensionContext): void {
   settingsHub = activateSettingsHub(context);
   codemaps = activateCodemaps(context, () => sidecar);
   graph = activateGraph(context, () => sidecar);
-  terminalVoiceGaze = activateTerminalVoiceGaze(context, () => sidecar);
+  terminalVoiceGaze = activateTerminalVoiceGaze(context, () => sidecar, async (transcript) =>
+    tryDispatchViewIntent(transcript, { previewCoordinator, getSidecar: () => sidecar }),
+  );
   review = activateReview(context, () => sidecar);
   mcpPresets = activateMcpPresets(context);
   hooks = activateHooks(context, () => sidecar);
@@ -390,11 +416,50 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("eri.openComposer", () => {
       composer?.open();
     }),
-    vscode.commands.registerCommand("eri.openAgentLayout", () => {
+    vscode.commands.registerCommand("eri.openAgentLayout", async () => {
+      // Cmd+E entrypoint — historically a stub. Now flips between coder
+      // and eri mode via LayoutManager; the panel keeps its previous
+      // notification for the inline UI affordance.
       panelProvider?.postToWebview({ method: "eri/ui/agentLayout", params: {} });
+      const next = layoutManager.current().mode === "coder" ? "eri" : "coder";
+      await layoutManager.setMode(next);
     }),
-    vscode.commands.registerCommand("eri.modeMenu", () => {
+    vscode.commands.registerCommand("eri.modeMenu", async () => {
       panelProvider?.postToWebview({ method: "eri/ui/modeMenu", params: {} });
+      const pick = await vscode.window.showQuickPick(
+        [
+          { label: "$(layout) Coder mode",  value: "coder" as const },
+          { label: "$(sparkle) eri mode",    value: "eri" as const   },
+        ],
+        { placeHolder: "Switch layout mode" },
+      );
+      if (pick) await layoutManager.setMode(pick.value);
+    }),
+    vscode.commands.registerCommand("eri.layout.toggleMode", async () => {
+      const next = layoutManager.current().mode === "coder" ? "eri" : "coder";
+      await layoutManager.setMode(next);
+    }),
+    vscode.commands.registerCommand("eri.layout.setChatPosition", async (pos?: string) => {
+      const value = pos
+        ?? (
+          await vscode.window.showQuickPick(
+            [
+              { label: "Left",   value: "left" as const   },
+              { label: "Right",  value: "right" as const  },
+              { label: "Bottom", value: "bottom" as const },
+            ],
+            { placeHolder: "Where should the eri chat panel dock?" },
+          )
+        )?.value;
+      if (value === "left" || value === "right" || value === "bottom") {
+        await layoutManager.setChatPosition(value);
+      }
+    }),
+    vscode.commands.registerCommand("eri.layout.openSettings", async () => {
+      await vscode.commands.executeCommand(
+        "workbench.view.extension.eri-activitybar",
+      );
+      await vscode.commands.executeCommand("eri.layoutSettings.focus");
     }),
     vscode.commands.registerCommand("eri.cycleModel", () => {
       sidecar?.notify("eri/model/cycle", {});

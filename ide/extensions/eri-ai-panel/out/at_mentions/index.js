@@ -68,7 +68,7 @@ function activateAtMentions(context, getSidecar) {
     // Per-kind shortcuts so the existing keybindings + command palette entries
     // keep working. We dispatch through the same picker so the chip flow is
     // identical.
-    vscode.commands.registerCommand("eri.mentions.openPicker", () => pickAndDispatch(undefined)), vscode.commands.registerCommand("eri.mentions.pickFile", () => pickAndDispatch("file")), vscode.commands.registerCommand("eri.mentions.pickFolder", () => pickAndDispatch("folder")), vscode.commands.registerCommand("eri.mentions.pickSymbol", () => pickAndDispatch("code")), vscode.commands.registerCommand("eri.mentions.pickWeb", () => pickAndDispatch("web")), vscode.commands.registerCommand("eri.mentions.pickDocs", () => pickAndDispatch("docs")), vscode.commands.registerCommand("eri.mentions.pickCodebase", () => pickAndDispatch("codebase")), vscode.commands.registerCommand("eri.mentions.pickGit", () => pickAndDispatch("git")), vscode.commands.registerCommand("eri.mentions.pickPastChats", () => pickAndDispatch("pastChats")), vscode.commands.registerCommand("eri.mentions.pickRecentChanges", () => pickAndDispatch("recentChanges")), vscode.commands.registerCommand("eri.mentions.pickLinterErrors", () => pickAndDispatch("linterErrors")), vscode.commands.registerCommand("eri.mentions.pickDefinitions", () => pickAndDispatch("definitions")), { dispose: () => settings.dispose() });
+    vscode.commands.registerCommand("eri.mentions.openPicker", () => pickAndDispatch(undefined)), vscode.commands.registerCommand("eri.mentions.pickFile", () => pickAndDispatch("file")), vscode.commands.registerCommand("eri.mentions.pickFolder", () => pickAndDispatch("folder")), vscode.commands.registerCommand("eri.mentions.pickSymbol", () => pickAndDispatch("code")), vscode.commands.registerCommand("eri.mentions.pickWeb", () => pickAndDispatch("web")), vscode.commands.registerCommand("eri.mentions.pickDocs", () => pickAndDispatch("docs")), vscode.commands.registerCommand("eri.mentions.pickCodebase", () => pickAndDispatch("codebase")), vscode.commands.registerCommand("eri.mentions.pickGit", () => pickAndDispatch("git")), vscode.commands.registerCommand("eri.mentions.pickPastChats", () => pickAndDispatch("pastChats")), vscode.commands.registerCommand("eri.mentions.pickRecentChanges", () => pickAndDispatch("recentChanges")), vscode.commands.registerCommand("eri.mentions.pickLinterErrors", () => pickAndDispatch("linterErrors")), vscode.commands.registerCommand("eri.mentions.pickDefinitions", () => pickAndDispatch("definitions")), vscode.commands.registerCommand("eri.mentions.pickImage", () => pickAndDispatch("image")), { dispose: () => settings.dispose() });
     return {
         pick: (kind) => pickAndDispatch(kind),
         assemble: async (chips, userPrompt) => {
@@ -113,6 +113,7 @@ function renderInlineToken(chip) {
         case "linterErrors": return "@LinterErrors";
         case "definitions": return `@Definitions ${chip.label}`;
         case "codemap": return `@Codemap ${chip.label}`;
+        case "image": return `@Image ${chip.label}`;
         default: return "@Mention";
     }
 }

@@ -2,6 +2,8 @@
 // counts) is rendered through textContent / createElement in the inline
 // script — never via innerHTML — so untrusted strings from the sidecar
 // cannot inject markup.
+import { eriThemeCss, resolveTheme } from "../theme/eriTheme";
+
 function modelDisplayLabel(modelId: string): string {
   // Map wire-format model IDs to user-visible labels. The diffusion engine
   // family is surfaced as "eri Engine" since we do not market the underlying
@@ -18,8 +20,9 @@ function modelDisplayLabel(modelId: string): string {
   }
 }
 
-export function renderComposerHtml(initialModel: string): string {
+export function renderComposerHtml(initialModel: string, themeSlug: string = "anthropic"): string {
   const safeModel = modelDisplayLabel(String(initialModel)).replace(/[<>&"']/g, "");
+  const sharedCss = eriThemeCss({ theme: resolveTheme(themeSlug) });
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -27,15 +30,15 @@ export function renderComposerHtml(initialModel: string): string {
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
 <title>eri composer</title>
 <style>
+${sharedCss}
   :root {
-    color-scheme: dark;
-    --bg: #181818;
-    --fg: #d6d6dd;
-    --muted: #8b8b96;
-    --border: #292929;
+    /* Back-compat shims pointing at canonical --eri-* tokens above. */
+    --bg: var(--eri-bg);
+    --fg: var(--eri-text);
+    --muted: var(--eri-text-muted);
+    --border: var(--eri-border);
     --accent: #228df2;
-    --eri-accent: #e0ff4f;
-    --card: #212121;
+    --card: var(--eri-bg-card);
     --added: #3fb950;
     --removed: #f85149;
   }
