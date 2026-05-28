@@ -42,6 +42,8 @@ const layoutManager_1 = require("./layout/layoutManager");
 const layoutSettingsView_1 = require("./layout/layoutSettingsView");
 const surfaceCoordinator_1 = require("./preview/surfaceCoordinator");
 const intentDispatcher_1 = require("./terminals/intentDispatcher");
+const themeHub_1 = require("./theme/themeHub");
+const phase25_1 = require("./onboarding/phase25");
 var gaze_2 = require("./gaze/gaze");
 Object.defineProperty(exports, "getCurrentGazeTarget", { enumerable: true, get: function () { return gaze_2.getCurrentTarget; } });
 Object.defineProperty(exports, "getEditorGazeContext", { enumerable: true, get: function () { return gaze_2.getEditorGazeContext; } });
@@ -118,8 +120,22 @@ function activate(context) {
     const previewCoordinator = (0, surfaceCoordinator_1.createPreviewSurfaceCoordinator)(context, preview, layoutManager);
     const layoutSettingsView = new layoutSettingsView_1.LayoutSettingsViewProvider(layoutManager);
     context.subscriptions.push(vscode.window.registerWebviewViewProvider(layoutSettingsView_1.LAYOUT_VIEW_ID, layoutSettingsView), { dispose: () => layoutSettingsView.dispose() });
-    // Mode-flip side effects (explorer visibility etc.) are best-effort.
-    context.subscriptions.push(layoutManager.onChange((state) => void (0, layoutManager_1.applyModeSideEffects)(state)));
+    (0, themeHub_1.registerThemeHub)(context, () => sidecar);
+    (0, phase25_1.activatePhase25Onboarding)(context);
+    // When the preview auto-open path (FS watcher / dev-server detect) fires
+    // a `shouldOpen` URL, route it through the surface coordinator so
+    // eri-mode opens the embedded WebviewPanel rather than the Swift window.
+    context.subscriptions.push(preview.onShouldOpen((url) => void previewCoordinator.open(url)));
+    // Mode-flip + chat-position side effects (explorer visibility, sidebar
+    // location, bottom-panel relocation) are best-effort.
+    let lastChatPosition = layoutManager.current().chatPosition;
+    context.subscriptions.push(layoutManager.onChange((state) => {
+        void (0, layoutManager_1.applyModeSideEffects)(state);
+        if (state.chatPosition !== lastChatPosition) {
+            lastChatPosition = state.chatPosition;
+            void (0, layoutManager_1.applyChatPosition)(state.chatPosition);
+        }
+    }));
     // Activate tier client right after sidecar starts so the very first
     // setContext + sidecar handshake reflects the user's real tier.
     tierClient = (0, tierClient_1.activateTierClient)(context, () => sidecar);
@@ -282,7 +298,11 @@ function activate(context) {
     settingsHub = (0, settingsHub_1.activateSettingsHub)(context);
     codemaps = (0, codemaps_1.activateCodemaps)(context, () => sidecar);
     graph = (0, graph_1.activateGraph)(context, () => sidecar);
-    terminalVoiceGaze = (0, terminals_1.activateTerminalVoiceGaze)(context, () => sidecar, async (transcript) => (0, intentDispatcher_1.tryDispatchViewIntent)(transcript, { previewCoordinator, getSidecar: () => sidecar }));
+    terminalVoiceGaze = (0, terminals_1.activateTerminalVoiceGaze)(context, () => sidecar, async (transcript) => (0, intentDispatcher_1.tryDispatchViewIntent)(transcript, {
+        previewCoordinator,
+        getSidecar: () => sidecar,
+        layout: layoutManager,
+    }));
     review = (0, review_1.activateReview)(context, () => sidecar);
     mcpPresets = (0, mcpPresets_1.activateMcpPresets)(context);
     hooks = (0, hooks_1.activateHooks)(context, () => sidecar);

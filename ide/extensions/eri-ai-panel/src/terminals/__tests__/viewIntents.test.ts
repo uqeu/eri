@@ -107,6 +107,24 @@ function testTerminalShowRegressionGuard(): void {
   assert.equal(out.terminalId, "t1");
 }
 
+function testModeSwitchClassification(): void {
+  const cases: ReadonlyArray<{ transcript: string; target: "coder" | "eri" }> = [
+    { transcript: "switch to eri mode", target: "eri" },
+    { transcript: "go to coder mode", target: "coder" },
+    { transcript: "open eri mode", target: "eri" },
+    { transcript: "enter coding mode", target: "coder" },
+    { transcript: "flip to eri", target: "eri" },
+  ];
+  for (const c of cases) {
+    const intent = matchViewIntent(c.transcript);
+    assert.ok(intent, `expected mode match for "${c.transcript}"`);
+    assert.equal(intent.kind, "mode", `kind for "${c.transcript}"`);
+    if (intent.kind === "mode") {
+      assert.equal(intent.target, c.target, `target for "${c.transcript}"`);
+    }
+  }
+}
+
 function testNoMatchOnPlainChat(): void {
   // Things that should NOT trigger view intents — they're chat.
   const noise = [
@@ -136,5 +154,6 @@ function run(name: string, fn: () => void): void {
 run("zoom intents classify correctly", testZoomClassification);
 run("scroll intents classify correctly", testScrollClassification);
 run("navigate intents classify correctly", testNavigateClassification);
+run("mode switch intents classify correctly", testModeSwitchClassification);
 run("terminal 'show me the dev terminal' regression guard", testTerminalShowRegressionGuard);
 run("plain chat does not trigger view intents", testNoMatchOnPlainChat);

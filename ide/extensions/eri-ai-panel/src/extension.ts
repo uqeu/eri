@@ -42,10 +42,12 @@ import { activateJanitorRulesWatcher } from "./background/janitorRulesWatcher";
 import { activateShip, ShipHandle } from "./ship";
 import { activateSlashRegistry, SlashRegistryHandle } from "./slash/registry";
 import { activateSnippets, SnippetsHandle } from "./snippets";
-import { LayoutManager, applyModeSideEffects } from "./layout/layoutManager";
+import { LayoutManager, applyModeSideEffects, applyChatPosition } from "./layout/layoutManager";
 import { LAYOUT_VIEW_ID, LayoutSettingsViewProvider } from "./layout/layoutSettingsView";
 import { createPreviewSurfaceCoordinator, PreviewSurfaceCoordinator } from "./preview/surfaceCoordinator";
 import { tryDispatchViewIntent } from "./terminals/intentDispatcher";
+import { registerThemeHub } from "./theme/themeHub";
+import { activatePhase25Onboarding } from "./onboarding/phase25";
 
 export { getCurrentTarget as getCurrentGazeTarget, getEditorGazeContext } from "./gaze/gaze";
 
@@ -139,9 +141,26 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.registerWebviewViewProvider(LAYOUT_VIEW_ID, layoutSettingsView),
     { dispose: () => layoutSettingsView.dispose() },
   );
-  // Mode-flip side effects (explorer visibility etc.) are best-effort.
+  registerThemeHub(context, () => sidecar);
+  activatePhase25Onboarding(context);
+
+  // When the preview auto-open path (FS watcher / dev-server detect) fires
+  // a `shouldOpen` URL, route it through the surface coordinator so
+  // eri-mode opens the embedded WebviewPanel rather than the Swift window.
   context.subscriptions.push(
-    layoutManager.onChange((state) => void applyModeSideEffects(state)),
+    preview.onShouldOpen((url) => void previewCoordinator.open(url)),
+  );
+  // Mode-flip + chat-position side effects (explorer visibility, sidebar
+  // location, bottom-panel relocation) are best-effort.
+  let lastChatPosition = layoutManager.current().chatPosition;
+  context.subscriptions.push(
+    layoutManager.onChange((state) => {
+      void applyModeSideEffects(state);
+      if (state.chatPosition !== lastChatPosition) {
+        lastChatPosition = state.chatPosition;
+        void applyChatPosition(state.chatPosition);
+      }
+    }),
   );
 
   // Activate tier client right after sidecar starts so the very first
@@ -342,7 +361,11 @@ export function activate(context: vscode.ExtensionContext): void {
   codemaps = activateCodemaps(context, () => sidecar);
   graph = activateGraph(context, () => sidecar);
   terminalVoiceGaze = activateTerminalVoiceGaze(context, () => sidecar, async (transcript) =>
-    tryDispatchViewIntent(transcript, { previewCoordinator, getSidecar: () => sidecar }),
+    tryDispatchViewIntent(transcript, {
+      previewCoordinator,
+      getSidecar: () => sidecar,
+      layout: layoutManager,
+    }),
   );
   review = activateReview(context, () => sidecar);
   mcpPresets = activateMcpPresets(context);

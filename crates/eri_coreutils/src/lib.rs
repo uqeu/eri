@@ -663,6 +663,8 @@ async fn dispatch_inner(
         "eri/preview/reload" => services::preview::reload(request.params.clone(), services).await,
         "eri/preview/load" => services::preview::load(request.params.clone(), services).await,
         "eri/preview/gaze" => services::preview::gaze(request.params.clone(), services).await,
+        "eri/preview/zoom" => services::preview::zoom(request.params.clone(), services).await,
+        "eri/preview/scroll" => services::preview::scroll(request.params.clone(), services).await,
         "eri/preview/status" => services::preview::status(request.params.clone(), services).await,
         "eri/preview/loadHtml" => {
             services::preview::load_html(request.params.clone(), services).await

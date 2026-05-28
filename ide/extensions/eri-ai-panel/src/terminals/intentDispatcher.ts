@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { LayoutManager } from "../layout/layoutManager";
 import { PreviewSurfaceCoordinator } from "../preview/surfaceCoordinator";
 import { Sidecar } from "../sidecar";
 import { matchViewIntent, ViewIntent, NavigateIntent } from "./viewIntents";
@@ -6,6 +7,7 @@ import { matchViewIntent, ViewIntent, NavigateIntent } from "./viewIntents";
 export interface ViewIntentDispatcherDeps {
   readonly previewCoordinator: PreviewSurfaceCoordinator | null;
   readonly getSidecar: () => Sidecar | null;
+  readonly layout?: LayoutManager | null;
 }
 
 /**
@@ -36,6 +38,11 @@ export async function tryDispatchViewIntent(
       return true;
     case "navigate":
       await handleNavigate(intent, deps);
+      return true;
+    case "mode":
+      if (deps.layout) {
+        await deps.layout.setMode(intent.target);
+      }
       return true;
   }
 }

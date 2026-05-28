@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.LayoutManager = void 0;
 exports.applyModeSideEffects = applyModeSideEffects;
+exports.applyChatPosition = applyChatPosition;
 const vscode = require("vscode");
 const layoutState_1 = require("./layoutState");
 const CONFIG_SECTION = "eri.layout";
@@ -109,6 +110,49 @@ async function applyModeSideEffects(state) {
             // Show the activity bar + sidebar back so the user lands on their
             // explorer (or whichever view they had open before flipping).
             await vscode.commands.executeCommand("workbench.action.focusActiveEditorGroup");
+        }
+    }
+    catch {
+        /* best-effort */
+    }
+}
+/**
+ * Move the eri Chat view to match the user's chatPosition setting.
+ * VS Code doesn't have a stable public API to swap a view between
+ * containers, so we fall back to the layered approach:
+ *   - left / right: flip the sidebar's side via the workbench command
+ *     (the eri activity-bar view follows it automatically)
+ *   - bottom: try the (internal but widely used) moveView command to
+ *     drop the eri panel into the bottom panel area; on failure, surface
+ *     a one-shot tip so the user can drag it themselves
+ *
+ * Wired from a LayoutManager.onChange listener so the setting actually
+ * moves the chat panel today instead of being a no-op preference.
+ */
+async function applyChatPosition(position) {
+    try {
+        if (position === "left" || position === "right") {
+            // Read the current sidebar side from the workbench config and
+            // toggle only when it doesn't match. Avoids flicker when the user
+            // re-picks the same value.
+            const cfg = vscode.workspace.getConfiguration("workbench");
+            const current = cfg.get("sideBar.location", "left");
+            if (current !== position) {
+                await vscode.commands.executeCommand("workbench.action.toggleSidebarPosition");
+            }
+            // Focus the eri activity bar so the user sees the result.
+            await vscode.commands.executeCommand("workbench.view.extension.eri-activitybar");
+            return;
+        }
+        // Bottom: move the eri Chat view ("eri.panel") to the bottom panel.
+        try {
+            await vscode.commands.executeCommand("vscode.moveViews", {
+                viewIds: ["eri.panel"],
+                destinationId: "workbench.view.panel",
+            });
+        }
+        catch {
+            void vscode.window.showInformationMessage("eri: drag the Chat panel into the bottom panel to dock it there. eri remembered your choice.");
         }
     }
     catch {

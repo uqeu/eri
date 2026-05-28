@@ -35,6 +35,10 @@ function matchViewIntent(rawTranscript) {
     if (raw.length === 0)
         return null;
     const transcript = raw.toLowerCase();
+    // Mode switch first — these phrases shouldn't be parsed as navigate or zoom.
+    const mode = tryParseMode(transcript);
+    if (mode)
+        return mode;
     const magnitude = detectMagnitude(transcript);
     if (matchesAny(transcript, ZOOM_TRIGGERS) || transcript.startsWith("make it bigger") || transcript.startsWith("make it smaller")) {
         const direction = detectZoomDirection(transcript);
@@ -123,5 +127,19 @@ function stripTrailingPunctuation(s) {
  */
 function looksLikeViewIntent(rawTranscript) {
     return matchViewIntent(rawTranscript) !== null;
+}
+const MODE_SWITCH_PATTERNS = [
+    { pattern: /\b(?:switch to|go to|enter|open|flip to)\s+eri(?:\s+mode)?\b/i, target: "eri" },
+    { pattern: /\b(?:switch to|go to|enter|open|flip to)\s+(?:coder|code|coding)(?:\s+mode)?\b/i, target: "coder" },
+    { pattern: /\beri\s+mode\b/i, target: "eri" },
+    { pattern: /\bcoder\s+mode\b/i, target: "coder" },
+];
+function tryParseMode(transcript) {
+    for (const entry of MODE_SWITCH_PATTERNS) {
+        if (entry.pattern.test(transcript)) {
+            return { kind: "mode", target: entry.target };
+        }
+    }
+    return null;
 }
 //# sourceMappingURL=viewIntents.js.map

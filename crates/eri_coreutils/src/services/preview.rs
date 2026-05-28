@@ -176,6 +176,53 @@ pub async fn gaze(params: Value, _services: &Services) -> Result<Value, Dispatch
     Ok(json!({ "ok": true }))
 }
 
+/// `eri/preview/zoom` — relay a voice "zoom in/out" intent to the Swift
+/// preview window. The Swift side decides the actual step size; we only
+/// forward direction + magnitude. Silently no-ops when the preview isn't
+/// connected so the voice path never throws on a missed message.
+pub async fn zoom(params: Value, _services: &Services) -> Result<Value, DispatchError> {
+    let parsed: ZoomParams =
+        serde_json::from_value(params).map_err(|e| DispatchError::BadParams(e.to_string()))?;
+    let _ = send_message(&json!({
+        "type": "zoom",
+        "direction": parsed.direction,
+        "magnitude": parsed.magnitude,
+    }))
+    .await;
+    Ok(json!({ "ok": true }))
+}
+
+/// `eri/preview/scroll` — relay a voice "scroll up/down/left/right" intent
+/// to the Swift preview window. Same shape + best-effort semantics as
+/// `zoom` above.
+pub async fn scroll(params: Value, _services: &Services) -> Result<Value, DispatchError> {
+    let parsed: ScrollParams =
+        serde_json::from_value(params).map_err(|e| DispatchError::BadParams(e.to_string()))?;
+    let _ = send_message(&json!({
+        "type": "scroll",
+        "direction": parsed.direction,
+        "magnitude": parsed.magnitude,
+    }))
+    .await;
+    Ok(json!({ "ok": true }))
+}
+
+#[derive(Debug, Deserialize)]
+struct ZoomParams {
+    /// `"in"` or `"out"`.
+    direction: String,
+    /// `"small"` (one step) or `"big"` (multiple steps).
+    magnitude: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ScrollParams {
+    /// `"up"` / `"down"` / `"left"` / `"right"`.
+    direction: String,
+    /// `"small"` (≈1/5 viewport) or `"big"` (≈1 viewport).
+    magnitude: String,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct LoadHtmlParams {

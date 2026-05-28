@@ -30,6 +30,11 @@ async function tryDispatchViewIntent(transcript, deps) {
         case "navigate":
             await handleNavigate(intent, deps);
             return true;
+        case "mode":
+            if (deps.layout) {
+                await deps.layout.setMode(intent.target);
+            }
+            return true;
     }
 }
 async function handleZoom(direction, magnitude, deps) {

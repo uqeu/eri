@@ -5,9 +5,10 @@
 // transcripts like "show me the hero headline" that would otherwise be
 // swallowed by the FOCUS_VERBS list.
 
-export type ViewIntentKind = "zoom" | "scroll" | "navigate";
+export type ViewIntentKind = "zoom" | "scroll" | "navigate" | "mode";
 export type ScrollDirection = "up" | "down" | "left" | "right";
 export type Magnitude = "small" | "big";
+export type LayoutModeTarget = "coder" | "eri";
 
 export interface ZoomIntent {
   readonly kind: "zoom";
@@ -27,7 +28,12 @@ export interface NavigateIntent {
   readonly target: string;
 }
 
-export type ViewIntent = ZoomIntent | ScrollIntent | NavigateIntent;
+export interface ModeIntent {
+  readonly kind: "mode";
+  readonly target: LayoutModeTarget;
+}
+
+export type ViewIntent = ZoomIntent | ScrollIntent | NavigateIntent | ModeIntent;
 
 const ZOOM_TRIGGERS = ["zoom", "magnify", "shrink"];
 const SCROLL_TRIGGERS = ["scroll", "pan"];
@@ -59,6 +65,10 @@ export function matchViewIntent(rawTranscript: string): ViewIntent | null {
   const raw = (rawTranscript ?? "").trim();
   if (raw.length === 0) return null;
   const transcript = raw.toLowerCase();
+
+  // Mode switch first — these phrases shouldn't be parsed as navigate or zoom.
+  const mode = tryParseMode(transcript);
+  if (mode) return mode;
 
   const magnitude = detectMagnitude(transcript);
 
@@ -150,4 +160,20 @@ function stripTrailingPunctuation(s: string): string {
  */
 export function looksLikeViewIntent(rawTranscript: string): boolean {
   return matchViewIntent(rawTranscript) !== null;
+}
+
+const MODE_SWITCH_PATTERNS: ReadonlyArray<{ pattern: RegExp; target: LayoutModeTarget }> = [
+  { pattern: /\b(?:switch to|go to|enter|open|flip to)\s+eri(?:\s+mode)?\b/i, target: "eri"   },
+  { pattern: /\b(?:switch to|go to|enter|open|flip to)\s+(?:coder|code|coding)(?:\s+mode)?\b/i, target: "coder" },
+  { pattern: /\beri\s+mode\b/i,   target: "eri"   },
+  { pattern: /\bcoder\s+mode\b/i, target: "coder" },
+];
+
+function tryParseMode(transcript: string): ModeIntent | null {
+  for (const entry of MODE_SWITCH_PATTERNS) {
+    if (entry.pattern.test(transcript)) {
+      return { kind: "mode", target: entry.target };
+    }
+  }
+  return null;
 }
