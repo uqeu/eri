@@ -78,9 +78,14 @@ async function dirExists(p) {
 }
 function runGitClone(url, dest) {
     return new Promise((resolve, reject) => {
-        // spawn with an args array — no shell interpolation, so a crafted
-        // URL is passed as a single argv slot to git directly.
-        const child = (0, node_child_process_1.spawn)("git", ["clone", "--depth", "1", "--no-tags", url, dest], { stdio: "ignore" });
+        // Defense in depth against argv flag smuggling: reject any URL that
+        // begins with a dash, then pass `--` so git treats the URL as a
+        // positional argument even if it ever slips past the validator.
+        if (url.startsWith("-")) {
+            reject(new Error(`refusing to clone URL that starts with '-': ${url}`));
+            return;
+        }
+        const child = (0, node_child_process_1.spawn)("git", ["clone", "--depth", "1", "--no-tags", "--", url, dest], { stdio: "ignore" });
         child.on("error", (err) => reject(err));
         child.on("exit", (code) => {
             if (code === 0)

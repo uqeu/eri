@@ -31,11 +31,40 @@ function sandboxPathFor(url) {
 function sandboxRoot() {
     return SANDBOX_ROOT;
 }
+const ALLOWED_HTTPS_HOSTS = new Set([
+    "github.com",
+    "gitlab.com",
+    "codeberg.org",
+    "bitbucket.org",
+]);
 function looksLikeRepoUrl(url) {
-    return (/^https:\/\/(github|gitlab)\.com\//.test(url) ||
-        /^https:\/\/codeberg\.org\//.test(url) ||
-        /^https:\/\/bitbucket\.org\//.test(url) ||
-        /^git@github\.com:/.test(url));
+    if (typeof url !== "string" || url.length === 0)
+        return false;
+    // Anything that could be mistaken for a CLI flag is rejected outright
+    // so a malformed allowlist regex can never expose `git clone` to argv
+    // flag smuggling (e.g. `--upload-pack=...`).
+    if (url.startsWith("-"))
+        return false;
+    // SSH shorthand — only github is supported. The path component must
+    // start with an alphanumeric char so a malicious "git@github.com:--foo"
+    // can't sneak past on the SSH branch.
+    if (/^git@github\.com:[A-Za-z0-9_][A-Za-z0-9._/-]*$/.test(url))
+        return true;
+    // HTTPS — parse strictly with new URL() and check the exact hostname
+    // against an allowlist (not a substring match).
+    try {
+        const parsed = new URL(url);
+        if (parsed.protocol !== "https:")
+            return false;
+        if (!ALLOWED_HTTPS_HOSTS.has(parsed.hostname))
+            return false;
+        if (parsed.username !== "" || parsed.password !== "")
+            return false;
+        return parsed.pathname.length > 1;
+    }
+    catch {
+        return false;
+    }
 }
 function renderTracerMarkdown(result) {
     const lines = [];
