@@ -673,6 +673,11 @@ async fn dispatch_inner(
             services::preview::discover(request.params.clone(), services).await
         }
 
+        // --- Natural-language voice intent router ---
+        "eri/voice/route" => {
+            services::voice_route::route(request.params.clone(), services).await
+        }
+
         // --- Gaze sidecar (free tier; local-only, never leaves the machine) ---
         "eri/gaze/start" => services::gaze::start(request.params.clone(), services).await,
         "eri/gaze/stop" => services::gaze::stop(request.params.clone(), services).await,

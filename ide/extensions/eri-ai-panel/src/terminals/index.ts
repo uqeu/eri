@@ -47,6 +47,7 @@ export function activateTerminalVoiceGaze(
   context: vscode.ExtensionContext,
   getSidecar: () => Sidecar | null,
   tryDispatchView?: (transcript: string) => Promise<boolean>,
+  tryRouteWithLlm?: (transcript: string) => Promise<boolean>,
 ): TerminalVoiceGazeHandle {
   const gazeHandle = activateTerminalGaze(context);
 
@@ -58,6 +59,7 @@ export function activateTerminalVoiceGaze(
       attendedTerminalId: () => gazeHandle.attendedTerminalId(),
     },
     ...(tryDispatchView ? { tryDispatchView } : {}),
+    ...(tryRouteWithLlm ? { tryRouteWithLlm } : {}),
   });
 
   const handle: TerminalVoiceGazeHandle = {

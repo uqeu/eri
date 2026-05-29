@@ -42,6 +42,7 @@ const layoutManager_1 = require("./layout/layoutManager");
 const layoutSettingsView_1 = require("./layout/layoutSettingsView");
 const surfaceCoordinator_1 = require("./preview/surfaceCoordinator");
 const intentDispatcher_1 = require("./terminals/intentDispatcher");
+const voiceRouter_1 = require("./terminals/voiceRouter");
 const themeHub_1 = require("./theme/themeHub");
 const phase25_1 = require("./onboarding/phase25");
 var gaze_2 = require("./gaze/gaze");
@@ -302,6 +303,24 @@ function activate(context) {
         previewCoordinator,
         getSidecar: () => sidecar,
         layout: layoutManager,
+    }), async (transcript) => (0, voiceRouter_1.tryRouteVoiceTranscript)(transcript, {
+        getSidecar: () => sidecar,
+        snapshot: () => {
+            const layoutState = layoutManager.current();
+            return {
+                mode: layoutState.mode,
+                chatPosition: layoutState.chatPosition,
+                previewSurface: previewCoordinator.active(),
+                activeEditor: vscode.window.activeTextEditor?.document.uri.fsPath ?? null,
+                terminals: vscode.window.terminals.map((t) => ({ name: t.name })),
+            };
+        },
+        onChatReply: (reply) => {
+            panelProvider?.postToWebview({
+                method: "eri/voice/reply",
+                params: { text: reply },
+            });
+        },
     }));
     review = (0, review_1.activateReview)(context, () => sidecar);
     mcpPresets = (0, mcpPresets_1.activateMcpPresets)(context);

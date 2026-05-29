@@ -49,6 +49,14 @@ export interface VoiceWiringOptions {
    * matching happens for that transcript.
    */
   readonly tryDispatchView?: (transcript: string) => Promise<boolean>;
+  /**
+   * Optional LLM-backed fallback. Called when neither the view-intent
+   * matcher nor the terminal-intent matcher claimed the transcript.
+   * Returns true when the LLM router executed a command or surfaced a
+   * chat reply. Cheap one-shot via the agent layer — model picked by
+   * the active agent (Mercury / Sonnet / Haiku — all paths supported).
+   */
+  readonly tryRouteWithLlm?: (transcript: string) => Promise<boolean>;
   // Test hook — when set, replaces the real vscode terminal collection
   // and status-bar message side-effects.
   readonly testHooks?: VoiceTestHooks;
@@ -115,6 +123,17 @@ async function handleTranscript(
     gazeAttendedTerminalId: options.gaze?.attendedTerminalId(),
   });
   if (!match) {
+    // Last resort: hand the transcript to the LLM router. This is where
+    // natural-language "switch to coding mode, scroll the preview, open
+    // extension.ts" requests that don't match the local regexes get
+    // resolved — the agent layer's active model classifies them.
+    if (options.tryRouteWithLlm) {
+      try {
+        await options.tryRouteWithLlm(transcript);
+      } catch (err) {
+        console.error("voice LLM router threw:", err);
+      }
+    }
     return;
   }
   await dispatch(match, terminals, options);

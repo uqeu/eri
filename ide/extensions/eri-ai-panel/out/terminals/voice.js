@@ -56,6 +56,18 @@ async function handleTranscript(transcript, options) {
         gazeAttendedTerminalId: options.gaze?.attendedTerminalId(),
     });
     if (!match) {
+        // Last resort: hand the transcript to the LLM router. This is where
+        // natural-language "switch to coding mode, scroll the preview, open
+        // extension.ts" requests that don't match the local regexes get
+        // resolved — the agent layer's active model classifies them.
+        if (options.tryRouteWithLlm) {
+            try {
+                await options.tryRouteWithLlm(transcript);
+            }
+            catch (err) {
+                console.error("voice LLM router threw:", err);
+            }
+        }
         return;
     }
     await dispatch(match, terminals, options);

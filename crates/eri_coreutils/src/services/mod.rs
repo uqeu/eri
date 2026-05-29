@@ -47,6 +47,7 @@ pub mod skills;
 pub mod slash;
 pub mod tab;
 pub mod voice;
+pub mod voice_route;
 pub mod web_docs;
 
 /// Fire-and-forget notification sender supplied by the binary. Services use

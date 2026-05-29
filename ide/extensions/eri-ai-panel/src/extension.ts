@@ -46,6 +46,7 @@ import { LayoutManager, applyModeSideEffects, applyChatPosition } from "./layout
 import { LAYOUT_VIEW_ID, LayoutSettingsViewProvider } from "./layout/layoutSettingsView";
 import { createPreviewSurfaceCoordinator, PreviewSurfaceCoordinator } from "./preview/surfaceCoordinator";
 import { tryDispatchViewIntent } from "./terminals/intentDispatcher";
+import { tryRouteVoiceTranscript } from "./terminals/voiceRouter";
 import { registerThemeHub } from "./theme/themeHub";
 import { activatePhase25Onboarding } from "./onboarding/phase25";
 
@@ -360,12 +361,35 @@ export function activate(context: vscode.ExtensionContext): void {
   settingsHub = activateSettingsHub(context);
   codemaps = activateCodemaps(context, () => sidecar);
   graph = activateGraph(context, () => sidecar);
-  terminalVoiceGaze = activateTerminalVoiceGaze(context, () => sidecar, async (transcript) =>
-    tryDispatchViewIntent(transcript, {
-      previewCoordinator,
-      getSidecar: () => sidecar,
-      layout: layoutManager,
-    }),
+  terminalVoiceGaze = activateTerminalVoiceGaze(
+    context,
+    () => sidecar,
+    async (transcript) =>
+      tryDispatchViewIntent(transcript, {
+        previewCoordinator,
+        getSidecar: () => sidecar,
+        layout: layoutManager,
+      }),
+    async (transcript) =>
+      tryRouteVoiceTranscript(transcript, {
+        getSidecar: () => sidecar,
+        snapshot: () => {
+          const layoutState = layoutManager.current();
+          return {
+            mode: layoutState.mode,
+            chatPosition: layoutState.chatPosition,
+            previewSurface: previewCoordinator.active(),
+            activeEditor: vscode.window.activeTextEditor?.document.uri.fsPath ?? null,
+            terminals: vscode.window.terminals.map((t) => ({ name: t.name })),
+          };
+        },
+        onChatReply: (reply: string) => {
+          panelProvider?.postToWebview({
+            method: "eri/voice/reply",
+            params: { text: reply },
+          });
+        },
+      }),
   );
   review = activateReview(context, () => sidecar);
   mcpPresets = activateMcpPresets(context);

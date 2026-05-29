@@ -21,7 +21,7 @@ const treeProvider_1 = require("./treeProvider");
 const blocksView_1 = require("./blocksView");
 const commands_1 = require("./commands");
 const layouts_1 = require("./layouts");
-function activateTerminalVoiceGaze(context, getSidecar, tryDispatchView) {
+function activateTerminalVoiceGaze(context, getSidecar, tryDispatchView, tryRouteWithLlm) {
     const gazeHandle = (0, gaze_1.activateTerminalGaze)(context);
     const organization = activateTerminalsOrganization(context);
     const voiceHandle = (0, voice_1.activateTerminalVoice)(context, {
@@ -30,6 +30,7 @@ function activateTerminalVoiceGaze(context, getSidecar, tryDispatchView) {
             attendedTerminalId: () => gazeHandle.attendedTerminalId(),
         },
         ...(tryDispatchView ? { tryDispatchView } : {}),
+        ...(tryRouteWithLlm ? { tryRouteWithLlm } : {}),
     });
     const handle = {
         forward(notification) {
