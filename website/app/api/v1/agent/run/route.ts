@@ -293,7 +293,7 @@ async function callAnthropic(args: UpstreamCallArgs): Promise<{
     },
     body: JSON.stringify({
       model: args.model,
-      max_tokens: 4096,
+      max_tokens: 32000,
       stream: true,
       system: systemPrompt,
       messages: [{ role: "user", content: args.prompt }],
@@ -423,7 +423,12 @@ function personaSystem(
       lines.push("Produce a step-by-step plan in Markdown. Each step is concrete + verifiable.");
       break;
     case "ship":
-      lines.push("Produce a unified diff that lands the requested change. Include both code and tests.");
+      lines.push(
+        "Output ONE complete, self-contained HTML5 document and NOTHING else — no prose, no explanation, no markdown code fences, no tool calls. Begin at <!DOCTYPE html> and end at </html>.",
+        "Put ALL CSS in a single <style> in the <head> and ALL JS in one <script> before </body>. Reference NO external files (no styles.css, no external JS). System font stack unless a brand font via Google Fonts <link> is clearly warranted.",
+        "Use straight ASCII punctuation (', \", -, ...) — never smart quotes, em dashes, or special glyphs — and include <meta charset=\"utf-8\"> so encoding is never ambiguous.",
+        "Design bar = v0/Lovable quality: one accent color, a real type scale, generous spacing on a 4/8px grid, depth from subtle borders not heavy shadows, fully responsive (375px and 1440px), accessible (semantic tags, focus states, alt text, >=4.5:1 contrast), and REAL specific copy — never lorem ipsum or 'Feature 1/2/3'. It must render beautifully as a single file opened directly in a browser.",
+      );
       break;
     case "test":
       lines.push("Generate tests with assertions that fail meaningfully when broken.");
