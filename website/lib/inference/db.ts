@@ -453,19 +453,26 @@ export async function denyDeviceCodeGrant(userCode: string): Promise<void> {
 }
 
 /**
- * Atomically clear the pending plaintext after the IDE has retrieved it.
- * Single-use: a second poll after delivery sees pending_secret = NULL and
- * returns "approved" with no token (the IDE has already saved it).
+ * Return the pending plaintext for the polling client. Keyed on the SECRET
+ * device_code, which (post RFC 8628 split) only the originating client ever
+ * holds — it never appears in the browser, URL, or approve path. Because the
+ * holder is provably the device that started the flow, delivery is idempotent
+ * within the grant's lifetime: every poll after approval returns the same
+ * token until `expires_at`. This removes the single-delivery race where a
+ * duplicate/retried poll consumed the one-shot secret before the real client
+ * read it. `delivered_at` is stamped on first delivery for auditing; the
+ * plaintext is bounded by the 10-min grant TTL (the canonical token lives
+ * hashed in api_tokens).
  */
 export async function consumeDeviceCodeSecret(
   code: string,
 ): Promise<string | null> {
   const rows = await sql()<{ pending_secret: string | null }[]>`
     UPDATE device_code_grants
-    SET pending_secret = NULL,
-        delivered_at = COALESCE(delivered_at, now())
+    SET delivered_at = COALESCE(delivered_at, now())
     WHERE code = ${code}
       AND pending_secret IS NOT NULL
+      AND expires_at > now()
     RETURNING pending_secret
   `;
   const row = rows[0];
