@@ -172,7 +172,7 @@ async fn drive_loop(
     opts: &LoopOpts,
 ) -> Result<BuildOutcome> {
     let tools = tool_specs();
-    let system = builder_system_prompt();
+    let system = build_system(root);
     let mut files_written: Vec<PathBuf> = Vec::new();
     let mut tokens_in: u64 = 0;
     let mut tokens_out: u64 = 0;
@@ -184,12 +184,8 @@ async fn drive_loop(
             "model": model,
             "max_tokens": MAX_TOKENS,
             "stream": true,
-            // Breakpoint on the system block caches tools + system together.
-            "system": [{
-                "type": "text",
-                "text": system,
-                "cache_control": { "type": "ephemeral" }
-            }],
+            // Cached system blocks (persona + project context).
+            "system": system,
             "tools": tools,
             "messages": messages,
         });
@@ -760,6 +756,28 @@ fn tool_specs() -> Value {
             "input_schema": { "type": "object", "properties": {} }
         }
     ])
+}
+
+/// Assemble the system blocks for a request: the constant builder persona
+/// (cached) plus, when present, the project's `AGENTS.md` context as a second
+/// cached block. Two breakpoints let the persona prefix stay cached across
+/// different workspaces while project context caches per-workspace.
+fn build_system(root: &Path) -> Vec<Value> {
+    let mut blocks = vec![json!({
+        "type": "text",
+        "text": builder_system_prompt(),
+        "cache_control": { "type": "ephemeral" }
+    })];
+    if let Some(ctx) = crate::project::context(root) {
+        blocks.push(json!({
+            "type": "text",
+            "text": format!(
+                "PROJECT CONTEXT (from AGENTS.md -- follow these project conventions):\n\n{ctx}"
+            ),
+            "cache_control": { "type": "ephemeral" }
+        }));
+    }
+    blocks
 }
 
 /// Builder persona — general-purpose: eri builds ANY software or artifact, not

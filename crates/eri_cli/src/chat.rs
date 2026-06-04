@@ -112,6 +112,12 @@ fn handle_slash(line: &str, sess: &mut Session) -> Result<Flow> {
         "help" | "?" => print_chat_help(),
         "sessions" => list_sessions()?,
         "cost" | "usage" => print_cost(sess),
+        "context" => print_context(sess),
+        "clear" => {
+            sess.messages.clear();
+            println!("[eri] context cleared -- the next message starts fresh (session kept)");
+        }
+        "init" => run_init(sess)?,
         "new" => {
             sess.save().ok();
             let cwd = std::env::current_dir().context("read current directory")?;
@@ -122,6 +128,34 @@ fn handle_slash(line: &str, sess: &mut Session) -> Result<Flow> {
         other => println!("[eri] unknown command /{other} -- try /help"),
     }
     Ok(Flow::Continue)
+}
+
+fn print_context(sess: &Session) {
+    let root = sess.workspace_path();
+    let agents = if crate::project::has_agents_md(&root) {
+        "loaded"
+    } else {
+        "none (run /init)"
+    };
+    println!(
+        "[eri] context: {} message(s) in history, AGENTS.md {}, workspace {}",
+        sess.messages.len(),
+        agents,
+        sess.workspace
+    );
+}
+
+fn run_init(sess: &Session) -> Result<()> {
+    let (path, created) = crate::project::scaffold(&sess.workspace_path())?;
+    if created {
+        println!(
+            "[eri] wrote {} -- fill it in; eri reads it each turn",
+            path.display()
+        );
+    } else {
+        println!("[eri] {} already exists", path.display());
+    }
+    Ok(())
 }
 
 fn set_model(sess: &mut Session, rest: &str) {
@@ -156,6 +190,9 @@ fn print_chat_help() {
     println!("chat commands:");
     println!("  /sessions          list saved sessions");
     println!("  /cost              tokens used this session");
+    println!("  /context           history size + AGENTS.md status");
+    println!("  /clear             forget the conversation (keep the session)");
+    println!("  /init              scaffold AGENTS.md for this project");
     println!("  /new               start a fresh session");
     println!("  /model <tier>      switch tier: fast | thinking | auto");
     println!("  /exit              save and quit");

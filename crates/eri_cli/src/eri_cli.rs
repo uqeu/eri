@@ -37,6 +37,7 @@ mod client;
 mod config;
 mod genui;
 mod memory;
+mod project;
 mod repl;
 mod session;
 mod update;
@@ -243,6 +244,9 @@ pub enum Command {
     /// Check for a server-published CLI update manifest.
     #[command(subcommand)]
     Update(UpdateCommand),
+    /// Scaffold an AGENTS.md in the current directory so eri learns this
+    /// project's conventions, commands, and gotchas.
+    Init,
     /// Inspect local setup for auth, agents, MCP, and workflow files.
     Doctor,
     /// Show the active sign-in + tier + remaining quota. Alias of
@@ -432,8 +436,25 @@ async fn dispatch(command: Option<Command>) -> anyhow::Result<()> {
         Command::Update(UpdateCommand::Check { channel, output }) => {
             update::check(update::UpdateCheckOptions { channel, output }).await
         }
+        Command::Init => run_init(),
         Command::Doctor => repl::print_doctor(),
     }
+}
+
+/// Scaffold AGENTS.md in the cwd so eri picks up project conventions.
+fn run_init() -> anyhow::Result<()> {
+    let cwd = std::env::current_dir().context("read current directory")?;
+    let (path, created) = project::scaffold(&cwd)?;
+    if created {
+        println!("[eri] wrote {}", path.display());
+        println!("Fill in the build/test/run commands and conventions -- eri reads it every turn.");
+    } else {
+        println!(
+            "[eri] {} already exists -- left it untouched.",
+            path.display()
+        );
+    }
+    Ok(())
 }
 
 #[allow(dead_code)]
@@ -478,6 +499,7 @@ pub fn run(command: Command) -> Result<(), CliError> {
         | Command::Memory(_)
         | Command::Mcp(_)
         | Command::Update(_)
+        | Command::Init
         | Command::Doctor
         | Command::Status => Err(CliError::User(
             "agent-mode commands require the async dispatcher (`main`)".into(),
