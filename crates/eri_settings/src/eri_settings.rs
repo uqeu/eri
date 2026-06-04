@@ -53,6 +53,11 @@ impl Default for VoiceSettings {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct TtsSettings {
+    /// Canonical voice NAME for eri's spoken replies. The production voice is
+    /// `eri_prod_voice` -- pinned here so the name is the source of truth and
+    /// `voice_id` is just its current ElevenLabs binding.
+    pub voice_name: String,
+    /// ElevenLabs voice id bound to `voice_name` (= `eri_prod_voice`).
     pub voice_id: String,
     pub model: String,
     pub format: String,
@@ -61,6 +66,7 @@ pub struct TtsSettings {
 impl Default for TtsSettings {
     fn default() -> Self {
         Self {
+            voice_name: "eri_prod_voice".to_string(),
             voice_id: "gJx1vCzNCD1EQHT212Ls".to_string(),
             model: "eleven_multilingual_v2".to_string(),
             format: "mp3_44100_128".to_string(),
@@ -240,4 +246,27 @@ pub fn validate_voice_sensitivity(value: f32) -> Result<(), SettingsError> {
         )));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tts_tests {
+    use super::TtsSettings;
+
+    #[test]
+    fn default_voice_is_eri_prod_voice() {
+        let tts = TtsSettings::default();
+        assert_eq!(tts.voice_name, "eri_prod_voice");
+        assert_eq!(tts.voice_id, "gJx1vCzNCD1EQHT212Ls");
+    }
+
+    #[test]
+    fn legacy_tts_toml_without_voice_name_still_parses() {
+        // Settings files written before voice_name existed must still load,
+        // defaulting the name to eri_prod_voice.
+        let toml = "voice_id = \"gJx1vCzNCD1EQHT212Ls\"\n\
+                    model = \"eleven_multilingual_v2\"\n\
+                    format = \"mp3_44100_128\"\n";
+        let tts: TtsSettings = toml::from_str(toml).expect("legacy tts parses");
+        assert_eq!(tts.voice_name, "eri_prod_voice");
+    }
 }

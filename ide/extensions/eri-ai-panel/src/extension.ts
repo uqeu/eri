@@ -14,6 +14,7 @@ import { activateMcp, applyServerStatus, McpRegistryHandle } from "./mcp/mcpRegi
 import { McpServerState } from "./mcp/mcpView";
 import { activateComposer, ComposerHandle } from "./composer/composer";
 import { activateGaze, GazeHandle } from "./gaze/gaze";
+import { GazeNarration } from "./voice/gazeNarration";
 import { activateTierClient, TierClientHandle } from "./tier/tierClient";
 import { activateCheckpoints, CheckpointsHandle } from "./checkpoints";
 import { activateApply, ApplyHandle } from "./apply";
@@ -49,6 +50,11 @@ import { tryDispatchViewIntent } from "./terminals/intentDispatcher";
 import { tryRouteVoiceTranscript } from "./terminals/voiceRouter";
 import { registerThemeHub } from "./theme/themeHub";
 import { activatePhase25Onboarding } from "./onboarding/phase25";
+import { activateWorkbench } from "./workbench";
+import {
+  activateAgentWorkbenchShell,
+  scheduleAgentWorkbenchShell,
+} from "./shell/agentWorkbenchShell";
 
 export { getCurrentTarget as getCurrentGazeTarget, getEditorGazeContext } from "./gaze/gaze";
 
@@ -59,6 +65,7 @@ let mcpRegistry: McpRegistryHandle | null = null;
 let composer: ComposerHandle | null = null;
 let atMentions: AtMentionsHandle | null = null;
 let gaze: GazeHandle | null = null;
+let gazeNarration: GazeNarration | null = null;
 let tierClient: TierClientHandle | null = null;
 let checkpoints: CheckpointsHandle | null = null;
 let apply: ApplyHandle | null = null;
@@ -105,6 +112,18 @@ export function activate(context: vscode.ExtensionContext): void {
   });
   sidecar.start();
 
+  panelProvider = new EriPanelProvider(context, () => sidecar);
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider("eri.panel", panelProvider),
+  );
+  activateWorkbench(context, { getSidecar: () => sidecar });
+  activateAgentWorkbenchShell(context);
+  context.subscriptions.push(
+    scheduleAgentWorkbenchShell(50),
+    scheduleAgentWorkbenchShell(900),
+    scheduleAgentWorkbenchShell(2_400),
+  );
+
   statusBar = activateStatusBar(context);
   account = activateAccount(context, { getSidecar: () => sidecar });
 
@@ -119,11 +138,6 @@ export function activate(context: vscode.ExtensionContext): void {
       });
     },
   });
-
-  panelProvider = new EriPanelProvider(context, () => sidecar);
-  context.subscriptions.push(
-    vscode.window.registerWebviewViewProvider("eri.panel", panelProvider),
-  );
 
   preview = activatePreview(context, () => sidecar);
 
@@ -173,6 +187,10 @@ export function activate(context: vscode.ExtensionContext): void {
   activateMentionCompletions(context, atMentions.registry);
   mcpRegistry = activateMcp(context, () => sidecar);
   gaze = activateGaze(context, () => sidecar);
+  // Gaze-lost talk-back: speak the last reply when the user looks away. Voice
+  // is eri_prod_voice (the TTS sidecar default). No-op if the sidecar is down.
+  gazeNarration = new GazeNarration(gaze.service());
+  context.subscriptions.push(gazeNarration);
   composer = activateComposer(context, () => sidecar, atMentions);
   checkpoints = activateCheckpoints(context, () => sidecar);
   apply = activateApply(context, () => sidecar);
@@ -388,6 +406,8 @@ export function activate(context: vscode.ExtensionContext): void {
             method: "eri/voice/reply",
             params: { text: reply },
           });
+          // Arm gaze-lost talk-back with this reply.
+          gazeNarration?.setReply(reply);
         },
       }),
   );
@@ -537,6 +557,8 @@ export function deactivate(): void {
   composer = null;
   atMentions?.dispose();
   atMentions = null;
+  gazeNarration?.dispose();
+  gazeNarration = null;
   gaze?.dispose();
   gaze = null;
   tierClient?.dispose();

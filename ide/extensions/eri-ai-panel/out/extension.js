@@ -13,6 +13,7 @@ const at_mentions_1 = require("./at_mentions");
 const mcpRegistry_1 = require("./mcp/mcpRegistry");
 const composer_1 = require("./composer/composer");
 const gaze_1 = require("./gaze/gaze");
+const gazeNarration_1 = require("./voice/gazeNarration");
 const tierClient_1 = require("./tier/tierClient");
 const checkpoints_1 = require("./checkpoints");
 const apply_1 = require("./apply");
@@ -45,6 +46,8 @@ const intentDispatcher_1 = require("./terminals/intentDispatcher");
 const voiceRouter_1 = require("./terminals/voiceRouter");
 const themeHub_1 = require("./theme/themeHub");
 const phase25_1 = require("./onboarding/phase25");
+const workbench_1 = require("./workbench");
+const agentWorkbenchShell_1 = require("./shell/agentWorkbenchShell");
 var gaze_2 = require("./gaze/gaze");
 Object.defineProperty(exports, "getCurrentGazeTarget", { enumerable: true, get: function () { return gaze_2.getCurrentTarget; } });
 Object.defineProperty(exports, "getEditorGazeContext", { enumerable: true, get: function () { return gaze_2.getEditorGazeContext; } });
@@ -55,6 +58,7 @@ let mcpRegistry = null;
 let composer = null;
 let atMentions = null;
 let gaze = null;
+let gazeNarration = null;
 let tierClient = null;
 let checkpoints = null;
 let apply = null;
@@ -97,6 +101,11 @@ function activate(context) {
         },
     });
     sidecar.start();
+    panelProvider = new panel_1.EriPanelProvider(context, () => sidecar);
+    context.subscriptions.push(vscode.window.registerWebviewViewProvider("eri.panel", panelProvider));
+    (0, workbench_1.activateWorkbench)(context, { getSidecar: () => sidecar });
+    (0, agentWorkbenchShell_1.activateAgentWorkbenchShell)(context);
+    context.subscriptions.push((0, agentWorkbenchShell_1.scheduleAgentWorkbenchShell)(50), (0, agentWorkbenchShell_1.scheduleAgentWorkbenchShell)(900), (0, agentWorkbenchShell_1.scheduleAgentWorkbenchShell)(2_400));
     statusBar = (0, statusBar_1.activateStatusBar)(context);
     account = (0, account_1.activateAccount)(context, { getSidecar: () => sidecar });
     agents = (0, agents_1.activateAgents)(context, {
@@ -110,8 +119,6 @@ function activate(context) {
             });
         },
     });
-    panelProvider = new panel_1.EriPanelProvider(context, () => sidecar);
-    context.subscriptions.push(vscode.window.registerWebviewViewProvider("eri.panel", panelProvider));
     preview = (0, preview_1.activatePreview)(context, () => sidecar);
     // Layout manager owns mode + chat position + preview surface choice;
     // the preview surface coordinator routes preview lifecycle between the
@@ -145,6 +152,10 @@ function activate(context) {
     (0, mentions_1.activateMentionCompletions)(context, atMentions.registry);
     mcpRegistry = (0, mcpRegistry_1.activateMcp)(context, () => sidecar);
     gaze = (0, gaze_1.activateGaze)(context, () => sidecar);
+    // Gaze-lost talk-back: speak the last reply when the user looks away. Voice
+    // is eri_prod_voice (the TTS sidecar default). No-op if the sidecar is down.
+    gazeNarration = new gazeNarration_1.GazeNarration(gaze.service());
+    context.subscriptions.push(gazeNarration);
     composer = (0, composer_1.activateComposer)(context, () => sidecar, atMentions);
     checkpoints = (0, checkpoints_1.activateCheckpoints)(context, () => sidecar);
     apply = (0, apply_1.activateApply)(context, () => sidecar);
@@ -320,6 +331,8 @@ function activate(context) {
                 method: "eri/voice/reply",
                 params: { text: reply },
             });
+            // Arm gaze-lost talk-back with this reply.
+            gazeNarration?.setReply(reply);
         },
     }));
     review = (0, review_1.activateReview)(context, () => sidecar);
@@ -426,6 +439,8 @@ function deactivate() {
     composer = null;
     atMentions?.dispose();
     atMentions = null;
+    gazeNarration?.dispose();
+    gazeNarration = null;
     gaze?.dispose();
     gaze = null;
     tierClient?.dispose();

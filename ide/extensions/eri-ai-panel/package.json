@@ -1,8 +1,8 @@
 {
   "name": "eri-ai-panel",
   "displayName": "eri",
-  "description": "Voice-driven diffusion AI panel for eri",
-  "version": "0.1.0",
+  "description": "Agent workbench for Eri",
+  "version": "0.1.1",
   "publisher": "eri",
   "private": true,
   "license": "SEE LICENSE IN ../../LICENSE",
@@ -11,6 +11,7 @@
   },
   "main": "./out/extension.js",
   "activationEvents": [
+    "*",
     "onStartupFinished",
     "onView:eri.crashes",
     "onCommand:eri.crash.refresh",
@@ -18,6 +19,9 @@
     "onCommand:eri.crash.openSidecarLog",
     "onCommand:eri.crash.clear",
     "onCommand:eri.crash.copyLast",
+    "onView:eri.workbench",
+    "onCommand:eri.shell.enterAgentWorkbench",
+    "onCommand:eri.workbench.startTask",
     "onView:eri.panel",
     "onView:eri.iterations",
     "onView:eri.mcp",
@@ -98,30 +102,28 @@
     "configurationDefaults": {
       "workbench.colorTheme": "eri Dark",
       "workbench.startupEditor": "none",
-      "workbench.welcomePage.walkthroughs.openOnInstall": false,
-      "workbench.welcomePage.experimentalOnboarding": false,
       "workbench.welcome.experimental.startupEditor": "none",
-      "workbench.enableExperiments": false,
-      "workbench.activityBar.location": "top",
-      "workbench.statusBar.visible": true,
+      "workbench.activityBar.location": "hidden",
+      "workbench.activityBar.visible": false,
+      "workbench.secondarySideBar.defaultVisibility": "hidden",
+      "workbench.statusBar.visible": false,
       "workbench.layoutControl.enabled": false,
-      "workbench.editor.showTabs": "single",
+      "workbench.editor.showTabs": "none",
+      "workbench.editor.editorActionsLocation": "hidden",
+      "workbench.editor.restoreViewState": false,
       "workbench.tree.indent": 14,
       "workbench.tree.renderIndentGuides": "always",
       "explorer.compactFolders": false,
       "breadcrumbs.enabled": true,
-      "window.titleBarStyle": "custom",
-      "window.customTitleBarVisibility": "auto",
       "window.title": "${rootName} — eri",
       "window.density.editorTabHeight": "compact",
+      "window.commandCenter": false,
       "editor.fontFamily": "Berkeley Mono, JetBrains Mono, monospace",
       "editor.fontSize": 13,
       "editor.lineHeight": 1.6,
       "editor.minimap.enabled": false,
       "extensions.ignoreRecommendations": true,
-      "update.mode": "none",
-      "chat.commandCenter.enabled": false,
-      "telemetry.telemetryLevel": "off"
+      "eri.layout.mode": "eri"
     },
     "viewsContainers": {
       "activitybar": [
@@ -140,16 +142,22 @@
       },
       {
         "view": "eri.iterations",
-        "contents": "Iterations from eri's diffusion engine will appear here once you run a build.\n[Open eri Chat](command:eri.openChat)"
+        "contents": "Iterations will appear here once you run a build.\n[Open Chat](command:eri.openChat)"
       }
     ],
     "views": {
       "eri-activitybar": [
         {
           "type": "webview",
-          "id": "eri.panel",
-          "name": "eri Chat",
+          "id": "eri.workbench",
+          "name": "Workbench",
           "visibility": "visible"
+        },
+        {
+          "type": "webview",
+          "id": "eri.panel",
+          "name": "Chat",
+          "visibility": "collapsed"
         },
         {
           "id": "eri.iterations",
@@ -249,11 +257,19 @@
       ]
     },
     "commands": [
+      { "command": "eri.shell.enterAgentWorkbench", "title": "eri: Enter Agent Workbench" },
+      { "command": "eri.workbench.open",            "title": "eri: Open Workbench" },
+      { "command": "eri.workbench.startTask",       "title": "eri: Start Workbench Task" },
+      { "command": "eri.workbench.openTool",        "title": "eri: Open Tool" },
+      { "command": "eri.workbench.focusPreview",    "title": "eri: Focus Preview" },
+      { "command": "eri.workbench.focusChanges",    "title": "eri: Focus Changes" },
+      { "command": "eri.workbench.openArtifacts",   "title": "eri: Open Artifacts" },
+      { "command": "eri.workbench.openExpertTools", "title": "eri: Open Expert Tools" },
       { "command": "eri.layout.toggleMode",        "title": "eri: Toggle Coder / eri Mode" },
       { "command": "eri.layout.setChatPosition",   "title": "eri: Set Chat Position" },
       { "command": "eri.layout.openSettings",      "title": "eri: Open Layout Settings" },
-      { "command": "eri.themes.openHub",           "title": "eri: Open Theme Marketplace" },
-      { "command": "eri.openPreview",       "title": "eri: Open Diffusion Preview" },
+      { "command": "eri.themes.openHub",           "title": "eri: Open Theme Hub" },
+      { "command": "eri.openPreview",       "title": "eri: Open Preview" },
       { "command": "eri.toggleMic",         "title": "eri: Toggle Voice" },
       { "command": "eri.inlineEdit",        "title": "eri: Inline Edit" },
       { "command": "eri.openChat",          "title": "eri: Open Chat Panel" },
@@ -264,7 +280,7 @@
       { "command": "eri.acceptIteration",   "title": "eri: Accept Iteration" },
       { "command": "eri.rejectIteration",   "title": "eri: Reject Iteration" },
       { "command": "eri.stopGeneration",    "title": "eri: Stop Generation" },
-      { "command": "eri.setDiffusionFire",  "title": "eri: Set Diffusion Fire State" },
+      { "command": "eri.setDiffusionFire",  "title": "eri: Set Preview Activity State" },
       { "command": "eri.tab.acceptWord",    "title": "eri: Accept Next Word of Inline Suggestion" },
       { "command": "eri.tab.acceptLine",    "title": "eri: Accept Next Line of Inline Suggestion" },
       { "command": "eri.tab.health",        "title": "eri: Check Tab Completion Health" },
@@ -424,7 +440,7 @@
       {
         "id": "eriOnboarding",
         "title": "Get started with eri",
-        "description": "Voice, gaze, and diffusion — set up eri in 60 seconds.",
+        "description": "Voice, sight, and preview — set up eri in 60 seconds.",
         "steps": [
           {
             "id": "welcome",
@@ -607,16 +623,24 @@
         "eri.model": {
           "type": "string",
           "enum": ["mercury-2", "mercury-2-coder", "claude-opus-4-7", "claude-sonnet-4-6", "gpt-5", "gemini-2.5-pro"],
+          "enumItemLabels": [
+            "eri Fast",
+            "eri Fast Coder",
+            "Deep reasoning",
+            "Deep coder",
+            "Broad reasoning",
+            "Design reasoning"
+          ],
           "enumDescriptions": [
             "eri Engine",
             "eri Engine (coder)",
-            "Claude Opus 4.7",
-            "Claude Sonnet 4.6",
-            "GPT-5",
-            "Gemini 2.5 Pro"
+            "Deep reasoning",
+            "Deep coder",
+            "Broad reasoning",
+            "Design reasoning"
           ],
           "default": "mercury-2",
-          "description": "Default model for diffusion iteration"
+          "description": "Default agent route for iteration"
         },
         "eri.voice.enabled": {
           "type": "boolean",
@@ -628,22 +652,27 @@
           "default": false,
           "description": "Keep the mic open continuously (vs push-to-talk)"
         },
+        "eri.voice.talkBackOnLookAway": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "When eri has just answered and you **look away** from the screen, speak the reply aloud (eri_prod_voice) so you can keep working eyes-free. Requires the local TTS sidecar."
+        },
         "eri.voice.preset": {
           "type": "string",
           "enum": ["lumen", "marrow", "sable", "vesper", "kiln"],
           "default": "lumen",
           "markdownDescription": "ElevenLabs **preset voice** eri uses to speak responses. Pick one in the Settings Hub for an instant preview."
         },
-        "eri.preview.autoOpen": {
-          "type": "boolean",
-          "default": true,
-          "description": "Automatically open the diffusion preview beside the editor on new builds"
-        },
-        "eri.preview.autoOpenOnBuild": {
-          "type": "boolean",
-          "default": true,
-          "description": "Spawn the standalone eri preview window when an iteration builds an index.html."
-        },
+      "eri.preview.autoOpen": {
+        "type": "boolean",
+        "default": false,
+        "description": "Automatically open Preview beside the editor on new builds"
+      },
+      "eri.preview.autoOpenOnBuild": {
+        "type": "boolean",
+        "default": false,
+        "description": "Spawn the standalone eri preview window when an iteration builds an index.html."
+      },
         "eri.preview.gazeRelay": {
           "type": "boolean",
           "default": true,
@@ -654,11 +683,16 @@
           "default": "",
           "description": "Optional absolute path to the eri_preview Swift binary. Leave blank to use the bundled binary (or the dev checkout's scripts/eri_preview)."
         },
+        "eri.account.hydrateOnStartup": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Unlock the OS keychain during startup to restore account status automatically. Off by default so Eri opens directly into the agent workbench."
+        },
         "eri.layout.mode": {
           "type": "string",
           "enum": ["coder", "eri"],
-          "default": "coder",
-          "markdownDescription": "Layout mode. **Coder** keeps the workbench shell + floating Swift preview. **eri** hides the explorer and docks a centred preview beside the editor (Lovable / Base44 / v0 feel)."
+          "default": "eri",
+          "markdownDescription": "Layout mode. **Coder** keeps the workbench shell plus a floating preview. **eri** hides secondary chrome and docks a centered preview beside the editor."
         },
         "eri.layout.chatPosition": {
           "type": "string",
@@ -675,12 +709,12 @@
           "type": "string",
           "enum": ["auto", "swift", "webview"],
           "default": "auto",
-          "markdownDescription": "Preview surface. **Auto** uses Swift in coder mode and the embedded WebviewPanel in eri mode. Override only if you need a specific surface for the whole session."
+          "markdownDescription": "Preview surface. **Auto** uses the floating preview in coder mode and the embedded preview in eri mode. Override only if you need a specific surface for the whole session."
         },
         "eri.layout.themeSlug": {
           "type": "string",
           "default": "anthropic",
-          "description": "Active marketplace theme slug. Open the eri theme hub to pick from the 80-theme catalog."
+          "description": "Active theme slug. Open the eri theme hub to pick from the catalog."
         },
         "eri.tab.enabled": {
           "type": "boolean",
@@ -851,8 +885,8 @@
         },
         "eri.visualEditor.url": {
           "type": "string",
-          "default": "http://localhost:5173",
-          "markdownDescription": "Default **dev server URL** loaded into the Visual Editor iframe. Pick a different URL at runtime with `eri: Visual Editor - Set Dev Server URL`."
+          "default": "",
+          "markdownDescription": "Optional **dev server URL** loaded into the Visual Editor iframe. Leave blank until a preview is opened; pick a URL at runtime with `eri: Visual Editor - Set Dev Server URL`."
         },
         "eri.visualEditor.voiceEdit": {
           "type": "boolean",
