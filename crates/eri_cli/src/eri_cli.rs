@@ -28,6 +28,7 @@ use eri_inference::{
     costs, deploy_to_vercel, extract_partial_html_body, template_by_slug,
 };
 
+mod admin;
 mod agent;
 mod agent_cmd;
 mod auth;
@@ -247,6 +248,9 @@ pub enum Command {
     /// Scaffold an AGENTS.md in the current directory so eri learns this
     /// project's conventions, commands, and gotchas.
     Init,
+    /// Owner-only: per-user usage analytics.
+    #[command(subcommand)]
+    Admin(AdminCommand),
     /// Inspect local setup for auth, agents, MCP, and workflow files.
     Doctor,
     /// Show the active sign-in + tier + remaining quota. Alias of
@@ -292,6 +296,19 @@ pub enum MemoryCommand {
 pub enum McpCommand {
     /// Show configured local MCP servers.
     List,
+}
+
+#[derive(Subcommand, Debug, PartialEq, Eq)]
+pub enum AdminCommand {
+    /// Per-user usage analytics over a recent window (owner-only).
+    Usage {
+        /// Window in days (1..365).
+        #[arg(long, default_value_t = 30)]
+        days: u32,
+        /// Show the top N users by cost.
+        #[arg(long, default_value_t = 50)]
+        top: u32,
+    },
 }
 
 #[derive(Subcommand, Debug, PartialEq, Eq)]
@@ -437,6 +454,7 @@ async fn dispatch(command: Option<Command>) -> anyhow::Result<()> {
             update::check(update::UpdateCheckOptions { channel, output }).await
         }
         Command::Init => run_init(),
+        Command::Admin(AdminCommand::Usage { days, top }) => admin::usage(days, top).await,
         Command::Doctor => repl::print_doctor(),
     }
 }
@@ -500,6 +518,7 @@ pub fn run(command: Command) -> Result<(), CliError> {
         | Command::Mcp(_)
         | Command::Update(_)
         | Command::Init
+        | Command::Admin(_)
         | Command::Doctor
         | Command::Status => Err(CliError::User(
             "agent-mode commands require the async dispatcher (`main`)".into(),

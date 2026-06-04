@@ -6,6 +6,7 @@ import {
   getDeviceCodeGrantByUserCode,
 } from "@/lib/inference/db";
 import { issueApiToken } from "@/lib/auth/api_tokens";
+import { recordAudit } from "@/lib/audit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -83,6 +84,10 @@ export async function POST(request: Request): Promise<NextResponse> {
     // freshly issued token row is unused and owned by this user; harmless.
     return NextResponse.json({ error: "code_not_pending" }, { status: 404 });
   }
+
+  void recordAudit(user.id, "device.token_created", {
+    token_id: issued.row.id,
+  });
 
   // The device_code never appears in this response or in the browser. The
   // originating client is the only holder of it and pulls the token via /poll.

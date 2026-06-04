@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getUserByEmail, publicUser } from "@/lib/db";
 import { issueTokenPair, verifyPassword } from "@/lib/auth";
+import { recordAudit } from "@/lib/audit";
 import { rateLimit } from "@/lib/rate_limit";
 
 export const runtime = "nodejs";
@@ -60,6 +61,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   }
 
   const tokens = await issueTokenPair(user);
+  void recordAudit(user.id, "auth.login", { method: "password" });
   return NextResponse.json(
     { ...tokens, user: publicUser(user) },
     { status: 200 },

@@ -41,6 +41,7 @@ export interface UserRow {
   last_threshold_email_at: number | null;
   oauth_provider: string | null;
   oauth_subject: string | null;
+  is_admin: boolean;
 }
 
 export interface RefreshTokenRow {
@@ -110,6 +111,7 @@ interface RawUser {
   last_threshold_email_at: string | number | null;
   oauth_provider: string | null;
   oauth_subject: string | null;
+  is_admin: boolean | null;
 }
 
 function toNumber(value: string | number): number {
@@ -136,6 +138,7 @@ function mapUser(row: RawUser): UserRow {
     last_threshold_email_at: toNumberOrNull(row.last_threshold_email_at),
     oauth_provider: row.oauth_provider ?? null,
     oauth_subject: row.oauth_subject ?? null,
+    is_admin: row.is_admin ?? false,
   };
 }
 

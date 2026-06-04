@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { userFromBearer } from "@/lib/auth";
+import { recordAudit } from "@/lib/audit";
 import { revokeApiTokenForUser } from "@/lib/inference/db";
 import { rateLimit } from "@/lib/rate_limit";
 
@@ -31,5 +32,7 @@ export async function POST(
       { status: 404 },
     );
   }
+  // Best-effort audit trail (no content); never blocks the response.
+  void recordAudit(user.id, "device.token_revoked", { token_id: params.id });
   return NextResponse.json({ ok: true }, { status: 200 });
 }

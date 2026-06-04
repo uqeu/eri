@@ -171,6 +171,7 @@ export async function GET(request: Request): Promise<NextResponse> {
     last_threshold_email_at: null,
     oauth_provider: OAUTH_PROVIDER,
     oauth_subject: userInfo.id,
+    is_admin: false,
   });
 
   const next = sanitizeNext(
