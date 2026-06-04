@@ -2,11 +2,23 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Suspense, useState } from "react";
+import { Suspense, useMemo, useState } from "react";
 import { authedFetch, useUser } from "@/lib/auth-client";
 
 type Action = "approve" | "deny";
 type Status = "idle" | "submitting" | "done" | "error";
+
+// Normalize to the canonical stored form: uppercase alphanumerics only.
+function normalizeUserCode(raw: string): string {
+  return raw.toUpperCase().replace(/[^0-9A-Z]/g, "").slice(0, 8);
+}
+
+// Display form: XXXX-XXXX once 8 chars are present.
+function formatUserCode(normalized: string): string {
+  return normalized.length > 4
+    ? `${normalized.slice(0, 4)}-${normalized.slice(4)}`
+    : normalized;
+}
 
 function Shell({ children }: { children: React.ReactNode }): JSX.Element {
   return (
@@ -32,36 +44,29 @@ function Eyebrow({ children }: { children: React.ReactNode }): JSX.Element {
   );
 }
 
-function CodeChip({ code }: { code: string }): JSX.Element {
-  // Show only a short slug — the full opaque code in the URL is not
-  // user-actionable. Use it just to disambiguate concurrent device flows.
-  const short = code.length > 12 ? `${code.slice(0, 6)}…${code.slice(-4)}` : code;
-  return (
-    <div className="mt-6 rounded-lg border border-border bg-[var(--bg-card-2)] px-4 py-3">
-      <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted">
-        Device code
-      </p>
-      <p className="mt-1 font-mono text-sm text-text">{short}</p>
-    </div>
-  );
-}
-
 function DevicePageInner(): JSX.Element {
   const search = useSearchParams();
-  const code = search.get("code") ?? "";
+  const initialCode = useMemo(
+    () => normalizeUserCode(search.get("user_code") ?? ""),
+    [search],
+  );
   const { user, loading } = useUser();
+  const [userCode, setUserCode] = useState<string>(initialCode);
   const [status, setStatus] = useState<Status>("idle");
   const [result, setResult] = useState<Action | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  const normalized = normalizeUserCode(userCode);
+  const isComplete = normalized.length === 8;
+
   async function handleAction(action: Action): Promise<void> {
-    if (!code || status === "submitting") return;
+    if (!isComplete || status === "submitting") return;
     setStatus("submitting");
     setErrorMessage(null);
     try {
       const response = await authedFetch("/api/v1/auth/device/approve", {
         method: "POST",
-        body: { code, action },
+        body: { user_code: normalized, action },
       });
       if (!response.ok) {
         const body: unknown = await response.json().catch(() => null);
@@ -84,30 +89,15 @@ function DevicePageInner(): JSX.Element {
     }
   }
 
-  // ───────────── Missing code ─────────────
-  if (!code) {
-    return (
-      <Shell>
-        <Card>
-          <Eyebrow>Authorize a device</Eyebrow>
-          <h1 className="text-2xl font-medium text-text">Code missing</h1>
-          <p className="mt-3 text-sm leading-relaxed text-muted">
-            This page must be opened with a device code in the URL. Re-run the
-            sign-in command from your eri IDE — it'll send you back with the
-            right link.
-          </p>
-        </Card>
-      </Shell>
-    );
-  }
-
   // ───────────── Loading ─────────────
   if (loading) {
     return (
       <Shell>
         <Card>
           <Eyebrow>Authorize a device</Eyebrow>
-          <h1 className="text-2xl font-medium text-text">Checking your session…</h1>
+          <h1 className="text-2xl font-medium text-text">
+            Checking your session…
+          </h1>
           <p className="mt-3 text-sm text-muted">One moment.</p>
         </Card>
       </Shell>
@@ -116,22 +106,24 @@ function DevicePageInner(): JSX.Element {
 
   // ───────────── Signed out ─────────────
   if (!user) {
+    const next = normalized
+      ? `/auth/device?user_code=${encodeURIComponent(formatUserCode(normalized))}`
+      : "/auth/device";
     return (
       <Shell>
         <Card>
           <Eyebrow>Authorize a device</Eyebrow>
           <h1 className="text-2xl font-medium text-text">Sign in to continue</h1>
           <p className="mt-3 text-sm leading-relaxed text-muted">
-            An eri IDE is asking to connect. Sign in first — your code stays in
-            the URL, so we'll bring you right back here.
+            An Eri device is asking to connect. Sign in first — we'll bring you
+            right back to confirm the code.
           </p>
           <Link
-            href={`/sign-in?next=${encodeURIComponent(`/auth/device?code=${code}`)}`}
+            href={`/sign-in?next=${encodeURIComponent(next)}`}
             className="mt-6 inline-flex items-center gap-2 rounded-lg bg-accent px-5 py-2.5 text-sm font-medium text-bg transition-colors hover:bg-[var(--accent-bright)]"
           >
             Sign in <span aria-hidden>→</span>
           </Link>
-          <CodeChip code={code} />
         </Card>
       </Shell>
     );
@@ -149,7 +141,7 @@ function DevicePageInner(): JSX.Element {
           </h1>
           <p className="mt-3 text-sm leading-relaxed text-muted">
             {approved
-              ? "Return to your eri IDE — it'll pick up the session within a few seconds."
+              ? "Return to Eri — it will pick up the session within a few seconds."
               : "Nothing was sent to the device. You can close this page."}
           </p>
           {approved && (
@@ -165,27 +157,40 @@ function DevicePageInner(): JSX.Element {
     );
   }
 
-  // ───────────── Approve / Deny ─────────────
+  // ───────────── Enter code + Approve / Deny ─────────────
   return (
     <Shell>
       <Card>
         <Eyebrow>Authorize this device</Eyebrow>
-        <h1 className="text-2xl font-medium text-text">
-          Connect your IDE
-        </h1>
+        <h1 className="text-2xl font-medium text-text">Connect your Eri device</h1>
         <p className="mt-3 text-sm leading-relaxed text-muted">
-          An eri IDE is asking to sign in as{" "}
-          <span className="text-text">{user.email}</span>. Only approve if you
-          just started this from your own IDE — the device will be able to use
-          your tier quota until you revoke it.
+          Confirm the code shown on your device to sign it in as{" "}
+          <span className="text-text">{user.email}</span>. Only approve a code
+          you just started yourself — it can use your tier quota until revoked.
         </p>
 
-        <CodeChip code={code} />
+        <label
+          htmlFor="user-code"
+          className="mt-6 block font-mono text-[10px] uppercase tracking-[0.22em] text-muted"
+        >
+          Code from your device
+        </label>
+        <input
+          id="user-code"
+          inputMode="text"
+          autoComplete="one-time-code"
+          autoFocus={!isComplete}
+          spellCheck={false}
+          value={formatUserCode(normalized)}
+          onChange={(e) => setUserCode(normalizeUserCode(e.target.value))}
+          placeholder="XXXX-XXXX"
+          className="mt-2 w-full rounded-lg border border-border bg-[var(--bg-card-2)] px-4 py-3 text-center font-mono text-lg tracking-[0.3em] text-text outline-none focus:border-[var(--border-strong)]"
+        />
 
         <div className="mt-6 flex gap-3">
           <button
             type="button"
-            disabled={status === "submitting"}
+            disabled={status === "submitting" || !isComplete}
             onClick={() => void handleAction("approve")}
             className="inline-flex flex-1 items-center justify-center rounded-lg bg-accent px-5 py-2.5 text-sm font-medium text-bg transition-colors hover:bg-[var(--accent-bright)] disabled:cursor-not-allowed disabled:opacity-50"
           >
@@ -193,7 +198,7 @@ function DevicePageInner(): JSX.Element {
           </button>
           <button
             type="button"
-            disabled={status === "submitting"}
+            disabled={status === "submitting" || !isComplete}
             onClick={() => void handleAction("deny")}
             className="inline-flex items-center justify-center rounded-lg border border-border bg-transparent px-5 py-2.5 text-sm font-medium text-muted transition-colors hover:border-[var(--border-strong)] hover:text-text disabled:cursor-not-allowed disabled:opacity-50"
           >

@@ -19,16 +19,26 @@ const POLL_MAX_SECS: u64 = 600; // 10 min — matches the IDE flow.
 #[derive(Debug, Serialize)]
 struct DeviceStartBody {}
 
+// RFC 8628 device authorization response. /api/v1/auth/device/start returns
+// { deviceCode, userCode, verificationUri, verificationUriComplete, ... }.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct DeviceStartResponse {
+    /// The polling secret — held only by this client, never shown to the user.
     device_code: String,
+    /// The short code the user enters/confirms in the browser.
     user_code: String,
-    verification_url: String,
+    /// Browser URL to enter the user_code.
+    verification_uri: Option<String>,
+    /// Same URL with the user_code prefilled.
+    verification_uri_complete: Option<String>,
+    /// Back-compat alias some deployments still emit.
+    verify_url: Option<String>,
 }
 
+// The token endpoint. We send the secret device_code; on approval it returns
+// { status: "approved", token }.
 #[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
 struct DevicePollBody {
     device_code: String,
 }
@@ -37,6 +47,8 @@ struct DevicePollBody {
 #[serde(rename_all = "camelCase")]
 struct DevicePollResponse {
     status: String,
+    // approved payload — backend sends `token`; accept `bearer` too for safety.
+    token: Option<String>,
     bearer: Option<String>,
     user_id: Option<String>,
     email: Option<String>,
@@ -51,15 +63,30 @@ pub async fn login() -> Result<Credentials> {
         .await
         .context("start device flow")?;
 
+    // Prefer the prefilled URL; fall back to the plain verification URI.
+    let open_url = start
+        .verification_uri_complete
+        .clone()
+        .or_else(|| start.verify_url.clone())
+        .or_else(|| start.verification_uri.clone())
+        .unwrap_or_default();
+    let manual_url = start
+        .verification_uri
+        .clone()
+        .or_else(|| start.verify_url.clone())
+        .unwrap_or_else(|| open_url.clone());
+
     println!();
-    println!("→ Open this URL to sign in:");
-    println!("  {}", start.verification_url);
+    println!("→ Open this URL and confirm the code:");
+    println!("  {manual_url}");
     println!();
-    println!("→ Or paste this code: {}", start.user_code);
+    println!("→ Your code: {}", start.user_code);
     println!();
     let _ = io::stdout().flush();
 
-    let _ = try_open_browser(&start.verification_url);
+    if !open_url.is_empty() {
+        let _ = try_open_browser(&open_url);
+    }
 
     let deadline = std::time::Instant::now() + Duration::from_secs(POLL_MAX_SECS);
     let mut spinner = Spinner::new("Waiting for approval");
@@ -84,12 +111,17 @@ pub async fn login() -> Result<Credentials> {
             "approved" => {
                 spinner.stop();
                 let mut next = creds.clone();
-                next.bearer = poll.bearer;
+                next.bearer = poll.bearer.or(poll.token);
                 next.user_id = poll.user_id;
                 next.email = poll.email;
                 next.tier = poll.tier;
+                // Persist the canonical host so future runs skip the apex redirect.
+                next.base_url = Some(creds.base_url());
                 config::save(&next)?;
-                println!("Signed in as {}", next.email.as_deref().unwrap_or("eri user"));
+                println!(
+                    "Signed in as {}",
+                    next.email.as_deref().unwrap_or("eri user")
+                );
                 return Ok(next);
             }
             "denied" => {
@@ -133,9 +165,7 @@ pub async fn status() -> Result<()> {
                 println!("Tier: {t}");
             }
             if let Some(tokens) = usage.get("tokens") {
-                if let Some(remaining) =
-                    tokens.get("remainingIncluded").and_then(|v| v.as_i64())
-                {
+                if let Some(remaining) = tokens.get("remainingIncluded").and_then(|v| v.as_i64()) {
                     println!("Tokens remaining (included): {remaining}");
                 }
             }

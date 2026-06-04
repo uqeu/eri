@@ -42,7 +42,10 @@ export interface TokenBucketRow {
 }
 
 export interface DeviceCodeGrantRow {
+  /** RFC 8628 device_code: the polling secret, held only by the client. */
   code: string;
+  /** RFC 8628 user_code: shown in the browser, used to approve. */
+  user_code: string | null;
   user_id: string | null;
   api_token_id: string | null;
   pending_secret: string | null;
@@ -354,6 +357,7 @@ export async function sumUsageRecords24h(userId: string): Promise<{
 
 interface RawDeviceCodeGrant {
   code: string;
+  user_code: string | null;
   user_id: string | null;
   api_token_id: string | null;
   pending_secret: string | null;
@@ -366,6 +370,7 @@ interface RawDeviceCodeGrant {
 function mapDeviceCodeGrant(row: RawDeviceCodeGrant): DeviceCodeGrantRow {
   return {
     code: row.code,
+    user_code: row.user_code,
     user_id: row.user_id,
     api_token_id: row.api_token_id,
     pending_secret: row.pending_secret,
@@ -378,11 +383,12 @@ function mapDeviceCodeGrant(row: RawDeviceCodeGrant): DeviceCodeGrantRow {
 
 export async function insertDeviceCodeGrant(input: {
   code: string;
+  user_code: string;
   expires_at: Date;
 }): Promise<DeviceCodeGrantRow> {
   const rows = await sql()<RawDeviceCodeGrant[]>`
-    INSERT INTO device_code_grants (code, expires_at)
-    VALUES (${input.code}, ${input.expires_at})
+    INSERT INTO device_code_grants (code, user_code, expires_at)
+    VALUES (${input.code}, ${input.user_code}, ${input.expires_at})
     RETURNING *
   `;
   const row = rows[0];
@@ -392,6 +398,7 @@ export async function insertDeviceCodeGrant(input: {
   return mapDeviceCodeGrant(row);
 }
 
+/** Look up by the secret device_code — the polling path (/poll). */
 export async function getDeviceCodeGrant(
   code: string,
 ): Promise<DeviceCodeGrantRow | null> {
@@ -402,28 +409,46 @@ export async function getDeviceCodeGrant(
   return row ? mapDeviceCodeGrant(row) : null;
 }
 
+/** Look up by the public user_code — the approval path (/approve). */
+export async function getDeviceCodeGrantByUserCode(
+  userCode: string,
+): Promise<DeviceCodeGrantRow | null> {
+  const rows = await sql()<RawDeviceCodeGrant[]>`
+    SELECT * FROM device_code_grants WHERE user_code = ${userCode}
+  `;
+  const row = rows[0];
+  return row ? mapDeviceCodeGrant(row) : null;
+}
+
+/**
+ * Approve a grant, keyed on the public user_code (the only value the browser
+ * holds). Returns false if it was already redeemed (lost race / replay), so
+ * the caller never double-issues. The device_code is never referenced here.
+ */
 export async function approveDeviceCodeGrant(input: {
-  code: string;
+  user_code: string;
   user_id: string;
   api_token_id: string;
   plaintext: string;
-}): Promise<void> {
-  await sql()`
+}): Promise<boolean> {
+  const rows = await sql()<{ code: string }[]>`
     UPDATE device_code_grants
     SET user_id = ${input.user_id},
         api_token_id = ${input.api_token_id},
         pending_secret = ${input.plaintext},
         redeemed_at = now()
-    WHERE code = ${input.code} AND redeemed_at IS NULL
+    WHERE user_code = ${input.user_code} AND redeemed_at IS NULL
+    RETURNING code
   `;
+  return rows.length > 0;
 }
 
-export async function denyDeviceCodeGrant(code: string): Promise<void> {
+export async function denyDeviceCodeGrant(userCode: string): Promise<void> {
   // Mark as redeemed with no api_token_id → poll returns "denied".
   await sql()`
     UPDATE device_code_grants
     SET redeemed_at = now()
-    WHERE code = ${code} AND redeemed_at IS NULL AND api_token_id IS NULL
+    WHERE user_code = ${userCode} AND redeemed_at IS NULL AND api_token_id IS NULL
   `;
 }
 
