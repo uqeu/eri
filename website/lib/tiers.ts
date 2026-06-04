@@ -36,6 +36,30 @@ export interface TokenBudget {
   ghost: number;
 }
 
+/**
+ * Output-token weight for "eri credits" (the no-loss meter).
+ *
+ * Every Claude family prices output at 5x input (Sonnet $3/$15, Haiku $1/$5,
+ * Opus $5/$25). We deduct `tokens_in + OUTPUT_WEIGHT * tokens_out` credits per
+ * call so a credit's real cost is bounded by `$3/M` (Sonnet) REGARDLESS of the
+ * in/out mix — output-heavy traffic can no longer blow past the plan's COGS.
+ * The `included`/`ghost` numbers above are therefore denominated in CREDITS,
+ * not raw tokens. Worst-case Sonnet COGS per tier = included x $3/M:
+ * Pro+ $12, Teams $9, Pro $2.25, Starter $0.60 — all margin-positive.
+ */
+export const OUTPUT_WEIGHT = 5;
+
+/**
+ * Credits deducted from `token_buckets.tokens_used` for one inference call.
+ * The no-loss meter: `in + OUTPUT_WEIGHT * out`. Negative/NaN inputs floor to 0
+ * so a malformed usage report can never refund credits or crash the deduction.
+ */
+export function creditCost(tokensIn: number, tokensOut: number): number {
+  const safeIn = Number.isFinite(tokensIn) ? Math.max(0, tokensIn) : 0;
+  const safeOut = Number.isFinite(tokensOut) ? Math.max(0, tokensOut) : 0;
+  return safeIn + OUTPUT_WEIGHT * safeOut;
+}
+
 export const TIER_TOKEN_BUDGETS: Record<TierName, TokenBudget> = {
   Free:    { included:         0, ghost:         0 },
   Starter: { included:   200_000, ghost:    40_000 },

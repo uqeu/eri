@@ -11,6 +11,7 @@ import {
   upsertTokenBucket,
 } from "@/lib/inference/db";
 import {
+  creditCost,
   MERCURY_TURN_LIMITS,
   normalizeTier,
   TIER_TOKEN_BUDGETS,
@@ -111,7 +112,10 @@ export interface RecordUsageOutcome {
 export async function recordUsage(
   record: UsageRecordInput,
 ): Promise<RecordUsageOutcome> {
-  const totalTokens = record.tokens_in + record.tokens_out;
+  // Weighted "eri credits": output costs 5x input across all Claude families,
+  // so deduct in + 5*out. This bounds a credit's real cost at Sonnet's $3/M
+  // regardless of in/out mix (the no-loss meter). See creditCost in tiers.ts.
+  const totalTokens = creditCost(record.tokens_in, record.tokens_out);
   await insertUsageRecord(record);
   if (totalTokens <= 0) {
     const bucket = await getTokenBucket(record.user_id);
