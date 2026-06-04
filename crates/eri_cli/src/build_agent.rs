@@ -52,28 +52,77 @@ pub struct BuildOutcome {
     pub halted: Option<String>,
 }
 
-/// Run the agentic build loop for `prompt`, materializing files under
-/// `workspace`, using the given Claude `model`. All inference is metered
-/// through `/api/v1/inference/messages`.
-pub async fn run_build_agent(prompt: &str, workspace: &Path, model: &str) -> Result<BuildOutcome> {
-    if prompt.trim().is_empty() {
-        bail!("build prompt is empty");
-    }
+/// A signed-in inference client, or a clear "run `eri auth login`" error.
+fn signed_in_client() -> Result<Client> {
     let creds = config::load()?;
     if !creds.is_signed_in() {
         bail!("not signed in — run `eri auth login` first");
     }
-    let client = Client::from_credentials(&creds)?;
+    Client::from_credentials(&creds)
+}
+
+/// Ensure the workspace exists and resolve its canonical root.
+fn ensure_workspace(workspace: &Path) -> Result<PathBuf> {
     std::fs::create_dir_all(workspace)
         .with_context(|| format!("create workspace {}", workspace.display()))?;
-    let root = workspace
+    Ok(workspace
         .canonicalize()
-        .unwrap_or_else(|_| workspace.to_path_buf());
+        .unwrap_or_else(|_| workspace.to_path_buf()))
+}
 
+/// Run the agentic build loop for `prompt`, materializing files under
+/// `workspace`, using the given Claude `model`. One-shot -- a fresh
+/// conversation. All inference is metered through `/api/v1/inference/messages`.
+pub async fn run_build_agent(prompt: &str, workspace: &Path, model: &str) -> Result<BuildOutcome> {
+    if prompt.trim().is_empty() {
+        bail!("build prompt is empty");
+    }
+    let client = signed_in_client()?;
+    let root = ensure_workspace(workspace)?;
+    let mut messages: Vec<Value> = vec![json!({ "role": "user", "content": prompt.trim() })];
+    drive_loop(&client, &root, model, &mut messages).await
+}
+
+/// Run one turn against an existing multi-turn `session`: seed the model with
+/// its prior messages, run the loop, and update the session's running totals in
+/// place. The caller persists the session afterward. This is the core of
+/// `eri chat` -- context is retained because `session.messages` carries the full
+/// prior history into each turn.
+pub async fn run_session_turn(
+    session: &mut crate::session::Session,
+    prompt: &str,
+) -> Result<BuildOutcome> {
+    let prompt = prompt.trim();
+    if prompt.is_empty() {
+        bail!("empty message");
+    }
+    let client = signed_in_client()?;
+    let root = ensure_workspace(&session.workspace_path())?;
+    session.ensure_title(prompt);
+    session
+        .messages
+        .push(json!({ "role": "user", "content": prompt }));
+    let model = session.model.clone();
+    let outcome = drive_loop(&client, &root, &model, &mut session.messages).await?;
+    session.turns += outcome.turns;
+    session.tokens_in += outcome.tokens_in;
+    session.tokens_out += outcome.tokens_out;
+    session.touch();
+    Ok(outcome)
+}
+
+/// The core SSE tool-use loop. Drives `messages` (which already ends with the
+/// latest user turn) to a terminal stop, executing tools on disk under `root`,
+/// and appends each assistant + tool_result turn so a session can persist the
+/// full conversation.
+async fn drive_loop(
+    client: &Client,
+    root: &Path,
+    model: &str,
+    messages: &mut Vec<Value>,
+) -> Result<BuildOutcome> {
     let tools = tool_specs();
     let system = builder_system_prompt();
-    let mut messages: Vec<Value> = vec![json!({ "role": "user", "content": prompt.trim() })];
-
     let mut files_written: Vec<PathBuf> = Vec::new();
     let mut tokens_in: u64 = 0;
     let mut tokens_out: u64 = 0;

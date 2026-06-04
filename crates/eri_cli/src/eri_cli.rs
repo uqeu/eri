@@ -31,11 +31,13 @@ mod agent;
 mod agent_cmd;
 mod auth;
 mod build_agent;
+mod chat;
 mod client;
 mod config;
 mod genui;
 mod memory;
 mod repl;
+mod session;
 mod update;
 
 const ERI_CLI_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -72,7 +74,7 @@ pub enum Mode {
     Auto,
 }
 
-fn model_for_mode(mode: Mode) -> &'static str {
+pub(crate) fn model_for_mode(mode: Mode) -> &'static str {
     match mode {
         Mode::Fast => "claude-haiku-4-5-20251001",
         Mode::Thinking | Mode::Auto => build_agent::DEFAULT_MODEL,
@@ -106,6 +108,23 @@ pub enum Command {
         #[arg(long, value_enum, default_value = "thinking")]
         mode: Mode,
     },
+    /// Multi-turn agentic chat session with persistent, retained context.
+    /// Each message runs the metered tool-use loop; the full conversation is
+    /// saved so it can be resumed later with --continue / --resume.
+    Chat {
+        /// Continue the most recently updated session.
+        #[arg(long = "continue")]
+        continue_: bool,
+        /// Resume a specific session by id or id-prefix (takes precedence
+        /// over --continue).
+        #[arg(long, value_name = "ID")]
+        resume: Option<String>,
+        /// Inference depth: fast | thinking | auto.
+        #[arg(long, value_enum, default_value = "thinking")]
+        mode: Mode,
+    },
+    /// List saved chat sessions, newest first.
+    Sessions,
     /// List every template slug eri can scaffold from.
     ListTemplates,
     /// Drop a template's HTML into ./index.html with no network call.
@@ -295,6 +314,21 @@ async fn dispatch(command: Option<Command>) -> anyhow::Result<()> {
             file,
             mode,
         } => run_iterate_metered(&instruction, &file, model_for_mode(mode)).await,
+        Command::Chat {
+            continue_,
+            resume,
+            mode,
+        } => {
+            let resume_mode = if let Some(id) = resume {
+                chat::ResumeMode::Resume(id)
+            } else if continue_ {
+                chat::ResumeMode::Continue
+            } else {
+                chat::ResumeMode::New
+            };
+            chat::run(resume_mode, model_for_mode(mode)).await
+        }
+        Command::Sessions => chat::list_sessions(),
         Command::ListTemplates => {
             print_templates();
             Ok(())
@@ -386,6 +420,8 @@ pub fn run(command: Command) -> Result<(), CliError> {
         Command::Ship {
             intent: Some(_), ..
         }
+        | Command::Chat { .. }
+        | Command::Sessions
         | Command::Deploy { .. }
         | Command::Ask { .. }
         | Command::Plan { .. }

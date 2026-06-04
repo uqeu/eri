@@ -65,6 +65,12 @@ impl Credentials {
     }
 }
 
+/// Shared by every module whose tests mutate the process-global `HOME` env var
+/// (config, session, ...). Without one lock across modules, parallel tests race
+/// on `HOME` and flake. Test-only.
+#[cfg(test)]
+pub(crate) static ENV_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 pub fn credentials_path() -> Result<PathBuf> {
     if let Ok(home) = std::env::var("HOME") {
         return Ok(PathBuf::from(home)
@@ -131,10 +137,10 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
-    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
     fn with_temp_home<F: FnOnce()>(f: F) {
-        let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _g = super::ENV_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let dir = TempDir::new().unwrap();
         let prev = std::env::var("HOME").ok();
         unsafe {
