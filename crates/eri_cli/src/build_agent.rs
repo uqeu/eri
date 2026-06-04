@@ -744,6 +744,17 @@ pub(crate) fn friendly_proxy_error(e: anyhow::Error) -> anyhow::Error {
         anyhow!("out of plan quota. Check `eri usage` or upgrade your plan.")
     } else if msg.contains("HTTP 429") {
         anyhow!("eri is at capacity right now -- try again shortly.")
+    } else if msg.contains("feature_locked") {
+        // The proxy returns { error: feature_locked, requiredTier, ... }.
+        let tier = msg
+            .split("\"requiredTier\":\"")
+            .nth(1)
+            .and_then(|s| s.split('"').next())
+            .filter(|t| !t.is_empty());
+        match tier {
+            Some(t) => anyhow!("this needs the {t} plan -- upgrade at tryeri.ca to use it."),
+            None => anyhow!("this feature isn't on your current plan -- upgrade at tryeri.ca."),
+        }
     } else if msg.contains("HTTP 403") {
         anyhow!("this request isn't allowed on your current plan.")
     } else {

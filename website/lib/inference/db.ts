@@ -53,6 +53,8 @@ export interface DeviceCodeGrantRow {
   expires_at: Date;
   redeemed_at: Date | null;
   delivered_at: Date | null;
+  /** Best-effort machine name the CLI sent at /start (device identity). */
+  device_label: string | null;
 }
 
 export function newApiTokenId(): string {
@@ -168,6 +170,51 @@ export async function revokeApiTokenForUser(
     RETURNING id
   `;
   return rows.length > 0;
+}
+
+/**
+ * One active token per machine: revoke every other non-revoked token for this
+ * user that shares the same device label, keeping only `keepId`. Returns the
+ * count revoked. No-op when label is empty (don't collapse unlabelled tokens).
+ */
+export async function revokeOtherTokensByLabel(
+  userId: string,
+  label: string,
+  keepId: string,
+): Promise<number> {
+  if (!label || label.trim().length === 0) return 0;
+  const rows = await sql()<{ id: string }[]>`
+    UPDATE api_tokens
+    SET revoked_at = now()
+    WHERE user_id = ${userId}
+      AND label = ${label}
+      AND id <> ${keepId}
+      AND revoked_at IS NULL
+    RETURNING id
+  `;
+  return rows.length;
+}
+
+/**
+ * Revoke ALL of a user's active tokens except `keepId` (the "revoke all others"
+ * action / sign out everywhere else). Returns the count revoked.
+ */
+export async function revokeAllOtherTokens(
+  userId: string,
+  keepId: string | null,
+): Promise<number> {
+  const rows = keepId
+    ? await sql()<{ id: string }[]>`
+        UPDATE api_tokens SET revoked_at = now()
+        WHERE user_id = ${userId} AND id <> ${keepId} AND revoked_at IS NULL
+        RETURNING id
+      `
+    : await sql()<{ id: string }[]>`
+        UPDATE api_tokens SET revoked_at = now()
+        WHERE user_id = ${userId} AND revoked_at IS NULL
+        RETURNING id
+      `;
+  return rows.length;
 }
 
 export async function insertUsageRecord(input: UsageRecordInput): Promise<void> {
@@ -365,6 +412,7 @@ interface RawDeviceCodeGrant {
   expires_at: Date | string;
   redeemed_at: Date | string | null;
   delivered_at: Date | string | null;
+  device_label: string | null;
 }
 
 function mapDeviceCodeGrant(row: RawDeviceCodeGrant): DeviceCodeGrantRow {
@@ -378,6 +426,7 @@ function mapDeviceCodeGrant(row: RawDeviceCodeGrant): DeviceCodeGrantRow {
     expires_at: toDate(row.expires_at),
     redeemed_at: toDateOrNull(row.redeemed_at),
     delivered_at: toDateOrNull(row.delivered_at),
+    device_label: row.device_label ?? null,
   };
 }
 
@@ -385,10 +434,11 @@ export async function insertDeviceCodeGrant(input: {
   code: string;
   user_code: string;
   expires_at: Date;
+  device_label?: string | null;
 }): Promise<DeviceCodeGrantRow> {
   const rows = await sql()<RawDeviceCodeGrant[]>`
-    INSERT INTO device_code_grants (code, user_code, expires_at)
-    VALUES (${input.code}, ${input.user_code}, ${input.expires_at})
+    INSERT INTO device_code_grants (code, user_code, expires_at, device_label)
+    VALUES (${input.code}, ${input.user_code}, ${input.expires_at}, ${input.device_label ?? null})
     RETURNING *
   `;
   const row = rows[0];

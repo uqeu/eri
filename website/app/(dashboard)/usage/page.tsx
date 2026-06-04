@@ -2,34 +2,42 @@
 
 import { useEffect, useState } from "react";
 import { authedFetch, useUser } from "@/lib/auth-client";
+import { Skeleton } from "@/components/Skeleton";
 
-interface DailyBucket {
+interface DailyPoint {
   date: string;
-  tokens_used: number;
-  cost_usd: number;
+  credits: number;
+  cost_micros: number;
 }
 
 interface UsageSummary {
   tier: string;
-  this_month_usd: number;
+  credits_used: number;
+  credits_included: number;
+  credits_ghost: number;
+  remaining_included: number;
+  period_end: string;
+  this_month_requests: number;
   this_month_tokens: number;
-  limit_usd: number;
-  daily: DailyBucket[];
+  this_month_credits: number;
+  this_month_cost_micros: number;
+  daily: DailyPoint[];
 }
 
 function isUsage(value: unknown): value is UsageSummary {
   if (typeof value !== "object" || value === null) return false;
   const obj = value as Record<string, unknown>;
   return (
-    typeof obj.this_month_usd === "number" &&
-    typeof obj.this_month_tokens === "number" &&
-    typeof obj.limit_usd === "number" &&
+    typeof obj.credits_used === "number" &&
+    typeof obj.credits_included === "number" &&
     Array.isArray(obj.daily)
   );
 }
 
-function formatUsd(value: number): string {
-  return `$${value.toFixed(2)}`;
+function compact(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(n >= 10_000 ? 0 : 1)}K`;
+  return `${n}`;
 }
 
 function shortDate(iso: string): string {
@@ -38,15 +46,15 @@ function shortDate(iso: string): string {
 }
 
 interface BarChartProps {
-  data: ReadonlyArray<DailyBucket>;
+  data: ReadonlyArray<DailyPoint>;
 }
 
 function BarChart({ data }: BarChartProps) {
-  const maxCost = data.reduce((max, point) => Math.max(max, point.cost_usd), 0);
-  const safeMax = maxCost > 0 ? maxCost : 1;
+  const maxCredits = data.reduce((max, p) => Math.max(max, p.credits), 0);
+  const safeMax = maxCredits > 0 ? maxCredits : 1;
   const width = 720;
   const height = 220;
-  const padding = { top: 16, right: 16, bottom: 32, left: 40 };
+  const padding = { top: 16, right: 16, bottom: 32, left: 48 };
   const innerWidth = width - padding.left - padding.right;
   const innerHeight = height - padding.top - padding.bottom;
   const barGap = 4;
@@ -56,7 +64,7 @@ function BarChart({ data }: BarChartProps) {
     <svg
       viewBox={`0 0 ${width} ${height}`}
       role="img"
-      aria-label="Daily usage for the last 30 days"
+      aria-label="Daily eri-credit usage for the last 30 days"
       className="w-full h-auto"
     >
       <line
@@ -66,14 +74,8 @@ function BarChart({ data }: BarChartProps) {
         y2={padding.top + innerHeight}
         stroke="rgba(255,255,255,0.1)"
       />
-      <text
-        x={padding.left - 8}
-        y={padding.top + 4}
-        textAnchor="end"
-        fontSize={10}
-        fill="#8A8A8A"
-      >
-        {formatUsd(safeMax)}
+      <text x={padding.left - 8} y={padding.top + 4} textAnchor="end" fontSize={10} fill="#8A8A8A">
+        {compact(safeMax)}
       </text>
       <text
         x={padding.left - 8}
@@ -82,10 +84,10 @@ function BarChart({ data }: BarChartProps) {
         fontSize={10}
         fill="#8A8A8A"
       >
-        $0
+        0
       </text>
       {data.map((point, index) => {
-        const barHeight = (point.cost_usd / safeMax) * innerHeight;
+        const barHeight = (point.credits / safeMax) * innerHeight;
         const x = padding.left + index * (barWidth + barGap);
         const y = padding.top + (innerHeight - barHeight);
         const showLabel = index % 5 === 0 || index === data.length - 1;
@@ -97,11 +99,10 @@ function BarChart({ data }: BarChartProps) {
               width={Math.max(barWidth, 1)}
               height={Math.max(barHeight, 0)}
               fill="#E0FF4F"
-              opacity={point.cost_usd > 0 ? 0.9 : 0.15}
+              opacity={point.credits > 0 ? 0.9 : 0.15}
             >
               <title>
-                {point.date}: {formatUsd(point.cost_usd)} ·{" "}
-                {point.tokens_used.toLocaleString()} tokens
+                {point.date}: {point.credits.toLocaleString()} credits
               </title>
             </rect>
             {showLabel && (
@@ -159,27 +160,23 @@ export default function UsagePage() {
   if (!user) return null;
 
   const percent =
-    usage && usage.limit_usd > 0
-      ? Math.min(100, Math.round((usage.this_month_usd / usage.limit_usd) * 100))
+    usage && usage.credits_included > 0
+      ? Math.min(100, Math.round((usage.credits_used / usage.credits_included) * 100))
       : 0;
 
   return (
     <div className="max-w-5xl">
       <p className="text-xs uppercase tracking-[0.25em] text-accent">Usage</p>
-      <h1 className="mt-3 font-display text-4xl md:text-5xl tracking-tight">
-        Usage history
-      </h1>
+      <h1 className="mt-3 font-display text-4xl md:text-5xl tracking-tight">Usage history</h1>
 
       <div className="mt-10 grid gap-6 md:grid-cols-3">
         <div className="border border-white/10 rounded-lg p-6 bg-white/[0.02]">
-          <div className="text-xs uppercase tracking-[0.2em] text-muted">
-            This month
-          </div>
-          <div className="mt-3 font-display text-3xl text-paper">
-            {usage ? formatUsd(usage.this_month_usd) : "—"}
+          <div className="text-xs uppercase tracking-[0.2em] text-muted">eri credits</div>
+          <div className="mt-3 font-display text-3xl text-paper tabular-nums">
+            {usage ? compact(usage.credits_used) : "—"}
           </div>
           <div className="mt-2 text-sm text-muted">
-            of {usage ? formatUsd(usage.limit_usd) : "—"} included
+            of {usage ? compact(usage.credits_included) : "—"} included
           </div>
           <div className="mt-4 h-2 w-full rounded-full bg-white/10 overflow-hidden">
             <div
@@ -187,39 +184,39 @@ export default function UsagePage() {
               style={{ width: `${percent}%` }}
             />
           </div>
+          <div className="mt-2 text-xs text-muted">{percent}% of plan used</div>
         </div>
         <div className="border border-white/10 rounded-lg p-6 bg-white/[0.02]">
-          <div className="text-xs uppercase tracking-[0.2em] text-muted">
-            Tokens
-          </div>
-          <div className="mt-3 font-display text-3xl text-paper">
+          <div className="text-xs uppercase tracking-[0.2em] text-muted">Tokens</div>
+          <div className="mt-3 font-display text-3xl text-paper tabular-nums">
             {usage ? usage.this_month_tokens.toLocaleString() : "—"}
           </div>
-          <div className="mt-2 text-sm text-muted">this month</div>
+          <div className="mt-2 text-sm text-muted">
+            this month · {usage ? usage.this_month_requests.toLocaleString() : "—"} requests
+          </div>
         </div>
         <div className="border border-white/10 rounded-lg p-6 bg-white/[0.02]">
-          <div className="text-xs uppercase tracking-[0.2em] text-muted">
-            Plan
-          </div>
+          <div className="text-xs uppercase tracking-[0.2em] text-muted">Plan</div>
           <div className="mt-3 font-display text-3xl text-paper capitalize">
-            {usage?.tier ?? user.tier}
+            {(usage?.tier ?? user.tier).replace("_", " ")}
+          </div>
+          <div className="mt-2 text-sm text-muted">
+            {usage ? `${compact(usage.remaining_included)} credits left` : ""}
           </div>
         </div>
       </div>
 
       <section className="mt-10 border border-white/10 rounded-lg p-6 bg-white/[0.02]">
-        <h2 className="font-display text-xl tracking-tight">
-          Daily spend · last 30 days
-        </h2>
+        <h2 className="font-display text-xl tracking-tight">Daily credits · last 30 days</h2>
         <div className="mt-6">
           {loading && !usage ? (
-            <p className="text-sm text-muted">Loading…</p>
+            <Skeleton className="h-[200px] w-full" />
           ) : error ? (
             <p className="text-sm text-red-400">{error}</p>
-          ) : usage && usage.daily.length > 0 ? (
+          ) : usage && usage.daily.some((d) => d.credits > 0) ? (
             <BarChart data={usage.daily} />
           ) : (
-            <p className="text-sm text-muted">No usage yet.</p>
+            <p className="text-sm text-muted">No usage yet this period.</p>
           )}
         </div>
       </section>

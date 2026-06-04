@@ -10,6 +10,7 @@ import {
 } from "@/lib/inference/tandem";
 import { estimateTokens } from "@/lib/inference/tokens";
 import { ensureWithinQuota, recordUsage } from "@/lib/usage/quota";
+import { featureLocked, featureLockedBody } from "@/lib/feature_gate";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -62,6 +63,14 @@ export async function POST(request: Request): Promise<Response> {
     workspaceFiles: body.workspaceFiles,
   });
   const estimate = Math.max(2_000, baseEstimate * 3);
+  // Paywall: the tandem builder/checker is multi-model — Pro+ and up.
+  if (featureLocked(auth.user.tier, "multiModel")) {
+    return new Response(JSON.stringify(featureLockedBody("multiModel")), {
+      status: 403,
+      headers: { "content-type": "application/json" },
+    });
+  }
+
   const quota = await ensureWithinQuota(auth.user.id, auth.user.tier, estimate);
   if (!quota.ok) {
     return new Response(

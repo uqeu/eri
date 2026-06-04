@@ -98,11 +98,31 @@ const PRICE_TABLE: Record<string, { in: number; out: number }> = {
   "mercury-coder":            { in: 0,    out: 0  }, // free-tier per project memory
 };
 
-export function estimateCostMicros(
-  model: string,
-  usage: UsageCounts,
-): number {
-  const row = PRICE_TABLE[model];
+/**
+ * Resolve a wire model id to its price row. Exact match first, then a family
+ * fallback by prefix so future date/point-release suffixes still price (e.g.
+ * `claude-sonnet-4-6`, `claude-haiku-4-5-20251001`). Without this, the live
+ * models miss the table and cost is recorded as $0.
+ */
+function priceForModel(model: string): { in: number; out: number } | null {
+  const exact = PRICE_TABLE[model];
+  if (exact) return exact;
+  const m = model.toLowerCase();
+  if (m.startsWith("claude-opus")) return { in: 15, out: 75 };
+  if (m.startsWith("claude-sonnet")) return { in: 3, out: 15 };
+  if (m.startsWith("claude-haiku")) return { in: 1, out: 5 };
+  if (m.startsWith("gpt-4o-mini")) return { in: 0.15, out: 0.6 };
+  if (m.startsWith("gpt-4o") || m.startsWith("gpt-4-turbo")) return { in: 2.5, out: 10 };
+  if (m.startsWith("o1")) return { in: 15, out: 60 };
+  if (m.startsWith("gemini-2.5-pro") || m.startsWith("gemini-2.0-pro"))
+    return { in: 1.25, out: 5 };
+  if (m.startsWith("gemini-2")) return { in: 0.075, out: 0.3 };
+  if (m.startsWith("mercury")) return { in: 0, out: 0 };
+  return null;
+}
+
+export function estimateCostMicros(model: string, usage: UsageCounts): number {
+  const row = priceForModel(model);
   if (!row) return 0;
   const cost = usage.tokens_in * row.in + usage.tokens_out * row.out;
   return Math.round(cost);

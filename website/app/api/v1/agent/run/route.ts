@@ -24,6 +24,7 @@
 import { authenticateApiBearer } from "@/lib/auth/api_tokens";
 import { rateLimitToken } from "@/lib/inference/rate_limit";
 import { ensureWithinQuota, recordUsage } from "@/lib/usage/quota";
+import { featureLocked, featureLockedBody } from "@/lib/feature_gate";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -93,6 +94,14 @@ export async function POST(request: Request): Promise<Response> {
   // Free-intent shortcut: ask / sketch stay on the bundled path and don't
   // burn frontier tokens.
   if (!FREE_INTENTS.has(intent)) {
+    // Paywall: the agent intents (plan/test/refactor/explain/ship) are agent
+    // mode — Pro and up. Free/Starter get a 403 with an upgrade hint.
+    if (featureLocked(auth.user.tier, "agentMode")) {
+      return new Response(JSON.stringify(featureLockedBody("agentMode")), {
+        status: 403,
+        headers: { "content-type": "application/json" },
+      });
+    }
     const estimate = estimateTokens(body.prompt);
     const quota = await ensureWithinQuota(auth.user.id, auth.user.tier, estimate);
     if (!quota.ok) {

@@ -17,7 +17,36 @@ const POLL_INTERVAL_SECS: u64 = 2;
 const POLL_MAX_SECS: u64 = 600; // 10 min — matches the IDE flow.
 
 #[derive(Debug, Serialize)]
-struct DeviceStartBody {}
+#[serde(rename_all = "camelCase")]
+struct DeviceStartBody {
+    /// Best-effort machine name so the device shows up labelled, and so a
+    /// re-login from the same machine replaces its prior token (one per host).
+    device_label: String,
+}
+
+/// Best-effort host label for this machine. `hostname` exists on macOS + Linux;
+/// fall back to $HOSTNAME, then a generic label. First dot-label only, capped.
+fn device_label() -> String {
+    let raw = std::env::var("HOSTNAME")
+        .ok()
+        .filter(|h| !h.trim().is_empty());
+    let raw = raw.or_else(|| {
+        std::process::Command::new("hostname")
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .filter(|h| !h.is_empty())
+    });
+    match raw {
+        Some(h) => {
+            let short = h.split('.').next().unwrap_or(&h).trim();
+            let short = if short.is_empty() { &h } else { short };
+            short.chars().take(64).collect()
+        }
+        None => "unknown device".to_string(),
+    }
+}
 
 // RFC 8628 device authorization response. /api/v1/auth/device/start returns
 // { deviceCode, userCode, verificationUri, verificationUriComplete, ... }.
@@ -59,7 +88,12 @@ pub async fn login() -> Result<Credentials> {
     let creds = config::load()?;
     let client = Client::from_credentials(&creds)?;
     let start: DeviceStartResponse = client
-        .post_json("/api/v1/auth/device/start", &DeviceStartBody {})
+        .post_json(
+            "/api/v1/auth/device/start",
+            &DeviceStartBody {
+                device_label: device_label(),
+            },
+        )
         .await
         .context("start device flow")?;
 

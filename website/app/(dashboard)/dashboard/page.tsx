@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { authedFetch, useUser } from "@/lib/auth-client";
+import { dashboardOnboardingSteps } from "@/lib/dashboard-onboarding";
 
 interface SubscriptionSummary {
   tier: string;
@@ -13,9 +14,10 @@ interface SubscriptionSummary {
 
 interface UsageSummary {
   tier: string;
-  this_month_usd: number;
+  credits_used: number;
+  credits_included: number;
   this_month_tokens: number;
-  limit_usd: number;
+  this_month_requests: number;
 }
 
 function isSubscription(value: unknown): value is SubscriptionSummary {
@@ -28,9 +30,9 @@ function isUsage(value: unknown): value is UsageSummary {
   if (typeof value !== "object" || value === null) return false;
   const obj = value as Record<string, unknown>;
   return (
-    typeof obj.this_month_usd === "number" &&
-    typeof obj.this_month_tokens === "number" &&
-    typeof obj.limit_usd === "number"
+    typeof obj.credits_used === "number" &&
+    typeof obj.credits_included === "number" &&
+    typeof obj.this_month_tokens === "number"
   );
 }
 
@@ -42,10 +44,6 @@ function formatRenewal(epoch: number | null): string {
     month: "short",
     day: "numeric",
   });
-}
-
-function formatUsd(value: number): string {
-  return `$${value.toFixed(2)}`;
 }
 
 function formatTokens(value: number): string {
@@ -144,9 +142,13 @@ export default function DashboardPage() {
 
   const greeting = user.display_name?.trim() || user.email;
   const percent =
-    usage && usage.limit_usd > 0
-      ? Math.min(100, Math.round((usage.this_month_usd / usage.limit_usd) * 100))
+    usage && usage.credits_included > 0
+      ? Math.min(100, Math.round((usage.credits_used / usage.credits_included) * 100))
       : 0;
+  const onboardingSteps = dashboardOnboardingSteps({
+    activeDevices,
+    tier: subscription?.tier ?? user.tier,
+  });
 
   return (
     <div className="max-w-5xl">
@@ -158,6 +160,54 @@ export default function DashboardPage() {
           Welcome, {greeting}
         </h1>
       </div>
+
+      <section className="mt-10 border border-accent/25 rounded-lg bg-accent/[0.035] p-6">
+        <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+          <div>
+            <p className="text-xs uppercase tracking-[0.22em] text-accent">
+              First Run
+            </p>
+            <h2 className="mt-2 font-display text-2xl tracking-tight text-paper">
+              Get from account to first shipped task.
+            </h2>
+          </div>
+          <Link
+            href="/docs/quickstart"
+            className="text-sm text-muted hover:text-paper transition"
+          >
+            Quickstart →
+          </Link>
+        </div>
+        <div className="mt-5 grid gap-3 lg:grid-cols-5">
+          {onboardingSteps.map((step, index) => (
+            <Link
+              key={step.id}
+              href={step.href}
+              className="rounded-md border border-white/10 bg-black/20 p-4 transition hover:border-accent"
+            >
+              <div className="flex items-center justify-between gap-3">
+                <span className="font-mono text-[11px] text-muted">
+                  {String(index + 1).padStart(2, "0")}
+                </span>
+                <span
+                  className={`rounded-full px-2 py-0.5 text-[11px] ${
+                    step.status === "done"
+                      ? "bg-accent text-ink"
+                      : "bg-white/10 text-muted"
+                  }`}
+                >
+                  {step.status === "done" ? "done" : "next"}
+                </span>
+              </div>
+              <div className="mt-3 text-sm text-paper">{step.title}</div>
+              <p className="mt-2 text-[12px] leading-relaxed text-muted">
+                {step.body}
+              </p>
+              <div className="mt-3 text-[12px] text-accent">{step.cta} →</div>
+            </Link>
+          ))}
+        </div>
+      </section>
 
       <div className="mt-10 grid gap-6 md:grid-cols-2">
         <section className="border border-white/10 rounded-lg p-6 bg-white/[0.02]">
@@ -217,11 +267,11 @@ export default function DashboardPage() {
             </Link>
           </div>
           <div className="mt-6 flex items-baseline gap-3">
-            <span className="font-display text-4xl text-paper">
-              {usage ? formatUsd(usage.this_month_usd) : "—"}
+            <span className="font-display text-4xl text-paper tabular-nums">
+              {usage ? formatTokens(usage.credits_used) : "—"}
             </span>
             <span className="text-sm text-muted">
-              of {usage ? formatUsd(usage.limit_usd) : "—"}
+              of {usage ? formatTokens(usage.credits_included) : "—"} credits
             </span>
           </div>
           <div className="mt-4 h-2 w-full rounded-full bg-white/10 overflow-hidden">
@@ -231,7 +281,8 @@ export default function DashboardPage() {
             />
           </div>
           <p className="mt-3 text-sm text-muted">
-            {usage ? formatTokens(usage.this_month_tokens) : "—"} tokens used
+            {usage ? formatTokens(usage.this_month_tokens) : "—"} tokens ·{" "}
+            {usage ? usage.this_month_requests.toLocaleString() : "—"} requests this month
           </p>
         </section>
       </div>
@@ -253,10 +304,10 @@ export default function DashboardPage() {
         ) : activeDevices === 0 ? (
           <div className="mt-4">
             <p className="text-sm text-paper">
-              No eri IDE has connected to your account yet.
+              No Eri device has connected to your account yet.
             </p>
             <p className="mt-2 text-sm text-muted leading-relaxed">
-              When the eri IDE is open on your machine, run{" "}
+              When Eri is open on your machine, run{" "}
               <code className="font-mono text-[12px] bg-white/5 border border-white/10 rounded px-1.5 py-0.5">
                 eri.account.signIn
               </code>{" "}
@@ -279,22 +330,22 @@ export default function DashboardPage() {
       <section className="mt-10">
         <h2 className="font-display text-xl tracking-tight">Quick links</h2>
         <div className="mt-4 grid gap-3 sm:grid-cols-3">
-          <a
-            href="#"
+          <Link
+            href="/install"
             className="border border-white/10 rounded-lg p-5 hover:border-accent transition group"
           >
             <div className="text-sm text-muted">Download</div>
             <div className="mt-1 text-paper group-hover:text-accent transition">
               Download eri
             </div>
-          </a>
+          </Link>
           <Link
-            href="/library"
+            href="/docs/ide"
             className="border border-white/10 rounded-lg p-5 hover:border-accent transition group"
           >
-            <div className="text-sm text-muted">Voices</div>
+            <div className="text-sm text-muted">Agent Manager</div>
             <div className="mt-1 text-paper group-hover:text-accent transition">
-              Open Voice Library
+              Open workbench guide
             </div>
           </Link>
           <a

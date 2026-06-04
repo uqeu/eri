@@ -37,8 +37,18 @@ function baseUrl(): string {
   );
 }
 
-export async function POST(): Promise<NextResponse> {
+function sanitizeLabel(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim().slice(0, 64);
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+export async function POST(request: Request): Promise<NextResponse> {
   const expiresAt = new Date(Date.now() + TTL_SECONDS * 1000);
+  const body: unknown = await request.json().catch(() => ({}));
+  const deviceLabel = sanitizeLabel(
+    (body as { deviceLabel?: unknown })?.deviceLabel,
+  );
 
   // Mint a fresh pair; retry only on the (rare) user_code unique collision.
   let deviceCode = "";
@@ -51,6 +61,7 @@ export async function POST(): Promise<NextResponse> {
         code: deviceCode,
         user_code: userCode,
         expires_at: expiresAt,
+        device_label: deviceLabel,
       });
       break;
     } catch (err) {

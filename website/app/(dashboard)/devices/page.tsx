@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { authedFetch, useUser } from "@/lib/auth-client";
+import { SkeletonRows } from "@/components/Skeleton";
 
 interface Device {
   id: string;
@@ -44,6 +45,7 @@ export default function DevicesPage(): JSX.Element | null {
   const [devices, setDevices] = useState<Device[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [revoking, setRevoking] = useState<Record<string, boolean>>({});
+  const [revokingAll, setRevokingAll] = useState<boolean>(false);
   const [toast, setToast] = useState<Toast | null>(null);
 
   const load = useCallback(async (): Promise<void> => {
@@ -100,6 +102,28 @@ export default function DevicesPage(): JSX.Element | null {
     }
   }
 
+  async function revokeAll(): Promise<void> {
+    if (!window.confirm("Sign out every device? Each will need to sign in again.")) {
+      return;
+    }
+    setRevokingAll(true);
+    try {
+      const res = await authedFetch("/api/auth/devices/revoke-all", {
+        method: "POST",
+      });
+      if (!res.ok) {
+        setToast({ kind: "error", message: "Could not revoke all." });
+        return;
+      }
+      setToast({ kind: "success", message: "All devices signed out." });
+      await load();
+    } catch {
+      setToast({ kind: "error", message: "Network error." });
+    } finally {
+      setRevokingAll(false);
+    }
+  }
+
   if (!user) return null;
 
   const active = (devices ?? []).filter((d) => !d.revoked);
@@ -112,7 +136,7 @@ export default function DevicesPage(): JSX.Element | null {
         Devices
       </h1>
       <p className="mt-3 text-[14px] text-muted">
-        Every signed-in eri IDE you've authorized. Revoke any device to
+        Every signed-in Eri app or CLI you've authorized. Revoke any device to
         invalidate its bearer token instantly.
       </p>
 
@@ -123,24 +147,34 @@ export default function DevicesPage(): JSX.Element | null {
           </div>
         )}
 
-        {devices === null && !error && (
-          <p className="text-[13px] text-muted">Loading…</p>
-        )}
+        {devices === null && !error && <SkeletonRows rows={3} />}
 
         {devices !== null && active.length === 0 && revoked.length === 0 && (
           <div className="rounded-md border border-white/10 px-6 py-10 text-center">
             <p className="text-[14px] text-paper">No devices yet.</p>
             <p className="mt-2 text-[12px] text-muted">
-              When you sign in from an eri IDE, it'll show up here.
+              When you sign in from Eri, it will show up here.
             </p>
           </div>
         )}
 
         {active.length > 0 && (
           <section>
-            <h2 className="text-[12px] uppercase tracking-[0.22em] text-muted mb-3">
-              Active · {active.length}
-            </h2>
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-[12px] uppercase tracking-[0.22em] text-muted">
+                Active · {active.length}
+              </h2>
+              {active.length > 1 && (
+                <button
+                  type="button"
+                  disabled={revokingAll}
+                  onClick={() => void revokeAll()}
+                  className="rounded-md border border-red-500/30 px-3 py-1 text-[12px] text-red-300 transition hover:border-red-500/60 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {revokingAll ? "Signing out…" : "Sign out all"}
+                </button>
+              )}
+            </div>
             <div className="space-y-2">
               {active.map((d) => (
                 <div

@@ -4,6 +4,7 @@ import {
   approveDeviceCodeGrant,
   denyDeviceCodeGrant,
   getDeviceCodeGrantByUserCode,
+  revokeOtherTokensByLabel,
 } from "@/lib/inference/db";
 import { issueApiToken } from "@/lib/auth/api_tokens";
 import { recordAudit } from "@/lib/audit";
@@ -69,9 +70,12 @@ export async function POST(request: Request): Promise<NextResponse> {
     return NextResponse.json({ ok: true }, { status: 200 });
   }
 
+  // Prefer the machine label the CLI sent at /start; fall back to any explicit
+  // body label, then a generic name.
+  const label = grant.device_label ?? body.label ?? "Eri";
   const issued = await issueApiToken({
     userId: user.id,
-    label: body.label ?? "Eri",
+    label,
   });
   const approved = await approveDeviceCodeGrant({
     user_code: body.user_code,
@@ -85,8 +89,13 @@ export async function POST(request: Request): Promise<NextResponse> {
     return NextResponse.json({ error: "code_not_pending" }, { status: 404 });
   }
 
+  // One active token per machine: revoke this host's prior tokens.
+  const replaced = await revokeOtherTokensByLabel(user.id, label, issued.row.id);
+
   void recordAudit(user.id, "device.token_created", {
     token_id: issued.row.id,
+    label,
+    replaced,
   });
 
   // The device_code never appears in this response or in the browser. The
