@@ -3,6 +3,7 @@ import {
   consumeDeviceCodeSecret,
   getDeviceCodeGrant,
 } from "@/lib/inference/db";
+import { getUserById } from "@/lib/db";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -73,8 +74,18 @@ export async function POST(request: Request): Promise<NextResponse> {
       { status: 200 },
     );
   }
+  // Return the signed-in identity alongside the token so the client can show
+  // "Signed in as <email> (<tier>)" without a second (JWT-only) call. The
+  // device bearer is an api_token, which /api/auth/me does not accept.
+  const user = grant.user_id ? await getUserById(grant.user_id) : null;
   return NextResponse.json(
-    { status: "approved", token: plaintext },
+    {
+      status: "approved",
+      token: plaintext,
+      userId: user?.id ?? grant.user_id ?? null,
+      email: user?.email ?? null,
+      tier: user?.tier ?? null,
+    },
     { status: 200 },
   );
 }
