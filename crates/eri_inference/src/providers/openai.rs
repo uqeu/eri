@@ -384,8 +384,8 @@ mod tests {
 
     #[test]
     fn openai_byok_constructor_keeps_openai_endpoint() {
-        let provider = OpenAiProvider::for_model_with_key("gpt-4o", "sk-byok")
-            .expect("provider builds");
+        let provider =
+            OpenAiProvider::for_model_with_key("gpt-4o", "sk-byok").expect("provider builds");
         assert!(!provider.is_proxied());
         assert_eq!(provider.endpoint(), OPENAI_CHAT_COMPLETIONS_URL);
     }

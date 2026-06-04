@@ -26,9 +26,16 @@ pub fn observe_edit_outcome(
     summary: &str,
     accepted: bool,
 ) -> io::Result<()> {
-    let kind = if accepted { "edit_accepted" } else { "edit_rejected" };
+    let kind = if accepted {
+        "edit_accepted"
+    } else {
+        "edit_rejected"
+    };
     let body = serde_json::to_string(&EditOutcome { path, summary }).map_err(|e| {
-        io::Error::new(io::ErrorKind::InvalidData, format!("serialize outcome: {e}"))
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("serialize outcome: {e}"),
+        )
     })?;
     store.insert(kind, workspace, &body)?;
     Ok(())

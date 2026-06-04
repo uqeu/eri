@@ -21,7 +21,7 @@ pub struct TemplateEntry {
     pub display_name: String,
     pub description: String,
     /// One of: `next`, `vite-react`, `astro`, `axum`, `fastapi`,
-    /// `expo`, `chrome-ext`, `vscode-ext`.
+    /// `expo`, `chrome-ext`, `eri-workbench`.
     pub family: String,
     /// Concrete stack labels surfaced in the picker (e.g.
     /// `["Next.js 15", "Tailwind", "shadcn/ui", "Stripe", "Supabase"]`).
@@ -137,11 +137,11 @@ pub fn builtin_templates() -> Vec<TemplateEntry> {
             ],
         },
         TemplateEntry {
-            slug: "vscode-ext".into(),
-            display_name: "VS Code extension".into(),
-            description: "Reference shape matching eri-ai-panel — yo code on rails.".into(),
-            family: "vscode-ext".into(),
-            stack: vec!["yo code".into(), "TypeScript".into(), "esbuild".into()],
+            slug: "eri-workbench-ext".into(),
+            display_name: "Eri workbench extension".into(),
+            description: "Agent surface extension with a typed command bridge.".into(),
+            family: "eri-workbench".into(),
+            stack: vec!["Agent surface".into(), "TypeScript".into(), "esbuild".into()],
         },
     ]
 }
@@ -164,7 +164,7 @@ mod tests {
             "fastapi",
             "expo",
             "chrome-ext",
-            "vscode-ext",
+            "eri-workbench",
         ] {
             assert!(families.contains(needed), "missing family {needed}");
         }
@@ -174,6 +174,40 @@ mod tests {
     fn each_template_has_at_least_one_stack_label() {
         for t in builtin_templates() {
             assert!(!t.stack.is_empty(), "template {} has empty stack", t.slug);
+        }
+    }
+
+    #[test]
+    fn builtin_templates_do_not_expose_competitor_shell_names() {
+        let forbidden = [
+            "mercury",
+            "sonnet",
+            "haiku",
+            "gemini",
+            "openai",
+            "anthropic",
+            "vscode",
+            "vscodium",
+            "visual studio code",
+            "claude",
+            "cursor",
+            "antigravity",
+        ];
+        for template in builtin_templates() {
+            let public_text = format!(
+                "{}\n{}\n{}\n{}\n{}",
+                template.slug,
+                template.display_name,
+                template.description,
+                template.family,
+                template.stack.join("\n")
+            )
+            .to_lowercase();
+            assert!(
+                !forbidden.iter().any(|term| public_text.contains(term)),
+                "template {} exposes a forbidden shell/provider name",
+                template.slug
+            );
         }
     }
 }

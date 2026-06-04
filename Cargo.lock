@@ -733,9 +733,16 @@ dependencies = [
 name = "eri_cli"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "clap",
  "eri_core",
  "eri_inference",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "url",
 ]
 
 [[package]]
@@ -927,6 +934,19 @@ dependencies = [
  "tokio",
  "tracing",
  "url",
+]
+
+[[package]]
+name = "eri_mcp_server"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "eri_inference",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -3125,6 +3145,7 @@ dependencies = [
  "bytes",
  "libc",
  "mio",
+ "parking_lot 0.12.5",
  "pin-project-lite",
  "signal-hook-registry",
  "socket2",

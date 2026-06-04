@@ -4,7 +4,7 @@ version = "0.1.0"
 edition.workspace = true
 publish.workspace = true
 license = "LicenseRef-Proprietary"
-description = "Headless CLI for eri — one-shot Mercury 2 builds, surgical iterations, template scaffolds, and Vercel deploys without launching the IDE GUI."
+description = "Terminal-native Eri agent for interactive sessions, one-shot builds, project plans, memory, templates, and shipping workflows."
 
 [lints]
 workspace = true

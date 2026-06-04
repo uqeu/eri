@@ -47,13 +47,13 @@ impl Persona {
     }
 }
 
-mod coder;
 mod architect;
+mod coder;
 mod debugger;
-mod tester;
-mod shipper;
-mod mercury_only;
 mod eri_default;
+mod mercury_only;
+mod shipper;
+mod tester;
 
 pub use architect::architect;
 pub use coder::coder;

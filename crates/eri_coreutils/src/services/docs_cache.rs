@@ -237,7 +237,7 @@ pub fn builtin_snippets() -> Vec<DocSnippet> {
             "4",
             "streamText (Vercel AI SDK)",
             "https://sdk.vercel.ai",
-            "const { textStream } = streamText({ model: anthropic('claude-sonnet-4-5-20251015'), prompt: 'hi' });",
+            "const { textStream } = streamText({ model: anthropic('claude-sonnet-4-6'), prompt: 'hi' });",
         ),
         // Storage / data
         s(

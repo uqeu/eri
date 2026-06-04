@@ -26,7 +26,7 @@
 
 use std::path::PathBuf;
 
-use eri_caveman::BudgetPart;
+use eri_caveman::{BudgetPart, CompressionLevel, Compressor};
 use eri_router::{Intent, ModelChoice, PromptContext};
 
 use crate::InferenceError;
@@ -141,6 +141,27 @@ impl Instrumentation for NullInstr {}
 ///    Search → `SearchProvider`, everything else → chat-style stream).
 /// 3. Stream events to `on_event` in real time. Tokens, edit applies and
 ///    edit failures are surfaced as they happen.
+/// Caveman-compress the prose of non-`system:` context parts before budgeting.
+///
+/// `system:`-labelled parts (instructions) are returned byte-for-byte so
+/// instruction fidelity is never touched. For all other parts, the prose is
+/// run through caveman at `Medium` level with fenced code blocks preserved, so
+/// filler words / articles shrink — code and HTML survive intact. This trims
+/// input tokens (hence eri credits burned) with no semantic change.
+pub(crate) fn compress_context_parts(parts: Vec<BudgetPart>) -> Vec<BudgetPart> {
+    let compressor = Compressor::new(CompressionLevel::Medium).with_preserve_blocks(vec!["```"]);
+    parts
+        .into_iter()
+        .map(|part| {
+            if part.label.starts_with("system:") {
+                return part;
+            }
+            let text = compressor.compress(&part.text);
+            BudgetPart { text, ..part }
+        })
+        .collect()
+}
+
 pub fn run_iteration_via_brain(
     req: BrainIterationRequest,
     search_provider: Option<&dyn SearchProvider>,
@@ -149,9 +170,12 @@ pub fn run_iteration_via_brain(
 ) -> Result<BrainIterationResponse, BrainIterationError> {
     instrumentation.on_prompt(&req.user_prompt);
 
-    // 1. Plan.
+    // 1. Plan. Caveman-compress the non-system context prose first so fewer
+    //    input tokens (and fewer eri credits) are burned; code/HTML and system
+    //    instructions are left byte-for-byte intact.
     let mut brain = Brain::new();
-    let plan = brain.plan(&req.user_prompt, &req.context, req.parts.clone())?;
+    let parts = compress_context_parts(req.parts.clone());
+    let plan = brain.plan(&req.user_prompt, &req.context, parts)?;
     instrumentation.on_intent(plan.intent);
 
     // 2. Dispatch by intent.
@@ -386,6 +410,34 @@ mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
     use tempfile::TempDir;
 
+    #[test]
+    fn compress_context_parts_preserves_system_and_code_but_shrinks_prose() {
+        let prose = "Please could you go ahead and make the header sticky so that \
+                     it will remain at the top of the page when the user scrolls down.";
+        let code = "```css\n.header { position: sticky; top: 0; }\n```";
+        let parts = vec![
+            BudgetPart::new("system:base", 0, prose),
+            BudgetPart::new("user:instruction", 1, prose),
+            BudgetPart::new("user:file", 2, code),
+        ];
+
+        let out = compress_context_parts(parts);
+
+        // system: parts are returned byte-for-byte (instruction fidelity).
+        assert_eq!(out[0].text, prose);
+        // non-system prose actually shrinks.
+        assert!(
+            out[1].text.len() < prose.len(),
+            "expected prose to compress, got {:?}",
+            out[1].text
+        );
+        // fenced code is left intact.
+        assert_eq!(out[2].text, code);
+        // labels and priorities are preserved.
+        assert_eq!(out[1].label, "user:instruction");
+        assert_eq!(out[2].priority, 2);
+    }
+
     /// In-test provider that returns canned text without touching the network.
     struct CannedProvider {
         text: String,
@@ -515,10 +567,10 @@ mod tests {
         let prev_build = std::env::var("ERI_ROUTE_BUILD").ok();
         // SAFETY: tests are serialised and we restore on drop below.
         unsafe {
-            std::env::set_var("ERI_ROUTE_EDIT", "claude:claude-sonnet-4-5-20251015");
-            std::env::set_var("ERI_ROUTE_BUILD", "claude:claude-sonnet-4-5-20251015");
-            std::env::set_var("ERI_ROUTE_CHAT", "claude:claude-sonnet-4-5-20251015");
-            std::env::set_var("ERI_ROUTE_EXPLAIN", "claude:claude-sonnet-4-5-20251015");
+            std::env::set_var("ERI_ROUTE_EDIT", "claude:claude-sonnet-4-6");
+            std::env::set_var("ERI_ROUTE_BUILD", "claude:claude-sonnet-4-6");
+            std::env::set_var("ERI_ROUTE_CHAT", "claude:claude-sonnet-4-6");
+            std::env::set_var("ERI_ROUTE_EXPLAIN", "claude:claude-sonnet-4-6");
         }
         let router = eri_router::Router::from_env();
         // Restore so other tests in the binary aren't perturbed.

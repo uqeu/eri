@@ -423,9 +423,8 @@ mod tests {
 
     #[test]
     fn gemini_byok_constructor_uses_query_param_auth() {
-        let provider =
-            GeminiProvider::for_model_with_key("gemini-2.0-flash-exp", "key-123")
-                .expect("provider builds");
+        let provider = GeminiProvider::for_model_with_key("gemini-2.0-flash-exp", "key-123")
+            .expect("provider builds");
         assert!(!provider.is_proxied());
         let endpoint = provider.endpoint("streamGenerateContent");
         assert!(endpoint.contains("?key=key-123"));

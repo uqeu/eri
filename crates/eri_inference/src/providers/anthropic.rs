@@ -96,11 +96,7 @@ impl AnthropicProvider {
             auth: AnthropicAuth::Proxy {
                 session_token: session_token.into(),
             },
-            endpoint: format!(
-                "{}{}",
-                base_url.trim_end_matches('/'),
-                ANTHROPIC_PROXY_PATH
-            ),
+            endpoint: format!("{}{}", base_url.trim_end_matches('/'), ANTHROPIC_PROXY_PATH),
         })
     }
 
@@ -147,18 +143,19 @@ impl AnthropicProvider {
 }
 
 fn pricing_for(model: &str) -> Option<(f64, f64)> {
-    // Match by prefix so "claude-sonnet-4-5-20251015" and "claude-sonnet-4-5"
-    // both resolve to the Sonnet rates.
-    if model.starts_with("claude-sonnet-4-5") {
+    // Match by model family prefix so future point releases (4-5, 4-6, ...)
+    // resolve without a code change. Rates are per the family's published
+    // pricing; see docs/architecture/eri-architecture.html section 6b.
+    if model.starts_with("claude-sonnet") {
         return Some((
             CLAUDE_SONNET_4_5_INPUT_PER_M,
             CLAUDE_SONNET_4_5_OUTPUT_PER_M,
         ));
     }
-    if model.starts_with("claude-haiku-4-5") {
+    if model.starts_with("claude-haiku") {
         return Some((CLAUDE_HAIKU_4_5_INPUT_PER_M, CLAUDE_HAIKU_4_5_OUTPUT_PER_M));
     }
-    if model.starts_with("claude-opus-4-5") {
+    if model.starts_with("claude-opus") {
         return Some((CLAUDE_OPUS_4_5_INPUT_PER_M, CLAUDE_OPUS_4_5_OUTPUT_PER_M));
     }
     None
@@ -399,7 +396,7 @@ mod tests {
     #[test]
     fn proxy_constructor_rewrites_endpoint_and_marks_proxied() {
         let provider = AnthropicProvider::for_model_with_proxy(
-            "claude-sonnet-4-5-20251015",
+            "claude-sonnet-4-6",
             "sess-tok",
             "https://eri.dev",
         )
@@ -413,11 +410,8 @@ mod tests {
 
     #[test]
     fn byok_constructor_keeps_anthropic_endpoint() {
-        let provider = AnthropicProvider::for_model_with_key(
-            "claude-sonnet-4-5-20251015",
-            "sk-ant-byok",
-        )
-        .expect("provider builds");
+        let provider = AnthropicProvider::for_model_with_key("claude-sonnet-4-6", "sk-ant-byok")
+            .expect("provider builds");
         assert!(!provider.is_proxied());
         assert_eq!(provider.endpoint(), ANTHROPIC_MESSAGES_URL);
     }
@@ -438,16 +432,13 @@ mod tests {
 
     #[test]
     fn anthropic_request_body_uses_messages_format_and_system_at_top_level() {
-        let provider = AnthropicProvider::with_endpoint(
-            "claude-sonnet-4-5-20251015",
-            "test-key",
-            "http://localhost/",
-        );
+        let provider =
+            AnthropicProvider::with_endpoint("claude-sonnet-4-6", "test-key", "http://localhost/");
         let body = provider
             .build_request_body("you are helpful", "hello", 128, false)
             .expect("body");
         let parsed: serde_json::Value = serde_json::from_str(&body).expect("json");
-        assert_eq!(parsed["model"], "claude-sonnet-4-5-20251015");
+        assert_eq!(parsed["model"], "claude-sonnet-4-6");
         // Anthropic puts `system` at the top level, NOT inside `messages`.
         assert_eq!(parsed["system"], "you are helpful");
         let messages = parsed["messages"].as_array().expect("messages");

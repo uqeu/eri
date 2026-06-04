@@ -1,19 +1,19 @@
-//! Headless one-shot CLI for eri.
+//! Terminal-native CLI for eri.
 //!
-//! Lets users drive Mercury 2 from a terminal without booting the IDE:
+//! Lets users drive Eri from a terminal:
 //!
 //! ```text
+//! eri
+//! eri plan "add Stripe checkout"
 //! eri build "make me a coffee shop and deploy it"
 //! eri iterate "swap the hero photo for an espresso shot"
 //! eri scaffold portfolio
 //! eri ship
 //! ```
 //!
-//! The CLI reuses `eri_inference` end-to-end — same env vars, same Mercury
-//! backend, same Vercel deploy path, same cost telemetry — so behavior stays
-//! identical to the GUI for the subset of flows it exposes. The only thing
-//! the CLI does differently is render progress as a single `\r`-updated
-//! status line on stdout instead of a panel.
+//! The CLI reuses the same build, iteration, deploy, and agent routing paths
+//! as the GUI. The only thing the CLI does differently is render progress as a
+//! single `\r`-updated status line on stdout instead of a panel.
 
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -30,9 +30,13 @@ use eri_inference::{
 mod agent;
 mod agent_cmd;
 mod auth;
+mod build_agent;
 mod client;
 mod config;
+mod genui;
 mod memory;
+mod repl;
+mod update;
 
 const ERI_CLI_VERSION: &str = env!("CARGO_PKG_VERSION");
 const DEFAULT_OUTPUT_FILE: &str = "index.html";
@@ -46,14 +50,33 @@ const ITERATE_DENOISING_STEPS: u32 = 12;
     name = "eri",
     bin_name = "eri",
     version = ERI_CLI_VERSION,
-    about = "Headless eri — Mercury 2 from your terminal.",
-    long_about = "One-shot CLI for eri. Build, iterate, scaffold from a template, \
-                  and deploy a single self-contained HTML page using the same \
-                  Mercury 2 backend the eri IDE uses."
+    about = "Terminal-native Eri agent.",
+    long_about = "Run Eri from any project. Start an interactive session, ask, plan, \
+                  build, iterate, scaffold, remember, and ship from the terminal."
 )]
 pub struct Cli {
     #[command(subcommand)]
-    pub command: Command,
+    pub command: Option<Command>,
+}
+
+/// CLI inference mode. `--mode` selects the reasoning tier (fast/thinking/auto),
+/// not the underlying engine -- the CLI runs the agentic tool-use loop
+/// throughout. The concrete engine/tier is an internal detail.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+pub enum Mode {
+    /// Cheapest, fastest tier -- quick edits, low token burn.
+    Fast,
+    /// Default. Deeper reasoning -- multi-file builds, real thinking.
+    Thinking,
+    /// Smart default (currently Thinking; intent-routed in a future release).
+    Auto,
+}
+
+fn model_for_mode(mode: Mode) -> &'static str {
+    match mode {
+        Mode::Fast => "claude-haiku-4-5-20251001",
+        Mode::Thinking | Mode::Auto => build_agent::DEFAULT_MODEL,
+    }
 }
 
 #[derive(Subcommand, Debug, PartialEq, Eq)]
@@ -68,6 +91,9 @@ pub enum Command {
         /// Write the resulting HTML to this path instead of ./index.html.
         #[arg(long, default_value = DEFAULT_OUTPUT_FILE)]
         output: PathBuf,
+        /// Inference depth: fast | thinking | auto.
+        #[arg(long, value_enum, default_value = "thinking")]
+        mode: Mode,
     },
     /// Apply a surgical edit to ./index.html based on an instruction.
     Iterate {
@@ -76,10 +102,13 @@ pub enum Command {
         /// Edit this file instead of ./index.html.
         #[arg(long, default_value = DEFAULT_OUTPUT_FILE)]
         file: PathBuf,
+        /// Inference depth: fast | thinking | auto.
+        #[arg(long, value_enum, default_value = "thinking")]
+        mode: Mode,
     },
     /// List every template slug eri can scaffold from.
     ListTemplates,
-    /// Drop a template's HTML into ./index.html with no Mercury call.
+    /// Drop a template's HTML into ./index.html with no network call.
     Scaffold {
         /// Slug from `eri list-templates` (e.g. `portfolio`, `coffee-shop`).
         slug: String,
@@ -88,7 +117,7 @@ pub enum Command {
         output: PathBuf,
     },
     /// Deploy whatever's at ./index.html to Vercel (--prod --yes), OR
-    /// run the agent's tandem ship pipeline when an intent is given.
+    /// run Eri's shipping loop when an intent is given.
     Ship {
         /// What to ship — when given, runs the tandem builder/checker.
         /// Empty → deploy ./index.html to Vercel (old behaviour).
@@ -97,6 +126,9 @@ pub enum Command {
         /// (Vercel mode only).
         #[arg(long)]
         dir: Option<PathBuf>,
+        /// Render the agent event stream as plain text or artifact JSON.
+        #[arg(long, value_enum, default_value_t = agent::AgentOutputMode::Text)]
+        output: agent::AgentOutputMode,
     },
     /// Deploy ./index.html to Vercel (--prod --yes). Same as
     /// `eri ship` without an intent.
@@ -104,13 +136,16 @@ pub enum Command {
         #[arg(long)]
         dir: Option<PathBuf>,
     },
-    /// Send a one-off question through eri's brain router.
+    /// Ask Eri a one-off question about the current project.
     Ask {
         /// The question to ask.
         prompt: Vec<String>,
     },
     /// Generate a step-by-step plan for a goal (Architect persona).
     Plan {
+        /// Render the agent event stream as plain text or artifact JSON.
+        #[arg(long, value_enum, default_value_t = agent::AgentOutputMode::Text)]
+        output: agent::AgentOutputMode,
         /// The goal to plan.
         prompt: Vec<String>,
     },
@@ -131,20 +166,39 @@ pub enum Command {
         /// The target — `src/foo.ts`, `src/foo.ts:42`, or `MyClass#method`.
         target: String,
     },
-    /// Mercury sketch — fast HTML draft from a description.
+    /// Fast HTML draft from a description.
     Sketch {
         /// What to sketch.
+        prompt: Vec<String>,
+    },
+    /// Generate an Eri GenUI component contract for streamed interface output.
+    Ui {
+        /// Render as text or artifact JSON.
+        #[arg(long, value_enum, default_value_t = genui::GenUiOutputMode::Text)]
+        output: genui::GenUiOutputMode,
+        /// Open the desktop Eri workbench with this UI intent.
+        #[arg(long)]
+        open: bool,
+        /// Interface to generate.
         prompt: Vec<String>,
     },
     /// eri.dev authentication commands.
     #[command(subcommand)]
     Auth(AuthCommand),
-    /// Persona / agent switcher mirrors the IDE's /agent slash command.
+    /// Persona / agent switcher for this workspace.
     #[command(subcommand)]
     Agent(AgentCommand),
     /// Memory — recall, remember, forget.
     #[command(subcommand)]
     Memory(MemoryCommand),
+    /// MCP server setup and local connector status.
+    #[command(subcommand)]
+    Mcp(McpCommand),
+    /// Check for a server-published CLI update manifest.
+    #[command(subcommand)]
+    Update(UpdateCommand),
+    /// Inspect local setup for auth, agents, MCP, and workflow files.
+    Doctor,
     /// Show the active sign-in + tier + remaining quota. Alias of
     /// `eri auth status`.
     Status,
@@ -184,6 +238,25 @@ pub enum MemoryCommand {
     Forget { target: String },
 }
 
+#[derive(Subcommand, Debug, PartialEq, Eq)]
+pub enum McpCommand {
+    /// Show configured local MCP servers.
+    List,
+}
+
+#[derive(Subcommand, Debug, PartialEq, Eq)]
+pub enum UpdateCommand {
+    /// Check the Eri update manifest without installing anything.
+    Check {
+        /// Release channel to query.
+        #[arg(long, value_enum, default_value_t = update::UpdateChannel::Stable)]
+        channel: update::UpdateChannel,
+        /// Render as text or JSON.
+        #[arg(long, value_enum, default_value_t = update::UpdateOutputMode::Text)]
+        output: update::UpdateOutputMode,
+    },
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
     let rt = match tokio::runtime::Builder::new_current_thread()
@@ -205,17 +278,23 @@ fn main() -> ExitCode {
     }
 }
 
-async fn dispatch(command: Command) -> anyhow::Result<()> {
+async fn dispatch(command: Option<Command>) -> anyhow::Result<()> {
+    let Some(command) = command else {
+        return repl::run().await;
+    };
     match command {
-        // -- existing Mercury HTML commands (sync) --
+        // -- existing Eri HTML commands (sync) --
         Command::Build {
             prompt,
             deploy,
             output,
-        } => run_build(&prompt, deploy, &output).map_err(anyhow::Error::from),
-        Command::Iterate { instruction, file } => {
-            run_iterate(&instruction, &file).map_err(anyhow::Error::from)
-        }
+            mode,
+        } => run_build_metered(&prompt, deploy, &output, model_for_mode(mode)).await,
+        Command::Iterate {
+            instruction,
+            file,
+            mode,
+        } => run_iterate_metered(&instruction, &file, model_for_mode(mode)).await,
         Command::ListTemplates => {
             print_templates();
             Ok(())
@@ -223,24 +302,44 @@ async fn dispatch(command: Command) -> anyhow::Result<()> {
         Command::Scaffold { slug, output } => {
             run_scaffold(&slug, &output).map_err(anyhow::Error::from)
         }
-        Command::Deploy { dir } => {
-            run_deploy(dir.as_deref()).map_err(anyhow::Error::from)
-        }
-        Command::Ship { intent, dir } => {
+        Command::Deploy { dir } => run_deploy(dir.as_deref()).map_err(anyhow::Error::from),
+        Command::Ship {
+            intent,
+            dir,
+            output,
+        } => {
             // `eri ship` with no args → legacy Vercel deploy. With an
             // intent → agent tandem ship.
+            let _ = output; // output mode unused on the metered build path
             match intent {
+                // No intent -> legacy: just deploy whatever is already built.
                 None => run_deploy(dir.as_deref()).map_err(anyhow::Error::from),
-                Some(intent) => agent::ship(intent.trim()).await,
+                // Intent -> build it for real via the metered agentic loop, then deploy.
+                Some(intent) => {
+                    run_build_metered(
+                        intent.trim(),
+                        true,
+                        Path::new(DEFAULT_OUTPUT_FILE),
+                        model_for_mode(Mode::Thinking),
+                    )
+                    .await
+                }
             }
         }
         // -- new agent-mode commands (async) --
         Command::Ask { prompt } => agent::ask(&prompt.join(" ")).await,
-        Command::Plan { prompt } => agent::plan(&prompt.join(" ")).await,
+        Command::Plan { prompt, output } => {
+            agent::plan_with_output(&prompt.join(" "), output).await
+        }
         Command::Test { scope } => agent::test(&scope).await,
         Command::Refactor { scope } => agent::refactor(&scope).await,
         Command::Explain { target } => agent::explain(&target).await,
         Command::Sketch { prompt } => agent::sketch(&prompt.join(" ")).await,
+        Command::Ui {
+            output,
+            open,
+            prompt,
+        } => genui::run_with_open(&prompt.join(" "), output, open),
         Command::Auth(AuthCommand::Login) => auth::login().await.map(|_| ()),
         Command::Auth(AuthCommand::Status) => auth::status().await,
         Command::Auth(AuthCommand::Logout) => auth::logout(),
@@ -252,6 +351,11 @@ async fn dispatch(command: Command) -> anyhow::Result<()> {
         }
         Command::Memory(MemoryCommand::Remember { text }) => memory::remember(&text).await,
         Command::Memory(MemoryCommand::Forget { target }) => memory::forget(&target).await,
+        Command::Mcp(McpCommand::List) => repl::print_mcp_status(),
+        Command::Update(UpdateCommand::Check { channel, output }) => {
+            update::check(update::UpdateCheckOptions { channel, output }).await
+        }
+        Command::Doctor => repl::print_doctor(),
     }
 }
 
@@ -264,15 +368,24 @@ pub fn run(command: Command) -> Result<(), CliError> {
             prompt,
             deploy,
             output,
+            mode: _,
         } => run_build(&prompt, deploy, &output),
-        Command::Iterate { instruction, file } => run_iterate(&instruction, &file),
+        Command::Iterate {
+            instruction,
+            file,
+            mode: _,
+        } => run_iterate(&instruction, &file),
         Command::ListTemplates => {
             print_templates();
             Ok(())
         }
         Command::Scaffold { slug, output } => run_scaffold(&slug, &output),
-        Command::Ship { intent: None, dir } => run_deploy(dir.as_deref()),
-        Command::Ship { intent: Some(_), .. }
+        Command::Ship {
+            intent: None, dir, ..
+        } => run_deploy(dir.as_deref()),
+        Command::Ship {
+            intent: Some(_), ..
+        }
         | Command::Deploy { .. }
         | Command::Ask { .. }
         | Command::Plan { .. }
@@ -280,15 +393,61 @@ pub fn run(command: Command) -> Result<(), CliError> {
         | Command::Refactor { .. }
         | Command::Explain { .. }
         | Command::Sketch { .. }
+        | Command::Ui { .. }
         | Command::Auth(_)
         | Command::Agent(_)
         | Command::Memory(_)
+        | Command::Mcp(_)
+        | Command::Update(_)
+        | Command::Doctor
         | Command::Status => Err(CliError::User(
             "agent-mode commands require the async dispatcher (`main`)".into(),
         )),
     }
 }
 
+/// Default `eri build`: the metered, client-side agentic loop. Inference goes
+/// through `/api/v1/inference/messages` (billed against the plan); tools run
+/// locally and materialize real files. Multi-file builds work because tools
+/// execute on disk here, not in a server relay.
+async fn run_build_metered(
+    prompt: &str,
+    deploy: bool,
+    output: &Path,
+    model: &str,
+) -> anyhow::Result<()> {
+    let workspace = output
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
+    let outcome = build_agent::run_build_agent(prompt, &workspace, model).await?;
+    println!(
+        "\n[eri] {} file(s) in {} turn(s) -- {} in / {} out tokens (metered)",
+        outcome.files_written.len(),
+        outcome.turns,
+        outcome.tokens_in,
+        outcome.tokens_out
+    );
+    for f in &outcome.files_written {
+        println!("  {}", f.display());
+    }
+    // Stopped early (quota / capacity): files are saved, but the build isn't
+    // complete -- don't deploy a partial result.
+    if outcome.halted.is_some() {
+        return Ok(());
+    }
+    if deploy {
+        let url = deploy_to_vercel(&workspace).map_err(anyhow::Error::from)?;
+        println!("deployed: {url}");
+    }
+    Ok(())
+}
+
+/// Legacy local build via the on-device Mercury backend. Unmetered — kept only
+/// as a dev / BYOK fallback (needs a local `MERCURY_API_KEY`). Not the default
+/// path; `run_build_metered` is.
+#[allow(dead_code)]
 fn run_build(prompt: &str, deploy: bool, output: &Path) -> Result<(), CliError> {
     let prompt = prompt.trim();
     if prompt.is_empty() {
@@ -304,7 +463,7 @@ fn run_build(prompt: &str, deploy: bool, output: &Path) -> Result<(), CliError> 
         stream_iteration(&backend, &ctx, request, "Generating")?;
 
     let final_html =
-        final_html.ok_or_else(|| CliError::Mercury("Mercury returned no HTML body".into()))?;
+        final_html.ok_or_else(|| CliError::Mercury("Eri returned no HTML body".into()))?;
 
     write_file(output, &final_html)?;
     println!("wrote {} ({} bytes)", output.display(), final_html.len());
@@ -322,6 +481,47 @@ fn run_build(prompt: &str, deploy: bool, output: &Path) -> Result<(), CliError> 
     Ok(())
 }
 
+/// Default `eri iterate`: a surgical edit via the metered agentic loop. The
+/// loop reads the target file and applies a str_replace (or rewrite) on disk,
+/// billed through `/api/v1/inference/messages`. (A cheaper Mercury turn-metered
+/// lane via `/api/v1/inference/iterate` is a future optimization.)
+async fn run_iterate_metered(instruction: &str, file: &Path, model: &str) -> anyhow::Result<()> {
+    let instruction = instruction.trim();
+    if instruction.is_empty() {
+        anyhow::bail!("iterate instruction is empty");
+    }
+    if !file.exists() {
+        anyhow::bail!("{} does not exist -- run `eri build` first", file.display());
+    }
+    let workspace = file
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
+    let name = file
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| file.display().to_string());
+    let prompt = format!(
+        "Make this change to the existing file `{name}` in the workspace: {instruction}\n\n\
+         Read `{name}` first, then apply a surgical edit with str_replace (or rewrite it \
+         with write_file if the change is large). Do not create new files unless strictly \
+         necessary. Call done when finished."
+    );
+    let outcome = build_agent::run_build_agent(&prompt, &workspace, model).await?;
+    println!(
+        "\n[eri] iterate: {} file(s) touched in {} turn(s) -- {} in / {} out tokens (metered)",
+        outcome.files_written.len(),
+        outcome.turns,
+        outcome.tokens_in,
+        outcome.tokens_out
+    );
+    Ok(())
+}
+
+/// Legacy local iterate via the on-device Mercury backend. Unmetered dev/BYOK
+/// fallback; `run_iterate_metered` is the default.
+#[allow(dead_code)]
 fn run_iterate(instruction: &str, file: &Path) -> Result<(), CliError> {
     let instruction = instruction.trim();
     if instruction.is_empty() {
@@ -345,9 +545,9 @@ fn run_iterate(instruction: &str, file: &Path) -> Result<(), CliError> {
         stream_iteration(&backend, &ctx, request, "Iterating")?;
 
     // For surgical iterations, the HTML body emerges from the partial-html
-    // callback (Mercury applies edits to the existing draft). For fall-back
+    // callback (the edit path applies edits to the existing draft). For fall-back
     // full-rewrites it emerges from the fenced response. If neither produced
-    // anything (Mercury said the file was already good), keep the original.
+    // anything (the file was already good), keep the original.
     let final_html = final_html.unwrap_or(current_draft);
     write_file(file, &final_html)?;
     println!("updated {} ({} bytes)", file.display(), final_html.len());
@@ -392,9 +592,7 @@ fn print_templates() {
 
 fn build_backend() -> Result<MercuryBackend, CliError> {
     let config = MercuryConfig::from_env().ok_or_else(|| {
-        CliError::User(
-            "MERCURY_API_KEY not set — export it (or INCEPTION_API_KEY) and retry".into(),
-        )
+        CliError::User("build key not set — configure Eri inference and retry".into())
     })?;
     Ok(MercuryBackend::new(config))
 }
@@ -491,16 +689,16 @@ fn print_usage_line(usage: Option<&UsageSummary>) {
     let Some(usage) = usage else {
         return;
     };
-    // Mercury Edit 2 and Mercury 2 bill at different rates; choose the cost
-    // function by model name so the dollar figure matches the dashboard.
+    // The build and edit paths bill at different rates; choose the cost
+    // function by route name so the dollar figure matches the dashboard.
     let dollars = if usage.model.contains("edit") {
         costs::mercury_edit_2_cost(usage.prompt_tokens, usage.completion_tokens)
     } else {
         costs::mercury_2_cost(usage.prompt_tokens, usage.completion_tokens)
     };
     println!(
-        "tokens: prompt={} completion={} total={} (model={}) ~${:.4}",
-        usage.prompt_tokens, usage.completion_tokens, usage.total_tokens, usage.model, dollars
+        "tokens: prompt={} completion={} total={} ~${:.4}",
+        usage.prompt_tokens, usage.completion_tokens, usage.total_tokens, dollars
     );
 }
 
@@ -509,7 +707,7 @@ fn print_usage_line(usage: Option<&UsageSummary>) {
 struct ProgressLine {
     verb: String,
     // We only flush every ~5 ticks to keep the terminal from thrashing —
-    // Mercury can emit hundreds of tiny chunks per second on a hot SSE stream.
+    // The build stream can emit hundreds of tiny chunks per second.
     tick_counter: u32,
     last_chars: usize,
     enabled: bool,
@@ -539,8 +737,8 @@ impl ProgressLine {
     fn tick(&mut self, accumulated_chars: usize, started: Instant) {
         self.last_chars = accumulated_chars;
         self.tick_counter = self.tick_counter.wrapping_add(1);
-        // Throttle: redraw at most every 5 chunks. Mercury emits tokens fast
-        // enough that one redraw per chunk pegs a terminal at 30% CPU.
+        // Throttle: redraw at most every 5 chunks; hot streams otherwise peg
+        // the terminal.
         if !self.enabled || !self.tick_counter.is_multiple_of(5) {
             return;
         }
@@ -574,7 +772,7 @@ impl ProgressLine {
 pub enum CliError {
     /// User-facing input/IO problem the user can correct.
     User(String),
-    /// Mercury / inference layer reported an error.
+    /// Eri inference layer reported an error.
     Mercury(String),
 }
 
@@ -582,7 +780,7 @@ impl std::fmt::Display for CliError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             CliError::User(msg) => write!(f, "{msg}"),
-            CliError::Mercury(msg) => write!(f, "mercury: {msg}"),
+            CliError::Mercury(msg) => write!(f, "eri: {msg}"),
         }
     }
 }
@@ -598,20 +796,33 @@ impl From<InferenceError> for CliError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use clap::Parser;
+    use clap::{CommandFactory, Parser};
+
+    fn parsed_command(args: impl IntoIterator<Item = &'static str>) -> Command {
+        Cli::parse_from(args)
+            .command
+            .expect("expected a parsed subcommand")
+    }
+
+    #[test]
+    fn parses_no_subcommand_as_interactive_session() {
+        let cli = Cli::parse_from(["eri"]);
+        assert!(cli.command.is_none());
+    }
 
     #[test]
     fn parses_build_with_prompt_and_deploy() {
-        let cli = Cli::parse_from(["eri", "build", "make me a coffee shop", "--deploy"]);
-        match cli.command {
+        match parsed_command(["eri", "build", "make me a coffee shop", "--deploy"]) {
             Command::Build {
                 prompt,
                 deploy,
                 output,
+                mode,
             } => {
                 assert_eq!(prompt, "make me a coffee shop");
                 assert!(deploy);
                 assert_eq!(output, PathBuf::from(DEFAULT_OUTPUT_FILE));
+                assert_eq!(mode, Mode::Thinking, "default mode is thinking");
             }
             other => panic!("expected Build, got {other:?}"),
         }
@@ -619,8 +830,7 @@ mod tests {
 
     #[test]
     fn parses_build_default_output_when_not_provided() {
-        let cli = Cli::parse_from(["eri", "build", "anything"]);
-        match cli.command {
+        match parsed_command(["eri", "build", "anything"]) {
             Command::Build { deploy, output, .. } => {
                 assert!(!deploy);
                 assert_eq!(output, PathBuf::from(DEFAULT_OUTPUT_FILE));
@@ -631,14 +841,13 @@ mod tests {
 
     #[test]
     fn parses_build_with_explicit_output_path() {
-        let cli = Cli::parse_from([
+        match parsed_command([
             "eri",
             "build",
             "ship me a page",
             "--output",
             "dist/page.html",
-        ]);
-        match cli.command {
+        ]) {
             Command::Build { output, .. } => {
                 assert_eq!(output, PathBuf::from("dist/page.html"));
             }
@@ -648,11 +857,15 @@ mod tests {
 
     #[test]
     fn parses_iterate_with_default_file() {
-        let cli = Cli::parse_from(["eri", "iterate", "make hero photo darker"]);
-        match cli.command {
-            Command::Iterate { instruction, file } => {
+        match parsed_command(["eri", "iterate", "make hero photo darker"]) {
+            Command::Iterate {
+                instruction,
+                file,
+                mode,
+            } => {
                 assert_eq!(instruction, "make hero photo darker");
                 assert_eq!(file, PathBuf::from(DEFAULT_OUTPUT_FILE));
+                assert_eq!(mode, Mode::Thinking, "default mode is thinking");
             }
             other => panic!("expected Iterate, got {other:?}"),
         }
@@ -660,14 +873,15 @@ mod tests {
 
     #[test]
     fn parses_list_templates() {
-        let cli = Cli::parse_from(["eri", "list-templates"]);
-        assert_eq!(cli.command, Command::ListTemplates);
+        assert_eq!(
+            parsed_command(["eri", "list-templates"]),
+            Command::ListTemplates
+        );
     }
 
     #[test]
     fn parses_scaffold_with_slug() {
-        let cli = Cli::parse_from(["eri", "scaffold", "portfolio"]);
-        match cli.command {
+        match parsed_command(["eri", "scaffold", "portfolio"]) {
             Command::Scaffold { slug, output } => {
                 assert_eq!(slug, "portfolio");
                 assert_eq!(output, PathBuf::from(DEFAULT_OUTPUT_FILE));
@@ -678,11 +892,15 @@ mod tests {
 
     #[test]
     fn parses_ship_without_dir() {
-        let cli = Cli::parse_from(["eri", "ship"]);
-        match cli.command {
-            Command::Ship { dir, intent } => {
+        match parsed_command(["eri", "ship"]) {
+            Command::Ship {
+                dir,
+                intent,
+                output,
+            } => {
                 assert!(dir.is_none());
                 assert!(intent.is_none());
+                assert_eq!(output, agent::AgentOutputMode::Text);
             }
             other => panic!("expected Ship, got {other:?}"),
         }
@@ -690,11 +908,15 @@ mod tests {
 
     #[test]
     fn parses_ship_with_dir() {
-        let cli = Cli::parse_from(["eri", "ship", "--dir", "build/"]);
-        match cli.command {
-            Command::Ship { dir, intent } => {
+        match parsed_command(["eri", "ship", "--dir", "build/"]) {
+            Command::Ship {
+                dir,
+                intent,
+                output,
+            } => {
                 assert_eq!(dir, Some(PathBuf::from("build/")));
                 assert!(intent.is_none());
+                assert_eq!(output, agent::AgentOutputMode::Text);
             }
             other => panic!("expected Ship, got {other:?}"),
         }
@@ -702,20 +924,82 @@ mod tests {
 
     #[test]
     fn parses_ship_with_intent_routes_to_tandem() {
-        let cli = Cli::parse_from(["eri", "ship", "add stripe checkout"]);
-        match cli.command {
-            Command::Ship { intent, dir } => {
+        match parsed_command(["eri", "ship", "add stripe checkout"]) {
+            Command::Ship {
+                intent,
+                dir,
+                output,
+            } => {
                 assert_eq!(intent.as_deref(), Some("add stripe checkout"));
                 assert!(dir.is_none());
+                assert_eq!(output, agent::AgentOutputMode::Text);
             }
             other => panic!("expected Ship, got {other:?}"),
         }
     }
 
     #[test]
+    fn parses_ship_with_artifact_output() {
+        match parsed_command([
+            "eri",
+            "ship",
+            "--output",
+            "artifact-json",
+            "add stripe checkout",
+        ]) {
+            Command::Ship {
+                intent,
+                dir,
+                output,
+            } => {
+                assert_eq!(intent.as_deref(), Some("add stripe checkout"));
+                assert!(dir.is_none());
+                assert_eq!(output, agent::AgentOutputMode::ArtifactJson);
+            }
+            other => panic!("expected Ship, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_plan_with_artifact_output() {
+        match parsed_command(["eri", "plan", "--output", "artifact-json", "fix", "billing"]) {
+            Command::Plan { prompt, output } => {
+                assert_eq!(prompt, vec!["fix", "billing"]);
+                assert_eq!(output, agent::AgentOutputMode::ArtifactJson);
+            }
+            other => panic!("expected Plan, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cli_help_does_not_expose_internal_engine_names() {
+        let help = Cli::command().render_long_help().to_string();
+        // Everything user-facing is "eri". No upstream vendor / model names may
+        // leak into help text -- not the engines (Mercury / Inception), not the
+        // frontier provider (Claude / Anthropic), not tier names (Sonnet /
+        // Haiku / Opus), not wire ids (`claude-...`).
+        for forbidden in [
+            "Mercury",
+            "MERCURY",
+            "Inception",
+            "model:",
+            "Claude",
+            "Anthropic",
+            "Sonnet",
+            "Haiku",
+            "Opus",
+            "claude-",
+        ] {
+            assert!(
+                !help.contains(forbidden),
+                "CLI help exposes forbidden engine/vendor term: {forbidden}"
+            );
+        }
+    }
+
+    #[test]
     fn parses_ask_subcommand() {
-        let cli = Cli::parse_from(["eri", "ask", "what", "is", "tokio?"]);
-        match cli.command {
+        match parsed_command(["eri", "ask", "what", "is", "tokio?"]) {
             Command::Ask { prompt } => {
                 assert_eq!(prompt, vec!["what", "is", "tokio?"]);
             }
@@ -724,9 +1008,42 @@ mod tests {
     }
 
     #[test]
+    fn parses_ui_with_artifact_output() {
+        match parsed_command([
+            "eri",
+            "ui",
+            "--output",
+            "artifact-json",
+            "billing",
+            "dashboard",
+        ]) {
+            Command::Ui {
+                prompt,
+                output,
+                open,
+            } => {
+                assert_eq!(prompt, vec!["billing", "dashboard"]);
+                assert_eq!(output, genui::GenUiOutputMode::ArtifactJson);
+                assert!(!open);
+            }
+            other => panic!("expected Ui, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_ui_open_flag() {
+        match parsed_command(["eri", "ui", "--open", "billing", "dashboard"]) {
+            Command::Ui { prompt, open, .. } => {
+                assert_eq!(prompt, vec!["billing", "dashboard"]);
+                assert!(open);
+            }
+            other => panic!("expected Ui, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn parses_memory_recall_with_limit() {
-        let cli = Cli::parse_from(["eri", "memory", "recall", "blue", "--limit", "5"]);
-        match cli.command {
+        match parsed_command(["eri", "memory", "recall", "blue", "--limit", "5"]) {
             Command::Memory(MemoryCommand::Recall { query, limit }) => {
                 assert_eq!(query, "blue");
                 assert_eq!(limit, 5);
@@ -736,9 +1053,35 @@ mod tests {
     }
 
     #[test]
+    fn parses_top_level_mcp_doctor_and_update() {
+        assert_eq!(
+            parsed_command(["eri", "mcp", "list"]),
+            Command::Mcp(McpCommand::List)
+        );
+        assert_eq!(parsed_command(["eri", "doctor"]), Command::Doctor);
+        match parsed_command([
+            "eri",
+            "update",
+            "check",
+            "--channel",
+            "beta",
+            "--output",
+            "json",
+        ]) {
+            Command::Update(UpdateCommand::Check { channel, output }) => {
+                assert_eq!(channel, update::UpdateChannel::Beta);
+                assert_eq!(output, update::UpdateOutputMode::Json);
+            }
+            other => panic!("expected Update(Check), got {other:?}"),
+        }
+    }
+
+    #[test]
     fn parses_auth_login() {
-        let cli = Cli::parse_from(["eri", "auth", "login"]);
-        assert_eq!(cli.command, Command::Auth(AuthCommand::Login));
+        assert_eq!(
+            parsed_command(["eri", "auth", "login"]),
+            Command::Auth(AuthCommand::Login)
+        );
     }
 
     #[test]

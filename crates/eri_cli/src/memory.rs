@@ -92,10 +92,7 @@ pub async fn remember(text: &str) -> Result<()> {
     if !response.ok {
         anyhow::bail!("remember failed");
     }
-    println!(
-        "Remembered ({}).",
-        response.id.as_deref().unwrap_or("ok")
-    );
+    println!("Remembered ({}).", response.id.as_deref().unwrap_or("ok"));
     Ok(())
 }
 
@@ -113,7 +110,10 @@ pub async fn forget(target: &str) -> Result<()> {
         anyhow::bail!("forget failed");
     }
     let removed = response.removed.unwrap_or(0);
-    println!("Forgot {removed} observation{}.", if removed == 1 { "" } else { "s" });
+    println!(
+        "Forgot {removed} observation{}.",
+        if removed == 1 { "" } else { "s" }
+    );
     Ok(())
 }
 

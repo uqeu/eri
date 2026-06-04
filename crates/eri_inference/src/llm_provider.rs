@@ -83,11 +83,7 @@ impl ProviderKeys {
     /// Attach the eri.dev session bearer + base URL to this bundle. Both
     /// fields are required to enable the proxy code path; an absent bearer
     /// keeps the legacy BYOK-only behaviour.
-    pub fn with_proxy(
-        mut self,
-        session: impl Into<String>,
-        base_url: impl Into<String>,
-    ) -> Self {
+    pub fn with_proxy(mut self, session: impl Into<String>, base_url: impl Into<String>) -> Self {
         self.eri_session = Some(session.into());
         self.eri_base_url = base_url.into();
         self
@@ -275,7 +271,7 @@ fn wire_model_id_for_canonical(canonical: &str) -> Option<&'static str> {
         "o1-mini" => Some("o1-mini"),
         "o3-mini" => Some("o3-mini"),
         "o4" => Some("o4"),
-        "claude-sonnet-4-5" => Some("claude-sonnet-4-5-20251015"),
+        "claude-sonnet-4-5" => Some("claude-sonnet-4-6"),
         "claude-haiku-4-5" => Some("claude-haiku-4-5-20251001"),
         "claude-opus-4-5" => Some("claude-opus-4-5"),
         "gemini-flash-2" => Some("gemini-2.0-flash-exp"),
@@ -284,20 +280,14 @@ fn wire_model_id_for_canonical(canonical: &str) -> Option<&'static str> {
     }
 }
 
-fn build_byok(
-    vendor: &str,
-    wire_model: &str,
-    key: &str,
-) -> Option<Box<dyn LlmProvider>> {
+fn build_byok(vendor: &str, wire_model: &str, key: &str) -> Option<Box<dyn LlmProvider>> {
     match vendor {
         "openai" => providers::openai::OpenAiProvider::for_model_with_key(wire_model, key)
             .ok()
             .map(|p| Box::new(p) as Box<dyn LlmProvider>),
-        "anthropic" => {
-            providers::anthropic::AnthropicProvider::for_model_with_key(wire_model, key)
-                .ok()
-                .map(|p| Box::new(p) as Box<dyn LlmProvider>)
-        }
+        "anthropic" => providers::anthropic::AnthropicProvider::for_model_with_key(wire_model, key)
+            .ok()
+            .map(|p| Box::new(p) as Box<dyn LlmProvider>),
         "google" => providers::gemini::GeminiProvider::for_model_with_key(wire_model, key)
             .ok()
             .map(|p| Box::new(p) as Box<dyn LlmProvider>),
@@ -350,7 +340,7 @@ fn provider_from_choice_env(canonical: &str) -> Option<Box<dyn LlmProvider>> {
             .ok()
             .map(|p| Box::new(p) as Box<dyn LlmProvider>),
         "claude-sonnet-4-5" => {
-            providers::anthropic::AnthropicProvider::for_model("claude-sonnet-4-5-20251015")
+            providers::anthropic::AnthropicProvider::for_model("claude-sonnet-4-6")
                 .ok()
                 .map(|p| Box::new(p) as Box<dyn LlmProvider>)
         }
@@ -561,20 +551,18 @@ mod tests {
         let keys = ProviderKeys::new()
             .with_anthropic("sk-ant")
             .with_proxy("sess-tok", "https://eri.dev");
-        let provider =
-            provider_from_choice_with_keys("claude sonnet", &keys).expect("provider");
+        let provider = provider_from_choice_with_keys("claude sonnet", &keys).expect("provider");
         assert_eq!(provider.name(), "anthropic");
         // Cast back through the concrete type to check the endpoint. We use
         // the trait surface to keep the assertion stable: the provider id is
         // "anthropic" in either case, but we can also inspect the wire model.
-        assert!(provider.model().starts_with("claude-sonnet-4-5"));
+        assert!(provider.model().starts_with("claude-sonnet"));
     }
 
     #[test]
     fn provider_from_choice_with_keys_falls_back_to_proxy_without_byok() {
         let keys = ProviderKeys::new().with_proxy("sess-tok", "https://eri.dev");
-        let provider =
-            provider_from_choice_with_keys("claude haiku", &keys).expect("provider");
+        let provider = provider_from_choice_with_keys("claude haiku", &keys).expect("provider");
         assert_eq!(provider.name(), "anthropic");
         // The provider name is the same; the URL differentiator lives on the
         // concrete struct. We assert the route exists by checking model id.

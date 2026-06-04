@@ -130,7 +130,7 @@ impl Router {
     /// Build a router from the process environment. Reads `ERI_ROUTE_*`
     /// variables for per-intent overrides:
     ///
-    /// - `ERI_ROUTE_EDIT=claude:claude-sonnet-4-5`
+    /// - `ERI_ROUTE_EDIT=claude:claude-sonnet-4-6`
     /// - `ERI_ROUTE_BUILD=mercury`
     /// - `ERI_ROUTE_REFACTOR=openai:gpt-5`
     /// - `ERI_ROUTE_DEBUG=...`, `ERI_ROUTE_EXPLAIN=...`, `ERI_ROUTE_CHAT=...`
@@ -228,8 +228,10 @@ impl RouteTable {
 // Default routing table.
 // ---------------------------------------------------------------------------
 
-const CLAUDE_SONNET_DEFAULT: &str = "claude-sonnet-4-5";
-const CLAUDE_HAIKU_DEFAULT: &str = "claude-haiku-4-5";
+// Canonical valid wire ids (see docs/architecture/eri-architecture.html section 9).
+// `claude-sonnet-4-5*` is a 404 at Anthropic — never use it.
+const CLAUDE_SONNET_DEFAULT: &str = "claude-sonnet-4-6";
+const CLAUDE_HAIKU_DEFAULT: &str = "claude-haiku-4-5-20251001";
 
 fn default_route_for(intent: Intent) -> (ModelChoice, ReasoningLevel, f32) {
     match intent {

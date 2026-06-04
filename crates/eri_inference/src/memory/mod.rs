@@ -98,7 +98,10 @@ pub fn memory_path_for(user_id: Option<&str>) -> io::Result<PathBuf> {
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no HOME or USERPROFILE"))?;
     let root = PathBuf::from(home).join(".eri");
     Ok(match user_id {
-        Some(uid) => root.join("users").join(user_partition(uid)).join("memory.json"),
+        Some(uid) => root
+            .join("users")
+            .join(user_partition(uid))
+            .join("memory.json"),
         None => root.join("memory.json"),
     })
 }
@@ -168,9 +171,8 @@ impl MemoryStore {
         if let Some(parent) = self.path.parent() {
             fs::create_dir_all(parent)?;
         }
-        let raw = serde_json::to_string(&self.file).map_err(|e| {
-            io::Error::new(io::ErrorKind::InvalidData, format!("serialize: {e}"))
-        })?;
+        let raw = serde_json::to_string(&self.file)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("serialize: {e}")))?;
         fs::write(&self.path, raw)
     }
 
@@ -274,8 +276,7 @@ impl MemoryStore {
                 if needle.is_empty() {
                     return true;
                 }
-                o.body.to_lowercase().contains(&needle)
-                    || o.kind.to_lowercase().contains(&needle)
+                o.body.to_lowercase().contains(&needle) || o.kind.to_lowercase().contains(&needle)
             })
             .collect();
         hits.sort_by(|a, b| b.ts_ms.cmp(&a.ts_ms));
@@ -378,8 +379,12 @@ mod tests {
     fn insert_then_recall_finds_keyword() {
         let (dir, mut store) = open_temp();
         let ws = dir.path();
-        store.insert("fact", ws, "user prefers PascalCase for components").unwrap();
-        store.insert("fact", ws, "user uses tabs not spaces").unwrap();
+        store
+            .insert("fact", ws, "user prefers PascalCase for components")
+            .unwrap();
+        store
+            .insert("fact", ws, "user uses tabs not spaces")
+            .unwrap();
         let hits = store.recall("pascalcase", ws, 5);
         assert_eq!(hits.len(), 1);
         assert!(hits[0].body.contains("PascalCase"));
@@ -424,9 +429,15 @@ mod tests {
     #[test]
     fn retention_from_tier_maps_correctly() {
         assert_eq!(RetentionWindow::from_tier("free"), RetentionWindow::Day);
-        assert_eq!(RetentionWindow::from_tier("starter"), RetentionWindow::Month);
+        assert_eq!(
+            RetentionWindow::from_tier("starter"),
+            RetentionWindow::Month
+        );
         assert_eq!(RetentionWindow::from_tier("pro"), RetentionWindow::Half);
-        assert_eq!(RetentionWindow::from_tier("pro_plus"), RetentionWindow::Forever);
+        assert_eq!(
+            RetentionWindow::from_tier("pro_plus"),
+            RetentionWindow::Forever
+        );
     }
 
     #[test]
@@ -443,8 +454,12 @@ mod tests {
     fn recall_semantic_ranks_related_observations_higher() {
         let (dir, mut store) = open_temp();
         let ws = dir.path();
-        store.insert("fact", ws, "I use pnpm as my package manager").unwrap();
-        store.insert("fact", ws, "blue and purple are my favourite colours").unwrap();
+        store
+            .insert("fact", ws, "I use pnpm as my package manager")
+            .unwrap();
+        store
+            .insert("fact", ws, "blue and purple are my favourite colours")
+            .unwrap();
         let hits = store
             .recall_semantic("what package manager do you use", ws, 2)
             .unwrap();
@@ -468,9 +483,7 @@ mod tests {
             body: "I prefer dark themes".into(),
             embedding: Vec::new(),
         });
-        let hits = store
-            .recall_semantic("dark themes", dir.path(), 1)
-            .unwrap();
+        let hits = store.recall_semantic("dark themes", dir.path(), 1).unwrap();
         assert_eq!(hits.len(), 1);
         // After recall, the legacy observation's embedding is filled.
         let stored = store
@@ -571,7 +584,8 @@ mod tests {
             // User A signs in (anon empty — no migration data).
             {
                 let mut a = MemoryStore::open_for(Some("user_a")).unwrap();
-                a.insert("fact", std::path::Path::new("/ws"), "A's fact").unwrap();
+                a.insert("fact", std::path::Path::new("/ws"), "A's fact")
+                    .unwrap();
                 drop(a);
             }
             // User B signs in.
@@ -588,12 +602,14 @@ mod tests {
             // User A signs in, has data.
             {
                 let mut a = MemoryStore::open_for(Some("user_a")).unwrap();
-                a.insert("fact", std::path::Path::new("/ws"), "A's fact").unwrap();
+                a.insert("fact", std::path::Path::new("/ws"), "A's fact")
+                    .unwrap();
             }
             // Signed-out anon session accumulates separate data.
             {
                 let mut anon = MemoryStore::open_for(None).unwrap();
-                anon.insert("fact", std::path::Path::new("/ws"), "anon fact").unwrap();
+                anon.insert("fact", std::path::Path::new("/ws"), "anon fact")
+                    .unwrap();
             }
             let anon_path = memory_path_for(None).unwrap();
             assert!(anon_path.exists(), "anon file exists pre-reopen");

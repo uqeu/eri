@@ -102,14 +102,14 @@ fn seed_workspace(rel: &str, body: &str) -> TempDir {
 /// (`stub-key`) path is exercised. Restores env on drop.
 fn with_byok_routing<R>(provider_keys: ProviderKeys, f: impl FnOnce(ProviderKeys) -> R) -> R {
     let intents = [
-        ("ERI_ROUTE_EDIT", "claude:claude-sonnet-4-5-20251015"),
-        ("ERI_ROUTE_BUILD", "claude:claude-sonnet-4-5-20251015"),
-        ("ERI_ROUTE_REFACTOR", "claude:claude-sonnet-4-5-20251015"),
-        ("ERI_ROUTE_CHAT", "claude:claude-sonnet-4-5-20251015"),
-        ("ERI_ROUTE_EXPLAIN", "claude:claude-sonnet-4-5-20251015"),
-        ("ERI_ROUTE_DEBUG", "claude:claude-sonnet-4-5-20251015"),
+        ("ERI_ROUTE_EDIT", "claude:claude-sonnet-4-6"),
+        ("ERI_ROUTE_BUILD", "claude:claude-sonnet-4-6"),
+        ("ERI_ROUTE_REFACTOR", "claude:claude-sonnet-4-6"),
+        ("ERI_ROUTE_CHAT", "claude:claude-sonnet-4-6"),
+        ("ERI_ROUTE_EXPLAIN", "claude:claude-sonnet-4-6"),
+        ("ERI_ROUTE_DEBUG", "claude:claude-sonnet-4-6"),
         ("ERI_ROUTE_VOICE", "claude:claude-haiku-4-5-20251001"),
-        ("ERI_ROUTE_UNKNOWN", "claude:claude-sonnet-4-5-20251015"),
+        ("ERI_ROUTE_UNKNOWN", "claude:claude-sonnet-4-6"),
     ];
     let saved: Vec<(&str, Option<String>)> = intents
         .iter()

@@ -7,7 +7,7 @@
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 
 use crate::config::Credentials;
 
@@ -86,9 +86,13 @@ impl Client {
         body: &B,
     ) -> Result<reqwest::Response> {
         let url = format!("{}{}", self.base_url, path);
+        // Override the client's short default timeout: one streamed agent turn
+        // (e.g. generating a full file) can legitimately run for minutes. This
+        // is a per-request total timeout; the loop opens a fresh stream per turn.
         let mut req = self
             .inner
             .post(&url)
+            .timeout(Duration::from_secs(600))
             .header("accept", "text/event-stream")
             .json(body);
         if let Some(token) = &self.bearer {

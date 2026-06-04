@@ -6,15 +6,68 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 
+pub struct BuiltinPersona {
+    pub name: &'static str,
+    pub description: &'static str,
+    pub focus: &'static str,
+}
+
+pub const BUILTIN_PERSONAS: &[BuiltinPersona] = &[
+    BuiltinPersona {
+        name: "eri",
+        description: "default balanced agent",
+        focus: "general coding, product thinking, and repo navigation",
+    },
+    BuiltinPersona {
+        name: "builder",
+        description: "first working versions",
+        focus: "turn an idea into a runnable app or artifact",
+    },
+    BuiltinPersona {
+        name: "coder",
+        description: "focused implementation",
+        focus: "write and edit code with tight scope",
+    },
+    BuiltinPersona {
+        name: "architect",
+        description: "plans and system design",
+        focus: "break down systems, risks, APIs, and rollout plans",
+    },
+    BuiltinPersona {
+        name: "debugger",
+        description: "failure diagnosis",
+        focus: "trace errors, isolate causes, and propose fixes",
+    },
+    BuiltinPersona {
+        name: "tester",
+        description: "tests and verification",
+        focus: "write tests, run checks, and guard regressions",
+    },
+    BuiltinPersona {
+        name: "reviewer",
+        description: "risk review",
+        focus: "inspect diffs, security risks, and missing coverage",
+    },
+    BuiltinPersona {
+        name: "browser",
+        description: "preview and UI inspection",
+        focus: "check pages, screenshots, responsive states, and flows",
+    },
+    BuiltinPersona {
+        name: "shipper",
+        description: "release and deploy",
+        focus: "prepare branches, commits, PRs, deploys, and summaries",
+    },
+];
+
 pub fn list() -> Result<()> {
     println!("Built-in personas:");
-    println!("  eri        — default, balanced");
-    println!("  coder      — focused on writing code");
-    println!("  architect  — high-level plans, system design");
-    println!("  debugger   — diagnose failures");
-    println!("  tester     — write + run tests");
-    println!("  shipper    — ship + deploy");
-    println!("  mercury    — pin Mercury for one-shot HTML drafts");
+    for persona in BUILTIN_PERSONAS {
+        println!(
+            "  {:<10} - {:<24} {}",
+            persona.name, persona.description, persona.focus
+        );
+    }
     println!();
     println!("User personas live at <workspace>/.eri/agents/*.md.");
     let cwd = std::env::current_dir()?;
@@ -40,7 +93,7 @@ pub fn list() -> Result<()> {
     }
     let active = read_active()?;
     println!();
-    println!("Active: {active}");
+    println!("Active: {}", display_persona(&active));
     Ok(())
 }
 
@@ -65,5 +118,37 @@ fn read_active() -> Result<String> {
     match fs::read_to_string(&path) {
         Ok(s) => Ok(s.trim().to_string()),
         Err(_) => Ok("eri".to_string()),
+    }
+}
+
+fn display_persona(name: &str) -> &str {
+    if name == "mercury" { "builder" } else { name }
+}
+
+pub fn active_persona() -> Result<String> {
+    Ok(display_persona(&read_active()?).to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn builtin_personas_cover_agentic_roles() {
+        let names: std::collections::HashSet<&str> =
+            BUILTIN_PERSONAS.iter().map(|p| p.name).collect();
+        for needed in [
+            "eri",
+            "builder",
+            "coder",
+            "architect",
+            "debugger",
+            "tester",
+            "reviewer",
+            "browser",
+            "shipper",
+        ] {
+            assert!(names.contains(needed), "missing persona {needed}");
+        }
     }
 }

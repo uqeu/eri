@@ -1,0 +1,665 @@
+//! Client-side agentic build loop — the Claude Code / codex pattern.
+//!
+//! The CLI owns the workspace and executes tools locally; the backend
+//! (`/api/v1/inference/messages`) is a stateless, metered inference proxy that
+//! forwards an Anthropic Messages request verbatim, injects the master key, and
+//! bills real usage against the user's token budget. Each turn we send the
+//! growing `messages` + `tools`; Claude replies with `tool_use`; we run the
+//! tool here, append a `tool_result`, and loop until a non-tool turn.
+//!
+//! Wire format learned from Anthropic's public Messages + streaming + prompt-
+//! caching docs (no vendor source copied). Key facts encoded below:
+//!   - `input_json_delta` arrives as partial JSON *string fragments* keyed by
+//!     content-block `index`; concatenate per index, parse once at block stop.
+//!   - `stop_reason` + output usage land on `message_delta`; input usage on
+//!     `message_start` (incl. cache_read / cache_creation).
+//!   - A `cache_control: ephemeral` breakpoint on the system block caches the
+//!     tools+system prefix (rendered tools -> system -> messages), so the stable
+//!     prefix reads at ~0.1x on every loop iteration.
+
+use std::collections::BTreeMap;
+use std::io::Write as _;
+use std::path::{Component, Path, PathBuf};
+
+use anyhow::{Context, Result, anyhow, bail};
+use serde_json::{Value, json};
+
+use crate::client::Client;
+use crate::config;
+
+/// Default frontier model for full/multi-file builds (token-billed). Valid
+/// wire id. CLI work is Claude-shaped (agentic tool-use); Mercury is the
+/// IDE live-edit engine, not a CLI driver. Callers pass the concrete model
+/// (e.g. Haiku for `--mode fast`, Sonnet for `--mode thinking`).
+pub const DEFAULT_MODEL: &str = "claude-sonnet-4-6";
+/// Per-turn output ceiling. Streaming lets this be large without HTTP timeouts.
+const MAX_TOKENS: u32 = 32_000;
+/// Hard cap on loop iterations — a runaway-tool backstop.
+const MAX_TURNS: usize = 24;
+/// Cap a single file read/write payload so one tool can't blow the context.
+const MAX_TOOL_BYTES: usize = 256 * 1024;
+
+/// What a completed build loop produced.
+pub struct BuildOutcome {
+    pub files_written: Vec<PathBuf>,
+    pub turns: usize,
+    pub tokens_in: u64,
+    pub tokens_out: u64,
+    /// Set when the loop stopped early for a recoverable reason (plan quota hit
+    /// mid-build, or provider at capacity). Whatever was already written stays
+    /// on disk -- this is the user-facing explanation, not an error. `None` on a
+    /// clean completion.
+    pub halted: Option<String>,
+}
+
+/// Run the agentic build loop for `prompt`, materializing files under
+/// `workspace`, using the given Claude `model`. All inference is metered
+/// through `/api/v1/inference/messages`.
+pub async fn run_build_agent(prompt: &str, workspace: &Path, model: &str) -> Result<BuildOutcome> {
+    if prompt.trim().is_empty() {
+        bail!("build prompt is empty");
+    }
+    let creds = config::load()?;
+    if !creds.is_signed_in() {
+        bail!("not signed in — run `eri auth login` first");
+    }
+    let client = Client::from_credentials(&creds)?;
+    std::fs::create_dir_all(workspace)
+        .with_context(|| format!("create workspace {}", workspace.display()))?;
+    let root = workspace
+        .canonicalize()
+        .unwrap_or_else(|_| workspace.to_path_buf());
+
+    let tools = tool_specs();
+    let system = builder_system_prompt();
+    let mut messages: Vec<Value> = vec![json!({ "role": "user", "content": prompt.trim() })];
+
+    let mut files_written: Vec<PathBuf> = Vec::new();
+    let mut tokens_in: u64 = 0;
+    let mut tokens_out: u64 = 0;
+    let mut stdout = std::io::stdout();
+
+    for turn in 0..MAX_TURNS {
+        let body = json!({
+            "model": model,
+            "max_tokens": MAX_TOKENS,
+            "stream": true,
+            // Breakpoint on the system block caches tools + system together.
+            "system": [{
+                "type": "text",
+                "text": system,
+                "cache_control": { "type": "ephemeral" }
+            }],
+            "tools": tools,
+            "messages": messages,
+        });
+
+        let response = match client
+            .post_stream("/api/v1/inference/messages", &body)
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                // A quota or capacity stop mid-build is recoverable, not fatal:
+                // tools materialize incrementally, so files already written are
+                // safe on disk. Stop cleanly and report, preserving the work.
+                if let Some(msg) = graceful_halt_message(&e) {
+                    let _ = writeln!(stdout, "\n{msg}");
+                    return Ok(BuildOutcome {
+                        files_written,
+                        turns: turn,
+                        tokens_in,
+                        tokens_out,
+                        halted: Some(msg),
+                    });
+                }
+                return Err(friendly_proxy_error(e));
+            }
+        };
+
+        let turn_result = consume_turn(response, &mut stdout).await?;
+        tokens_in += turn_result.usage_in;
+        tokens_out += turn_result.usage_out;
+
+        // Append the assistant turn verbatim (text + tool_use blocks) so the
+        // next request continues the conversation coherently.
+        messages.push(json!({ "role": "assistant", "content": turn_result.content }));
+
+        if turn_result.stop_reason.as_deref() != Some("tool_use") {
+            // end_turn / max_tokens / refusal -> terminal.
+            if turn_result.stop_reason.as_deref() == Some("max_tokens") {
+                let _ = writeln!(
+                    stdout,
+                    "\n[eri] note: hit max_tokens — output may be truncated."
+                );
+            }
+            return Ok(BuildOutcome {
+                files_written,
+                turns: turn + 1,
+                tokens_in,
+                tokens_out,
+                halted: None,
+            });
+        }
+
+        // Execute every tool_use locally -> one tool_result each (required).
+        let mut results: Vec<Value> = Vec::new();
+        let mut done = false;
+        for tu in &turn_result.tool_uses {
+            if tu.name == "done" {
+                done = true;
+                results.push(json!({
+                    "type": "tool_result",
+                    "tool_use_id": tu.id,
+                    "content": "acknowledged"
+                }));
+                continue;
+            }
+            let exec = execute_tool(&root, &tu.name, &tu.input);
+            if let Some(p) = exec.written {
+                if !files_written.contains(&p) {
+                    files_written.push(p);
+                }
+            }
+            results.push(json!({
+                "type": "tool_result",
+                "tool_use_id": tu.id,
+                "content": exec.content,
+                "is_error": exec.is_error,
+            }));
+        }
+        messages.push(json!({ "role": "user", "content": results }));
+        if done {
+            return Ok(BuildOutcome {
+                files_written,
+                turns: turn + 1,
+                tokens_in,
+                tokens_out,
+                halted: None,
+            });
+        }
+    }
+
+    let _ = writeln!(stdout, "\n[eri] reached max {MAX_TURNS} turns; stopping.");
+    Ok(BuildOutcome {
+        files_written,
+        turns: MAX_TURNS,
+        tokens_in,
+        tokens_out,
+        halted: None,
+    })
+}
+
+/// One extracted tool call from an assistant turn.
+struct ToolUse {
+    id: String,
+    name: String,
+    input: Value,
+}
+
+/// The assembled result of consuming one streamed assistant turn.
+struct TurnResult {
+    /// Assistant content array, verbatim, for re-sending in `messages`.
+    content: Vec<Value>,
+    /// The tool calls to execute (subset of `content`).
+    tool_uses: Vec<ToolUse>,
+    stop_reason: Option<String>,
+    usage_in: u64,
+    usage_out: u64,
+}
+
+/// A per-index streaming block accumulator.
+enum Acc {
+    Text(String),
+    Tool {
+        id: String,
+        name: String,
+        json: String,
+    },
+}
+
+/// Drive the SSE stream for one turn: narrate text live, accumulate tool inputs
+/// per content-block index, and capture stop_reason + usage.
+async fn consume_turn(
+    mut response: reqwest::Response,
+    stdout: &mut std::io::Stdout,
+) -> Result<TurnResult> {
+    let mut buffer = String::new();
+    let mut blocks: BTreeMap<usize, Acc> = BTreeMap::new();
+    let mut stop_reason: Option<String> = None;
+    let mut usage_in: u64 = 0;
+    let mut usage_out: u64 = 0;
+
+    while let Some(chunk) = response.chunk().await.context("read SSE stream")? {
+        buffer.push_str(&String::from_utf8_lossy(&chunk));
+        while let Some(idx) = buffer.find('\n') {
+            let line = buffer[..idx].trim_end_matches('\r').to_string();
+            buffer.drain(..=idx);
+            let Some(payload) = line.strip_prefix("data:").map(str::trim) else {
+                continue;
+            };
+            if payload.is_empty() {
+                continue;
+            }
+            let ev: Value = match serde_json::from_str(payload) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            match ev.get("type").and_then(Value::as_str) {
+                Some("message_start") => {
+                    usage_in += u64_at(&ev, "/message/usage/input_tokens");
+                    usage_in += u64_at(&ev, "/message/usage/cache_read_input_tokens");
+                    usage_in += u64_at(&ev, "/message/usage/cache_creation_input_tokens");
+                }
+                Some("content_block_start") => {
+                    let i = ev.get("index").and_then(Value::as_u64).unwrap_or(0) as usize;
+                    let cb = ev.get("content_block");
+                    let kind = cb
+                        .and_then(|c| c.get("type"))
+                        .and_then(Value::as_str)
+                        .unwrap_or("text");
+                    if kind == "tool_use" {
+                        let id = str_at(cb, "id");
+                        let name = str_at(cb, "name");
+                        blocks.insert(
+                            i,
+                            Acc::Tool {
+                                id,
+                                name,
+                                json: String::new(),
+                            },
+                        );
+                    } else {
+                        blocks.insert(i, Acc::Text(String::new()));
+                    }
+                }
+                Some("content_block_delta") => {
+                    let i = ev.get("index").and_then(Value::as_u64).unwrap_or(0) as usize;
+                    let delta = ev.get("delta");
+                    match delta.and_then(|d| d.get("type")).and_then(Value::as_str) {
+                        Some("text_delta") => {
+                            if let Some(t) =
+                                delta.and_then(|d| d.get("text")).and_then(Value::as_str)
+                            {
+                                if let Some(Acc::Text(s)) = blocks.get_mut(&i) {
+                                    s.push_str(t);
+                                }
+                                let _ = write!(stdout, "{t}");
+                                let _ = stdout.flush();
+                            }
+                        }
+                        Some("input_json_delta") => {
+                            if let Some(p) = delta
+                                .and_then(|d| d.get("partial_json"))
+                                .and_then(Value::as_str)
+                            {
+                                if let Some(Acc::Tool { json, .. }) = blocks.get_mut(&i) {
+                                    json.push_str(p);
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                Some("message_delta") => {
+                    if let Some(sr) = ev.pointer("/delta/stop_reason").and_then(Value::as_str) {
+                        stop_reason = Some(sr.to_string());
+                    }
+                    usage_out += u64_at(&ev, "/usage/output_tokens");
+                }
+                // content_block_stop, message_stop, ping, error: nothing to do.
+                _ => {}
+            }
+        }
+    }
+
+    // Assemble the verbatim content array and extract tool calls.
+    let mut content: Vec<Value> = Vec::new();
+    let mut tool_uses: Vec<ToolUse> = Vec::new();
+    for (_index, acc) in blocks {
+        match acc {
+            Acc::Text(s) => {
+                if !s.trim().is_empty() {
+                    content.push(json!({ "type": "text", "text": s }));
+                }
+            }
+            Acc::Tool { id, name, json } => {
+                // Empty-input tools emit no deltas; default to {}.
+                let input: Value = if json.trim().is_empty() {
+                    json!({})
+                } else {
+                    serde_json::from_str(&json).unwrap_or_else(|_| json!({}))
+                };
+                content.push(json!({
+                    "type": "tool_use",
+                    "id": id.clone(),
+                    "name": name.clone(),
+                    "input": input.clone(),
+                }));
+                tool_uses.push(ToolUse { id, name, input });
+            }
+        }
+    }
+
+    Ok(TurnResult {
+        content,
+        tool_uses,
+        stop_reason,
+        usage_in,
+        usage_out,
+    })
+}
+
+/// Outcome of one local tool execution.
+struct ToolExec {
+    content: String,
+    is_error: bool,
+    written: Option<PathBuf>,
+}
+
+fn execute_tool(root: &Path, name: &str, input: &Value) -> ToolExec {
+    match name {
+        "list_dir" => {
+            let rel = input.get("path").and_then(Value::as_str).unwrap_or(".");
+            match resolve_in_workspace(root, rel) {
+                Ok(p) => match std::fs::read_dir(&p) {
+                    Ok(rd) => {
+                        let mut entries: Vec<String> = rd
+                            .filter_map(std::result::Result::ok)
+                            .map(|e| {
+                                let n = e.file_name().to_string_lossy().to_string();
+                                if e.path().is_dir() {
+                                    format!("{n}/")
+                                } else {
+                                    n
+                                }
+                            })
+                            .collect();
+                        entries.sort();
+                        let body = if entries.is_empty() {
+                            "(empty)".to_string()
+                        } else {
+                            entries.join("\n")
+                        };
+                        ToolExec {
+                            content: body,
+                            is_error: false,
+                            written: None,
+                        }
+                    }
+                    Err(e) => err(format!("list_dir {rel}: {e}")),
+                },
+                Err(e) => err(e),
+            }
+        }
+        "read_file" => {
+            let rel = input.get("path").and_then(Value::as_str).unwrap_or("");
+            match resolve_in_workspace(root, rel) {
+                Ok(p) => match std::fs::read_to_string(&p) {
+                    Ok(s) => ToolExec {
+                        content: truncate_bytes(&s, MAX_TOOL_BYTES),
+                        is_error: false,
+                        written: None,
+                    },
+                    Err(e) => err(format!("read_file {rel}: {e}")),
+                },
+                Err(e) => err(e),
+            }
+        }
+        "write_file" => {
+            let rel = input.get("path").and_then(Value::as_str).unwrap_or("");
+            let body = input.get("content").and_then(Value::as_str).unwrap_or("");
+            if body.len() > MAX_TOOL_BYTES {
+                return err(format!(
+                    "write_file {rel}: content {} bytes exceeds {MAX_TOOL_BYTES} cap",
+                    body.len()
+                ));
+            }
+            match resolve_in_workspace(root, rel) {
+                Ok(p) => {
+                    if let Some(parent) = p.parent() {
+                        let _ = std::fs::create_dir_all(parent);
+                    }
+                    match std::fs::write(&p, body) {
+                        Ok(()) => ToolExec {
+                            content: format!("wrote {} bytes to {rel}", body.len()),
+                            is_error: false,
+                            written: Some(p),
+                        },
+                        Err(e) => err(format!("write_file {rel}: {e}")),
+                    }
+                }
+                Err(e) => err(e),
+            }
+        }
+        "str_replace" => {
+            let rel = input.get("path").and_then(Value::as_str).unwrap_or("");
+            let old = input
+                .get("old_string")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let new = input
+                .get("new_string")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            if old.is_empty() {
+                return err(format!("str_replace {rel}: old_string is empty"));
+            }
+            match resolve_in_workspace(root, rel) {
+                Ok(p) => match std::fs::read_to_string(&p) {
+                    Ok(cur) => {
+                        let n = cur.matches(old).count();
+                        if n == 0 {
+                            err(format!("str_replace {rel}: old_string not found"))
+                        } else if n > 1 {
+                            err(format!(
+                                "str_replace {rel}: old_string matches {n} times; make it unique"
+                            ))
+                        } else {
+                            let updated = cur.replacen(old, new, 1);
+                            match std::fs::write(&p, &updated) {
+                                Ok(()) => ToolExec {
+                                    content: format!("replaced 1 occurrence in {rel}"),
+                                    is_error: false,
+                                    written: Some(p),
+                                },
+                                Err(e) => err(format!("str_replace {rel}: {e}")),
+                            }
+                        }
+                    }
+                    Err(e) => err(format!("str_replace {rel}: {e}")),
+                },
+                Err(e) => err(e),
+            }
+        }
+        other => err(format!("unknown tool: {other}")),
+    }
+}
+
+fn err(msg: String) -> ToolExec {
+    ToolExec {
+        content: msg,
+        is_error: true,
+        written: None,
+    }
+}
+
+/// Resolve a tool-supplied relative path strictly inside the workspace.
+/// Rejects absolute paths and any `..` component, which lexically guarantees
+/// containment (no traversal, no absolute escape). Symlink escape is a residual
+/// v1 risk noted for hardening.
+fn resolve_in_workspace(root: &Path, rel: &str) -> std::result::Result<PathBuf, String> {
+    let candidate = Path::new(rel);
+    if candidate.is_absolute() {
+        return Err(format!("path '{rel}' rejected: absolute paths not allowed"));
+    }
+    for comp in candidate.components() {
+        match comp {
+            Component::ParentDir => {
+                return Err(format!("path '{rel}' rejected: '..' traversal not allowed"));
+            }
+            Component::Prefix(_) | Component::RootDir => {
+                return Err(format!("path '{rel}' rejected: not workspace-relative"));
+            }
+            _ => {}
+        }
+    }
+    Ok(root.join(candidate))
+}
+
+/// Truncate to at most `max` bytes on a char boundary, with a marker.
+fn truncate_bytes(s: &str, max: usize) -> String {
+    if s.len() <= max {
+        return s.to_string();
+    }
+    let mut end = max;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}\n…[truncated {} bytes]", &s[..end], s.len() - end)
+}
+
+fn u64_at(v: &Value, pointer: &str) -> u64 {
+    v.pointer(pointer).and_then(Value::as_u64).unwrap_or(0)
+}
+
+fn str_at(v: Option<&Value>, key: &str) -> String {
+    v.and_then(|c| c.get(key))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string()
+}
+
+/// Recoverable mid-build stops. Returns a user-facing message for the cases
+/// where the right thing is to halt cleanly and KEEP whatever was already
+/// written -- plan quota exhausted (402) or the provider at capacity / rate-
+/// limited (429). Returns `None` for everything else (let it propagate as an
+/// error). Branding stays "eri"; no upstream vendor names leak.
+fn graceful_halt_message(e: &anyhow::Error) -> Option<String> {
+    let msg = e.to_string();
+    if msg.contains("HTTP 402") {
+        Some(
+            "[eri] you've hit your plan limit -- saved what's built so far. \
+             This prompt can't continue; run `eri usage` or upgrade to keep going."
+                .to_string(),
+        )
+    } else if msg.contains("HTTP 429") {
+        Some(
+            "[eri] at capacity right now -- saved what's built so far. \
+             Try again in a moment to keep going."
+                .to_string(),
+        )
+    } else {
+        None
+    }
+}
+
+/// Map raw proxy HTTP errors to actionable, eri-branded messages. Shared with
+/// the agent-run path (`agent.rs`) so quota / capacity reads the same way
+/// everywhere. Non-quota errors pass through unchanged.
+pub(crate) fn friendly_proxy_error(e: anyhow::Error) -> anyhow::Error {
+    let msg = e.to_string();
+    if msg.contains("HTTP 402") {
+        anyhow!("out of plan quota. Check `eri usage` or upgrade your plan.")
+    } else if msg.contains("HTTP 429") {
+        anyhow!("eri is at capacity right now -- try again shortly.")
+    } else if msg.contains("HTTP 403") {
+        anyhow!("this request isn't allowed on your current plan.")
+    } else {
+        e
+    }
+}
+
+/// The local tool set, path-jailed to the workspace. Minimal-but-sufficient v1
+/// (the set Claude Code / aider / Cline converge on for file building).
+fn tool_specs() -> Value {
+    json!([
+        {
+            "name": "list_dir",
+            "description": "List files and subdirectories at a workspace-relative path. Use to explore before reading or writing. Defaults to the workspace root.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "description": "Workspace-relative directory, e.g. \".\" or \"assets\"." }
+                }
+            }
+        },
+        {
+            "name": "read_file",
+            "description": "Read the full text of a workspace-relative file. Use before editing so str_replace targets match exactly.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "description": "Workspace-relative file path." }
+                },
+                "required": ["path"]
+            }
+        },
+        {
+            "name": "write_file",
+            "description": "Create or overwrite a workspace-relative file with the given content. Use for new files and full rewrites. Parent directories are created automatically.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "description": "Workspace-relative file path." },
+                    "content": { "type": "string", "description": "The complete file contents." }
+                },
+                "required": ["path", "content"]
+            }
+        },
+        {
+            "name": "str_replace",
+            "description": "Replace exactly one occurrence of old_string with new_string in a workspace-relative file. old_string must be unique in the file (include enough surrounding context). Prefer this over write_file for small edits.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "description": "Workspace-relative file path." },
+                    "old_string": { "type": "string", "description": "Exact text to replace (must occur exactly once)." },
+                    "new_string": { "type": "string", "description": "Replacement text." }
+                },
+                "required": ["path", "old_string", "new_string"]
+            }
+        },
+        {
+            "name": "done",
+            "description": "Call when the build is complete and all files are written. Ends the session.",
+            "input_schema": { "type": "object", "properties": {} }
+        }
+    ])
+}
+
+/// Builder persona — general-purpose: eri builds ANY software or artifact, not
+/// just web pages. Enforces real, complete output and the tool protocol. ASCII
+/// punctuation + <meta charset> guidance avoids the mojibake class of bug.
+fn builder_system_prompt() -> &'static str {
+    "You are eri's build agent. You construct complete, production-quality \
+software and artifacts of ANY kind directly on the user's filesystem using the \
+provided tools -- web apps and sites, CLI tools and scripts, backends and APIs, \
+data tools and dashboards, financial or analytical models, games, libraries, \
+config, docs. Build whatever the prompt asks for; do not assume it is a website.\n\n\
+PROTOCOL\n\
+- Use write_file to create files and str_replace for small edits. Never print \
+file contents in prose; always write them to disk with a tool.\n\
+- Explore with list_dir / read_file before editing existing files.\n\
+- When everything is built and coherent, call the done tool.\n\n\
+PROJECT SHAPE\n\
+- Choose the files and structure that fit the task -- the right entry point, \
+language, and layout for what's being built, NOT always index.html. A Python \
+tool is `.py` + maybe requirements; a CLI is its source + a README; a model is \
+its code/notebook/spreadsheet; a multi-page app splits sensibly. Use real, \
+runnable structure a competent engineer would ship.\n\
+- Single-page sites may be one self-contained index.html with inline CSS/JS; \
+larger web apps split into separate files or framework conventions.\n\n\
+QUALITY BAR\n\
+- Ship real, finished work: full content, real logic and copy, deliberate design \
+where there's a UI (layout, type scale, color, spacing, responsive). No lorem \
+ipsum, no TODOs, no placeholder stubs, no truncation, no \"left as an exercise\".\n\
+- Code must be correct and runnable as written: real implementations, sane \
+defaults, basic error handling, no references to files you didn't create.\n\
+- Every HTML document starts with <!DOCTYPE html> and includes \
+<meta charset=\"utf-8\"> and a responsive viewport meta. Prefer ASCII \
+punctuation in source (straight quotes, -- for dashes) to avoid encoding \
+artifacts. Where there's a UI, keep it accessible and valid (semantic elements, \
+alt text, labelled controls).\n\n\
+Be efficient: read only what you need, write decisively, then call done."
+}

@@ -21,7 +21,9 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-const DEFAULT_BASE_URL: &str = "https://tryeri.ca";
+// Canonical host. The apex (tryeri.ca) 307-redirects to www, and the HTTP
+// client does not replay POSTs across the redirect, so target www directly.
+const DEFAULT_BASE_URL: &str = "https://www.tryeri.ca";
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -92,8 +94,7 @@ pub fn load() -> Result<Credentials> {
 pub fn save(creds: &Credentials) -> Result<()> {
     let path = credentials_path()?;
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("create {}", parent.display()))?;
+        fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
     }
     let serialized = serde_json::to_string_pretty(creds)?;
     fs::write(&path, format!("{serialized}\n"))
@@ -105,8 +106,7 @@ pub fn save(creds: &Credentials) -> Result<()> {
 pub fn clear() -> Result<()> {
     let path = credentials_path()?;
     if path.exists() {
-        fs::remove_file(&path)
-            .with_context(|| format!("remove {}", path.display()))?;
+        fs::remove_file(&path).with_context(|| format!("remove {}", path.display()))?;
     }
     Ok(())
 }
@@ -115,8 +115,7 @@ pub fn clear() -> Result<()> {
 fn set_owner_only(path: &std::path::Path) -> Result<()> {
     use std::os::unix::fs::PermissionsExt;
     let perms = fs::Permissions::from_mode(0o600);
-    fs::set_permissions(path, perms)
-        .with_context(|| format!("chmod 0600 {}", path.display()))?;
+    fs::set_permissions(path, perms).with_context(|| format!("chmod 0600 {}", path.display()))?;
     Ok(())
 }
 
