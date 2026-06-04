@@ -64,7 +64,7 @@ pub async fn run(resume: ResumeMode, model: &str) -> Result<()> {
             continue;
         }
         if line.starts_with('/') {
-            if handle_slash(&line, &mut sess)? == Flow::Exit {
+            if handle_slash(&line, &mut sess).await? == Flow::Exit {
                 break;
             }
             continue;
@@ -101,7 +101,7 @@ enum Flow {
 }
 
 /// Handle an in-chat slash command. Returns whether to keep looping.
-fn handle_slash(line: &str, sess: &mut Session) -> Result<Flow> {
+async fn handle_slash(line: &str, sess: &mut Session) -> Result<Flow> {
     let without = line.trim_start_matches('/').trim();
     let (cmd, rest) = match without.split_once(char::is_whitespace) {
         Some((h, t)) => (h, t.trim()),
@@ -113,6 +113,7 @@ fn handle_slash(line: &str, sess: &mut Session) -> Result<Flow> {
         "sessions" => list_sessions()?,
         "cost" | "usage" => print_cost(sess),
         "context" => print_context(sess),
+        "compact" => compact(sess).await?,
         "clear" => {
             sess.messages.clear();
             println!("[eri] context cleared -- the next message starts fresh (session kept)");
@@ -143,6 +144,15 @@ fn print_context(sess: &Session) {
         agents,
         sess.workspace
     );
+}
+
+async fn compact(sess: &mut Session) -> Result<()> {
+    let model = sess.model.clone();
+    println!("[eri] compacting conversation...");
+    let (old, new) = build_agent::compact_session(sess, &model).await?;
+    sess.save().ok();
+    println!("[eri] compacted {old} message(s) -> {new}; continuity kept as a summary");
+    Ok(())
 }
 
 fn run_init(sess: &Session) -> Result<()> {
@@ -191,6 +201,7 @@ fn print_chat_help() {
     println!("  /sessions          list saved sessions");
     println!("  /cost              tokens used this session");
     println!("  /context           history size + AGENTS.md status");
+    println!("  /compact           summarize history to shrink context");
     println!("  /clear             forget the conversation (keep the session)");
     println!("  /init              scaffold AGENTS.md for this project");
     println!("  /new               start a fresh session");

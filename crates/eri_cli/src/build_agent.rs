@@ -160,6 +160,57 @@ pub async fn run_session_turn(
     Ok(outcome)
 }
 
+/// Compact a session: ask the model to summarize the conversation so far, then
+/// replace the full message history with that single summary. Shrinks context
+/// (and per-turn token cost) while preserving continuity -- the `/compact`
+/// parity feature. Returns (old_message_count, new_message_count).
+pub async fn compact_session(
+    session: &mut crate::session::Session,
+    model: &str,
+) -> Result<(usize, usize)> {
+    let old_count = session.messages.len();
+    if old_count == 0 {
+        bail!("nothing to compact yet");
+    }
+    let client = signed_in_client()?;
+    let mut msgs = session.messages.clone();
+    msgs.push(json!({
+        "role": "user",
+        "content": "Summarize this conversation into a compact brief that preserves every \
+    decision made, every file created or changed, and any open task. Write it as notes the \
+    assistant can use to continue seamlessly. Output only the summary."
+    }));
+    let body = json!({
+        "model": model,
+        "max_tokens": 2048,
+        "stream": true,
+        "system": [{
+            "type": "text",
+            "text": "You summarize a coding session concisely and completely, losing no decisions, file names, or open work.",
+            "cache_control": { "type": "ephemeral" }
+        }],
+        "messages": msgs,
+    });
+    let response = client
+        .post_stream("/api/v1/inference/messages", &body)
+        .await
+        .map_err(friendly_proxy_error)?;
+    let mut sink = std::io::stdout();
+    let turn = consume_turn(response, &mut sink, false).await?;
+    let summary = assistant_text(&turn.content);
+    if summary.trim().is_empty() {
+        bail!("compaction produced no summary -- history left unchanged");
+    }
+    session.messages = vec![json!({
+        "role": "user",
+        "content": format!("Summary of the conversation so far (compacted):\n{summary}")
+    })];
+    session.tokens_in += turn.usage_in;
+    session.tokens_out += turn.usage_out;
+    session.touch();
+    Ok((old_count, session.messages.len()))
+}
+
 /// The core SSE tool-use loop. Drives `messages` (which already ends with the
 /// latest user turn) to a terminal stop, executing tools on disk under `root`,
 /// and appends each assistant + tool_result turn so a session can persist the
