@@ -2,10 +2,9 @@
 //
 // The CLI (`eri ask "..."`), the SDKs (`@eri/sdk`, `eri-py`), and any
 // third-party that holds a `eri_sk_*` bearer hit this route. It's the
-// single "run my prompt through eri's brain" endpoint — the brain
-// decides per-turn whether to route to Mercury (free), Sonnet, GPT-4o,
-// or Gemini, then streams events back as SSE so terminals + scripts
-// render token-by-token.
+// single "run my prompt through Eri" endpoint. The server picks the right
+// Eri capability for the turn, then streams events back as SSE so terminals
+// and scripts render progress token-by-token.
 //
 // Wire shape:
 //   POST /api/v1/agent/run
@@ -13,15 +12,14 @@
 //   Body: { intent, prompt, persona?, workspaceRoot?, targets? }
 //
 //   ← stream of `data: { kind, text? | message?, ... }\n\n` lines
-//   ← final `data: { kind: "done", tokensIn, tokensOut, routedTo }\n\n`
+//   ← final `data: { kind: "done", tokensIn, tokensOut, engine }\n\n`
 //   ← `data: [DONE]\n\n`
 //
 // Auth: same `authenticateApiBearer` flow the inference proxies use.
 // Rate limit: same `rateLimitToken` gateway as `/inference/*` — passes
 // the user's tier so the 429 envelope carries the right context.
-// Quota: routes to Mercury for `ask` / `sketch` (free tier covered);
-// routes to the proxy for `plan`, `ship`, `test`, `refactor`, `explain`
-// (frontier; counts against the monthly bucket).
+// Quota: lightweight intents stay on the bundled path; heavier plan/ship/test
+// flows count against the monthly cloud bucket.
 
 import { authenticateApiBearer } from "@/lib/auth/api_tokens";
 import { rateLimitToken } from "@/lib/inference/rate_limit";
@@ -56,15 +54,15 @@ const PERSONA_DEFAULTS: Record<Intent, string> = {
   test: "tester",
   refactor: "architect",
   explain: "eri",
-  sketch: "mercury",
+  sketch: "eri",
 };
 
 const ROUTING: Record<Intent, { provider: string; model: string }> = {
-  ask: { provider: "anthropic", model: "claude-sonnet-4-5-20251015" },
-  plan: { provider: "anthropic", model: "claude-sonnet-4-5-20251015" },
-  ship: { provider: "anthropic", model: "claude-sonnet-4-5-20251015" },
-  test: { provider: "anthropic", model: "claude-sonnet-4-5-20251015" },
-  refactor: { provider: "anthropic", model: "claude-sonnet-4-5-20251015" },
+  ask: { provider: "anthropic", model: "claude-sonnet-4-6" },
+  plan: { provider: "anthropic", model: "claude-sonnet-4-6" },
+  ship: { provider: "anthropic", model: "claude-sonnet-4-6" },
+  test: { provider: "anthropic", model: "claude-sonnet-4-6" },
+  refactor: { provider: "anthropic", model: "claude-sonnet-4-6" },
   explain: { provider: "anthropic", model: "claude-haiku-4-5-20251001" },
   sketch: { provider: "inception", model: "mercury-2" },
 };
@@ -92,7 +90,7 @@ export async function POST(request: Request): Promise<Response> {
   }
   const persona = body.persona ?? PERSONA_DEFAULTS[intent];
 
-  // Free-intent shortcut: ask / sketch route through Mercury and don't
+  // Free-intent shortcut: ask / sketch stay on the bundled path and don't
   // burn frontier tokens.
   if (!FREE_INTENTS.has(intent)) {
     const estimate = estimateTokens(body.prompt);
@@ -121,7 +119,7 @@ export async function POST(request: Request): Promise<Response> {
   const route = ROUTING[intent];
   const masterKey = pickMasterKey(route.provider);
   if (!masterKey) {
-    return sseError(503, `provider_unavailable:${route.provider}`);
+    return sseError(503, "eri_engine_unavailable");
   }
 
   return new Response(
@@ -136,7 +134,7 @@ export async function POST(request: Request): Promise<Response> {
         try {
           send({
             kind: "tool_call",
-            message: `persona=${persona} intent=${intent} model=${route.model}`,
+            message: `persona=${persona} intent=${intent} engine=${publicEngine(intent)}`,
           });
 
           const upstream = await callUpstream({
@@ -176,7 +174,8 @@ export async function POST(request: Request): Promise<Response> {
             kind: "done",
             tokensIn,
             tokensOut,
-            routedTo: route.model,
+            engine: publicEngine(intent),
+            routedTo: publicEngine(intent),
           });
           controller.enqueue(encoder.encode("data: [DONE]\n\n"));
         } catch (err) {
@@ -233,6 +232,14 @@ function pickMasterKey(provider: string): string | undefined {
   }
 }
 
+function publicEngine(intent: Intent): string {
+  if (intent === "sketch") return "Eri Sketch";
+  if (intent === "ship") return "Eri Shipper";
+  if (intent === "test") return "Eri Tester";
+  if (intent === "refactor" || intent === "plan") return "Eri Architect";
+  return "Eri";
+}
+
 interface UpstreamCallArgs {
   intent: Intent;
   prompt: string;
@@ -251,14 +258,14 @@ interface TokenChunk {
 }
 
 /**
- * Dispatch to the upstream provider with the persona's system prompt
+ * Dispatch to the upstream capability with the persona's system prompt
  * baked in. Returns an async iterable of token chunks.
  *
  * For Anthropic we use the Messages API with streaming. For Inception
  * we use the iterate endpoint. Other providers route via OpenAI's
  * Chat Completions shape; this layer is intentionally thin since the
  * full proxy logic (`lib/inference/proxy.ts`) handles BYOK + cost
- * guard for the IDE-side surfaces — `/agent/run` is the simpler
+ * guard for the app-side surfaces — `/agent/run` is the simpler
  * "headless ask" path that doesn't need workspace context.
  */
 async function callUpstream(args: UpstreamCallArgs): Promise<{
@@ -305,7 +312,7 @@ async function callAnthropic(args: UpstreamCallArgs): Promise<{
 async function callInception(args: UpstreamCallArgs): Promise<{
   tokens: AsyncIterable<TokenChunk>;
 }> {
-  // Mercury answers as a single non-streaming call for the simple
+  // The sketch path answers as a single non-streaming call for the simple
   // "ask"/"sketch" use cases. Wrap as a degenerate async iterable.
   const response = await fetch(
     "https://api.inceptionlabs.ai/v1/chat/completions",
