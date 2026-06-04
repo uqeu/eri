@@ -6,6 +6,7 @@
 //! it into the build/chat system prompt so the agent follows project rules.
 //! `eri init` (and `/init` in chat) scaffolds a starter file.
 
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -32,35 +33,58 @@ fn global_agents_md() -> Option<PathBuf> {
     )
 }
 
-/// Assemble project context for `root`: global then project `AGENTS.md`,
-/// truncated to a byte cap. `None` when neither exists / both empty.
+/// Read a context file with hardening, returning its (capped) text. Returns
+/// `None` if it is missing, empty, a symlink, a non-regular file, or unreadable.
+///
+/// Security: a workspace AGENTS.md is attacker-controllable (clone a hostile
+/// repo). Without these checks a symlinked `AGENTS.md -> ~/.ssh/id_rsa` would be
+/// read and folded into the prompt -- exfiltrating a secret to the inference
+/// backend. We `lstat` and refuse symlinks + special files, and bound the read
+/// so a huge file or a fifo cannot exhaust memory or block.
+fn read_capped(path: &Path) -> Option<String> {
+    let meta = std::fs::symlink_metadata(path).ok()?;
+    // Reject symlinks and anything that is not a plain regular file.
+    if meta.file_type().is_symlink() || !meta.file_type().is_file() {
+        return None;
+    }
+    // Bounded read: never pull in more than the cap + 1 (the +1 detects overflow
+    // so we can mark truncation), regardless of the stat'd size.
+    let file = std::fs::File::open(path).ok()?;
+    let mut buf = Vec::new();
+    file.take(MAX_CONTEXT_BYTES as u64 + 1)
+        .read_to_end(&mut buf)
+        .ok()?;
+    let mut s = String::from_utf8_lossy(&buf).into_owned();
+    if s.trim().is_empty() {
+        return None;
+    }
+    if s.len() > MAX_CONTEXT_BYTES {
+        let mut end = MAX_CONTEXT_BYTES;
+        while end > 0 && !s.is_char_boundary(end) {
+            end -= 1;
+        }
+        s.truncate(end);
+        s.push_str("\n…[truncated]");
+    }
+    Some(s)
+}
+
+/// Assemble project context for `root`: global then project `AGENTS.md`, each
+/// read with symlink/size hardening. `None` when neither exists / both empty.
 pub fn context(root: &Path) -> Option<String> {
     let mut parts: Vec<String> = Vec::new();
     if let Some(g) = global_agents_md() {
-        if let Ok(s) = std::fs::read_to_string(&g) {
-            if !s.trim().is_empty() {
-                parts.push(s);
-            }
-        }
-    }
-    if let Ok(s) = std::fs::read_to_string(agents_md_path(root)) {
-        if !s.trim().is_empty() {
+        if let Some(s) = read_capped(&g) {
             parts.push(s);
         }
+    }
+    if let Some(s) = read_capped(&agents_md_path(root)) {
+        parts.push(s);
     }
     if parts.is_empty() {
         return None;
     }
-    let mut joined = parts.join("\n\n---\n\n");
-    if joined.len() > MAX_CONTEXT_BYTES {
-        let mut end = MAX_CONTEXT_BYTES;
-        while end > 0 && !joined.is_char_boundary(end) {
-            end -= 1;
-        }
-        joined.truncate(end);
-        joined.push_str("\n…[truncated]");
-    }
-    Some(joined)
+    Some(parts.join("\n\n---\n\n"))
 }
 
 /// True when the workspace already has an `AGENTS.md`.
@@ -138,5 +162,19 @@ mod tests {
         let ctx = context(dir.path()).unwrap();
         assert!(ctx.len() <= MAX_CONTEXT_BYTES + 32);
         assert!(ctx.ends_with("[truncated]"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn context_refuses_symlinked_agents_md() {
+        // A hostile workspace could symlink AGENTS.md to a secret; refuse it.
+        let dir = TempDir::new().unwrap();
+        let secret = dir.path().join("secret.txt");
+        std::fs::write(&secret, "PRIVATE-KEY-DO-NOT-LEAK").unwrap();
+        std::os::unix::fs::symlink(&secret, agents_md_path(dir.path())).unwrap();
+        assert!(
+            context(dir.path()).is_none(),
+            "symlinked AGENTS.md must not be read"
+        );
     }
 }

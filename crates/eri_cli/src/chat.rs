@@ -192,8 +192,13 @@ fn print_banner(sess: &Session) {
     println!("eri chat -- multi-turn session (context retained across turns)");
     println!("session    {}", sess.id);
     println!("workspace  {}", sess.workspace);
+    // Surface what project context is being injected, so a freshly-cloned
+    // AGENTS.md folded into the prompt is visible, not silent.
+    if crate::project::has_agents_md(&sess.workspace_path()) {
+        println!("AGENTS.md  loaded from this workspace (informational; review it with /context)");
+    }
     println!();
-    println!("type a message, or /help /sessions /cost /new /model /exit");
+    println!("type a message, or /help /sessions /cost /context /compact /new /model /exit");
 }
 
 fn print_chat_help() {
