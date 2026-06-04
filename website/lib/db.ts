@@ -150,6 +150,7 @@ export function publicUser(row: UserRow): {
   created_at: number;
   oauth_provider: string | null;
   has_password: boolean;
+  is_admin: boolean;
 } {
   return {
     id: row.id,
@@ -159,6 +160,7 @@ export function publicUser(row: UserRow): {
     created_at: row.created_at,
     oauth_provider: row.oauth_provider,
     has_password: row.password_hash !== null,
+    is_admin: row.is_admin,
   };
 }
 

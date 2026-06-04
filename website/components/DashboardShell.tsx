@@ -133,7 +133,7 @@ export function DashboardShell({ children }: DashboardShellProps) {
           </div>
         </div>
         <nav className="flex flex-col py-4">
-          {NAV.map((item) => {
+          {(user?.is_admin ? [...NAV, { href: "/admin", label: "Admin" }] : NAV).map((item) => {
             const active =
               pathname === item.href ||
               (item.href !== "/dashboard" && pathname.startsWith(item.href));

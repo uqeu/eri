@@ -10,6 +10,7 @@ export interface PublicUser {
   created_at: number;
   oauth_provider: string | null;
   has_password: boolean;
+  is_admin?: boolean;
 }
 
 interface AuthState {
