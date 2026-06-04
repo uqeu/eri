@@ -20,6 +20,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Instant;
 
+use anyhow::Context as _;
 use clap::{Parser, Subcommand};
 use eri_core::{IterEvent, PromptCtx};
 use eri_inference::{
@@ -57,8 +58,34 @@ const ITERATE_DENOISING_STEPS: u32 = 12;
                   build, iterate, scaffold, remember, and ship from the terminal."
 )]
 pub struct Cli {
+    /// Headless one-shot: run PROMPT (or read stdin if given with no value)
+    /// through the agentic loop, print the result, and exit. Non-interactive --
+    /// for pipes, scripts, and CI.
+    #[arg(short = 'p', long = "print", value_name = "PROMPT", num_args = 0..=1, default_missing_value = "")]
+    pub print: Option<String>,
+    /// Headless output format: text | json | stream-json.
+    #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+    pub output_format: OutputFormat,
+    /// Headless: cap agentic turns. Exits non-zero (2) if the cap is hit before
+    /// completion -- useful as a CI budget guard.
+    #[arg(long, value_name = "N")]
+    pub max_turns: Option<usize>,
+    /// Headless inference depth: fast | thinking | auto.
+    #[arg(long, value_enum, default_value = "thinking")]
+    pub mode: Mode,
     #[command(subcommand)]
     pub command: Option<Command>,
+}
+
+/// Output format for headless (`-p`) runs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+pub enum OutputFormat {
+    /// Human-readable narration + a summary line (default).
+    Text,
+    /// A single pretty-printed JSON result object.
+    Json,
+    /// Newline-delimited JSON (currently one `result` event).
+    StreamJson,
 }
 
 /// CLI inference mode. `--mode` selects the reasoning tier (fast/thinking/auto),
@@ -288,6 +315,22 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    // Headless one-shot (`-p` / `--print`) bypasses the subcommand dispatcher and
+    // returns its own exit code (non-zero when a turn cap is hit).
+    if let Some(prompt) = cli.print.clone() {
+        return match rt.block_on(run_headless(
+            prompt,
+            cli.output_format,
+            cli.max_turns,
+            model_for_mode(cli.mode),
+        )) {
+            Ok(code) => ExitCode::from(code),
+            Err(error) => {
+                eprintln!("error: {error}");
+                ExitCode::FAILURE
+            }
+        };
+    }
     match rt.block_on(dispatch(cli.command)) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
@@ -440,6 +483,77 @@ pub fn run(command: Command) -> Result<(), CliError> {
             "agent-mode commands require the async dispatcher (`main`)".into(),
         )),
     }
+}
+
+/// Headless one-shot (`eri -p "..."`). Runs the agentic loop without the
+/// interactive UI and emits a result in the requested format. Returns the
+/// process exit code (2 when a turn cap is hit before completion).
+async fn run_headless(
+    prompt: String,
+    format: OutputFormat,
+    max_turns: Option<usize>,
+    model: &str,
+) -> anyhow::Result<u8> {
+    // Prompt comes from the flag value, or stdin when `-p` is passed bare.
+    let prompt = if prompt.trim().is_empty() {
+        let mut buf = String::new();
+        std::io::Read::read_to_string(&mut io::stdin(), &mut buf).context("read stdin")?;
+        buf
+    } else {
+        prompt
+    };
+    if prompt.trim().is_empty() {
+        anyhow::bail!("no prompt -- pass `-p \"...\"` or pipe text into `eri -p`");
+    }
+
+    let mut opts = build_agent::LoopOpts {
+        narrate: format == OutputFormat::Text,
+        ..Default::default()
+    };
+    if let Some(n) = max_turns {
+        opts.max_turns = n.max(1);
+    }
+
+    let workspace = std::env::current_dir().context("read current directory")?;
+    let outcome = build_agent::run_headless(prompt.trim(), &workspace, model, &opts).await?;
+
+    match format {
+        OutputFormat::Text => {
+            println!(
+                "\n[eri] {} file(s) in {} turn(s) -- {} in / {} out tokens (metered)",
+                outcome.files_written.len(),
+                outcome.turns,
+                outcome.tokens_in,
+                outcome.tokens_out
+            );
+            for f in &outcome.files_written {
+                println!("  {}", f.display());
+            }
+        }
+        OutputFormat::Json | OutputFormat::StreamJson => {
+            let result = serde_json::json!({
+                "type": "result",
+                "files": outcome.files_written.iter().map(|p| p.display().to_string()).collect::<Vec<_>>(),
+                "turns": outcome.turns,
+                "tokens_in": outcome.tokens_in,
+                "tokens_out": outcome.tokens_out,
+                "credits": outcome.tokens_in + 5 * outcome.tokens_out,
+                "final_text": outcome.final_text,
+                "halted": outcome.halted,
+                "hit_turn_cap": outcome.hit_turn_cap,
+            });
+            // `json` pretty-prints; `stream-json` emits a single compact line.
+            let line = if format == OutputFormat::Json {
+                serde_json::to_string_pretty(&result)
+            } else {
+                serde_json::to_string(&result)
+            }
+            .context("serialize result")?;
+            println!("{line}");
+        }
+    }
+
+    Ok(if outcome.hit_turn_cap { 2 } else { 0 })
 }
 
 /// Default `eri build`: the metered, client-side agentic loop. Inference goes
@@ -844,6 +958,59 @@ mod tests {
     fn parses_no_subcommand_as_interactive_session() {
         let cli = Cli::parse_from(["eri"]);
         assert!(cli.command.is_none());
+        assert!(cli.print.is_none());
+        assert_eq!(cli.output_format, OutputFormat::Text);
+    }
+
+    #[test]
+    fn parses_headless_print_with_format_and_cap() {
+        let cli = Cli::parse_from([
+            "eri",
+            "-p",
+            "build a CLI tool",
+            "--output-format",
+            "json",
+            "--max-turns",
+            "8",
+            "--mode",
+            "fast",
+        ]);
+        assert_eq!(cli.print.as_deref(), Some("build a CLI tool"));
+        assert_eq!(cli.output_format, OutputFormat::Json);
+        assert_eq!(cli.max_turns, Some(8));
+        assert_eq!(cli.mode, Mode::Fast);
+    }
+
+    #[test]
+    fn print_flag_bare_means_read_stdin() {
+        // `-p` with no value parses as Some("") -> the runner reads stdin.
+        let cli = Cli::parse_from(["eri", "-p"]);
+        assert_eq!(cli.print.as_deref(), Some(""));
+    }
+
+    #[test]
+    fn parses_chat_continue_and_resume() {
+        match parsed_command(["eri", "chat", "--continue", "--mode", "fast"]) {
+            Command::Chat {
+                continue_,
+                resume,
+                mode,
+            } => {
+                assert!(continue_);
+                assert!(resume.is_none());
+                assert_eq!(mode, Mode::Fast);
+            }
+            other => panic!("expected Chat, got {other:?}"),
+        }
+        match parsed_command(["eri", "chat", "--resume", "s_abc"]) {
+            Command::Chat {
+                continue_, resume, ..
+            } => {
+                assert!(!continue_);
+                assert_eq!(resume.as_deref(), Some("s_abc"));
+            }
+            other => panic!("expected Chat, got {other:?}"),
+        }
     }
 
     #[test]

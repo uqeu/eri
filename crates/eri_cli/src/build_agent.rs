@@ -45,11 +45,35 @@ pub struct BuildOutcome {
     pub turns: usize,
     pub tokens_in: u64,
     pub tokens_out: u64,
+    /// The assistant's final text (the terminal turn's prose). Empty when the
+    /// run ended without a text turn. Used by headless `--output-format json`.
+    pub final_text: String,
     /// Set when the loop stopped early for a recoverable reason (plan quota hit
     /// mid-build, or provider at capacity). Whatever was already written stays
     /// on disk -- this is the user-facing explanation, not an error. `None` on a
     /// clean completion.
     pub halted: Option<String>,
+    /// True when the turn cap was reached without a clean completion -- lets
+    /// headless callers exit non-zero (CI-friendly).
+    pub hit_turn_cap: bool,
+}
+
+/// Tunables for one loop run.
+pub struct LoopOpts {
+    /// Hard cap on loop iterations.
+    pub max_turns: usize,
+    /// Stream assistant text live to stdout. False for headless json output,
+    /// where stdout must stay clean for the structured result.
+    pub narrate: bool,
+}
+
+impl Default for LoopOpts {
+    fn default() -> Self {
+        Self {
+            max_turns: MAX_TURNS,
+            narrate: true,
+        }
+    }
 }
 
 /// A signed-in inference client, or a clear "run `eri auth login`" error.
@@ -80,7 +104,25 @@ pub async fn run_build_agent(prompt: &str, workspace: &Path, model: &str) -> Res
     let client = signed_in_client()?;
     let root = ensure_workspace(workspace)?;
     let mut messages: Vec<Value> = vec![json!({ "role": "user", "content": prompt.trim() })];
-    drive_loop(&client, &root, model, &mut messages).await
+    drive_loop(&client, &root, model, &mut messages, &LoopOpts::default()).await
+}
+
+/// Headless one-shot build with explicit loop options (turn cap, narration).
+/// Used by `eri -p` / `--print`; returns the outcome incl. `final_text` for
+/// structured output.
+pub async fn run_headless(
+    prompt: &str,
+    workspace: &Path,
+    model: &str,
+    opts: &LoopOpts,
+) -> Result<BuildOutcome> {
+    if prompt.trim().is_empty() {
+        bail!("prompt is empty");
+    }
+    let client = signed_in_client()?;
+    let root = ensure_workspace(workspace)?;
+    let mut messages: Vec<Value> = vec![json!({ "role": "user", "content": prompt.trim() })];
+    drive_loop(&client, &root, model, &mut messages, opts).await
 }
 
 /// Run one turn against an existing multi-turn `session`: seed the model with
@@ -103,7 +145,14 @@ pub async fn run_session_turn(
         .messages
         .push(json!({ "role": "user", "content": prompt }));
     let model = session.model.clone();
-    let outcome = drive_loop(&client, &root, &model, &mut session.messages).await?;
+    let outcome = drive_loop(
+        &client,
+        &root,
+        &model,
+        &mut session.messages,
+        &LoopOpts::default(),
+    )
+    .await?;
     session.turns += outcome.turns;
     session.tokens_in += outcome.tokens_in;
     session.tokens_out += outcome.tokens_out;
@@ -120,15 +169,17 @@ async fn drive_loop(
     root: &Path,
     model: &str,
     messages: &mut Vec<Value>,
+    opts: &LoopOpts,
 ) -> Result<BuildOutcome> {
     let tools = tool_specs();
     let system = builder_system_prompt();
     let mut files_written: Vec<PathBuf> = Vec::new();
     let mut tokens_in: u64 = 0;
     let mut tokens_out: u64 = 0;
+    let mut final_text = String::new();
     let mut stdout = std::io::stdout();
 
-    for turn in 0..MAX_TURNS {
+    for turn in 0..opts.max_turns {
         let body = json!({
             "model": model,
             "max_tokens": MAX_TOKENS,
@@ -153,22 +204,30 @@ async fn drive_loop(
                 // tools materialize incrementally, so files already written are
                 // safe on disk. Stop cleanly and report, preserving the work.
                 if let Some(msg) = graceful_halt_message(&e) {
-                    let _ = writeln!(stdout, "\n{msg}");
+                    if opts.narrate {
+                        let _ = writeln!(stdout, "\n{msg}");
+                    }
                     return Ok(BuildOutcome {
                         files_written,
                         turns: turn,
                         tokens_in,
                         tokens_out,
+                        final_text,
                         halted: Some(msg),
+                        hit_turn_cap: false,
                     });
                 }
                 return Err(friendly_proxy_error(e));
             }
         };
 
-        let turn_result = consume_turn(response, &mut stdout).await?;
+        let turn_result = consume_turn(response, &mut stdout, opts.narrate).await?;
         tokens_in += turn_result.usage_in;
         tokens_out += turn_result.usage_out;
+        let turn_text = assistant_text(&turn_result.content);
+        if !turn_text.trim().is_empty() {
+            final_text = turn_text;
+        }
 
         // Append the assistant turn verbatim (text + tool_use blocks) so the
         // next request continues the conversation coherently.
@@ -176,7 +235,7 @@ async fn drive_loop(
 
         if turn_result.stop_reason.as_deref() != Some("tool_use") {
             // end_turn / max_tokens / refusal -> terminal.
-            if turn_result.stop_reason.as_deref() == Some("max_tokens") {
+            if opts.narrate && turn_result.stop_reason.as_deref() == Some("max_tokens") {
                 let _ = writeln!(
                     stdout,
                     "\n[eri] note: hit max_tokens — output may be truncated."
@@ -187,7 +246,9 @@ async fn drive_loop(
                 turns: turn + 1,
                 tokens_in,
                 tokens_out,
+                final_text,
                 halted: None,
+                hit_turn_cap: false,
             });
         }
 
@@ -224,18 +285,28 @@ async fn drive_loop(
                 turns: turn + 1,
                 tokens_in,
                 tokens_out,
+                final_text,
                 halted: None,
+                hit_turn_cap: false,
             });
         }
     }
 
-    let _ = writeln!(stdout, "\n[eri] reached max {MAX_TURNS} turns; stopping.");
+    if opts.narrate {
+        let _ = writeln!(
+            stdout,
+            "\n[eri] reached max {} turns; stopping.",
+            opts.max_turns
+        );
+    }
     Ok(BuildOutcome {
         files_written,
-        turns: MAX_TURNS,
+        turns: opts.max_turns,
         tokens_in,
         tokens_out,
+        final_text,
         halted: None,
+        hit_turn_cap: true,
     })
 }
 
@@ -267,11 +338,23 @@ enum Acc {
     },
 }
 
-/// Drive the SSE stream for one turn: narrate text live, accumulate tool inputs
-/// per content-block index, and capture stop_reason + usage.
+/// Concatenate the text blocks of an assistant `content` array.
+fn assistant_text(content: &[Value]) -> String {
+    content
+        .iter()
+        .filter(|b| b.get("type").and_then(Value::as_str) == Some("text"))
+        .filter_map(|b| b.get("text").and_then(Value::as_str))
+        .collect::<Vec<_>>()
+        .join("")
+}
+
+/// Drive the SSE stream for one turn: optionally narrate text live (`narrate`),
+/// accumulate tool inputs per content-block index, and capture stop_reason +
+/// usage.
 async fn consume_turn(
     mut response: reqwest::Response,
     stdout: &mut std::io::Stdout,
+    narrate: bool,
 ) -> Result<TurnResult> {
     let mut buffer = String::new();
     let mut blocks: BTreeMap<usize, Acc> = BTreeMap::new();
@@ -333,8 +416,10 @@ async fn consume_turn(
                                 if let Some(Acc::Text(s)) = blocks.get_mut(&i) {
                                     s.push_str(t);
                                 }
-                                let _ = write!(stdout, "{t}");
-                                let _ = stdout.flush();
+                                if narrate {
+                                    let _ = write!(stdout, "{t}");
+                                    let _ = stdout.flush();
+                                }
                             }
                         }
                         Some("input_json_delta") => {
