@@ -89,8 +89,37 @@ pub struct Cli {
     /// shell is privileged and NOT sandboxed, so opt in explicitly.
     #[arg(long)]
     pub allow_shell: bool,
+    /// Permission posture: plan (read-only) | accept-edits (default, writes, no
+    /// shell) | workspace-write (writes + shell) | bypass. When set, this is the
+    /// source of truth and overrides --plan / --allow-shell.
+    #[arg(long, value_enum, value_name = "MODE")]
+    pub permission_mode: Option<PermissionModeArg>,
     #[command(subcommand)]
     pub command: Option<Command>,
+}
+
+/// CLI spelling of `build_agent::PermissionMode`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+pub enum PermissionModeArg {
+    /// Read-only: explore + plan, no writes, no shell.
+    Plan,
+    /// Default: file writes allowed; shell off.
+    AcceptEdits,
+    /// Writes + shell, scoped to the workspace.
+    WorkspaceWrite,
+    /// Writes + shell, no extra friction.
+    Bypass,
+}
+
+impl From<PermissionModeArg> for build_agent::PermissionMode {
+    fn from(a: PermissionModeArg) -> Self {
+        match a {
+            PermissionModeArg::Plan => build_agent::PermissionMode::Plan,
+            PermissionModeArg::AcceptEdits => build_agent::PermissionMode::AcceptEdits,
+            PermissionModeArg::WorkspaceWrite => build_agent::PermissionMode::WorkspaceWrite,
+            PermissionModeArg::Bypass => build_agent::PermissionMode::Bypass,
+        }
+    }
 }
 
 /// Output format for headless (`-p`) runs.
@@ -390,8 +419,10 @@ fn main() -> ExitCode {
             cli.output_format,
             cli.max_turns,
             model_for_mode(resolve_mode(cli.mode, &cwd())),
-            cli.plan,
-            cli.allow_shell,
+            // --permission-mode wins; else derive from legacy --plan/--allow-shell.
+            cli.permission_mode.map(Into::into).unwrap_or_else(|| {
+                build_agent::PermissionMode::from_legacy_flags(cli.plan, cli.allow_shell)
+            }),
         )) {
             Ok(code) => ExitCode::from(code),
             Err(error) => {
@@ -620,8 +651,7 @@ async fn run_headless(
     format: OutputFormat,
     max_turns: Option<usize>,
     model: &str,
-    plan: bool,
-    allow_shell: bool,
+    permission: build_agent::PermissionMode,
 ) -> anyhow::Result<u8> {
     // Prompt comes from the flag value, or stdin when `-p` is passed bare.
     let prompt = if prompt.trim().is_empty() {
@@ -639,10 +669,9 @@ async fn run_headless(
 
     let mut opts = build_agent::LoopOpts {
         narrate: format == OutputFormat::Text,
-        allow_writes: !plan,
-        allow_shell,
         ..Default::default()
     };
+    permission.apply(&mut opts);
     // --max-turns flag wins; else .eri/config.toml; else built-in default.
     if let Some(n) = max_turns.or_else(|| eri_config::load(&workspace).max_turns) {
         opts.max_turns = n.max(1);

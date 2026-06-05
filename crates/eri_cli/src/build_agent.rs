@@ -90,6 +90,58 @@ impl Default for LoopOpts {
     }
 }
 
+/// The agent's permission posture for a run -- the single named source of
+/// truth for what the loop may do, mapped to the capability bools the loop
+/// gates on. Ordered least- to most-privileged. Modeled on Claude Code's
+/// permission modes and Codex's sandbox levels: the default writes files but
+/// never runs shell, and each step up is an explicit opt-in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PermissionMode {
+    /// Read-only: explore + plan, no writes, no shell. (`--plan`.)
+    Plan,
+    /// Default: file writes allowed; shell still off.
+    AcceptEdits,
+    /// Writes + shell, scoped to the workspace. (`--allow-shell`.)
+    WorkspaceWrite,
+    /// Writes + shell with no extra friction. Named for intent + future
+    /// approval-skipping; today its capabilities equal WorkspaceWrite (eri has
+    /// no OS sandbox tiers yet, so it grants nothing WorkspaceWrite doesn't).
+    Bypass,
+}
+
+impl PermissionMode {
+    /// May file-writing tools (write_file / str_replace / apply_patch) run?
+    pub fn allows_writes(self) -> bool {
+        !matches!(self, PermissionMode::Plan)
+    }
+
+    /// Is the privileged, non-sandboxed `bash` tool available?
+    pub fn allows_shell(self) -> bool {
+        matches!(
+            self,
+            PermissionMode::WorkspaceWrite | PermissionMode::Bypass
+        )
+    }
+
+    /// Apply this mode's capabilities onto a `LoopOpts` (preserving max_turns /
+    /// narrate). The mode is the source of truth for the two capability bools.
+    pub fn apply(self, opts: &mut LoopOpts) {
+        opts.allow_writes = self.allows_writes();
+        opts.allow_shell = self.allows_shell();
+    }
+
+    /// Derive a mode from the legacy `--plan` / `--allow-shell` flags so both
+    /// the new `--permission-mode` flag and the old flags map to one model.
+    /// `--allow-shell` wins over `--plan` if (incoherently) both are set.
+    pub fn from_legacy_flags(plan: bool, allow_shell: bool) -> Self {
+        match (plan, allow_shell) {
+            (_, true) => PermissionMode::WorkspaceWrite,
+            (true, false) => PermissionMode::Plan,
+            (false, false) => PermissionMode::AcceptEdits,
+        }
+    }
+}
+
 /// A signed-in inference client, or a clear "run `eri auth login`" error.
 fn signed_in_client() -> Result<Client> {
     let creds = config::load()?;
@@ -1257,6 +1309,44 @@ mod bash_tests {
         );
         assert_eq!(todos.borrow().len(), 1);
         assert!(render_todos(&todos.borrow()).contains("[x] ship"));
+    }
+
+    #[test]
+    fn permission_mode_capabilities_and_legacy_mapping() {
+        // Capability ladder: Plan < AcceptEdits < WorkspaceWrite <= Bypass.
+        assert!(!PermissionMode::Plan.allows_writes());
+        assert!(!PermissionMode::Plan.allows_shell());
+        assert!(PermissionMode::AcceptEdits.allows_writes());
+        assert!(!PermissionMode::AcceptEdits.allows_shell());
+        assert!(PermissionMode::WorkspaceWrite.allows_writes());
+        assert!(PermissionMode::WorkspaceWrite.allows_shell());
+        assert!(PermissionMode::Bypass.allows_writes());
+        assert!(PermissionMode::Bypass.allows_shell());
+
+        // apply() is the single source of truth for the loop's two bools.
+        let mut opts = LoopOpts::default();
+        PermissionMode::Plan.apply(&mut opts);
+        assert!(!opts.allow_writes && !opts.allow_shell);
+        PermissionMode::WorkspaceWrite.apply(&mut opts);
+        assert!(opts.allow_writes && opts.allow_shell);
+
+        // Legacy flags map cleanly; --allow-shell wins over --plan if both set.
+        assert_eq!(
+            PermissionMode::from_legacy_flags(false, false),
+            PermissionMode::AcceptEdits
+        );
+        assert_eq!(
+            PermissionMode::from_legacy_flags(true, false),
+            PermissionMode::Plan
+        );
+        assert_eq!(
+            PermissionMode::from_legacy_flags(false, true),
+            PermissionMode::WorkspaceWrite
+        );
+        assert_eq!(
+            PermissionMode::from_legacy_flags(true, true),
+            PermissionMode::WorkspaceWrite
+        );
     }
 
     #[test]
