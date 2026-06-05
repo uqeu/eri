@@ -38,6 +38,7 @@ mod checkpoint;
 mod client;
 mod commands;
 mod config;
+mod eri_config;
 mod genui;
 mod memory;
 mod project;
@@ -74,9 +75,10 @@ pub struct Cli {
     /// completion -- useful as a CI budget guard.
     #[arg(long, value_name = "N")]
     pub max_turns: Option<usize>,
-    /// Headless inference depth: fast | thinking | auto.
-    #[arg(long, value_enum, default_value = "thinking")]
-    pub mode: Mode,
+    /// Headless inference depth: fast | thinking | auto (default from
+    /// .eri/config.toml, else thinking).
+    #[arg(long, value_enum)]
+    pub mode: Option<Mode>,
     #[command(subcommand)]
     pub command: Option<Command>,
 }
@@ -112,6 +114,31 @@ pub(crate) fn model_for_mode(mode: Mode) -> &'static str {
     }
 }
 
+/// The workspace a path lives in (its parent, or cwd).
+fn workspace_of(path: &Path) -> PathBuf {
+    path.parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
+/// Resolve the effective mode: explicit flag wins, else `.eri/config.toml`,
+/// else the built-in default (thinking).
+fn resolve_mode(flag: Option<Mode>, workspace: &Path) -> Mode {
+    if let Some(m) = flag {
+        return m;
+    }
+    match eri_config::load(workspace).mode.as_deref() {
+        Some("fast") => Mode::Fast,
+        Some("auto") => Mode::Auto,
+        _ => Mode::Thinking,
+    }
+}
+
+fn cwd() -> PathBuf {
+    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+}
+
 #[derive(Subcommand, Debug, PartialEq, Eq)]
 pub enum Command {
     /// Generate a fresh ./index.html from a natural-language prompt.
@@ -124,9 +151,10 @@ pub enum Command {
         /// Write the resulting HTML to this path instead of ./index.html.
         #[arg(long, default_value = DEFAULT_OUTPUT_FILE)]
         output: PathBuf,
-        /// Inference depth: fast | thinking | auto.
-        #[arg(long, value_enum, default_value = "thinking")]
-        mode: Mode,
+        /// Inference depth: fast | thinking | auto (default from
+        /// .eri/config.toml, else thinking).
+        #[arg(long, value_enum)]
+        mode: Option<Mode>,
     },
     /// Apply a surgical edit to ./index.html based on an instruction.
     Iterate {
@@ -135,9 +163,10 @@ pub enum Command {
         /// Edit this file instead of ./index.html.
         #[arg(long, default_value = DEFAULT_OUTPUT_FILE)]
         file: PathBuf,
-        /// Inference depth: fast | thinking | auto.
-        #[arg(long, value_enum, default_value = "thinking")]
-        mode: Mode,
+        /// Inference depth: fast | thinking | auto (default from
+        /// .eri/config.toml, else thinking).
+        #[arg(long, value_enum)]
+        mode: Option<Mode>,
     },
     /// Multi-turn agentic chat session with persistent, retained context.
     /// Each message runs the metered tool-use loop; the full conversation is
@@ -150,9 +179,10 @@ pub enum Command {
         /// over --continue).
         #[arg(long, value_name = "ID")]
         resume: Option<String>,
-        /// Inference depth: fast | thinking | auto.
-        #[arg(long, value_enum, default_value = "thinking")]
-        mode: Mode,
+        /// Inference depth: fast | thinking | auto (default from
+        /// .eri/config.toml, else thinking).
+        #[arg(long, value_enum)]
+        mode: Option<Mode>,
     },
     /// List saved chat sessions, newest first.
     Sessions,
@@ -253,6 +283,8 @@ pub enum Command {
     /// Owner-only: per-user usage analytics.
     #[command(subcommand)]
     Admin(AdminCommand),
+    /// Show the resolved .eri/config.toml defaults for this directory.
+    Config,
     /// Inspect local setup for auth, agents, MCP, and workflow files.
     Doctor,
     /// Show the active sign-in + tier + remaining quota. Alias of
@@ -345,7 +377,7 @@ fn main() -> ExitCode {
             prompt,
             cli.output_format,
             cli.max_turns,
-            model_for_mode(cli.mode),
+            model_for_mode(resolve_mode(cli.mode, &cwd())),
         )) {
             Ok(code) => ExitCode::from(code),
             Err(error) => {
@@ -374,12 +406,18 @@ async fn dispatch(command: Option<Command>) -> anyhow::Result<()> {
             deploy,
             output,
             mode,
-        } => run_build_metered(&prompt, deploy, &output, model_for_mode(mode)).await,
+        } => {
+            let m = resolve_mode(mode, &workspace_of(&output));
+            run_build_metered(&prompt, deploy, &output, model_for_mode(m)).await
+        }
         Command::Iterate {
             instruction,
             file,
             mode,
-        } => run_iterate_metered(&instruction, &file, model_for_mode(mode)).await,
+        } => {
+            let m = resolve_mode(mode, &workspace_of(&file));
+            run_iterate_metered(&instruction, &file, model_for_mode(m)).await
+        }
         Command::Chat {
             continue_,
             resume,
@@ -392,7 +430,8 @@ async fn dispatch(command: Option<Command>) -> anyhow::Result<()> {
             } else {
                 chat::ResumeMode::New
             };
-            chat::run(resume_mode, model_for_mode(mode)).await
+            let m = resolve_mode(mode, &cwd());
+            chat::run(resume_mode, model_for_mode(m)).await
         }
         Command::Sessions => chat::list_sessions(),
         Command::ListTemplates => {
@@ -457,8 +496,33 @@ async fn dispatch(command: Option<Command>) -> anyhow::Result<()> {
         }
         Command::Init => run_init(),
         Command::Admin(AdminCommand::Usage { days, top }) => admin::usage(days, top).await,
+        Command::Config => {
+            run_config();
+            Ok(())
+        }
         Command::Doctor => repl::print_doctor(),
     }
+}
+
+/// Print the resolved `.eri/config.toml` defaults for the cwd.
+fn run_config() {
+    let dir = cwd();
+    let cfg = eri_config::load(&dir);
+    let effective = resolve_mode(None, &dir);
+    println!("eri config (resolved for {})", dir.display());
+    println!(
+        "  mode       {} (effective: {:?})",
+        cfg.mode.as_deref().unwrap_or("(unset -> thinking)"),
+        effective
+    );
+    println!(
+        "  max_turns  {}",
+        cfg.max_turns
+            .map(|n| n.to_string())
+            .unwrap_or_else(|| "(unset)".to_string())
+    );
+    println!("  files      .eri/config.toml (project), ~/.config/eri/config.toml (global)");
+    println!("  precedence CLI flag > project > global > built-in");
 }
 
 /// Scaffold AGENTS.md in the cwd so eri picks up project conventions.
@@ -521,6 +585,7 @@ pub fn run(command: Command) -> Result<(), CliError> {
         | Command::Update(_)
         | Command::Init
         | Command::Admin(_)
+        | Command::Config
         | Command::Doctor
         | Command::Status => Err(CliError::User(
             "agent-mode commands require the async dispatcher (`main`)".into(),
@@ -549,15 +614,17 @@ async fn run_headless(
         anyhow::bail!("no prompt -- pass `-p \"...\"` or pipe text into `eri -p`");
     }
 
+    let workspace = std::env::current_dir().context("read current directory")?;
+
     let mut opts = build_agent::LoopOpts {
         narrate: format == OutputFormat::Text,
         ..Default::default()
     };
-    if let Some(n) = max_turns {
+    // --max-turns flag wins; else .eri/config.toml; else built-in default.
+    if let Some(n) = max_turns.or_else(|| eri_config::load(&workspace).max_turns) {
         opts.max_turns = n.max(1);
     }
 
-    let workspace = std::env::current_dir().context("read current directory")?;
     let outcome = build_agent::run_headless(prompt.trim(), &workspace, model, &opts).await?;
 
     match format {
@@ -1021,7 +1088,7 @@ mod tests {
         assert_eq!(cli.print.as_deref(), Some("build a CLI tool"));
         assert_eq!(cli.output_format, OutputFormat::Json);
         assert_eq!(cli.max_turns, Some(8));
-        assert_eq!(cli.mode, Mode::Fast);
+        assert_eq!(cli.mode, Some(Mode::Fast));
     }
 
     #[test]
@@ -1041,7 +1108,7 @@ mod tests {
             } => {
                 assert!(continue_);
                 assert!(resume.is_none());
-                assert_eq!(mode, Mode::Fast);
+                assert_eq!(mode, Some(Mode::Fast));
             }
             other => panic!("expected Chat, got {other:?}"),
         }
@@ -1068,7 +1135,7 @@ mod tests {
                 assert_eq!(prompt, "make me a coffee shop");
                 assert!(deploy);
                 assert_eq!(output, PathBuf::from(DEFAULT_OUTPUT_FILE));
-                assert_eq!(mode, Mode::Thinking, "default mode is thinking");
+                assert_eq!(mode, None, "no explicit --mode; resolved at dispatch");
             }
             other => panic!("expected Build, got {other:?}"),
         }
@@ -1111,7 +1178,7 @@ mod tests {
             } => {
                 assert_eq!(instruction, "make hero photo darker");
                 assert_eq!(file, PathBuf::from(DEFAULT_OUTPUT_FILE));
-                assert_eq!(mode, Mode::Thinking, "default mode is thinking");
+                assert_eq!(mode, None, "no explicit --mode; resolved at dispatch");
             }
             other => panic!("expected Iterate, got {other:?}"),
         }
