@@ -19,6 +19,8 @@ pub struct EriConfig {
     pub mode: Option<String>,
     /// Headless turn cap.
     pub max_turns: Option<usize>,
+    /// Output style / persona: "builder" | "reviewer" | "explainer" | "concise".
+    pub style: Option<String>,
 }
 
 impl EriConfig {
@@ -29,6 +31,9 @@ impl EriConfig {
         }
         if other.max_turns.is_some() {
             self.max_turns = other.max_turns;
+        }
+        if other.style.is_some() {
+            self.style = other.style;
         }
         self
     }
@@ -66,6 +71,12 @@ fn parse(text: &str) -> EriConfig {
             "max_turns" => {
                 if let Ok(n) = value.parse::<usize>() {
                     cfg.max_turns = Some(n);
+                }
+            }
+            "style" => {
+                let v = value.to_lowercase();
+                if matches!(v.as_str(), "builder" | "reviewer" | "explainer" | "concise") {
+                    cfg.style = Some(v);
                 }
             }
             _ => {}
@@ -120,6 +131,16 @@ mod tests {
     fn rejects_invalid_mode() {
         let cfg = parse("mode = banana");
         assert!(cfg.mode.is_none());
+    }
+
+    #[test]
+    fn parses_style_and_rejects_invalid() {
+        assert_eq!(
+            parse("style = \"reviewer\"").style.as_deref(),
+            Some("reviewer")
+        );
+        assert_eq!(parse("style = Concise").style.as_deref(), Some("concise"));
+        assert!(parse("style = nonsense").style.is_none());
     }
 
     #[test]

@@ -82,6 +82,8 @@ pub struct LoopOpts {
     /// same way Claude Code's Bash requires permission. When off, `bash` is not
     /// even advertised to the model.
     pub allow_shell: bool,
+    /// Output style / persona preset. Default `Builder`.
+    pub style: SystemStyle,
 }
 
 impl Default for LoopOpts {
@@ -91,6 +93,7 @@ impl Default for LoopOpts {
             narrate: true,
             allow_writes: true,
             allow_shell: false,
+            style: SystemStyle::default(),
         }
     }
 }
@@ -143,6 +146,59 @@ impl PermissionMode {
             (_, true) => PermissionMode::WorkspaceWrite,
             (true, false) => PermissionMode::Plan,
             (false, false) => PermissionMode::AcceptEdits,
+        }
+    }
+}
+
+/// Output style / system-prompt preset -- swaps the agent's posture while
+/// keeping the same tool protocol + safety rules. Like Claude Code's output
+/// styles. Default is `Builder` (ship complete artifacts).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum SystemStyle {
+    /// Construct complete, production-quality artifacts (default).
+    #[default]
+    Builder,
+    /// Review existing code: find bugs/security/quality issues, propose minimal
+    /// diffs, don't rewrite wholesale.
+    Reviewer,
+    /// Teach: explain the code and the "why" clearly; prefer reading over
+    /// writing; keep any edits minimal.
+    Explainer,
+    /// Minimal narration: do the work and report briefly.
+    Concise,
+}
+
+impl SystemStyle {
+    /// Parse a config/flag string. Unknown -> Builder (the safe default).
+    pub fn parse(s: &str) -> Self {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "reviewer" | "review" => SystemStyle::Reviewer,
+            "explainer" | "explain" | "teacher" => SystemStyle::Explainer,
+            "concise" | "brief" => SystemStyle::Concise,
+            _ => SystemStyle::Builder,
+        }
+    }
+
+    /// The extra directive prepended for non-default styles (None for Builder,
+    /// whose persona is already the base prompt). Vendor-neutral.
+    fn directive(self) -> Option<&'static str> {
+        match self {
+            SystemStyle::Builder => None,
+            SystemStyle::Reviewer => Some(
+                "OUTPUT STYLE: REVIEWER. Prioritize reviewing the existing code over building \
+new. Read and search first; find correctness bugs, security issues, and quality/maintainability \
+problems; cite file:line. When you change code, prefer the smallest correct diff (str_replace / \
+apply_patch) over wholesale rewrites, and explain why. Group findings by severity.",
+            ),
+            SystemStyle::Explainer => Some(
+                "OUTPUT STYLE: EXPLAINER. Teach as you go. Explain what the code does and WHY, in \
+clear plain language, before and after any change. Prefer reading/searching to writing; make only \
+minimal, well-justified edits. Favor understanding over volume of output.",
+            ),
+            SystemStyle::Concise => Some(
+                "OUTPUT STYLE: CONCISE. Minimize narration. Do the work with tools and report \
+results briefly -- short, information-dense summaries, no preamble or restating the request.",
+            ),
         }
     }
 }
@@ -345,7 +401,7 @@ async fn drive_loop(
         let _ = hooks.fire(eri_hooks::HookEvent::SessionStart).await;
     }
 
-    let system = build_system(root);
+    let system = build_system(root, opts.style);
     // Per-loop task checklist (todo_write / todo_read).
     let todos: RefCell<Vec<TodoItem>> = RefCell::new(Vec::new());
     let mut files_written: Vec<PathBuf> = Vec::new();
@@ -1019,6 +1075,9 @@ async fn run_subagent(
         narrate: false,
         allow_writes: true,
         allow_shell: false,
+        // Subagents inherit the default builder posture regardless of the
+        // parent's style -- they do focused work, not the parent's persona.
+        style: SystemStyle::Builder,
     };
     // Box the recursive async call so the future stays finite-sized.
     let result = Box::pin(drive_loop(
@@ -1402,6 +1461,56 @@ mod bash_tests {
         );
         assert_eq!(todos.borrow().len(), 1);
         assert!(render_todos(&todos.borrow()).contains("[x] ship"));
+    }
+
+    #[test]
+    fn system_style_parse_and_directives() {
+        // Parsing is forgiving + aliased; unknown -> Builder.
+        assert_eq!(SystemStyle::parse("reviewer"), SystemStyle::Reviewer);
+        assert_eq!(SystemStyle::parse("REVIEW"), SystemStyle::Reviewer);
+        assert_eq!(SystemStyle::parse("teacher"), SystemStyle::Explainer);
+        assert_eq!(SystemStyle::parse("brief"), SystemStyle::Concise);
+        assert_eq!(SystemStyle::parse("whatever"), SystemStyle::Builder);
+        assert_eq!(SystemStyle::default(), SystemStyle::Builder);
+
+        // Builder adds no directive (its persona is the base prompt); the others
+        // each contribute a distinct, non-empty, vendor-neutral directive.
+        assert!(SystemStyle::Builder.directive().is_none());
+        let mut seen = std::collections::HashSet::new();
+        for s in [
+            SystemStyle::Reviewer,
+            SystemStyle::Explainer,
+            SystemStyle::Concise,
+        ] {
+            let d = s.directive().expect("non-builder has a directive");
+            assert!(!d.trim().is_empty());
+            assert!(d.contains("OUTPUT STYLE"));
+            assert!(seen.insert(d), "directives must be distinct");
+            let low = d.to_lowercase();
+            for banned in ["claude", "anthropic", "sonnet", "haiku", "mercury"] {
+                assert!(
+                    !low.contains(banned),
+                    "directive leaked vendor name: {banned}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn build_system_adds_style_block_for_non_builder() {
+        let dir = tempfile::tempdir().unwrap();
+        // Builder: just the persona block (no project AGENTS.md here).
+        let base = build_system(dir.path(), SystemStyle::Builder);
+        assert_eq!(base.len(), 1);
+        // Reviewer: persona + a style directive block.
+        let reviewed = build_system(dir.path(), SystemStyle::Reviewer);
+        assert_eq!(reviewed.len(), 2);
+        assert!(
+            reviewed[1]["text"]
+                .as_str()
+                .unwrap()
+                .contains("OUTPUT STYLE: REVIEWER")
+        );
     }
 
     #[test]
@@ -1868,12 +1977,21 @@ fn task_spec() -> Value {
 /// (cached) plus, when present, the project's `AGENTS.md` context as a second
 /// cached block. Two breakpoints let the persona prefix stay cached across
 /// different workspaces while project context caches per-workspace.
-fn build_system(root: &Path) -> Vec<Value> {
+fn build_system(root: &Path, style: SystemStyle) -> Vec<Value> {
+    // Builder persona first (identical across styles -> stays prompt-cached),
+    // then the style directive as its own block for non-default styles.
     let mut blocks = vec![json!({
         "type": "text",
         "text": builder_system_prompt(),
         "cache_control": { "type": "ephemeral" }
     })];
+    if let Some(directive) = style.directive() {
+        blocks.push(json!({
+            "type": "text",
+            "text": directive,
+            "cache_control": { "type": "ephemeral" }
+        }));
+    }
     if let Some(ctx) = crate::project::context(root) {
         // AGENTS.md is workspace-provided and may come from an untrusted clone.
         // Fence it as lower-trust informational notes: useful project context,

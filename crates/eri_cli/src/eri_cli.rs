@@ -96,8 +96,32 @@ pub struct Cli {
     /// source of truth and overrides --plan / --allow-shell.
     #[arg(long, value_enum, value_name = "MODE")]
     pub permission_mode: Option<PermissionModeArg>,
+    /// Output style / persona: builder (default) | reviewer | explainer |
+    /// concise. Same tools + safety, different posture.
+    #[arg(long, value_enum, value_name = "STYLE")]
+    pub style: Option<StyleArg>,
     #[command(subcommand)]
     pub command: Option<Command>,
+}
+
+/// CLI spelling of `build_agent::SystemStyle`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+pub enum StyleArg {
+    Builder,
+    Reviewer,
+    Explainer,
+    Concise,
+}
+
+impl From<StyleArg> for build_agent::SystemStyle {
+    fn from(a: StyleArg) -> Self {
+        match a {
+            StyleArg::Builder => build_agent::SystemStyle::Builder,
+            StyleArg::Reviewer => build_agent::SystemStyle::Reviewer,
+            StyleArg::Explainer => build_agent::SystemStyle::Explainer,
+            StyleArg::Concise => build_agent::SystemStyle::Concise,
+        }
+    }
 }
 
 /// CLI spelling of `build_agent::PermissionMode`.
@@ -425,6 +449,14 @@ fn main() -> ExitCode {
             cli.permission_mode.map(Into::into).unwrap_or_else(|| {
                 build_agent::PermissionMode::from_legacy_flags(cli.plan, cli.allow_shell)
             }),
+            // --style flag wins; else .eri/config.toml style; else builder.
+            cli.style.map(Into::into).unwrap_or_else(|| {
+                eri_config::load(&cwd())
+                    .style
+                    .as_deref()
+                    .map(build_agent::SystemStyle::parse)
+                    .unwrap_or_default()
+            }),
         )) {
             Ok(code) => ExitCode::from(code),
             Err(error) => {
@@ -654,6 +686,7 @@ async fn run_headless(
     max_turns: Option<usize>,
     model: &str,
     permission: build_agent::PermissionMode,
+    style: build_agent::SystemStyle,
 ) -> anyhow::Result<u8> {
     // Prompt comes from the flag value, or stdin when `-p` is passed bare.
     let prompt = if prompt.trim().is_empty() {
@@ -671,6 +704,7 @@ async fn run_headless(
 
     let mut opts = build_agent::LoopOpts {
         narrate: format == OutputFormat::Text,
+        style,
         ..Default::default()
     };
     permission.apply(&mut opts);
