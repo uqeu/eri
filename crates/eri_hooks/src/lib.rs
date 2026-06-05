@@ -206,6 +206,17 @@ impl Hooks {
             }
         }
 
+        // Plugin-bundled hooks: `<workspace>/.eri/plugins/<name>/hooks.json`,
+        // each a full hooks config. Merged after the workspace's own so the
+        // workspace can't be silently overridden (merge appends, not replaces).
+        for plugin_hooks in plugin_hook_files(&workspace_root) {
+            let body = std::fs::read_to_string(&plugin_hooks)
+                .with_context(|| format!("reading {}", plugin_hooks.display()))?;
+            let parsed: RawConfig = serde_json::from_str(&body)
+                .with_context(|| format!("parsing {}", plugin_hooks.display()))?;
+            merge_raw(&mut raw, parsed);
+        }
+
         let config = compile_config(raw)?;
         Ok(Self {
             workspace_root,
@@ -306,6 +317,25 @@ fn parse_per_event_file(event_name: &str, body: &str) -> Result<RawConfig> {
         _ => return Err(anyhow!("unknown event: {event_name}")),
     }
     Ok(cfg)
+}
+
+/// `hooks.json` files bundled by plugins under
+/// `<workspace>/.eri/plugins/<name>/hooks.json`, sorted by plugin dir for
+/// deterministic merge order.
+fn plugin_hook_files(workspace_root: &Path) -> Vec<PathBuf> {
+    let plugins_dir = workspace_root.join(".eri").join("plugins");
+    let Ok(rd) = std::fs::read_dir(&plugins_dir) else {
+        return Vec::new();
+    };
+    let mut files: Vec<PathBuf> = rd
+        .filter_map(std::result::Result::ok)
+        .map(|e| e.path())
+        .filter(|p| p.is_dir())
+        .map(|p| p.join("hooks.json"))
+        .filter(|p| p.is_file())
+        .collect();
+    files.sort();
+    files
 }
 
 fn merge_raw(dst: &mut RawConfig, mut src: RawConfig) {
@@ -642,6 +672,29 @@ mod tests {
         let tmp = tempdir().unwrap();
         let hooks = Hooks::load(tmp.path()).expect("load");
         assert!(hooks.list().is_empty());
+    }
+
+    #[tokio::test]
+    async fn load_merges_plugin_hooks() {
+        let tmp = tempdir().unwrap();
+        // Workspace's own hook.
+        write_hooks(
+            tmp.path(),
+            r#"{ "PreToolUse": [ { "command": "echo ws" } ] }"#,
+        );
+        // A plugin bundles another PreToolUse hook + a PostToolUse hook.
+        let plugin = tmp.path().join(".eri/plugins/acme");
+        fs::create_dir_all(&plugin).unwrap();
+        fs::write(
+            plugin.join("hooks.json"),
+            r#"{ "PreToolUse": [ { "command": "echo plug" } ], "PostToolUse": [ { "command": "echo post" } ] }"#,
+        )
+        .unwrap();
+
+        let hooks = Hooks::load(tmp.path()).expect("load");
+        // Workspace + plugin PreToolUse hooks both present (merge appends).
+        assert_eq!(hooks.config().pre_tool_use.len(), 2);
+        assert_eq!(hooks.config().post_tool_use.len(), 1);
     }
 
     #[tokio::test]

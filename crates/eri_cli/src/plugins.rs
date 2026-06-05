@@ -14,10 +14,13 @@
 //! ```
 //!
 //! Plugins live under `<workspace>/.eri/plugins/` (project) and
-//! `~/.config/eri/plugins/` (global). This module discovers them and exposes
-//! the per-kind directories so the existing loaders (`commands`, `skills`) fold
-//! plugin-provided entries into their normal search, no special-casing at the
-//! call sites.
+//! `~/.config/eri/plugins/` (global). All four kinds are active:
+//!   - commands + skills: this module exposes the per-kind directories so the
+//!     `commands` / `skills` loaders fold plugin entries into their search.
+//!   - hooks + mcp: the owning crates (`eri_hooks`, `eri_mcp`) scan
+//!     `.eri/plugins/<name>/{hooks.json,mcp.json}` directly when they load, so
+//!     plugin-bundled hooks and MCP servers are picked up by the loop too.
+//! In every case a project-level file wins over a plugin's on a name collision.
 
 use std::path::{Path, PathBuf};
 

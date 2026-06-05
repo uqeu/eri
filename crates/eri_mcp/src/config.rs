@@ -115,6 +115,14 @@ pub fn load(workspace: &Path) -> Result<Vec<ServerConfig>, McpError> {
         }
     }
 
+    // Plugin-bundled servers: `<workspace>/.eri/plugins/<name>/mcp.json`. Sit
+    // between global and project precedence so a project file still wins.
+    for plugin_cfg in plugin_config_files(workspace) {
+        for server in load_file(&plugin_cfg)? {
+            merged.insert(server.name.clone(), server);
+        }
+    }
+
     let project_path = workspace.join(ERI_DIR).join(CONFIG_FILE);
     if project_path.exists() {
         for server in load_file(&project_path)? {
@@ -123,6 +131,24 @@ pub fn load(workspace: &Path) -> Result<Vec<ServerConfig>, McpError> {
     }
 
     Ok(merged.into_values().collect())
+}
+
+/// `mcp.json` files bundled by plugins, sorted by plugin name for determinism:
+/// `<workspace>/.eri/plugins/<name>/mcp.json`.
+fn plugin_config_files(workspace: &Path) -> Vec<PathBuf> {
+    let plugins_dir = workspace.join(ERI_DIR).join("plugins");
+    let Ok(rd) = std::fs::read_dir(&plugins_dir) else {
+        return Vec::new();
+    };
+    let mut files: Vec<PathBuf> = rd
+        .filter_map(std::result::Result::ok)
+        .map(|e| e.path())
+        .filter(|p| p.is_dir())
+        .map(|p| p.join(CONFIG_FILE))
+        .filter(|p| p.is_file())
+        .collect();
+    files.sort();
+    files
 }
 
 /// Filter to enabled entries only. The `Mcp` client uses this; the UI uses
@@ -371,6 +397,49 @@ mod tests {
             "project file must win over global on name collisions"
         );
         assert_eq!(by_name["only-global"].command.as_deref(), Some("g"));
+    }
+
+    #[test]
+    fn plugin_servers_load_between_global_and_project() {
+        // Serialize with other HOME-mutating tests in this binary.
+        let _env = crate::HOME_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let ws = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap(); // empty -> no global config
+
+        // A plugin contributes one unique server + one that the project shadows.
+        let plugin = ws.path().join(".eri/plugins/acme");
+        std::fs::create_dir_all(&plugin).unwrap();
+        std::fs::write(
+            plugin.join("mcp.json"),
+            r#"{"mcpServers":{"acme-only":{"command":"plug"},"shared":{"command":"plugin-cmd"}}}"#,
+        )
+        .unwrap();
+        std::fs::create_dir_all(ws.path().join(".eri")).unwrap();
+        std::fs::write(
+            ws.path().join(".eri/mcp.json"),
+            r#"{"mcpServers":{"shared":{"command":"project-cmd"}}}"#,
+        )
+        .unwrap();
+
+        let prev = std::env::var_os("HOME");
+        unsafe {
+            std::env::set_var("HOME", home.path());
+        }
+        let servers = load(ws.path()).unwrap();
+        unsafe {
+            match prev {
+                Some(v) => std::env::set_var("HOME", v),
+                None => std::env::remove_var("HOME"),
+            }
+        }
+
+        let by: BTreeMap<_, _> = servers.iter().map(|s| (s.name.clone(), s)).collect();
+        assert_eq!(by.len(), 2);
+        assert_eq!(by["acme-only"].command.as_deref(), Some("plug"));
+        // Project file wins over the plugin on a name collision.
+        assert_eq!(by["shared"].command.as_deref(), Some("project-cmd"));
     }
 
     #[test]
