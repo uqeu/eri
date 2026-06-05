@@ -6,10 +6,7 @@
 //! `build`; the full conversation is saved to `~/.config/eri/sessions/<id>.json`
 //! after every turn so nothing is lost if the shell closes.
 
-use std::io::Write;
-
 use anyhow::{Context, Result};
-use tokio::io::{AsyncBufReadExt, BufReader};
 
 use crate::session::{self, Session};
 use crate::{Mode, build_agent};
@@ -54,18 +51,18 @@ pub async fn run(resume: ResumeMode, model: &str, opts: build_agent::LoopOpts) -
     // Per-run undo stack for /rewind. Each entry is a pre-turn workspace snapshot.
     let mut checkpoints: Vec<crate::checkpoint::Snapshot> = Vec::new();
 
-    let stdin = BufReader::new(tokio::io::stdin());
-    let mut lines = stdin.lines();
+    let mut editor = crate::line_editor::LineEditor::new();
     loop {
-        print!("eri chat> ");
-        std::io::stdout().flush().context("flush prompt")?;
-        let Some(line) = lines.next_line().await.context("read terminal input")? else {
-            break;
+        let line = match editor.read_line("eri chat> ").await {
+            crate::line_editor::Line::Text(l) => l.trim().to_string(),
+            // Ctrl-C cancels the current line but keeps the session, like a shell.
+            crate::line_editor::Line::Interrupted => continue,
+            crate::line_editor::Line::Eof => break,
         };
-        let line = line.trim().to_string();
         if line.is_empty() {
             continue;
         }
+        editor.remember(&line);
         if line.starts_with('/') {
             if handle_slash(&line, &mut sess, &mut checkpoints, &opts).await? == Flow::Exit {
                 break;
@@ -401,6 +398,7 @@ fn print_chat_help() {
     println!("  /exit              save and quit");
     println!("custom: /<name> runs .eri/commands/<name>.md ($ARGUMENTS expanded)");
     println!("any other line is sent as a message (prior turns are remembered)");
+    println!("editing: up/down history, Ctrl-R search, Ctrl-C cancels the line, Ctrl-D exits");
 }
 
 fn print_cost(sess: &Session) {

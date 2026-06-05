@@ -43,6 +43,7 @@ mod context;
 mod eri_config;
 mod genui;
 mod git_tools;
+mod line_editor;
 mod memory;
 mod plugins;
 mod project;

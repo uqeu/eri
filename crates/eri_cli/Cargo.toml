@@ -28,6 +28,7 @@ globset = "0.4"
 ignore = "0.4"
 regex = "1"
 reqwest = { workspace = true, features = ["json", "stream"] }
+rustyline = "14"
 serde.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["full"] }
