@@ -1266,6 +1266,8 @@ pub(crate) fn friendly_proxy_error(e: anyhow::Error) -> anyhow::Error {
         }
     } else if msg.contains("HTTP 403") {
         anyhow!("this request isn't allowed on your current plan.")
+    } else if msg.contains("HTTP 401") || msg.contains("unauthorized") {
+        anyhow!("your eri sign-in has expired or was revoked -- run `eri auth login` to re-connect.")
     } else {
         e
     }
@@ -1274,6 +1276,20 @@ pub(crate) fn friendly_proxy_error(e: anyhow::Error) -> anyhow::Error {
 #[cfg(test)]
 mod bash_tests {
     use super::*;
+
+    #[test]
+    fn friendly_proxy_error_maps_status_codes() {
+        let m = |s: &str| friendly_proxy_error(anyhow!("{s}")).to_string();
+        assert!(m("HTTP 402: over_quota").contains("plan quota"));
+        assert!(m("HTTP 429").contains("at capacity"));
+        assert!(m("HTTP 403").contains("plan"));
+        // 401 (revoked/expired token) now gives a re-login nudge, not raw HTTP.
+        let unauth = m("HTTP 401: {\"error\":\"unauthorized\"}");
+        assert!(unauth.contains("eri auth login"));
+        assert!(!unauth.contains("HTTP 401"));
+        // Unknown errors propagate verbatim.
+        assert_eq!(m("disk full"), "disk full");
+    }
 
     #[tokio::test]
     async fn bash_captures_stdout_and_success() {
