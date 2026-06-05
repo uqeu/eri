@@ -117,7 +117,15 @@ pub async fn run_build_agent(prompt: &str, workspace: &Path, model: &str) -> Res
     let client = signed_in_client()?;
     let root = ensure_workspace(workspace)?;
     let mut messages: Vec<Value> = vec![json!({ "role": "user", "content": prompt.trim() })];
-    drive_loop(&client, &root, model, &mut messages, &LoopOpts::default()).await
+    drive_loop(
+        &client,
+        &root,
+        model,
+        &mut messages,
+        &LoopOpts::default(),
+        0,
+    )
+    .await
 }
 
 /// Headless one-shot build with explicit loop options (turn cap, narration).
@@ -135,7 +143,7 @@ pub async fn run_headless(
     let client = signed_in_client()?;
     let root = ensure_workspace(workspace)?;
     let mut messages: Vec<Value> = vec![json!({ "role": "user", "content": prompt.trim() })];
-    drive_loop(&client, &root, model, &mut messages, opts).await
+    drive_loop(&client, &root, model, &mut messages, opts, 0).await
 }
 
 /// Run one turn against an existing multi-turn `session`: seed the model with
@@ -164,6 +172,7 @@ pub async fn run_session_turn(
         &model,
         &mut session.messages,
         &LoopOpts::default(),
+        0,
     )
     .await?;
     session.turns += outcome.turns;
@@ -234,8 +243,9 @@ async fn drive_loop(
     model: &str,
     messages: &mut Vec<Value>,
     opts: &LoopOpts,
+    depth: u8,
 ) -> Result<BuildOutcome> {
-    let tools = tool_specs(opts.allow_shell);
+    let tools = tool_specs(opts.allow_shell, depth);
     let system = build_system(root);
     let mut files_written: Vec<PathBuf> = Vec::new();
     let mut tokens_in: u64 = 0;
@@ -352,7 +362,7 @@ async fn drive_loop(
                 }));
                 continue;
             }
-            let exec = execute_tool(&root, &tu.name, &tu.input).await;
+            let exec = execute_tool(client, root, model, depth, &tu.name, &tu.input).await;
             for p in &exec.written {
                 if !files_written.contains(p) {
                     files_written.push(p.clone());
@@ -580,9 +590,17 @@ struct ToolExec {
     written: Vec<PathBuf>,
 }
 
-async fn execute_tool(root: &Path, name: &str, input: &Value) -> ToolExec {
+async fn execute_tool(
+    client: &Client,
+    root: &Path,
+    model: &str,
+    depth: u8,
+    name: &str,
+    input: &Value,
+) -> ToolExec {
     match name {
         "bash" => run_bash(root, input).await,
+        "task" => run_subagent(client, root, model, depth, input).await,
         "list_dir" => {
             let rel = input.get("path").and_then(Value::as_str).unwrap_or(".");
             match resolve_in_workspace(root, rel) {
@@ -714,6 +732,67 @@ async fn execute_tool(root: &Path, name: &str, input: &Value) -> ToolExec {
             }
         }
         other => err(format!("unknown tool: {other}")),
+    }
+}
+
+/// Run a subagent: a nested agentic loop with its OWN fresh context window, a
+/// restricted tool set (no shell, and no further subagents -- depth-bounded),
+/// and a lower turn cap. Returns only the subagent's summary text + the files
+/// it wrote, so the parent's context stays small. This is the "delegate a
+/// focused task" capability (Claude Code's Agent / Devin's Planner).
+async fn run_subagent(
+    client: &Client,
+    root: &Path,
+    model: &str,
+    depth: u8,
+    input: &Value,
+) -> ToolExec {
+    if depth >= 1 {
+        return err("task: subagents cannot spawn further subagents.".to_string());
+    }
+    let prompt = input.get("prompt").and_then(Value::as_str).unwrap_or("");
+    if prompt.trim().is_empty() {
+        return err("task: prompt is empty".to_string());
+    }
+    let description = input
+        .get("description")
+        .and_then(Value::as_str)
+        .unwrap_or("subtask");
+    let mut messages = vec![json!({ "role": "user", "content": prompt.trim() })];
+    let opts = LoopOpts {
+        max_turns: 16,
+        narrate: false,
+        allow_writes: true,
+        allow_shell: false,
+    };
+    // Box the recursive async call so the future stays finite-sized.
+    let result = Box::pin(drive_loop(
+        client,
+        root,
+        model,
+        &mut messages,
+        &opts,
+        depth + 1,
+    ))
+    .await;
+    match result {
+        Ok(outcome) => {
+            let summary = if outcome.final_text.trim().is_empty() {
+                format!(
+                    "(subagent finished: {} file(s) touched, {} turn(s); no summary text)",
+                    outcome.files_written.len(),
+                    outcome.turns
+                )
+            } else {
+                outcome.final_text
+            };
+            ToolExec {
+                content: format!("[subagent: {description}]\n{summary}"),
+                is_error: false,
+                written: outcome.files_written,
+            }
+        }
+        Err(e) => err(format!("task: subagent failed: {e}")),
     }
 }
 
@@ -1024,6 +1103,36 @@ mod bash_tests {
         assert!(apply_patch(dir.path(), &json!({ "patch": "" })).is_error);
         assert!(apply_patch(dir.path(), &json!({ "patch": "no blocks here" })).is_error);
     }
+
+    fn tool_names(allow_shell: bool, depth: u8) -> Vec<String> {
+        tool_specs(allow_shell, depth)
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|t| t.get("name").and_then(|n| n.as_str()).map(String::from))
+            .collect()
+    }
+
+    #[test]
+    fn tool_specs_gates_bash_and_subagent() {
+        // bash only when explicitly enabled; task (subagent) only at depth 0.
+        let base = tool_names(false, 0);
+        assert!(!base.contains(&"bash".to_string()), "bash must be opt-in");
+        assert!(
+            base.contains(&"task".to_string()),
+            "task available at depth 0"
+        );
+        assert!(base.contains(&"grep".to_string()));
+        assert!(base.contains(&"apply_patch".to_string()));
+
+        let with_shell = tool_names(true, 0);
+        assert!(with_shell.contains(&"bash".to_string()));
+
+        // A subagent (depth 1) gets neither shell nor the ability to nest.
+        let sub = tool_names(false, 1);
+        assert!(!sub.contains(&"task".to_string()), "no nested subagents");
+        assert!(!sub.contains(&"bash".to_string()));
+    }
 }
 
 /// The local tool set, path-jailed to the workspace. Minimal-but-sufficient v1
@@ -1044,8 +1153,9 @@ fn bash_spec() -> Value {
 }
 
 /// The local tool set. `bash` is only advertised when shell is explicitly
-/// enabled (`allow_shell`) -- it is a privileged, non-sandboxed capability.
-fn tool_specs(allow_shell: bool) -> Value {
+/// enabled (`allow_shell`). `task` (subagents) is only offered at depth 0 so a
+/// subagent cannot spawn further subagents.
+fn tool_specs(allow_shell: bool, depth: u8) -> Value {
     let mut tools = json!([
         {
             "name": "list_dir",
@@ -1138,12 +1248,31 @@ fn tool_specs(allow_shell: bool) -> Value {
             "input_schema": { "type": "object", "properties": {} }
         }
     ]);
-    if allow_shell {
-        if let Some(arr) = tools.as_array_mut() {
+    if let Some(arr) = tools.as_array_mut() {
+        if allow_shell {
             arr.insert(0, bash_spec());
+        }
+        if depth == 0 {
+            arr.push(task_spec());
         }
     }
     tools
+}
+
+/// Subagent tool spec -- a nested agent with its own context window.
+fn task_spec() -> Value {
+    json!({
+        "name": "task",
+        "description": "Delegate a focused sub-task to a fresh subagent with its own context window. The subagent reads/searches/edits files independently and returns a concise summary -- use it to keep your own context small for large explorations or self-contained chunks of work (e.g. \"investigate how auth works and summarize\", \"implement the parser in src/parse.rs\"). The subagent cannot run shell or spawn further subagents.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "description": { "type": "string", "description": "Short label for the sub-task." },
+                "prompt": { "type": "string", "description": "The full instruction for the subagent." }
+            },
+            "required": ["prompt"]
+        }
+    })
 }
 
 /// Assemble the system blocks for a request: the constant builder persona
