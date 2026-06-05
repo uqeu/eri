@@ -35,6 +35,7 @@ members = [
     "crates/eri_codemaps",
     "crates/eri_review",
     "crates/eri_hooks",
+    "crates/eri_agent",
 ]
 
 [workspace.package]

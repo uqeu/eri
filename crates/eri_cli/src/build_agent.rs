@@ -102,108 +102,18 @@ impl Default for LoopOpts {
     }
 }
 
-/// The agent's permission posture for a run -- the single named source of
-/// truth for what the loop may do, mapped to the capability bools the loop
-/// gates on. Ordered least- to most-privileged. Modeled on Claude Code's
-/// permission modes and Codex's sandbox levels: the default writes files but
-/// never runs shell, and each step up is an explicit opt-in.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PermissionMode {
-    /// Read-only: explore + plan, no writes, no shell. (`--plan`.)
-    Plan,
-    /// Default: file writes allowed; shell still off.
-    AcceptEdits,
-    /// Writes + shell, scoped to the workspace. (`--allow-shell`.)
-    WorkspaceWrite,
-    /// Writes + shell with no extra friction. Named for intent + future
-    /// approval-skipping; today its capabilities equal WorkspaceWrite (eri has
-    /// no OS sandbox tiers yet, so it grants nothing WorkspaceWrite doesn't).
-    Bypass,
-}
+/// The permission posture + output style live in the transport-agnostic
+/// `eri_agent` SDK crate; re-exported here so existing `build_agent::*` paths
+/// keep working. The `apply_permission` method (which touches the CLI-only
+/// `LoopOpts`) stays here -- see below.
+pub use eri_agent::{PermissionMode, SystemStyle};
 
-impl PermissionMode {
-    /// May file-writing tools (write_file / str_replace / apply_patch) run?
-    pub fn allows_writes(self) -> bool {
-        !matches!(self, PermissionMode::Plan)
-    }
-
-    /// Is the privileged, non-sandboxed `bash` tool available?
-    pub fn allows_shell(self) -> bool {
-        matches!(
-            self,
-            PermissionMode::WorkspaceWrite | PermissionMode::Bypass
-        )
-    }
-
-    /// Apply this mode's capabilities onto a `LoopOpts` (preserving max_turns /
-    /// narrate). The mode is the source of truth for the two capability bools.
-    pub fn apply(self, opts: &mut LoopOpts) {
-        opts.allow_writes = self.allows_writes();
-        opts.allow_shell = self.allows_shell();
-    }
-
-    /// Derive a mode from the legacy `--plan` / `--allow-shell` flags so both
-    /// the new `--permission-mode` flag and the old flags map to one model.
-    /// `--allow-shell` wins over `--plan` if (incoherently) both are set.
-    pub fn from_legacy_flags(plan: bool, allow_shell: bool) -> Self {
-        match (plan, allow_shell) {
-            (_, true) => PermissionMode::WorkspaceWrite,
-            (true, false) => PermissionMode::Plan,
-            (false, false) => PermissionMode::AcceptEdits,
-        }
-    }
-}
-
-/// Output style / system-prompt preset -- swaps the agent's posture while
-/// keeping the same tool protocol + safety rules. Like Claude Code's output
-/// styles. Default is `Builder` (ship complete artifacts).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-pub enum SystemStyle {
-    /// Construct complete, production-quality artifacts (default).
-    #[default]
-    Builder,
-    /// Review existing code: find bugs/security/quality issues, propose minimal
-    /// diffs, don't rewrite wholesale.
-    Reviewer,
-    /// Teach: explain the code and the "why" clearly; prefer reading over
-    /// writing; keep any edits minimal.
-    Explainer,
-    /// Minimal narration: do the work and report briefly.
-    Concise,
-}
-
-impl SystemStyle {
-    /// Parse a config/flag string. Unknown -> Builder (the safe default).
-    pub fn parse(s: &str) -> Self {
-        match s.trim().to_ascii_lowercase().as_str() {
-            "reviewer" | "review" => SystemStyle::Reviewer,
-            "explainer" | "explain" | "teacher" => SystemStyle::Explainer,
-            "concise" | "brief" => SystemStyle::Concise,
-            _ => SystemStyle::Builder,
-        }
-    }
-
-    /// The extra directive prepended for non-default styles (None for Builder,
-    /// whose persona is already the base prompt). Vendor-neutral.
-    fn directive(self) -> Option<&'static str> {
-        match self {
-            SystemStyle::Builder => None,
-            SystemStyle::Reviewer => Some(
-                "OUTPUT STYLE: REVIEWER. Prioritize reviewing the existing code over building \
-new. Read and search first; find correctness bugs, security issues, and quality/maintainability \
-problems; cite file:line. When you change code, prefer the smallest correct diff (str_replace / \
-apply_patch) over wholesale rewrites, and explain why. Group findings by severity.",
-            ),
-            SystemStyle::Explainer => Some(
-                "OUTPUT STYLE: EXPLAINER. Teach as you go. Explain what the code does and WHY, in \
-clear plain language, before and after any change. Prefer reading/searching to writing; make only \
-minimal, well-justified edits. Favor understanding over volume of output.",
-            ),
-            SystemStyle::Concise => Some(
-                "OUTPUT STYLE: CONCISE. Minimize narration. Do the work with tools and report \
-results briefly -- short, information-dense summaries, no preamble or restating the request.",
-            ),
-        }
+impl LoopOpts {
+    /// Apply a permission mode's capabilities onto these options (the mode is
+    /// the source of truth for the two capability bools).
+    pub fn apply_permission(&mut self, mode: PermissionMode) {
+        self.allow_writes = mode.allows_writes();
+        self.allow_shell = mode.allows_shell();
     }
 }
 
@@ -449,7 +359,7 @@ async fn drive_loop(
         // Shape the growing context before the call: cheapest reductions first,
         // only when over budget. Keeps long sessions inside the window without a
         // (metered) summarization round unless the local layers can't cope.
-        let shaped = crate::context::shape_context(messages, CONTEXT_TARGET_TOKENS);
+        let shaped = eri_agent::compaction::shape_context(messages, CONTEXT_TARGET_TOKENS);
         if opts.narrate && shaped.changed() {
             let _ = writeln!(
                 stdout,
@@ -1625,39 +1535,6 @@ mod bash_tests {
     }
 
     #[test]
-    fn system_style_parse_and_directives() {
-        // Parsing is forgiving + aliased; unknown -> Builder.
-        assert_eq!(SystemStyle::parse("reviewer"), SystemStyle::Reviewer);
-        assert_eq!(SystemStyle::parse("REVIEW"), SystemStyle::Reviewer);
-        assert_eq!(SystemStyle::parse("teacher"), SystemStyle::Explainer);
-        assert_eq!(SystemStyle::parse("brief"), SystemStyle::Concise);
-        assert_eq!(SystemStyle::parse("whatever"), SystemStyle::Builder);
-        assert_eq!(SystemStyle::default(), SystemStyle::Builder);
-
-        // Builder adds no directive (its persona is the base prompt); the others
-        // each contribute a distinct, non-empty, vendor-neutral directive.
-        assert!(SystemStyle::Builder.directive().is_none());
-        let mut seen = std::collections::HashSet::new();
-        for s in [
-            SystemStyle::Reviewer,
-            SystemStyle::Explainer,
-            SystemStyle::Concise,
-        ] {
-            let d = s.directive().expect("non-builder has a directive");
-            assert!(!d.trim().is_empty());
-            assert!(d.contains("OUTPUT STYLE"));
-            assert!(seen.insert(d), "directives must be distinct");
-            let low = d.to_lowercase();
-            for banned in ["claude", "anthropic", "sonnet", "haiku", "mercury"] {
-                assert!(
-                    !low.contains(banned),
-                    "directive leaked vendor name: {banned}"
-                );
-            }
-        }
-    }
-
-    #[test]
     fn build_system_adds_style_block_for_non_builder() {
         let dir = tempfile::tempdir().unwrap();
         // Builder: just the persona block (no project AGENTS.md here).
@@ -1709,41 +1586,14 @@ mod bash_tests {
     }
 
     #[test]
-    fn permission_mode_capabilities_and_legacy_mapping() {
-        // Capability ladder: Plan < AcceptEdits < WorkspaceWrite <= Bypass.
-        assert!(!PermissionMode::Plan.allows_writes());
-        assert!(!PermissionMode::Plan.allows_shell());
-        assert!(PermissionMode::AcceptEdits.allows_writes());
-        assert!(!PermissionMode::AcceptEdits.allows_shell());
-        assert!(PermissionMode::WorkspaceWrite.allows_writes());
-        assert!(PermissionMode::WorkspaceWrite.allows_shell());
-        assert!(PermissionMode::Bypass.allows_writes());
-        assert!(PermissionMode::Bypass.allows_shell());
-
-        // apply() is the single source of truth for the loop's two bools.
+    fn apply_permission_sets_capability_bools() {
+        // The ladder + legacy mapping are tested in eri_agent; here we cover the
+        // CLI-side glue: applying a mode onto LoopOpts.
         let mut opts = LoopOpts::default();
-        PermissionMode::Plan.apply(&mut opts);
+        opts.apply_permission(PermissionMode::Plan);
         assert!(!opts.allow_writes && !opts.allow_shell);
-        PermissionMode::WorkspaceWrite.apply(&mut opts);
+        opts.apply_permission(PermissionMode::WorkspaceWrite);
         assert!(opts.allow_writes && opts.allow_shell);
-
-        // Legacy flags map cleanly; --allow-shell wins over --plan if both set.
-        assert_eq!(
-            PermissionMode::from_legacy_flags(false, false),
-            PermissionMode::AcceptEdits
-        );
-        assert_eq!(
-            PermissionMode::from_legacy_flags(true, false),
-            PermissionMode::Plan
-        );
-        assert_eq!(
-            PermissionMode::from_legacy_flags(false, true),
-            PermissionMode::WorkspaceWrite
-        );
-        assert_eq!(
-            PermissionMode::from_legacy_flags(true, true),
-            PermissionMode::WorkspaceWrite
-        );
     }
 
     #[test]

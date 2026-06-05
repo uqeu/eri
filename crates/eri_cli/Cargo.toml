@@ -17,6 +17,7 @@ path = "src/eri_cli.rs"
 anyhow.workspace = true
 clap.workspace = true
 clap_complete = "4.5"
+eri_agent = { path = "../eri_agent" }
 eri_apply = { path = "../eri_apply" }
 eri_caveman = { path = "../eri_caveman" }
 eri_core.workspace = true

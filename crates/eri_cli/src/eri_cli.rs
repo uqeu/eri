@@ -39,7 +39,6 @@ mod checkpoint;
 mod client;
 mod commands;
 mod config;
-mod context;
 mod eri_config;
 mod genui;
 mod git_tools;
@@ -600,7 +599,7 @@ async fn dispatch(cli: Cli) -> anyhow::Result<()> {
                 sandbox: flags.sandbox,
                 ..Default::default()
             };
-            flags.permission.apply(&mut opts);
+            opts.apply_permission(flags.permission);
             chat::run(resume_mode, model_for_mode(m), opts).await
         }
         Command::Sessions => chat::list_sessions(),
@@ -841,7 +840,7 @@ async fn run_headless(
         sandbox,
         ..Default::default()
     };
-    permission.apply(&mut opts);
+    opts.apply_permission(permission);
     // --max-turns flag wins; else .eri/config.toml; else built-in default.
     if let Some(n) = max_turns.or_else(|| eri_config::load(&workspace).max_turns) {
         opts.max_turns = n.max(1);
@@ -911,7 +910,7 @@ async fn run_build_metered(
         sandbox: flags.sandbox,
         ..Default::default()
     };
-    flags.permission.apply(&mut opts);
+    opts.apply_permission(flags.permission);
     let outcome = build_agent::run_headless(prompt, &workspace, model, &opts).await?;
     println!(
         "\n[eri] {} file(s) in {} turn(s) -- {} in / {} out tokens (metered)",
