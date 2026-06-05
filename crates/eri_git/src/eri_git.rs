@@ -261,6 +261,89 @@ pub fn diff_against(project_dir: &Path, base_ref: &str) -> Result<String, GitErr
     run_git(project_dir, &["diff", &range])
 }
 
+/// One linked working tree of a repository (`git worktree list`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Worktree {
+    pub path: PathBuf,
+    pub head: String,
+    /// Branch short-name (`main`), or `None` when the worktree is detached.
+    pub branch: Option<String>,
+    /// True for the repository's primary working tree (the first listed).
+    pub is_main: bool,
+}
+
+/// Create a new linked worktree at `path` on a fresh branch `new_branch` (forked
+/// from HEAD). Isolates a parallel session so concurrent edits don't collide.
+/// Errors if `new_branch` already exists -- callers pick a unique name.
+pub fn add_worktree(repo: &Path, path: &Path, new_branch: &str) -> Result<(), GitError> {
+    ensure_repo_exists(repo)?;
+    if new_branch.trim().is_empty() {
+        return Err(GitError::GitCommandFailed {
+            command: "git worktree add".to_string(),
+            exit_code: -1,
+            stderr: "branch name must not be empty".to_string(),
+        });
+    }
+    let path_str = path.to_string_lossy();
+    run_git(repo, &["worktree", "add", "-b", new_branch, &path_str])?;
+    Ok(())
+}
+
+/// List every linked worktree of `repo`, parsed from
+/// `git worktree list --porcelain`. The first entry is the main worktree.
+pub fn list_worktrees(repo: &Path) -> Result<Vec<Worktree>, GitError> {
+    ensure_repo_exists(repo)?;
+    let out = run_git(repo, &["worktree", "list", "--porcelain"])?;
+    let mut worktrees = Vec::new();
+    let mut path: Option<PathBuf> = None;
+    let mut head = String::new();
+    let mut branch: Option<String> = None;
+    for line in out.lines() {
+        let line = line.trim_end();
+        if let Some(p) = line.strip_prefix("worktree ") {
+            path = Some(PathBuf::from(p));
+        } else if let Some(h) = line.strip_prefix("HEAD ") {
+            head = h.to_string();
+        } else if let Some(b) = line.strip_prefix("branch ") {
+            // `refs/heads/main` -> `main`.
+            branch = Some(b.rsplit('/').next().unwrap_or(b).to_string());
+        } else if line.is_empty() {
+            // Blank line terminates a record.
+            if let Some(p) = path.take() {
+                worktrees.push(Worktree {
+                    path: p,
+                    head: std::mem::take(&mut head),
+                    branch: branch.take(),
+                    is_main: worktrees.is_empty(),
+                });
+            }
+        }
+    }
+    // Flush a trailing record with no terminating blank line.
+    if let Some(p) = path.take() {
+        worktrees.push(Worktree {
+            path: p,
+            head,
+            branch,
+            is_main: worktrees.is_empty(),
+        });
+    }
+    Ok(worktrees)
+}
+
+/// Remove a linked worktree. `force` removes it even with uncommitted changes.
+/// The worktree's branch is left intact.
+pub fn remove_worktree(repo: &Path, path: &Path, force: bool) -> Result<(), GitError> {
+    ensure_repo_exists(repo)?;
+    let path_str = path.to_string_lossy();
+    if force {
+        run_git(repo, &["worktree", "remove", "--force", &path_str])?;
+    } else {
+        run_git(repo, &["worktree", "remove", &path_str])?;
+    }
+    Ok(())
+}
+
 /// Porcelain working-tree status (`git status --porcelain`): one line per
 /// changed path (staged + unstaged + untracked), stable machine-readable form.
 /// Empty string means a clean tree.

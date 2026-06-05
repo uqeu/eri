@@ -20,6 +20,7 @@
 //!   - hooks + mcp: the owning crates (`eri_hooks`, `eri_mcp`) scan
 //!     `.eri/plugins/<name>/{hooks.json,mcp.json}` directly when they load, so
 //!     plugin-bundled hooks and MCP servers are picked up by the loop too.
+//!
 //! In every case a project-level file wins over a plugin's on a name collision.
 
 use std::path::{Path, PathBuf};

@@ -50,6 +50,7 @@ mod search;
 mod session;
 mod skills;
 mod update;
+mod worktree;
 
 const ERI_CLI_VERSION: &str = env!("CARGO_PKG_VERSION");
 const DEFAULT_OUTPUT_FILE: &str = "index.html";
@@ -355,6 +356,9 @@ pub enum Command {
     Skills,
     /// List installed plugins (.eri/plugins/<name>/: commands, skills, hooks, mcp).
     Plugins,
+    /// Manage isolated git worktrees for parallel sessions.
+    #[command(subcommand)]
+    Worktree(WorktreeCommand),
     /// Inspect local setup for auth, agents, MCP, and workflow files.
     Doctor,
     /// Show the active sign-in + tier + remaining quota. Alias of
@@ -412,6 +416,28 @@ pub enum AdminCommand {
         /// Show the top N users by cost.
         #[arg(long, default_value_t = 50)]
         top: u32,
+    },
+}
+
+#[derive(Subcommand, Debug, PartialEq, Eq)]
+pub enum WorktreeCommand {
+    /// Create an isolated worktree on a new branch (forked from HEAD).
+    Add {
+        /// New branch name for the worktree.
+        branch: String,
+        /// Where to create the worktree (default: ../<repo>-<branch>).
+        #[arg(long)]
+        path: Option<PathBuf>,
+    },
+    /// List the repository's worktrees.
+    List,
+    /// Remove a worktree by path.
+    Remove {
+        /// The worktree path to remove.
+        path: PathBuf,
+        /// Remove even with uncommitted changes.
+        #[arg(long)]
+        force: bool,
     },
 }
 
@@ -590,6 +616,11 @@ async fn dispatch(command: Option<Command>) -> anyhow::Result<()> {
             plugins::print_list(&plugins::discover(&cwd()));
             Ok(())
         }
+        Command::Worktree(wc) => match wc {
+            WorktreeCommand::Add { branch, path } => worktree::add(&branch, path),
+            WorktreeCommand::List => worktree::list(),
+            WorktreeCommand::Remove { path, force } => worktree::remove(&path, force),
+        },
         Command::Doctor => repl::print_doctor(),
     }
 }
@@ -678,6 +709,7 @@ pub fn run(command: Command) -> Result<(), CliError> {
         | Command::Config
         | Command::Skills
         | Command::Plugins
+        | Command::Worktree(_)
         | Command::Doctor
         | Command::Status => Err(CliError::User(
             "agent-mode commands require the async dispatcher (`main`)".into(),

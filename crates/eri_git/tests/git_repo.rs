@@ -5,8 +5,9 @@
 use std::{fs, process::Command};
 
 use eri_git::{
-    checkout_commit, commit_iteration, create_branch_if_needed, current_branch_or_main,
-    diff_against, ensure_git_repo, export_iterations, list_commits, upstream_branch,
+    add_worktree, checkout_commit, commit_iteration, create_branch_if_needed,
+    current_branch_or_main, diff_against, ensure_git_repo, export_iterations, list_commits,
+    list_worktrees, remove_worktree, upstream_branch,
 };
 use tempfile::TempDir;
 
@@ -33,6 +34,48 @@ fn ensure_git_repo_is_idempotent() {
     // The seed commit from the first init must still be reachable.
     let commits = list_commits(&project, 10).unwrap();
     assert!(!commits.is_empty(), "seed commit survived a repeat init");
+}
+
+#[test]
+fn worktree_add_list_remove_roundtrips() {
+    if !git_on_path() {
+        eprintln!("git not on PATH — skipping");
+        return;
+    }
+    let tmp = TempDir::new().unwrap();
+    let project = tmp.path().join("proj");
+    ensure_git_repo(&project).unwrap();
+
+    let wt_path = tmp.path().join("wt-feature");
+    add_worktree(&project, &wt_path, "feature-x").expect("add worktree");
+    assert!(wt_path.exists(), "worktree dir created");
+    assert!(
+        wt_path.join(".git").exists(),
+        "linked worktree has a .git pointer file"
+    );
+
+    // Adding the same branch again must fail (branch already exists).
+    assert!(
+        add_worktree(&project, &tmp.path().join("wt2"), "feature-x").is_err(),
+        "duplicate branch is rejected"
+    );
+
+    let list = list_worktrees(&project).unwrap();
+    assert_eq!(list.len(), 2, "main + one linked worktree");
+    assert!(list[0].is_main, "first listed is the main worktree");
+    let wt = list
+        .iter()
+        .find(|w| w.branch.as_deref() == Some("feature-x"))
+        .expect("linked worktree is listed with its branch");
+    assert!(!wt.is_main);
+    assert_eq!(wt.head.len(), 40, "HEAD is a full SHA");
+
+    remove_worktree(&project, &wt_path, true).expect("remove worktree");
+    assert_eq!(
+        list_worktrees(&project).unwrap().len(),
+        1,
+        "only the main worktree remains"
+    );
 }
 
 #[test]
