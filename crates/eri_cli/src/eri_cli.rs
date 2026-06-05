@@ -35,6 +35,7 @@ mod auth;
 mod build_agent;
 mod chat;
 mod client;
+mod commands;
 mod config;
 mod genui;
 mod memory;

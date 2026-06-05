@@ -119,6 +119,9 @@ async fn handle_slash(line: &str, sess: &mut Session) -> Result<Flow> {
             println!("[eri] context cleared -- the next message starts fresh (session kept)");
         }
         "init" => run_init(sess)?,
+        "diff" => print_diff(sess, rest),
+        "status" => print_status(sess),
+        "commands" => list_custom_commands(sess),
         "new" => {
             sess.save().ok();
             let cwd = std::env::current_dir().context("read current directory")?;
@@ -126,9 +129,98 @@ async fn handle_slash(line: &str, sess: &mut Session) -> Result<Flow> {
             println!("[eri] started a new session {}", sess.id);
         }
         "model" => set_model(sess, rest),
-        other => println!("[eri] unknown command /{other} -- try /help"),
+        other => {
+            // Fall back to a custom command from .eri/commands/<other>.md.
+            if let Some(cmd) = crate::commands::find(&sess.workspace_path(), other) {
+                let prompt = crate::commands::expand(&cmd.body, rest);
+                match build_agent::run_session_turn(sess, &prompt).await {
+                    Ok(o) => println!(
+                        "\n[eri] /{other} done -- {} file(s), {} in / {} out tokens",
+                        o.files_written.len(),
+                        o.tokens_in,
+                        o.tokens_out
+                    ),
+                    Err(e) => eprintln!("error: {e}"),
+                }
+                sess.save().ok();
+            } else {
+                println!("[eri] unknown command /{other} -- try /help");
+            }
+        }
     }
     Ok(Flow::Continue)
+}
+
+fn run_git(workspace: &std::path::Path, args: &[&str]) -> Option<String> {
+    let out = std::process::Command::new("git")
+        .args(args)
+        .current_dir(workspace)
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&out.stdout).to_string())
+}
+
+fn print_diff(sess: &Session, rest: &str) {
+    let ws = sess.workspace_path();
+    let mut args = vec!["diff", "--stat"];
+    if !rest.trim().is_empty() {
+        args.push(rest.trim());
+    }
+    match run_git(&ws, &args) {
+        Some(s) if !s.trim().is_empty() => print!("{s}"),
+        Some(_) => println!("[eri] no changes in the working tree."),
+        None => println!(
+            "[eri] not a git repo (or git unavailable) at {}",
+            sess.workspace
+        ),
+    }
+}
+
+fn print_status(sess: &Session) {
+    let creds = crate::config::load().unwrap_or_default();
+    let who = creds.email.as_deref().unwrap_or("not signed in");
+    let tier = creds.tier.as_deref().unwrap_or("-");
+    println!("[eri] account    {who} ({tier})");
+    println!("      session    {} -- {} turns", sess.id, sess.turns);
+    println!("      workspace  {}", sess.workspace);
+    let ws = sess.workspace_path();
+    if let Some(branch) = run_git(&ws, &["rev-parse", "--abbrev-ref", "HEAD"]) {
+        let branch = branch.trim();
+        let dirty = run_git(&ws, &["status", "--porcelain"])
+            .map(|s| !s.trim().is_empty())
+            .unwrap_or(false);
+        println!(
+            "      git        {branch}{}",
+            if dirty { " (uncommitted changes)" } else { "" }
+        );
+    }
+    let agents = if crate::project::has_agents_md(&ws) {
+        "loaded"
+    } else {
+        "none"
+    };
+    println!("      AGENTS.md  {agents}");
+}
+
+fn list_custom_commands(sess: &Session) {
+    let cmds = crate::commands::discover(&sess.workspace_path());
+    if cmds.is_empty() {
+        println!("[eri] no custom commands. Add .eri/commands/<name>.md to define /<name>.");
+        return;
+    }
+    println!("custom commands:");
+    for c in &cmds {
+        let first = c.body.lines().find(|l| !l.trim().is_empty()).unwrap_or("");
+        println!(
+            "  /{:<14} {:<8} {}",
+            c.name,
+            c.scope,
+            short(first.trim(), 48)
+        );
+    }
 }
 
 fn print_context(sess: &Session) {
@@ -206,12 +298,16 @@ fn print_chat_help() {
     println!("  /sessions          list saved sessions");
     println!("  /cost              tokens used this session");
     println!("  /context           history size + AGENTS.md status");
+    println!("  /status            account, session, git, AGENTS.md");
+    println!("  /diff [ref]        git diff --stat of the workspace");
     println!("  /compact           summarize history to shrink context");
     println!("  /clear             forget the conversation (keep the session)");
     println!("  /init              scaffold AGENTS.md for this project");
+    println!("  /commands          list custom .eri/commands/*.md commands");
     println!("  /new               start a fresh session");
     println!("  /model <tier>      switch tier: fast | thinking | auto");
     println!("  /exit              save and quit");
+    println!("custom: /<name> runs .eri/commands/<name>.md ($ARGUMENTS expanded)");
     println!("any other line is sent as a message (prior turns are remembered)");
 }
 
