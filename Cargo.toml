@@ -6,6 +6,8 @@ exclude = [
     # Python-extension cdylib -- needs maturin's linker flags, so it is built
     # from its own dir (has a local .cargo/config.toml), not via `--workspace`.
     "crates/eri_agent_py",
+    # Node native addon cdylib -- same story (napi-rs / dynamic_lookup).
+    "crates/eri_agent_node",
 ]
 members = [
     "crates/eri_auth",

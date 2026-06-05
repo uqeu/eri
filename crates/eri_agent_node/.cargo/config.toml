@@ -1,0 +1,7 @@
+# A Node native addon resolves Node/V8 symbols at load time, so the linker must
+# allow undefined symbols. @napi-rs/cli sets this; this lets plain `cargo build`
+# (run from this crate dir) work too.
+[target.aarch64-apple-darwin]
+rustflags = ["-C", "link-arg=-undefined", "-C", "link-arg=dynamic_lookup"]
+[target.x86_64-apple-darwin]
+rustflags = ["-C", "link-arg=-undefined", "-C", "link-arg=dynamic_lookup"]

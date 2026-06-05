@@ -1,0 +1,24 @@
+[package]
+name = "eri_agent_node"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "LicenseRef-Proprietary"
+description = "Node/TypeScript bindings (napi-rs) over the eri_agent SDK core."
+
+# EXCLUDED from the eri workspace (see root Cargo.toml `exclude`): a Node native
+# addon cdylib needs `-undefined dynamic_lookup` at link time, supplied by the
+# crate-local `.cargo/config.toml` here (or by @napi-rs/cli). Build from this dir.
+
+[lib]
+name = "eri_agent_node"
+crate-type = ["cdylib"]
+
+[dependencies]
+eri_agent = { path = "../eri_agent" }
+napi = { version = "2", default-features = false, features = ["napi4"] }
+napi-derive = "2"
+serde_json = "1"
+
+[build-dependencies]
+napi-build = "2"
