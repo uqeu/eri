@@ -499,7 +499,7 @@ async fn drive_loop(
                 && (is_mcp
                     || matches!(
                         tu.name.as_str(),
-                        "write_file" | "str_replace" | "apply_patch" | "bash"
+                        "write_file" | "str_replace" | "apply_patch" | "bash" | "git_commit"
                     ))
             {
                 results.push(json!({
@@ -852,6 +852,10 @@ async fn execute_tool(
             is_error: false,
             written: Vec::new(),
         },
+        "git_status" => git_out(crate::git_tools::git_status(root)),
+        "git_diff" => git_out(crate::git_tools::git_diff(root)),
+        "git_log" => git_out(crate::git_tools::git_log(root, input)),
+        "git_commit" => git_out(crate::git_tools::git_commit(root, input)),
         "list_dir" => {
             let rel = input.get("path").and_then(Value::as_str).unwrap_or(".");
             match resolve_in_workspace(root, rel) {
@@ -1176,6 +1180,16 @@ fn err(msg: String) -> ToolExec {
     ToolExec {
         content: msg,
         is_error: true,
+        written: Vec::new(),
+    }
+}
+
+/// Adapt a `git_tools::GitOut` into a `ToolExec` (git tools touch the index/HEAD
+/// but don't produce workspace files we track in `files_written`).
+fn git_out(o: crate::git_tools::GitOut) -> ToolExec {
+    ToolExec {
+        content: o.content,
+        is_error: o.is_error,
         written: Vec::new(),
     }
 }
@@ -1637,6 +1651,38 @@ fn tool_specs(allow_shell: bool, depth: u8) -> Value {
             }
         },
         {
+            "name": "git_status",
+            "description": "Show the working-tree status (changed/staged/untracked files) as `git status --porcelain`. Use to see what you've modified before committing.",
+            "input_schema": { "type": "object", "properties": {} }
+        },
+        {
+            "name": "git_diff",
+            "description": "Show uncommitted changes to tracked files (`git diff HEAD`). Use to review your edits before committing.",
+            "input_schema": { "type": "object", "properties": {} }
+        },
+        {
+            "name": "git_log",
+            "description": "List recent commits (newest first) as short-hash + subject.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "limit": { "type": "integer", "description": "How many commits (default 10, max 100)." }
+                }
+            }
+        },
+        {
+            "name": "git_commit",
+            "description": "Stage and commit changes. Requires a concise message. Optionally limit to specific files; omit to commit everything. Commit logical units of work as you complete them.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "message": { "type": "string", "description": "Commit message (concise, imperative)." },
+                    "files": { "type": "array", "items": { "type": "string" }, "description": "Optional workspace-relative paths to stage; omit to stage all changes." }
+                },
+                "required": ["message"]
+            }
+        },
+        {
             "name": "todo_write",
             "description": "Maintain a task checklist for multi-step work. Pass the FULL list each time (it replaces the previous one). Mark items in_progress as you start them and completed when done -- surfaces progress and keeps you on track.",
             "input_schema": {
@@ -1873,8 +1919,9 @@ you go) so progress is visible and nothing is dropped.\n\
 - Some tools may be named `server__tool` -- these come from the user's \
 configured MCP servers (GitHub, filesystem, browser, ...). Use them when they \
 fit the task, the same as built-in tools.\n\
-- When bash is available, use it for git and to run the project's own tests / \
-build / linter to verify your work after changes.\n\
+- Use git_status / git_diff to review your changes and git_commit to commit \
+logical units of work (no shell needed). When bash is available, use it to run \
+the project's own tests / build / linter to verify your work after changes.\n\
 - When everything is built and coherent, call the done tool.\n\n\
 PROJECT SHAPE\n\
 - Choose the files and structure that fit the task -- the right entry point, \

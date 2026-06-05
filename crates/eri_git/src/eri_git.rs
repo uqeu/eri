@@ -261,6 +261,21 @@ pub fn diff_against(project_dir: &Path, base_ref: &str) -> Result<String, GitErr
     run_git(project_dir, &["diff", &range])
 }
 
+/// Porcelain working-tree status (`git status --porcelain`): one line per
+/// changed path (staged + unstaged + untracked), stable machine-readable form.
+/// Empty string means a clean tree.
+pub fn status_porcelain(project_dir: &Path) -> Result<String, GitError> {
+    ensure_repo_exists(project_dir)?;
+    run_git(project_dir, &["status", "--porcelain"])
+}
+
+/// Diff of the working tree against HEAD (staged + unstaged changes to tracked
+/// files). Unlike [`diff_against`], this shows what is NOT yet committed.
+pub fn working_tree_diff(project_dir: &Path) -> Result<String, GitError> {
+    ensure_repo_exists(project_dir)?;
+    run_git(project_dir, &["diff", "HEAD"])
+}
+
 /// Push the current branch to `remote`, setting upstream tracking so future
 /// `git push` calls work without arguments. Equivalent to
 /// `git push -u <remote> <current-branch>`. Returns the propagated git error

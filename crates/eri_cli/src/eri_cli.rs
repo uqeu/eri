@@ -41,6 +41,7 @@ mod config;
 mod context;
 mod eri_config;
 mod genui;
+mod git_tools;
 mod memory;
 mod project;
 mod repl;
