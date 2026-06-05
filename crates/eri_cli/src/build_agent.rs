@@ -401,6 +401,40 @@ async fn drive_loop(
         let _ = hooks.fire(eri_hooks::HookEvent::SessionStart).await;
     }
 
+    // Optional run trace (ERI_TRACE_FILE), depth-0 only. Records tool calls +
+    // completion -- never prompt/response content. Elapsed-ms timestamps from a
+    // single Instant so there are no wall-clock calls.
+    let tracer = if depth == 0 {
+        crate::trace::Tracer::from_env()
+    } else {
+        crate::trace::Tracer::disabled()
+    };
+    let run_clock = std::time::Instant::now();
+    if tracer.is_enabled() {
+        tracer.event(
+            0,
+            "run_start",
+            json!({ "model": model, "max_turns": opts.max_turns }),
+        );
+    }
+    // Emit the terminal run_end record. Values passed by-value so this borrows
+    // only the (immutable) tracer + clock, never the loop's mutable totals.
+    let emit_run_end = |turns: usize, t_in: u64, t_out: u64, files: usize, reason: &str| {
+        if tracer.is_enabled() {
+            tracer.event(
+                run_clock.elapsed().as_millis(),
+                "run_end",
+                json!({
+                    "turns": turns,
+                    "tokens_in": t_in,
+                    "tokens_out": t_out,
+                    "files": files,
+                    "reason": reason,
+                }),
+            );
+        }
+    };
+
     let system = build_system(root, opts.style);
     // Per-loop task checklist (todo_write / todo_read).
     let todos: RefCell<Vec<TodoItem>> = RefCell::new(Vec::new());
@@ -453,6 +487,7 @@ async fn drive_loop(
                     if opts.narrate {
                         let _ = writeln!(stdout, "\n{msg}");
                     }
+                    emit_run_end(turn, tokens_in, tokens_out, files_written.len(), "halted");
                     return Ok(BuildOutcome {
                         files_written,
                         turns: turn,
@@ -487,6 +522,13 @@ async fn drive_loop(
                     "\n[eri] note: hit max_tokens — output may be truncated."
                 );
             }
+            emit_run_end(
+                turn + 1,
+                tokens_in,
+                tokens_out,
+                files_written.len(),
+                "end_turn",
+            );
             return Ok(BuildOutcome {
                 files_written,
                 turns: turn + 1,
@@ -570,6 +612,7 @@ async fn drive_loop(
             // Dispatch: MCP tools route to the live host; everything else to the
             // built-in executor. Both yield a ToolExec so the post-hook + result
             // handling is shared.
+            let tool_started = run_clock.elapsed().as_millis();
             let exec =
                 if let Some(handle) = mcp_tools.iter().find(|h| h.qualified_name() == tu.name) {
                     // Safe: an MCP handle only exists in `mcp_tools` when `_mcp` is Some.
@@ -580,6 +623,18 @@ async fn drive_loop(
                 } else {
                     execute_tool(client, root, model, depth, &todos, &tu.name, &tu.input).await
                 };
+            if tracer.is_enabled() {
+                let now = run_clock.elapsed().as_millis();
+                tracer.event(
+                    now,
+                    "tool",
+                    json!({
+                        "name": tu.name,
+                        "ok": !exec.is_error,
+                        "ms": now.saturating_sub(tool_started),
+                    }),
+                );
+            }
             for p in &exec.written {
                 if !files_written.contains(p) {
                     files_written.push(p.clone());
@@ -613,6 +668,7 @@ async fn drive_loop(
         }
         messages.push(json!({ "role": "user", "content": results }));
         if done {
+            emit_run_end(turn + 1, tokens_in, tokens_out, files_written.len(), "done");
             return Ok(BuildOutcome {
                 files_written,
                 turns: turn + 1,
@@ -632,6 +688,13 @@ async fn drive_loop(
             opts.max_turns
         );
     }
+    emit_run_end(
+        opts.max_turns,
+        tokens_in,
+        tokens_out,
+        files_written.len(),
+        "turn_cap",
+    );
     Ok(BuildOutcome {
         files_written,
         turns: opts.max_turns,

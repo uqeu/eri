@@ -49,6 +49,7 @@ mod repl;
 mod search;
 mod session;
 mod skills;
+mod trace;
 mod update;
 mod worktree;
 
