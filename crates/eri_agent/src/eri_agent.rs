@@ -48,10 +48,12 @@ pub mod permission;
 pub mod request;
 pub mod stream;
 pub mod style;
+pub mod team;
 pub mod tool;
 pub mod transport;
 
 pub use permission::PermissionMode;
 pub use stream::{ToolUse, Turn, TurnAccumulator};
 pub use style::SystemStyle;
+pub use team::{Task, TaskStatus, TeamBoard};
 pub use tool::{Tool, ToolBox, ToolOutcome};
