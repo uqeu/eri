@@ -17,6 +17,7 @@
 //!     tools+system prefix (rendered tools -> system -> messages), so the stable
 //!     prefix reads at ~0.1x on every loop iteration.
 
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::io::Write as _;
 use std::path::{Component, Path, PathBuf};
@@ -247,6 +248,8 @@ async fn drive_loop(
 ) -> Result<BuildOutcome> {
     let tools = tool_specs(opts.allow_shell, depth);
     let system = build_system(root);
+    // Per-loop task checklist (todo_write / todo_read).
+    let todos: RefCell<Vec<TodoItem>> = RefCell::new(Vec::new());
     let mut files_written: Vec<PathBuf> = Vec::new();
     let mut tokens_in: u64 = 0;
     let mut tokens_out: u64 = 0;
@@ -362,7 +365,7 @@ async fn drive_loop(
                 }));
                 continue;
             }
-            let exec = execute_tool(client, root, model, depth, &tu.name, &tu.input).await;
+            let exec = execute_tool(client, root, model, depth, &todos, &tu.name, &tu.input).await;
             for p in &exec.written {
                 if !files_written.contains(p) {
                     files_written.push(p.clone());
@@ -581,6 +584,70 @@ async fn consume_turn(
     })
 }
 
+/// A task-list item the agent maintains via todo_write / todo_read.
+#[derive(Clone)]
+struct TodoItem {
+    content: String,
+    status: String,
+}
+
+/// Render a todo list with status glyphs.
+fn render_todos(todos: &[TodoItem]) -> String {
+    if todos.is_empty() {
+        return "(no todos)".to_string();
+    }
+    todos
+        .iter()
+        .map(|t| {
+            let mark = match t.status.as_str() {
+                "completed" => "[x]",
+                "in_progress" => "[~]",
+                _ => "[ ]",
+            };
+            format!("{mark} {}", t.content)
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Replace the todo list from a tool input `{ todos: [{content, status}] }`.
+fn write_todos(todos: &RefCell<Vec<TodoItem>>, input: &Value) -> ToolExec {
+    let arr = input.get("todos").and_then(Value::as_array);
+    let Some(arr) = arr else {
+        return err("todo_write: expected a `todos` array".to_string());
+    };
+    let mut next = Vec::new();
+    for item in arr {
+        let content = item
+            .get("content")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if content.is_empty() {
+            continue;
+        }
+        let status = match item.get("status").and_then(Value::as_str) {
+            Some("completed") => "completed",
+            Some("in_progress") => "in_progress",
+            _ => "pending",
+        }
+        .to_string();
+        next.push(TodoItem { content, status });
+    }
+    *todos.borrow_mut() = next;
+    let list = todos.borrow();
+    ToolExec {
+        content: format!(
+            "updated todo list ({} item(s)):\n{}",
+            list.len(),
+            render_todos(&list)
+        ),
+        is_error: false,
+        written: Vec::new(),
+    }
+}
+
 /// Outcome of one local tool execution.
 struct ToolExec {
     content: String,
@@ -595,12 +662,19 @@ async fn execute_tool(
     root: &Path,
     model: &str,
     depth: u8,
+    todos: &RefCell<Vec<TodoItem>>,
     name: &str,
     input: &Value,
 ) -> ToolExec {
     match name {
         "bash" => run_bash(root, input).await,
         "task" => run_subagent(client, root, model, depth, input).await,
+        "todo_write" => write_todos(todos, input),
+        "todo_read" => ToolExec {
+            content: render_todos(&todos.borrow()),
+            is_error: false,
+            written: Vec::new(),
+        },
         "list_dir" => {
             let rel = input.get("path").and_then(Value::as_str).unwrap_or(".");
             match resolve_in_workspace(root, rel) {
@@ -1114,6 +1188,32 @@ mod bash_tests {
     }
 
     #[test]
+    fn todo_write_replaces_and_renders() {
+        let todos = std::cell::RefCell::new(Vec::new());
+        let r = write_todos(
+            &todos,
+            &json!({ "todos": [
+                { "content": "write parser", "status": "in_progress" },
+                { "content": "add tests", "status": "pending" },
+                { "content": "", "status": "pending" }
+            ]}),
+        );
+        assert!(!r.is_error);
+        // empty content skipped -> 2 items.
+        assert_eq!(todos.borrow().len(), 2);
+        let rendered = render_todos(&todos.borrow());
+        assert!(rendered.contains("[~] write parser"));
+        assert!(rendered.contains("[ ] add tests"));
+        // a second write replaces the list.
+        write_todos(
+            &todos,
+            &json!({ "todos": [{ "content": "ship", "status": "completed" }] }),
+        );
+        assert_eq!(todos.borrow().len(), 1);
+        assert!(render_todos(&todos.borrow()).contains("[x] ship"));
+    }
+
+    #[test]
     fn tool_specs_gates_bash_and_subagent() {
         // bash only when explicitly enabled; task (subagent) only at depth 0.
         let base = tool_names(false, 0);
@@ -1241,6 +1341,32 @@ fn tool_specs(allow_shell: bool, depth: u8) -> Value {
                 },
                 "required": ["patch"]
             }
+        },
+        {
+            "name": "todo_write",
+            "description": "Maintain a task checklist for multi-step work. Pass the FULL list each time (it replaces the previous one). Mark items in_progress as you start them and completed when done -- surfaces progress and keeps you on track.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "todos": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "content": { "type": "string" },
+                                "status": { "type": "string", "enum": ["pending", "in_progress", "completed"] }
+                            },
+                            "required": ["content", "status"]
+                        }
+                    }
+                },
+                "required": ["todos"]
+            }
+        },
+        {
+            "name": "todo_read",
+            "description": "Read the current task checklist.",
+            "input_schema": { "type": "object", "properties": {} }
         },
         {
             "name": "done",
