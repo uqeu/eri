@@ -246,7 +246,28 @@ async fn drive_loop(
     opts: &LoopOpts,
     depth: u8,
 ) -> Result<BuildOutcome> {
-    let tools = tool_specs(opts.allow_shell, depth);
+    // External MCP servers are loaded only at depth 0 (subagents stay local).
+    // `_mcp` is held in scope for the loop's lifetime: dropping it reaps the
+    // server child processes (kill_on_drop), so we needn't shut down explicitly
+    // on every early return.
+    let (_mcp, mcp_tools) = if depth == 0 {
+        load_mcp(root).await
+    } else {
+        (None, Vec::new())
+    };
+    let mut tools = tool_specs(opts.allow_shell, depth);
+    if !mcp_tools.is_empty() {
+        if let Some(arr) = tools.as_array_mut() {
+            arr.extend(mcp_tool_specs(&mcp_tools));
+        }
+        if opts.narrate {
+            let _ = writeln!(
+                std::io::stdout(),
+                "[eri] {} MCP tool(s) available.",
+                mcp_tools.len()
+            );
+        }
+    }
     let system = build_system(root);
     // Per-loop task checklist (todo_write / todo_read).
     let todos: RefCell<Vec<TodoItem>> = RefCell::new(Vec::new());
@@ -362,6 +383,31 @@ async fn drive_loop(
                     "tool_use_id": tu.id,
                     "content": "plan mode: writes and shell are disabled. Describe the change/command instead of running it.",
                     "is_error": true,
+                }));
+                continue;
+            }
+            // MCP tool? Namespaced `server__tool`. Dispatch to the live host.
+            if let Some(handle) = mcp_tools.iter().find(|h| h.qualified_name() == tu.name) {
+                // External tools may have side effects; plan mode forbids them.
+                if !opts.allow_writes {
+                    results.push(json!({
+                        "type": "tool_result",
+                        "tool_use_id": tu.id,
+                        "content": "plan mode: external (MCP) tools are disabled. Describe what you'd call instead.",
+                        "is_error": true,
+                    }));
+                    continue;
+                }
+                // Safe: an MCP handle only exists in `mcp_tools` when `_mcp` is Some.
+                let exec = match _mcp.as_ref() {
+                    Some(mcp) => call_mcp_tool(mcp, handle, &tu.input).await,
+                    None => err("MCP host unavailable".to_string()),
+                };
+                results.push(json!({
+                    "type": "tool_result",
+                    "tool_use_id": tu.id,
+                    "content": exec.content,
+                    "is_error": exec.is_error,
                 }));
                 continue;
             }
@@ -1214,6 +1260,51 @@ mod bash_tests {
     }
 
     #[test]
+    fn mcp_specs_namespace_and_render() {
+        use eri_mcp::{ContentBlock, ToolHandle};
+        let handles = vec![
+            ToolHandle {
+                server: "github".into(),
+                name: "create_issue".into(),
+                description: "Open an issue".into(),
+                input_schema: json!({ "type": "object" }),
+            },
+            ToolHandle {
+                server: "fs".into(),
+                name: "read".into(),
+                description: String::new(),
+                input_schema: json!({ "type": "object" }),
+            },
+        ];
+        let specs = mcp_tool_specs(&handles);
+        assert_eq!(specs.len(), 2);
+        // Namespaced so they can't collide with built-ins.
+        assert_eq!(specs[0]["name"], "github__create_issue");
+        assert_eq!(specs[0]["description"], "Open an issue");
+        // Empty description gets a synthesized fallback (Anthropic rejects empty).
+        assert_eq!(specs[1]["name"], "fs__read");
+        assert!(
+            specs[1]["description"]
+                .as_str()
+                .unwrap()
+                .contains("MCP tool 'read'")
+        );
+
+        // Content rendering flattens text; non-text is summarized, not dropped.
+        let rendered = render_mcp_content(&[
+            ContentBlock::Text {
+                text: "hello".into(),
+            },
+            ContentBlock::Image {
+                data: "AAAA".into(),
+                mime_type: "image/png".into(),
+            },
+        ]);
+        assert!(rendered.contains("hello"));
+        assert!(rendered.contains("image/png"));
+    }
+
+    #[test]
     fn tool_specs_gates_bash_and_subagent() {
         // bash only when explicitly enabled; task (subagent) only at depth 0.
         let base = tool_names(false, 0);
@@ -1385,6 +1476,110 @@ fn tool_specs(allow_shell: bool, depth: u8) -> Value {
     tools
 }
 
+/// Load configured MCP servers and their advertised tools.
+///
+/// Returns the live host (kept in scope so its `kill_on_drop` child processes
+/// are reaped when the loop ends) plus a flat list of tool handles. When no
+/// servers are configured this is a fast no-op — we never block a plain build
+/// on MCP. When servers ARE configured we poll the catalog briefly (handshakes
+/// run in the background after `load`) so first-turn tool specs are populated.
+///
+/// MCP is loaded only at depth 0: subagents inherit a restricted, local-only
+/// tool set by design, so they don't get external servers.
+async fn load_mcp(root: &Path) -> (Option<eri_mcp::Mcp>, Vec<eri_mcp::ToolHandle>) {
+    let mcp = match eri_mcp::Mcp::load(root).await {
+        Ok(m) => m,
+        // A broken mcp.json must never break a build — degrade to no MCP.
+        Err(_) => return (None, Vec::new()),
+    };
+    if mcp.servers().await.is_empty() {
+        return (None, Vec::new());
+    }
+    // Poll until at least one server reports tools, or a short deadline passes.
+    // Servers handshake quickly; the cap keeps a slow/hung server from stalling
+    // the whole build.
+    let mut tools = mcp.tools().await;
+    for _ in 0..25 {
+        if !tools.is_empty() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        tools = mcp.tools().await;
+    }
+    (Some(mcp), tools)
+}
+
+/// Anthropic tool specs for the MCP tools, namespaced `server__tool` so they
+/// can't collide with built-ins. Appended to the END of the tools array so the
+/// stable built-in prefix stays prompt-cached across turns.
+fn mcp_tool_specs(handles: &[eri_mcp::ToolHandle]) -> Vec<Value> {
+    handles
+        .iter()
+        .map(|h| {
+            let desc = if h.description.trim().is_empty() {
+                format!("MCP tool '{}' from server '{}'.", h.name, h.server)
+            } else {
+                h.description.clone()
+            };
+            json!({
+                "name": h.qualified_name(),
+                "description": desc,
+                "input_schema": h.input_schema,
+            })
+        })
+        .collect()
+}
+
+/// Invoke an MCP tool and render its result as a `ToolExec`. Errors and
+/// tool-level failures come back as graceful, non-panicking tool results.
+async fn call_mcp_tool(
+    mcp: &eri_mcp::Mcp,
+    handle: &eri_mcp::ToolHandle,
+    input: &Value,
+) -> ToolExec {
+    match mcp.call_tool(handle, input.clone()).await {
+        Ok(result) => {
+            let mut text = render_mcp_content(&result.content);
+            if text.len() > MAX_TOOL_BYTES {
+                text.truncate(MAX_TOOL_BYTES);
+                text.push_str("\n…[truncated]");
+            }
+            if text.trim().is_empty() {
+                text = "(the tool returned no textual content)".to_string();
+            }
+            ToolExec {
+                content: text,
+                is_error: result.is_error,
+                written: Vec::new(),
+            }
+        }
+        Err(e) => err(format!(
+            "MCP tool '{}' failed: {e}",
+            handle.qualified_name()
+        )),
+    }
+}
+
+/// Flatten MCP content blocks to text the model can read. Text passes through;
+/// images/resources are summarized (the loop is text-only for tool results).
+fn render_mcp_content(blocks: &[eri_mcp::ContentBlock]) -> String {
+    use eri_mcp::ContentBlock;
+    let mut parts: Vec<String> = Vec::new();
+    for block in blocks {
+        match block {
+            ContentBlock::Text { text } => parts.push(text.clone()),
+            ContentBlock::Image { mime_type, .. } => {
+                parts.push(format!("[image: {mime_type} — not shown]"));
+            }
+            ContentBlock::Resource { resource } => {
+                parts.push(format!("[resource: {resource}]"));
+            }
+            ContentBlock::Unknown => parts.push("[unsupported content block]".to_string()),
+        }
+    }
+    parts.join("\n")
+}
+
 /// Subagent tool spec -- a nested agent with its own context window.
 fn task_spec() -> Value {
     json!({
@@ -1451,6 +1646,11 @@ each file atomic); write_file for new files / full rewrites; str_replace for a \
 single small edit. Never print file contents in prose; always use a tool.\n\
 - Delegate large, self-contained explorations or chunks to the task tool (a \
 subagent with its own context) to keep your own context focused.\n\
+- Track multi-step work with todo_write (mark items in_progress / completed as \
+you go) so progress is visible and nothing is dropped.\n\
+- Some tools may be named `server__tool` -- these come from the user's \
+configured MCP servers (GitHub, filesystem, browser, ...). Use them when they \
+fit the task, the same as built-in tools.\n\
 - When bash is available, use it for git and to run the project's own tests / \
 build / linter to verify your work after changes.\n\
 - When everything is built and coherent, call the done tool.\n\n\

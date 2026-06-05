@@ -738,6 +738,7 @@ dependencies = [
  "eri_apply",
  "eri_core",
  "eri_inference",
+ "eri_mcp",
  "globset",
  "ignore",
  "regex",

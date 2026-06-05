@@ -18,6 +18,7 @@ anyhow.workspace = true
 clap.workspace = true
 eri_apply = { path = "../eri_apply" }
 eri_core.workspace = true
+eri_mcp = { path = "../eri_mcp" }
 eri_inference.workspace = true
 globset = "0.4"
 ignore = "0.4"
