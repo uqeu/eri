@@ -29,6 +29,9 @@ pub struct Snapshot {
 }
 
 impl Snapshot {
+    /// Number of files captured in this snapshot. Retained for status/UX
+    /// display of a checkpoint's size.
+    #[allow(dead_code)]
     pub fn file_count(&self) -> usize {
         self.entries.len()
     }

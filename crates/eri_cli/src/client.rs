@@ -32,6 +32,9 @@ impl Client {
         })
     }
 
+    /// Accessor for the bearer token. Part of the client's public surface;
+    /// retained for callers/tests that need to inspect auth state.
+    #[allow(dead_code)]
     pub fn bearer(&self) -> Option<&str> {
         self.bearer.as_deref()
     }

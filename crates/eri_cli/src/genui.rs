@@ -85,10 +85,6 @@ pub fn system_prompt(intent: &str) -> String {
     )
 }
 
-pub fn run(prompt: &str, output: GenUiOutputMode) -> Result<()> {
-    run_with_open(prompt, output, false)
-}
-
 pub fn run_with_open(prompt: &str, output: GenUiOutputMode, open: bool) -> Result<()> {
     let intent = prompt.trim();
     if intent.is_empty() {

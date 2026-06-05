@@ -22,7 +22,10 @@ struct Observation {
     id: String,
     kind: String,
     body: String,
+    // Part of the recall wire shape; deserialized for completeness even though
+    // the CLI doesn't currently render it.
     #[serde(default)]
+    #[allow(dead_code)]
     ts_ms: Option<u64>,
 }
 
