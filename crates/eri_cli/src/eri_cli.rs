@@ -79,6 +79,10 @@ pub struct Cli {
     /// .eri/config.toml, else thinking).
     #[arg(long, value_enum)]
     pub mode: Option<Mode>,
+    /// Headless plan mode: read-only -- eri plans the work without writing any
+    /// files (write tools are refused).
+    #[arg(long)]
+    pub plan: bool,
     #[command(subcommand)]
     pub command: Option<Command>,
 }
@@ -378,6 +382,7 @@ fn main() -> ExitCode {
             cli.output_format,
             cli.max_turns,
             model_for_mode(resolve_mode(cli.mode, &cwd())),
+            cli.plan,
         )) {
             Ok(code) => ExitCode::from(code),
             Err(error) => {
@@ -601,6 +606,7 @@ async fn run_headless(
     format: OutputFormat,
     max_turns: Option<usize>,
     model: &str,
+    plan: bool,
 ) -> anyhow::Result<u8> {
     // Prompt comes from the flag value, or stdin when `-p` is passed bare.
     let prompt = if prompt.trim().is_empty() {
@@ -618,6 +624,7 @@ async fn run_headless(
 
     let mut opts = build_agent::LoopOpts {
         narrate: format == OutputFormat::Text,
+        allow_writes: !plan,
         ..Default::default()
     };
     // --max-turns flag wins; else .eri/config.toml; else built-in default.

@@ -65,6 +65,10 @@ pub struct LoopOpts {
     /// Stream assistant text live to stdout. False for headless json output,
     /// where stdout must stay clean for the structured result.
     pub narrate: bool,
+    /// Whether file-writing tools may modify the workspace. False = plan mode:
+    /// the agent can read/list but write_file / str_replace are refused, so it
+    /// plans without touching disk.
+    pub allow_writes: bool,
 }
 
 impl Default for LoopOpts {
@@ -72,6 +76,7 @@ impl Default for LoopOpts {
         Self {
             max_turns: MAX_TURNS,
             narrate: true,
+            allow_writes: true,
         }
     }
 }
@@ -309,6 +314,17 @@ async fn drive_loop(
                     "type": "tool_result",
                     "tool_use_id": tu.id,
                     "content": "acknowledged"
+                }));
+                continue;
+            }
+            // Plan mode: refuse file-modifying tools so the agent plans without
+            // touching disk. Read-only tools (list_dir / read_file) still run.
+            if !opts.allow_writes && matches!(tu.name.as_str(), "write_file" | "str_replace") {
+                results.push(json!({
+                    "type": "tool_result",
+                    "tool_use_id": tu.id,
+                    "content": "plan mode: writes are disabled. Describe the change instead of applying it.",
+                    "is_error": true,
                 }));
                 continue;
             }
