@@ -501,7 +501,7 @@ fn main() -> ExitCode {
             }
         };
     }
-    match rt.block_on(dispatch(cli.command)) {
+    match rt.block_on(dispatch(cli)) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("error: {error}");
@@ -510,8 +510,31 @@ fn main() -> ExitCode {
     }
 }
 
-async fn dispatch(command: Option<Command>) -> anyhow::Result<()> {
-    let Some(command) = command else {
+/// The loop-capability flags resolved from the top-level CLI, so `eri build`
+/// honors the same `--permission-mode` / `--style` / `--sandbox` as headless.
+#[derive(Clone, Copy)]
+struct LoopFlags {
+    permission: build_agent::PermissionMode,
+    style: build_agent::SystemStyle,
+    sandbox: bool,
+}
+
+async fn dispatch(cli: Cli) -> anyhow::Result<()> {
+    // Resolve the loop flags up front (used by the build/ship paths).
+    let flags = LoopFlags {
+        permission: cli.permission_mode.map(Into::into).unwrap_or_else(|| {
+            build_agent::PermissionMode::from_legacy_flags(cli.plan, cli.allow_shell)
+        }),
+        style: cli.style.map(Into::into).unwrap_or_else(|| {
+            eri_config::load(&cwd())
+                .style
+                .as_deref()
+                .map(build_agent::SystemStyle::parse)
+                .unwrap_or_default()
+        }),
+        sandbox: cli.sandbox,
+    };
+    let Some(command) = cli.command else {
         return repl::run().await;
     };
     match command {
@@ -523,7 +546,7 @@ async fn dispatch(command: Option<Command>) -> anyhow::Result<()> {
             mode,
         } => {
             let m = resolve_mode(mode, &workspace_of(&output));
-            run_build_metered(&prompt, deploy, &output, model_for_mode(m)).await
+            run_build_metered(&prompt, deploy, &output, model_for_mode(m), flags).await
         }
         Command::Iterate {
             instruction,
@@ -575,6 +598,7 @@ async fn dispatch(command: Option<Command>) -> anyhow::Result<()> {
                         true,
                         Path::new(DEFAULT_OUTPUT_FILE),
                         model_for_mode(Mode::Thinking),
+                        flags,
                     )
                     .await
                 }
@@ -812,13 +836,22 @@ async fn run_build_metered(
     deploy: bool,
     output: &Path,
     model: &str,
+    flags: LoopFlags,
 ) -> anyhow::Result<()> {
     let workspace = output
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .map(Path::to_path_buf)
         .unwrap_or_else(|| PathBuf::from("."));
-    let outcome = build_agent::run_build_agent(prompt, &workspace, model).await?;
+    // Honor the same loop-capability flags as headless (permission/style/sandbox).
+    let mut opts = build_agent::LoopOpts {
+        narrate: true,
+        style: flags.style,
+        sandbox: flags.sandbox,
+        ..Default::default()
+    };
+    flags.permission.apply(&mut opts);
+    let outcome = build_agent::run_headless(prompt, &workspace, model, &opts).await?;
     println!(
         "\n[eri] {} file(s) in {} turn(s) -- {} in / {} out tokens (metered)",
         outcome.files_written.len(),
