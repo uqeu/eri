@@ -25,7 +25,7 @@ pub enum ResumeMode {
 }
 
 /// Start or resume a chat session and run the interactive loop.
-pub async fn run(resume: ResumeMode, model: &str) -> Result<()> {
+pub async fn run(resume: ResumeMode, model: &str, opts: build_agent::LoopOpts) -> Result<()> {
     let cwd = std::env::current_dir().context("read current directory")?;
     let mut sess = match resume {
         ResumeMode::New => Session::create(&cwd, model),
@@ -67,14 +67,14 @@ pub async fn run(resume: ResumeMode, model: &str) -> Result<()> {
             continue;
         }
         if line.starts_with('/') {
-            if handle_slash(&line, &mut sess, &mut checkpoints).await? == Flow::Exit {
+            if handle_slash(&line, &mut sess, &mut checkpoints, &opts).await? == Flow::Exit {
                 break;
             }
             continue;
         }
         // A normal message -> one agentic turn with retained context.
         snapshot_before_turn(&mut checkpoints, &sess);
-        match build_agent::run_session_turn(&mut sess, &line).await {
+        match build_agent::run_session_turn(&mut sess, &line, &opts).await {
             Ok(outcome) => {
                 println!(
                     "\n[eri] turn done -- {} file(s) touched, {} in / {} out tokens (metered)",
@@ -119,6 +119,7 @@ async fn handle_slash(
     line: &str,
     sess: &mut Session,
     checkpoints: &mut Vec<crate::checkpoint::Snapshot>,
+    opts: &build_agent::LoopOpts,
 ) -> Result<Flow> {
     let without = line.trim_start_matches('/').trim();
     let (cmd, rest) = match without.split_once(char::is_whitespace) {
@@ -142,7 +143,7 @@ async fn handle_slash(
         "status" => print_status(sess),
         "commands" => list_custom_commands(sess),
         "skills" => list_skills(sess),
-        "skill" => run_skill(sess, checkpoints, rest).await,
+        "skill" => run_skill(sess, checkpoints, rest, opts).await,
         "new" => {
             sess.save().ok();
             let cwd = std::env::current_dir().context("read current directory")?;
@@ -170,7 +171,7 @@ async fn handle_slash(
             if let Some(cmd) = crate::commands::find(&sess.workspace_path(), other) {
                 let prompt = crate::commands::expand(&cmd.body, rest);
                 snapshot_before_turn(checkpoints, sess);
-                match build_agent::run_session_turn(sess, &prompt).await {
+                match build_agent::run_session_turn(sess, &prompt, opts).await {
                     Ok(o) => println!(
                         "\n[eri] /{other} done -- {} file(s), {} in / {} out tokens",
                         o.files_written.len(),
@@ -262,6 +263,7 @@ async fn run_skill(
     sess: &mut Session,
     checkpoints: &mut Vec<crate::checkpoint::Snapshot>,
     rest: &str,
+    opts: &build_agent::LoopOpts,
 ) {
     let (name, task) = match rest.split_once(char::is_whitespace) {
         Some((n, t)) => (n.trim(), t.trim()),
@@ -278,7 +280,7 @@ async fn run_skill(
     println!("[eri] applying skill '{}' ({})", skill.name, skill.source);
     let prompt = crate::skills::compose_prompt(&skill, task);
     snapshot_before_turn(checkpoints, sess);
-    match build_agent::run_session_turn(sess, &prompt).await {
+    match build_agent::run_session_turn(sess, &prompt, opts).await {
         Ok(o) => println!(
             "\n[eri] skill done -- {} file(s), {} in / {} out tokens",
             o.files_written.len(),

@@ -272,6 +272,7 @@ pub async fn run_headless(
 pub async fn run_session_turn(
     session: &mut crate::session::Session,
     prompt: &str,
+    opts: &LoopOpts,
 ) -> Result<BuildOutcome> {
     let prompt = prompt.trim();
     if prompt.is_empty() {
@@ -284,15 +285,7 @@ pub async fn run_session_turn(
         .messages
         .push(json!({ "role": "user", "content": prompt }));
     let model = session.model.clone();
-    let outcome = drive_loop(
-        &client,
-        &root,
-        &model,
-        &mut session.messages,
-        &LoopOpts::default(),
-        0,
-    )
-    .await?;
+    let outcome = drive_loop(&client, &root, &model, &mut session.messages, opts, 0).await?;
     session.turns += outcome.turns;
     session.tokens_in += outcome.tokens_in;
     session.tokens_out += outcome.tokens_out;

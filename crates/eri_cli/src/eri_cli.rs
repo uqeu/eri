@@ -569,7 +569,15 @@ async fn dispatch(cli: Cli) -> anyhow::Result<()> {
                 chat::ResumeMode::New
             };
             let m = resolve_mode(mode, &cwd());
-            chat::run(resume_mode, model_for_mode(m)).await
+            // chat honors the same loop-capability flags (sandbox/permission/style).
+            let mut opts = build_agent::LoopOpts {
+                narrate: true,
+                style: flags.style,
+                sandbox: flags.sandbox,
+                ..Default::default()
+            };
+            flags.permission.apply(&mut opts);
+            chat::run(resume_mode, model_for_mode(m), opts).await
         }
         Command::Sessions => chat::list_sessions(),
         Command::ListTemplates => {
