@@ -95,6 +95,132 @@ fn messages_body(
     serde_json::to_string(&body).map_err(|e| PyValueError::new_err(format!("serialize: {e}")))
 }
 
+/// Run a full agent loop driven by Python callbacks. Synchronous: the host owns
+/// the I/O.
+///
+/// - `transport(body_json: str) -> sse_text: str` makes the model call and
+///   returns the full SSE response text.
+/// - `tools` maps a tool name to `fn(input_json: str) -> dict(content=str,
+///   is_error=bool)`; `tool_specs_json` is the Anthropic `tools` array.
+///
+/// Returns a dict: `final_text`, `turns`, `tokens_in`, `tokens_out`, `stop`
+/// ("done" | "turn_cap"), and `messages` (the final conversation as JSON).
+#[pyfunction]
+#[pyo3(signature = (model, system_json, messages_json, transport, tools, tool_specs_json, max_turns=24))]
+#[allow(clippy::too_many_arguments)]
+fn run_agent(
+    py: Python<'_>,
+    model: &str,
+    system_json: &str,
+    messages_json: &str,
+    transport: PyObject,
+    tools: &Bound<'_, pyo3::types::PyDict>,
+    tool_specs_json: &str,
+    max_turns: usize,
+) -> PyResult<PyObject> {
+    let system = match serde_json::from_str::<Value>(system_json)
+        .map_err(|e| PyValueError::new_err(format!("system: {e}")))?
+    {
+        Value::Array(a) => a,
+        _ => return Err(PyValueError::new_err("system must be a JSON array")),
+    };
+    let specs: Value = serde_json::from_str(tool_specs_json)
+        .map_err(|e| PyValueError::new_err(format!("tool_specs: {e}")))?;
+    let mut messages = parse_messages(messages_json)?;
+
+    let mut tokens_in = 0u64;
+    let mut tokens_out = 0u64;
+    let mut final_text = String::new();
+
+    for turn in 0..max_turns {
+        eri_agent::compaction::shape_context(&mut messages, 150_000);
+        let body = eri_agent::request::messages_body(model, 32_000, &system, &specs, &messages);
+        // Call the Python transport synchronously; it returns the SSE text.
+        let sse: String = transport
+            .call1(py, (body.to_string(),))?
+            .extract::<String>(py)?;
+
+        // Parse the SSE via the SDK accumulator.
+        let mut acc = eri_agent::TurnAccumulator::new();
+        for line in sse.lines() {
+            if let Some(payload) = line.strip_prefix("data:").map(str::trim) {
+                if !payload.is_empty() {
+                    if let Ok(ev) = serde_json::from_str::<Value>(payload) {
+                        acc.push_event(&ev);
+                    }
+                }
+            }
+        }
+        let result = acc.finish();
+        tokens_in += result.usage_in;
+        tokens_out += result.usage_out;
+        let text = eri_agent::stream::assistant_text(&result.content);
+        if !text.trim().is_empty() {
+            final_text = text;
+        }
+        messages.push(serde_json::json!({ "role": "assistant", "content": result.content }));
+
+        if result.stop_reason.as_deref() != Some("tool_use") {
+            return finish_result(py, turn + 1, tokens_in, tokens_out, &final_text, "done", &messages);
+        }
+
+        // Dispatch each tool call through the Python tool callbacks.
+        let mut results: Vec<Value> = Vec::new();
+        for tu in &result.tool_uses {
+            let (content, is_error) = match tools.get_item(&tu.name)? {
+                Some(callable) => {
+                    let out = callable.call1((tu.input.to_string(),))?;
+                    let content: String = out
+                        .get_item("content")
+                        .ok()
+                        .and_then(|v| v.extract::<String>().ok())
+                        .unwrap_or_default();
+                    let is_error: bool = out
+                        .get_item("is_error")
+                        .ok()
+                        .and_then(|v| v.extract::<bool>().ok())
+                        .unwrap_or(false);
+                    (content, is_error)
+                }
+                None => (format!("unknown tool '{}'", tu.name), true),
+            };
+            results.push(serde_json::json!({
+                "type": "tool_result",
+                "tool_use_id": tu.id,
+                "content": content,
+                "is_error": is_error,
+            }));
+        }
+        messages.push(serde_json::json!({ "role": "user", "content": results }));
+    }
+
+    finish_result(py, max_turns, tokens_in, tokens_out, &final_text, "turn_cap", &messages)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn finish_result(
+    py: Python<'_>,
+    turns: usize,
+    tokens_in: u64,
+    tokens_out: u64,
+    final_text: &str,
+    stop: &str,
+    messages: &[Value],
+) -> PyResult<PyObject> {
+    let dict = pyo3::types::PyDict::new_bound(py);
+    dict.set_item("turns", turns)?;
+    dict.set_item("tokens_in", tokens_in)?;
+    dict.set_item("tokens_out", tokens_out)?;
+    dict.set_item("final_text", final_text)?;
+    dict.set_item("stop", stop)?;
+    dict.set_item(
+        "messages",
+        serde_json::to_string(messages)
+            .map_err(|e| PyValueError::new_err(format!("serialize: {e}")))?,
+    )?;
+    Ok(dict.into())
+}
+
 #[pymodule]
 fn eri_agent_py(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(estimate_tokens, m)?)?;
@@ -103,6 +229,7 @@ fn eri_agent_py(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(permission_allows_shell, m)?)?;
     m.add_function(wrap_pyfunction!(style_directive, m)?)?;
     m.add_function(wrap_pyfunction!(messages_body, m)?)?;
+    m.add_function(wrap_pyfunction!(run_agent, m)?)?;
     Ok(())
 }
 

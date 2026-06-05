@@ -10,9 +10,35 @@ transport-agnostic building blocks of the eri agent loop to Python:
 | `permission_allows_writes(mode)` / `permission_allows_shell(mode)` | the permission capability ladder |
 | `style_directive(style)` | the output-style directive (`reviewer` / `explainer` / `concise`) |
 | `messages_body(model, max_tokens, system_json, tools_json, messages_json)` | build a streaming request body |
+| `run_agent(model, system_json, messages_json, transport, tools, tool_specs_json, max_turns)` | **run a full agent loop** driven by your callbacks |
 
 Interop is over JSON strings (the Anthropic Messages wire shape) to keep the
 surface tiny and stable.
+
+### Running an agent from Python
+
+`run_agent` is the whole loop (shape context → request → your transport → parse →
+dispatch your tools → repeat). You own the I/O:
+
+```python
+import json, eri_agent_py as e
+
+def transport(body_json):           # you make the model call, return the SSE text
+    return http_post("/v1/messages", body_json)
+
+def write_file(input_json):         # a tool you implement
+    p = json.loads(input_json)["path"]
+    open(p, "w").write("...")
+    return {"content": f"wrote {p}", "is_error": False}
+
+specs = json.dumps([{ "name": "write_file", "description": "...", "input_schema": {"type": "object"} }])
+result = e.run_agent(
+    "claude-sonnet-4-6", "[]",
+    json.dumps([{"role": "user", "content": "make a.txt"}]),
+    transport, {"write_file": write_file}, specs, max_turns=24,
+)
+print(result["final_text"], result["turns"], result["tokens_out"])
+```
 
 ## Build
 
@@ -41,5 +67,5 @@ Built with `abi3-py38`, so one wheel works across CPython ≥ 3.8.
 
 The Rust binding surface + conversion logic are tested (`cargo test` rlib unit
 test) and the module is verified end-to-end against CPython 3.13
-(`tests/test_bindings.py`, all green). The loop driver (`eri_agent::driver::run`)
-is not yet bound — it needs a Python-callback `Transport`, which is the next step.
+(`tests/test_bindings.py`, all green) -- including `run_agent` driving a complete
+agent loop (tool dispatch + termination) against a fake transport.
