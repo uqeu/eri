@@ -738,6 +738,7 @@ dependencies = [
  "eri_apply",
  "eri_caveman",
  "eri_core",
+ "eri_hooks",
  "eri_inference",
  "eri_mcp",
  "globset",

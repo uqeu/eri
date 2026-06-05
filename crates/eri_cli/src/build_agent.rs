@@ -325,6 +325,26 @@ async fn drive_loop(
             );
         }
     }
+    // Deterministic policy hooks (.eri/hooks.json), depth-0 only. A blocking
+    // PreToolUse hook can veto a tool call; PostToolUse can format/log/notify.
+    let _hooks = if depth == 0 {
+        eri_hooks::Hooks::load(root).ok().filter(|h| {
+            // Skip the whole layer when nothing is configured -- no per-tool fire cost.
+            let c = h.config();
+            !(c.pre_tool_use.is_empty()
+                && c.post_tool_use.is_empty()
+                && c.post_tool_error.is_empty()
+                && c.session_start.is_empty()
+                && c.session_end.is_empty())
+        })
+    } else {
+        None
+    };
+    if let Some(hooks) = _hooks.as_ref() {
+        // Best-effort lifecycle signal; outcomes are informational.
+        let _ = hooks.fire(eri_hooks::HookEvent::SessionStart).await;
+    }
+
     let system = build_system(root);
     // Per-loop task checklist (todo_write / todo_read).
     let todos: RefCell<Vec<TodoItem>> = RefCell::new(Vec::new());
@@ -435,6 +455,31 @@ async fn drive_loop(
                 }));
                 continue;
             }
+            // PreToolUse policy gate: a hook exiting code 2 vetoes the call
+            // (Claude Code convention) -- a free, deterministic way to forbid
+            // e.g. `rm -rf`, redact secrets, or enforce project rules. The
+            // hook's message is surfaced to the model as the refusal reason.
+            if let Some(hooks) = _hooks.as_ref() {
+                let outcomes = hooks
+                    .fire(eri_hooks::HookEvent::PreToolUse {
+                        method: tu.name.clone(),
+                        params: tu.input.clone(),
+                    })
+                    .await;
+                if let Some(reason) = hook_veto(&outcomes) {
+                    if opts.narrate {
+                        let _ =
+                            writeln!(stdout, "[eri] policy hook blocked `{}`: {reason}", tu.name);
+                    }
+                    results.push(json!({
+                        "type": "tool_result",
+                        "tool_use_id": tu.id,
+                        "content": format!("blocked by a PreToolUse policy hook: {reason}"),
+                        "is_error": true,
+                    }));
+                    continue;
+                }
+            }
             // Shell is privileged + non-sandboxed: refuse unless explicitly
             // enabled, even if the model hallucinates the tool name.
             if tu.name == "bash" && !opts.allow_shell {
@@ -446,51 +491,61 @@ async fn drive_loop(
                 }));
                 continue;
             }
-            // Plan mode: refuse file-modifying + shell tools so the agent plans
-            // without side effects. Read-only tools (list_dir/read_file) run.
+            let is_mcp = mcp_tools.iter().any(|h| h.qualified_name() == tu.name);
+            // Plan mode: refuse file-modifying + shell + external tools so the
+            // agent plans without side effects. Read-only tools (list/read/grep)
+            // run.
             if !opts.allow_writes
-                && matches!(
-                    tu.name.as_str(),
-                    "write_file" | "str_replace" | "apply_patch" | "bash"
-                )
+                && (is_mcp
+                    || matches!(
+                        tu.name.as_str(),
+                        "write_file" | "str_replace" | "apply_patch" | "bash"
+                    ))
             {
                 results.push(json!({
                     "type": "tool_result",
                     "tool_use_id": tu.id,
-                    "content": "plan mode: writes and shell are disabled. Describe the change/command instead of running it.",
+                    "content": "plan mode: writes, shell, and external (MCP) tools are disabled. Describe the change/command instead of running it.",
                     "is_error": true,
                 }));
                 continue;
             }
-            // MCP tool? Namespaced `server__tool`. Dispatch to the live host.
-            if let Some(handle) = mcp_tools.iter().find(|h| h.qualified_name() == tu.name) {
-                // External tools may have side effects; plan mode forbids them.
-                if !opts.allow_writes {
-                    results.push(json!({
-                        "type": "tool_result",
-                        "tool_use_id": tu.id,
-                        "content": "plan mode: external (MCP) tools are disabled. Describe what you'd call instead.",
-                        "is_error": true,
-                    }));
-                    continue;
-                }
-                // Safe: an MCP handle only exists in `mcp_tools` when `_mcp` is Some.
-                let exec = match _mcp.as_ref() {
-                    Some(mcp) => call_mcp_tool(mcp, handle, &tu.input).await,
-                    None => err("MCP host unavailable".to_string()),
+
+            // Dispatch: MCP tools route to the live host; everything else to the
+            // built-in executor. Both yield a ToolExec so the post-hook + result
+            // handling is shared.
+            let exec =
+                if let Some(handle) = mcp_tools.iter().find(|h| h.qualified_name() == tu.name) {
+                    // Safe: an MCP handle only exists in `mcp_tools` when `_mcp` is Some.
+                    match _mcp.as_ref() {
+                        Some(mcp) => call_mcp_tool(mcp, handle, &tu.input).await,
+                        None => err("MCP host unavailable".to_string()),
+                    }
+                } else {
+                    execute_tool(client, root, model, depth, &todos, &tu.name, &tu.input).await
                 };
-                results.push(json!({
-                    "type": "tool_result",
-                    "tool_use_id": tu.id,
-                    "content": exec.content,
-                    "is_error": exec.is_error,
-                }));
-                continue;
-            }
-            let exec = execute_tool(client, root, model, depth, &todos, &tu.name, &tu.input).await;
             for p in &exec.written {
                 if !files_written.contains(p) {
                     files_written.push(p.clone());
+                }
+            }
+            // PostToolUse / PostToolError: best-effort, non-blocking -- run a
+            // formatter, log, notify, etc. Outcomes are not fed back to the model.
+            if let Some(hooks) = _hooks.as_ref() {
+                if exec.is_error {
+                    let _ = hooks
+                        .fire(eri_hooks::HookEvent::PostToolError {
+                            method: tu.name.clone(),
+                            error: exec.content.clone(),
+                        })
+                        .await;
+                } else {
+                    let _ = hooks
+                        .fire(eri_hooks::HookEvent::PostToolUse {
+                            method: tu.name.clone(),
+                            result: json!({ "content": exec.content }),
+                        })
+                        .await;
                 }
             }
             results.push(json!({
@@ -1336,6 +1391,40 @@ mod bash_tests {
     }
 
     #[test]
+    fn hook_veto_blocks_on_exit_2_only() {
+        use eri_hooks::HookOutcome;
+        let mk = |code: Option<i32>, stderr: &str, stdout: &str| HookOutcome {
+            event: "PreToolUse".into(),
+            command_preview: "policy".into(),
+            stdout: stdout.into(),
+            stderr: stderr.into(),
+            exit_code: code,
+            duration_ms: 1,
+            timed_out: false,
+            spawn_error: None,
+            backgrounded: false,
+        };
+        // Exit 0 / other non-zero do not block.
+        assert!(hook_veto(&[mk(Some(0), "", "ok")]).is_none());
+        assert!(hook_veto(&[mk(Some(1), "warn", "")]).is_none());
+        // Exit 2 blocks; reason prefers stderr, falls back to stdout, then default.
+        assert_eq!(
+            hook_veto(&[mk(Some(2), "no rm -rf", "")]).as_deref(),
+            Some("no rm -rf")
+        );
+        assert_eq!(
+            hook_veto(&[mk(Some(2), "", "from stdout")]).as_deref(),
+            Some("from stdout")
+        );
+        assert_eq!(
+            hook_veto(&[mk(Some(2), "", "")]).as_deref(),
+            Some("blocked by policy")
+        );
+        // A blocking hook anywhere in the list wins.
+        assert!(hook_veto(&[mk(Some(0), "", ""), mk(Some(2), "deny", "")]).is_some());
+    }
+
+    #[test]
     fn permission_mode_capabilities_and_legacy_mapping() {
         // Capability ladder: Plan < AcceptEdits < WorkspaceWrite <= Bypass.
         assert!(!PermissionMode::Plan.allows_writes());
@@ -1692,6 +1781,25 @@ fn render_mcp_content(blocks: &[eri_mcp::ContentBlock]) -> String {
         }
     }
     parts.join("\n")
+}
+
+/// Inspect PreToolUse hook outcomes for a veto. Convention (Claude Code): a
+/// hook that exits with code 2 BLOCKS the tool; its stderr (or stdout) is the
+/// reason shown to the model. Any other exit code is a non-blocking warning.
+/// Returns the block reason, or `None` to allow the call.
+fn hook_veto(outcomes: &[eri_hooks::HookOutcome]) -> Option<String> {
+    outcomes.iter().find(|o| o.exit_code == Some(2)).map(|o| {
+        let msg = if !o.stderr.trim().is_empty() {
+            o.stderr.trim()
+        } else {
+            o.stdout.trim()
+        };
+        if msg.is_empty() {
+            "blocked by policy".to_string()
+        } else {
+            msg.to_string()
+        }
+    })
 }
 
 /// Subagent tool spec -- a nested agent with its own context window.
