@@ -38,6 +38,7 @@ mod checkpoint;
 mod client;
 mod commands;
 mod config;
+mod context;
 mod eri_config;
 mod genui;
 mod memory;

@@ -39,6 +39,11 @@ const MAX_TOKENS: u32 = 32_000;
 const MAX_TURNS: usize = 24;
 /// Cap a single file read/write payload so one tool can't blow the context.
 const MAX_TOOL_BYTES: usize = 256 * 1024;
+/// Target ceiling for the assembled `messages` (estimated tokens) before a
+/// model call. Sonnet's window is ~200k; we shape down to this to leave room
+/// for the system blocks, tools, and the response. The context pipeline only
+/// engages when the running history exceeds it.
+const CONTEXT_TARGET_TOKENS: usize = 150_000;
 
 /// What a completed build loop produced.
 pub struct BuildOutcome {
@@ -330,6 +335,25 @@ async fn drive_loop(
     let mut stdout = std::io::stdout();
 
     for turn in 0..opts.max_turns {
+        // Shape the growing context before the call: cheapest reductions first,
+        // only when over budget. Keeps long sessions inside the window without a
+        // (metered) summarization round unless the local layers can't cope.
+        let shaped = crate::context::shape_context(messages, CONTEXT_TARGET_TOKENS);
+        if opts.narrate && shaped.changed() {
+            let _ = writeln!(
+                stdout,
+                "[eri] compacted context ({} -> {} est. tokens via {}){}",
+                shaped.tokens_before,
+                shaped.tokens_after,
+                shaped.layers_applied.join(", "),
+                if shaped.needs_summarization {
+                    " -- still large; consider /compact"
+                } else {
+                    ""
+                }
+            );
+        }
+
         let body = json!({
             "model": model,
             "max_tokens": MAX_TOKENS,

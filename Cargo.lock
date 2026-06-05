@@ -736,6 +736,7 @@ dependencies = [
  "anyhow",
  "clap",
  "eri_apply",
+ "eri_caveman",
  "eri_core",
  "eri_inference",
  "eri_mcp",
