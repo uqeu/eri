@@ -53,6 +53,7 @@ mod session;
 mod skills;
 mod trace;
 mod update;
+mod workflow;
 mod worktree;
 
 const ERI_CLI_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -383,6 +384,9 @@ pub enum Command {
     /// Manage isolated git worktrees for parallel sessions.
     #[command(subcommand)]
     Worktree(WorktreeCommand),
+    /// Run or list dynamic multi-step workflows (.eri/workflows/<name>.json).
+    #[command(subcommand)]
+    Workflow(WorkflowCommand),
     /// Print a shell completion script (bash | zsh | fish | powershell | elvish).
     Completions {
         /// The shell to generate completions for.
@@ -467,6 +471,20 @@ pub enum WorktreeCommand {
         /// Remove even with uncommitted changes.
         #[arg(long)]
         force: bool,
+    },
+}
+
+#[derive(Subcommand, Debug, PartialEq, Eq)]
+pub enum WorkflowCommand {
+    /// List available workflows.
+    List,
+    /// Run a workflow by name.
+    Run {
+        /// Workflow name (file stem under .eri/workflows/).
+        name: String,
+        /// Inference depth for the steps.
+        #[arg(long, value_enum)]
+        mode: Option<Mode>,
     },
 }
 
@@ -709,6 +727,16 @@ async fn dispatch(cli: Cli) -> anyhow::Result<()> {
             generate_completions(shell, &mut io::stdout());
             Ok(())
         }
+        Command::Workflow(wc) => match wc {
+            WorkflowCommand::List => {
+                workflow::print_list(&cwd());
+                Ok(())
+            }
+            WorkflowCommand::Run { name, mode } => {
+                let m = resolve_mode(mode, &cwd());
+                workflow::run(&cwd(), &name, model_for_mode(m)).await
+            }
+        },
         Command::Doctor => repl::print_doctor(),
     }
 }
@@ -800,6 +828,7 @@ pub fn run(command: Command) -> Result<(), CliError> {
         | Command::Skills
         | Command::Plugins
         | Command::Worktree(_)
+        | Command::Workflow(_)
         | Command::Completions { .. }
         | Command::Doctor
         | Command::Status => Err(CliError::User(
