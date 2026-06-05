@@ -84,6 +84,9 @@ pub struct LoopOpts {
     pub allow_shell: bool,
     /// Output style / persona preset. Default `Builder`.
     pub style: SystemStyle,
+    /// Run the `bash` tool inside an OS sandbox (writes confined to the
+    /// workspace, no network). macOS only; fails closed elsewhere. Default off.
+    pub sandbox: bool,
 }
 
 impl Default for LoopOpts {
@@ -94,6 +97,7 @@ impl Default for LoopOpts {
             allow_writes: true,
             allow_shell: false,
             style: SystemStyle::default(),
+            sandbox: false,
         }
     }
 }
@@ -621,7 +625,17 @@ async fn drive_loop(
                         None => err("MCP host unavailable".to_string()),
                     }
                 } else {
-                    execute_tool(client, root, model, depth, &todos, &tu.name, &tu.input).await
+                    execute_tool(
+                        client,
+                        root,
+                        model,
+                        depth,
+                        &todos,
+                        &tu.name,
+                        &tu.input,
+                        opts.sandbox,
+                    )
+                    .await
                 };
             if tracer.is_enabled() {
                 let now = run_clock.elapsed().as_millis();
@@ -952,6 +966,7 @@ struct ToolExec {
     written: Vec<PathBuf>,
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn execute_tool(
     client: &Client,
     root: &Path,
@@ -960,9 +975,10 @@ async fn execute_tool(
     todos: &RefCell<Vec<TodoItem>>,
     name: &str,
     input: &Value,
+    sandbox: bool,
 ) -> ToolExec {
     match name {
-        "bash" => run_bash(root, input).await,
+        "bash" => run_bash(root, input, sandbox).await,
         "task" => run_subagent(client, root, model, depth, input).await,
         "todo_write" => write_todos(todos, input),
         "todo_read" => ToolExec {
@@ -1140,6 +1156,8 @@ async fn run_subagent(
         // Subagents inherit the default builder posture regardless of the
         // parent's style -- they do focused work, not the parent's persona.
         style: SystemStyle::Builder,
+        // Subagents have no shell, so sandbox is moot; carry the flag anyway.
+        sandbox: false,
     };
     // Box the recursive async call so the future stays finite-sized.
     let result = Box::pin(drive_loop(
@@ -1237,7 +1255,7 @@ fn is_secret_env(name: &str) -> bool {
 /// Hardening here: stdin closed, output timeout- + size-bounded, the child is
 /// killed (and reaped) on timeout, and secret-looking env vars are stripped so
 /// a `printenv`-style command can't leak eri's bearer or cloud credentials.
-async fn run_bash(root: &Path, input: &Value) -> ToolExec {
+async fn run_bash(root: &Path, input: &Value, sandbox: bool) -> ToolExec {
     let command = input.get("command").and_then(Value::as_str).unwrap_or("");
     if command.trim().is_empty() {
         return err("bash: command is empty".to_string());
@@ -1249,10 +1267,27 @@ async fn run_bash(root: &Path, input: &Value) -> ToolExec {
         .unwrap_or(120_000)
         .clamp(1_000, 600_000);
 
-    let mut cmd = tokio::process::Command::new("sh");
-    cmd.arg("-c")
-        .arg(command)
-        .current_dir(root)
+    // Sandboxed execution wraps the shell in an OS seatbelt (writes confined to
+    // the workspace, no network). Fail CLOSED: if the user asked for a sandbox
+    // but the platform can't provide one, refuse rather than run unsandboxed.
+    let mut cmd = if sandbox {
+        if !crate::sandbox::is_available() {
+            return err(
+                "bash: --sandbox was requested but OS sandboxing is unavailable on this platform; \
+refusing to run unsandboxed. Drop --sandbox to run without it."
+                    .to_string(),
+            );
+        }
+        let (program, args) = crate::sandbox::wrap(root, command);
+        let mut c = tokio::process::Command::new(program);
+        c.args(args);
+        c
+    } else {
+        let mut c = tokio::process::Command::new("sh");
+        c.arg("-c").arg(command);
+        c
+    };
+    cmd.current_dir(root)
         .stdin(std::process::Stdio::null())
         // Kill the child if the future is dropped (e.g. on timeout) so a hung
         // command doesn't linger.
@@ -1419,7 +1454,7 @@ mod bash_tests {
     #[tokio::test]
     async fn bash_captures_stdout_and_success() {
         let dir = tempfile::TempDir::new().unwrap();
-        let exec = run_bash(dir.path(), &json!({ "command": "echo hello-eri" })).await;
+        let exec = run_bash(dir.path(), &json!({ "command": "echo hello-eri" }), false).await;
         assert!(!exec.is_error);
         assert!(exec.content.contains("hello-eri"));
     }
@@ -1427,7 +1462,7 @@ mod bash_tests {
     #[tokio::test]
     async fn bash_nonzero_exit_is_error() {
         let dir = tempfile::TempDir::new().unwrap();
-        let exec = run_bash(dir.path(), &json!({ "command": "exit 3" })).await;
+        let exec = run_bash(dir.path(), &json!({ "command": "exit 3" }), false).await;
         assert!(exec.is_error);
         assert!(exec.content.contains("exit 3"));
     }
@@ -1436,7 +1471,7 @@ mod bash_tests {
     async fn bash_runs_in_workspace_cwd() {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::write(dir.path().join("marker.txt"), "x").unwrap();
-        let exec = run_bash(dir.path(), &json!({ "command": "ls" })).await;
+        let exec = run_bash(dir.path(), &json!({ "command": "ls" }), false).await;
         assert!(exec.content.contains("marker.txt"));
     }
 
@@ -1446,6 +1481,7 @@ mod bash_tests {
         let exec = run_bash(
             dir.path(),
             &json!({ "command": "sleep 5", "timeout_ms": 1000 }),
+            false,
         )
         .await;
         assert!(exec.is_error);
@@ -1455,7 +1491,7 @@ mod bash_tests {
     #[tokio::test]
     async fn bash_empty_command_errors() {
         let dir = tempfile::TempDir::new().unwrap();
-        let exec = run_bash(dir.path(), &json!({ "command": "   " })).await;
+        let exec = run_bash(dir.path(), &json!({ "command": "   " }), false).await;
         assert!(exec.is_error);
     }
 

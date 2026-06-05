@@ -46,6 +46,7 @@ mod memory;
 mod plugins;
 mod project;
 mod repl;
+mod sandbox;
 mod search;
 mod session;
 mod skills;
@@ -94,6 +95,10 @@ pub struct Cli {
     /// shell is privileged and NOT sandboxed, so opt in explicitly.
     #[arg(long)]
     pub allow_shell: bool,
+    /// Run the bash tool inside an OS sandbox (writes confined to the workspace,
+    /// no network). macOS only; refuses to run shell unsandboxed elsewhere.
+    #[arg(long)]
+    pub sandbox: bool,
     /// Permission posture: plan (read-only) | accept-edits (default, writes, no
     /// shell) | workspace-write (writes + shell) | bypass. When set, this is the
     /// source of truth and overrides --plan / --allow-shell.
@@ -487,6 +492,7 @@ fn main() -> ExitCode {
                     .map(build_agent::SystemStyle::parse)
                     .unwrap_or_default()
             }),
+            cli.sandbox,
         )) {
             Ok(code) => ExitCode::from(code),
             Err(error) => {
@@ -728,6 +734,7 @@ async fn run_headless(
     model: &str,
     permission: build_agent::PermissionMode,
     style: build_agent::SystemStyle,
+    sandbox: bool,
 ) -> anyhow::Result<u8> {
     // Prompt comes from the flag value, or stdin when `-p` is passed bare.
     let prompt = if prompt.trim().is_empty() {
@@ -746,6 +753,7 @@ async fn run_headless(
     let mut opts = build_agent::LoopOpts {
         narrate: format == OutputFormat::Text,
         style,
+        sandbox,
         ..Default::default()
     };
     permission.apply(&mut opts);
