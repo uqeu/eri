@@ -38,6 +38,7 @@
 
 pub mod compaction;
 pub mod permission;
+pub mod request;
 pub mod stream;
 pub mod style;
 

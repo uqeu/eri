@@ -374,15 +374,9 @@ async fn drive_loop(
             );
         }
 
-        let body = json!({
-            "model": model,
-            "max_tokens": MAX_TOKENS,
-            "stream": true,
-            // Cached system blocks (persona + project context).
-            "system": system,
-            "tools": tools,
-            "messages": messages,
-        });
+        // The request shape (incl. the cached system+tools prefix) lives in the
+        // SDK crate so the host and SDK agree on it.
+        let body = eri_agent::request::messages_body(model, MAX_TOKENS, &system, &tools, messages);
 
         let response = match client
             .post_stream("/api/v1/inference/messages", &body)
