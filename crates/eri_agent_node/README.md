@@ -10,8 +10,28 @@ crate. napi auto-converts the snake_case Rust names to camelCase in JS.
 | `permissionAllowsWrites(mode)` / `permissionAllowsShell(mode)` | the permission ladder |
 | `styleDirective(style)` | output-style directive (`reviewer`/`explainer`/`concise`) or `null` |
 | `messagesBody(model, maxTokens, systemJson, toolsJson, messagesJson)` | build a request body |
+| `runAgent(model, systemJson, messagesJson, transport, tools, toolSpecsJson, maxTurns)` | **run a full agent loop** with your callbacks |
 
 Interop is over JSON strings (the Anthropic Messages wire shape).
+
+### Running an agent from Node
+
+```js
+const m = require("./eri_agent_node.node");
+const transport = (bodyJson) => httpPost("/v1/messages", bodyJson); // returns SSE text
+const tools = {
+  write_file: (inputJson) => {
+    const p = JSON.parse(inputJson).path;
+    fs.writeFileSync(p, "...");
+    return { content: `wrote ${p}`, isError: false };
+  },
+};
+const specs = JSON.stringify([{ name: "write_file", description: "...", input_schema: { type: "object" } }]);
+const r = m.runAgent("claude-sonnet-4-6", "[]",
+  JSON.stringify([{ role: "user", content: "make a.txt" }]),
+  transport, tools, specs, 24);
+console.log(r.finalText, r.turns, r.tokensOut);
+```
 
 ## Build
 
@@ -34,6 +54,6 @@ node tests/test_bindings.mjs
 
 ## Status
 
-Verified end-to-end against Node v22 (`tests/test_bindings.mjs`, all green). The
-loop driver (`eri_agent::driver::run`) is not yet bound — it needs a
-JS-callback `Transport` (async across the FFI boundary), the next step.
+Verified end-to-end against Node v22 (`tests/test_bindings.mjs`, all green) --
+including `runAgent` driving a complete agent loop (tool dispatch + termination)
+against a fake transport.

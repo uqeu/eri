@@ -46,4 +46,53 @@ assert.equal(body.model, "claude-x");
 assert.equal(body.stream, true);
 assert.equal(body.messages[0].content, "hi");
 
-console.log(`node binding OK: all assertions passed; estimate=${n} -> after=${tokensAfter}`);
+// --- full agent loop (runAgent) ---
+function sseTurn(text, tool) {
+  const lines = [
+    'data: {"type":"message_start","message":{"usage":{"input_tokens":1}}}',
+    'data: {"type":"content_block_start","index":0,"content_block":{"type":"text"}}',
+    `data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":${JSON.stringify(text)}}}`,
+  ];
+  let stop = "end_turn";
+  if (tool) {
+    const [id, name, inp] = tool;
+    lines.push(`data: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":${JSON.stringify(id)},"name":${JSON.stringify(name)}}}`);
+    lines.push(`data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":${JSON.stringify(JSON.stringify(inp))}}}`);
+    stop = "tool_use";
+  }
+  lines.push(`data: {"type":"message_delta","delta":{"stop_reason":"${stop}"},"usage":{"output_tokens":2}}`);
+  return lines.join("\n") + "\n";
+}
+
+const responses = [
+  sseTurn("let me write it", ["t1", "write_file", { path: "a.txt" }]),
+  sseTurn("all done"),
+];
+let calls = 0;
+const transport = (_bodyJson) => responses[calls++];
+const written = [];
+const tools = {
+  write_file: (inputJson) => {
+    const p = JSON.parse(inputJson).path;
+    written.push(p);
+    return { content: `wrote ${p}`, isError: false };
+  },
+};
+const specs = JSON.stringify([{ name: "write_file", description: "w", input_schema: { type: "object" } }]);
+const result = m.runAgent(
+  "claude-x", "[]",
+  JSON.stringify([{ role: "user", content: "make a.txt" }]),
+  transport, tools, specs, 8
+);
+assert.equal(result.stop, "done");
+assert.equal(result.turns, 2);
+assert.equal(result.finalText, "all done");
+assert.deepEqual(written, ["a.txt"]);
+const convo = JSON.parse(result.messages);
+const toolResults = convo.flatMap((msg) =>
+  Array.isArray(msg.content) ? msg.content.filter((b) => b && b.type === "tool_result") : []
+);
+assert.equal(toolResults[0].content, "wrote a.txt");
+assert.equal(toolResults[0].is_error, false);
+
+console.log(`node binding OK: all assertions passed; estimate=${n} -> after=${tokensAfter}; runAgent turns=${result.turns}`);
