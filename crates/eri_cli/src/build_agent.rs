@@ -317,18 +317,20 @@ async fn drive_loop(
                 }));
                 continue;
             }
-            // Plan mode: refuse file-modifying tools so the agent plans without
-            // touching disk. Read-only tools (list_dir / read_file) still run.
-            if !opts.allow_writes && matches!(tu.name.as_str(), "write_file" | "str_replace") {
+            // Plan mode: refuse file-modifying + shell tools so the agent plans
+            // without side effects. Read-only tools (list_dir/read_file) run.
+            if !opts.allow_writes
+                && matches!(tu.name.as_str(), "write_file" | "str_replace" | "bash")
+            {
                 results.push(json!({
                     "type": "tool_result",
                     "tool_use_id": tu.id,
-                    "content": "plan mode: writes are disabled. Describe the change instead of applying it.",
+                    "content": "plan mode: writes and shell are disabled. Describe the change/command instead of running it.",
                     "is_error": true,
                 }));
                 continue;
             }
-            let exec = execute_tool(&root, &tu.name, &tu.input);
+            let exec = execute_tool(&root, &tu.name, &tu.input).await;
             if let Some(p) = exec.written {
                 if !files_written.contains(&p) {
                     files_written.push(p);
@@ -554,8 +556,9 @@ struct ToolExec {
     written: Option<PathBuf>,
 }
 
-fn execute_tool(root: &Path, name: &str, input: &Value) -> ToolExec {
+async fn execute_tool(root: &Path, name: &str, input: &Value) -> ToolExec {
     match name {
+        "bash" => run_bash(root, input).await,
         "list_dir" => {
             let rel = input.get("path").and_then(Value::as_str).unwrap_or(".");
             match resolve_in_workspace(root, rel) {
@@ -673,6 +676,61 @@ fn execute_tool(root: &Path, name: &str, input: &Value) -> ToolExec {
     }
 }
 
+/// Run a shell command in the workspace. cwd is jailed to `root`; stdin is
+/// closed; output is timeout- and size-bounded. This single tool gives the
+/// agent grep/find/git/test-runners/build for free -- the Codex/Claude `shell`
+/// surface. Gated by permission mode in `drive_loop` (blocked in plan mode).
+async fn run_bash(root: &Path, input: &Value) -> ToolExec {
+    let command = input.get("command").and_then(Value::as_str).unwrap_or("");
+    if command.trim().is_empty() {
+        return err("bash: command is empty".to_string());
+    }
+    // Default 2 min, hard ceiling 10 min (Claude Code parity).
+    let timeout_ms = input
+        .get("timeout_ms")
+        .and_then(Value::as_u64)
+        .unwrap_or(120_000)
+        .clamp(1_000, 600_000);
+
+    let mut cmd = tokio::process::Command::new("sh");
+    cmd.arg("-c")
+        .arg(command)
+        .current_dir(root)
+        .stdin(std::process::Stdio::null());
+
+    match tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), cmd.output()).await {
+        Err(_) => err(format!("bash: timed out after {timeout_ms} ms")),
+        Ok(Err(e)) => err(format!("bash: failed to run: {e}")),
+        Ok(Ok(out)) => {
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            let code = out.status.code().unwrap_or(-1);
+            let mut s = String::new();
+            if !stdout.trim().is_empty() {
+                s.push_str(&stdout);
+            }
+            if !stderr.trim().is_empty() {
+                if !s.is_empty() {
+                    s.push('\n');
+                }
+                s.push_str("[stderr]\n");
+                s.push_str(&stderr);
+            }
+            if code != 0 {
+                s.push_str(&format!("\n[exit {code}]"));
+            }
+            if s.trim().is_empty() {
+                s = format!("[exit {code}, no output]");
+            }
+            ToolExec {
+                content: truncate_bytes(&s, MAX_TOOL_BYTES),
+                is_error: code != 0,
+                written: None,
+            }
+        }
+    }
+}
+
 fn err(msg: String) -> ToolExec {
     ToolExec {
         content: msg,
@@ -778,10 +836,66 @@ pub(crate) fn friendly_proxy_error(e: anyhow::Error) -> anyhow::Error {
     }
 }
 
+#[cfg(test)]
+mod bash_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn bash_captures_stdout_and_success() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let exec = run_bash(dir.path(), &json!({ "command": "echo hello-eri" })).await;
+        assert!(!exec.is_error);
+        assert!(exec.content.contains("hello-eri"));
+    }
+
+    #[tokio::test]
+    async fn bash_nonzero_exit_is_error() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let exec = run_bash(dir.path(), &json!({ "command": "exit 3" })).await;
+        assert!(exec.is_error);
+        assert!(exec.content.contains("exit 3"));
+    }
+
+    #[tokio::test]
+    async fn bash_runs_in_workspace_cwd() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(dir.path().join("marker.txt"), "x").unwrap();
+        let exec = run_bash(dir.path(), &json!({ "command": "ls" })).await;
+        assert!(exec.content.contains("marker.txt"));
+    }
+
+    #[tokio::test]
+    async fn bash_times_out() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let exec = run_bash(dir.path(), &json!({ "command": "sleep 5", "timeout_ms": 1000 })).await;
+        assert!(exec.is_error);
+        assert!(exec.content.contains("timed out"));
+    }
+
+    #[tokio::test]
+    async fn bash_empty_command_errors() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let exec = run_bash(dir.path(), &json!({ "command": "   " })).await;
+        assert!(exec.is_error);
+    }
+}
+
 /// The local tool set, path-jailed to the workspace. Minimal-but-sufficient v1
 /// (the set Claude Code / aider / Cline converge on for file building).
 fn tool_specs() -> Value {
     json!([
+        {
+            "name": "bash",
+            "description": "Run a shell command in the workspace (sh -c). Use for search (grep/rg/find), git, running tests/builds/linters, and any task a terminal does. cwd is the workspace; stdin is closed. Output is truncated if very large. Disabled in plan mode.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "command": { "type": "string", "description": "The shell command to run." },
+                    "timeout_ms": { "type": "integer", "description": "Optional timeout in ms (default 120000, max 600000)." }
+                },
+                "required": ["command"]
+            }
+        },
         {
             "name": "list_dir",
             "description": "List files and subdirectories at a workspace-relative path. Use to explore before reading or writing. Defaults to the workspace root.",
@@ -881,7 +995,9 @@ config, docs. Build whatever the prompt asks for; do not assume it is a website.
 PROTOCOL\n\
 - Use write_file to create files and str_replace for small edits. Never print \
 file contents in prose; always write them to disk with a tool.\n\
-- Explore with list_dir / read_file before editing existing files.\n\
+- Explore with list_dir / read_file before editing existing files. Use bash for \
+search (grep/rg/find), git, and running tests / builds / linters to verify your \
+work -- prefer running the project's own test/build command after changes.\n\
 - When everything is built and coherent, call the done tool.\n\n\
 PROJECT SHAPE\n\
 - Choose the files and structure that fit the task -- the right entry point, \
