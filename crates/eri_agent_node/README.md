@@ -57,3 +57,11 @@ node tests/test_bindings.mjs
 Verified end-to-end against Node v22 (`tests/test_bindings.mjs`, all green) --
 including `runAgent` driving a complete agent loop (tool dispatch + termination)
 against a fake transport.
+
+### Release artifact (verified)
+
+`npm run build` emits the native addon + `index.js` + **`index.d.ts`
+TypeScript types**; `npm pack` produces a lean ~290 KB tarball
+(`index.js` / `index.d.ts` / `*.node` / `README.md` only). The package entry
+(`require("@eri/agent")`) is verified working. Publishing (`npm publish`) is a
+deliberate manual step.

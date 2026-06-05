@@ -1,0 +1,6 @@
+/target
+/node_modules
+*.node
+*.tgz
+index.js
+index.d.ts

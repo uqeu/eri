@@ -5,6 +5,12 @@
   "license": "LicenseRef-Proprietary",
   "main": "index.js",
   "types": "index.d.ts",
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "*.node",
+    "README.md"
+  ],
   "napi": {
     "name": "eri_agent_node"
   },

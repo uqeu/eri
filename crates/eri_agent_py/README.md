@@ -63,6 +63,14 @@ python tests/test_bindings.py
 
 Built with `abi3-py38`, so one wheel works across CPython ≥ 3.8.
 
+### Release artifact (verified)
+
+`maturin build --release` produces a wheel
+(`target/wheels/eri_agent-0.1.0-cp38-abi3-macosx_11_0_arm64.whl`) that
+**installs from pip into a clean venv and passes the full test suite** against
+the installed package (including the `run_agent` loop). Publishing to a registry
+is a deliberate manual step (`maturin publish` with credentials).
+
 ## Status
 
 The Rust binding surface + conversion logic are tested (`cargo test` rlib unit
