@@ -149,6 +149,21 @@ async fn handle_slash(
             *sess = Session::create(&cwd, &sess.model);
             println!("[eri] started a new session {}", sess.id);
         }
+        "recap" => println!("{}", sess.recap()),
+        "fork" => {
+            // Persist the current session, then switch to a fresh branch of it
+            // so this conversation can diverge without disturbing the original.
+            sess.save().ok();
+            let parent = sess.id.clone();
+            let branch = sess.fork();
+            branch.save().ok();
+            *sess = branch;
+            println!(
+                "[eri] forked {} -> {} (continuing on the branch; the original is saved)",
+                parent.chars().take(8).collect::<String>(),
+                sess.id.chars().take(8).collect::<String>()
+            );
+        }
         "model" => set_model(sess, rest),
         other => {
             // Fall back to a custom command from .eri/commands/<other>.md.
@@ -378,6 +393,8 @@ fn print_chat_help() {
     println!("  /skills            list SKILL.md skills (any agent CLI)");
     println!("  /skill <name> [t]  run a skill on a task");
     println!("  /new               start a fresh session");
+    println!("  /recap             summarize where this session left off");
+    println!("  /fork              branch this session (continue on a copy)");
     println!("  /model <tier>      switch tier: fast | thinking | auto");
     println!("  /exit              save and quit");
     println!("custom: /<name> runs .eri/commands/<name>.md ($ARGUMENTS expanded)");

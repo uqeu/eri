@@ -107,6 +107,48 @@ impl Session {
         PathBuf::from(&self.workspace)
     }
 
+    /// Branch this session: a new session (new id) that starts from this one's
+    /// full conversation state so it can diverge without disturbing the
+    /// original. Messages + workspace + model carry over; per-session counters
+    /// reset (the branch accrues its own usage); the title notes the lineage.
+    /// Does not persist -- the caller saves the returned session.
+    pub fn fork(&self) -> Session {
+        let now = unix_secs();
+        let base = self
+            .title
+            .clone()
+            .unwrap_or_else(|| self.id.chars().take(8).collect());
+        Session {
+            id: new_id(),
+            created_at: now,
+            updated_at: now,
+            workspace: self.workspace.clone(),
+            model: self.model.clone(),
+            title: Some(format!("fork of {base}")),
+            turns: 0,
+            tokens_in: 0,
+            tokens_out: 0,
+            messages: self.messages.clone(),
+        }
+    }
+
+    /// A short human recap of where this session left off -- for when you return
+    /// to it (`/recap`, resume picker). Pure + deterministic.
+    pub fn recap(&self) -> String {
+        let title = self.title.as_deref().unwrap_or("(untitled)");
+        let mut out = format!(
+            "{title}\n  id {}  ·  {} turns  ·  {} in / {} out tokens",
+            self.id.chars().take(8).collect::<String>(),
+            self.turns,
+            self.tokens_in,
+            self.tokens_out
+        );
+        if let Some(last) = last_text_snippet(&self.messages) {
+            out.push_str(&format!("\n  last: {last}"));
+        }
+        out
+    }
+
     /// Persist this session to disk (pretty JSON).
     pub fn save(&self) -> Result<()> {
         let dir = sessions_dir()?;
@@ -206,6 +248,43 @@ fn unix_secs() -> u64 {
         .unwrap_or(0)
 }
 
+/// The last readable text from the conversation (newest user or assistant
+/// text), trimmed to a one-line snippet. `None` for an empty/contentless
+/// history. Used by `recap`.
+fn last_text_snippet(messages: &[Value]) -> Option<String> {
+    for msg in messages.iter().rev() {
+        let text = match msg.get("content") {
+            // Plain-string user turn.
+            Some(Value::String(s)) => Some(s.clone()),
+            // Content-array turn: take its text blocks (assistant) or any
+            // string-valued content.
+            Some(Value::Array(blocks)) => {
+                let joined: String = blocks
+                    .iter()
+                    .filter(|b| b.get("type").and_then(Value::as_str) == Some("text"))
+                    .filter_map(|b| b.get("text").and_then(Value::as_str))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                if joined.trim().is_empty() {
+                    None
+                } else {
+                    Some(joined)
+                }
+            }
+            _ => None,
+        };
+        if let Some(t) = text {
+            let one_line = t.split_whitespace().collect::<Vec<_>>().join(" ");
+            if one_line.is_empty() {
+                continue;
+            }
+            let snippet: String = one_line.chars().take(100).collect();
+            return Some(snippet);
+        }
+    }
+    None
+}
+
 /// Generate a sortable, collision-resistant session id: `s_<millis36>_<seq36>`.
 /// Millis give human-sortable ordering; a process-local monotonic counter
 /// guarantees uniqueness even for rapid same-millisecond creates (the nanos
@@ -277,6 +356,60 @@ mod tests {
             assert_eq!(loaded.tokens_out, 40);
             assert_eq!(loaded.messages.len(), 1);
         });
+    }
+
+    #[test]
+    fn fork_copies_history_with_new_id_and_reset_counters() {
+        let mut parent = Session::create(Path::new("."), "claude-sonnet-4-6");
+        parent.ensure_title("add auth");
+        parent
+            .messages
+            .push(json!({ "role": "user", "content": "first" }));
+        parent.turns = 3;
+        parent.tokens_in = 500;
+        parent.tokens_out = 200;
+
+        let child = parent.fork();
+        assert_ne!(child.id, parent.id, "fork gets a fresh id");
+        assert_eq!(child.messages, parent.messages, "history carries over");
+        assert_eq!(child.model, parent.model);
+        assert_eq!(child.workspace, parent.workspace);
+        assert_eq!(child.title.as_deref(), Some("fork of add auth"));
+        // The branch accrues its own usage.
+        assert_eq!(child.turns, 0);
+        assert_eq!(child.tokens_in, 0);
+        assert_eq!(child.tokens_out, 0);
+        // The parent is untouched.
+        assert_eq!(parent.turns, 3);
+    }
+
+    #[test]
+    fn recap_summarizes_and_includes_last_text() {
+        let mut s = Session::create(Path::new("."), "m");
+        s.ensure_title("build a parser");
+        s.turns = 2;
+        s.messages
+            .push(json!({ "role": "user", "content": "write the lexer" }));
+        s.messages.push(json!({
+            "role": "assistant",
+            "content": [
+                { "type": "text", "text": "Done -- the lexer handles all tokens now." },
+                { "type": "tool_use", "id": "x", "name": "done", "input": {} }
+            ]
+        }));
+        let r = s.recap();
+        assert!(r.contains("build a parser"));
+        assert!(r.contains("2 turns"));
+        // Newest text wins (assistant's), not the tool_use block.
+        assert!(r.contains("the lexer handles all tokens"));
+    }
+
+    #[test]
+    fn recap_handles_empty_history() {
+        let s = Session::create(Path::new("."), "m");
+        let r = s.recap();
+        assert!(r.contains("(untitled)"));
+        assert!(!r.contains("last:"));
     }
 
     #[test]
