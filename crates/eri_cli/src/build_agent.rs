@@ -1267,7 +1267,9 @@ pub(crate) fn friendly_proxy_error(e: anyhow::Error) -> anyhow::Error {
     } else if msg.contains("HTTP 403") {
         anyhow!("this request isn't allowed on your current plan.")
     } else if msg.contains("HTTP 401") || msg.contains("unauthorized") {
-        anyhow!("your eri sign-in has expired or was revoked -- run `eri auth login` to re-connect.")
+        anyhow!(
+            "your eri sign-in has expired or was revoked -- run `eri auth login` to re-connect."
+        )
     } else {
         e
     }
