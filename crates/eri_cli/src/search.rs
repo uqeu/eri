@@ -106,10 +106,8 @@ pub fn grep(root: &Path, input: &Value) -> SearchOut {
         }
         let path = dent.path();
         let rel = path.strip_prefix(root).unwrap_or(path);
-        if let Some(gs) = &globset {
-            if !gs.is_match(rel) {
-                continue;
-            }
+        if globset.as_ref().is_some_and(|gs| !gs.is_match(rel)) {
+            continue;
         }
         let Ok(text) = std::fs::read_to_string(path) else {
             continue;
@@ -183,7 +181,7 @@ pub fn glob(root: &Path, input: &Value) -> SearchOut {
     if matches.is_empty() {
         return out(format!("no files match {pattern}"));
     }
-    matches.sort_by(|a, b| b.0.cmp(&a.0));
+    matches.sort_by_key(|m| std::cmp::Reverse(m.0));
     let total = matches.len();
     let shown: Vec<String> = matches.into_iter().take(max).map(|(_, p)| p).collect();
     let mut body = shown.join("\n");
