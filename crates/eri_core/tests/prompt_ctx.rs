@@ -968,6 +968,9 @@ fn theme_voice_commands_parse_with_palette_names() {
 }
 
 #[test]
+#[ignore = "theme name-matching retired with the VSCodium pivot: eri_theme::match_theme \
+stubs return None and the IDE TS extension owns theme selection now. Re-enable when the \
+JSON-RPC sidecar wires real theme lookups back into ControlCommand::parse."]
 fn ui_theme_voice_commands_route_to_set_ui_theme() {
     use eri_core::ControlCommand;
 
@@ -1044,6 +1047,9 @@ fn dark_and_light_mode_phrases_parse_to_set_ui_theme_mode() {
 }
 
 #[test]
+#[ignore = "font name-matching retired with the VSCodium pivot: eri_theme::match_*_font \
+stubs return None and the IDE TS extension owns font selection now. Re-enable when the \
+JSON-RPC sidecar wires real font lookups back into ControlCommand::parse."]
 fn font_picker_phrases_parse_to_font_commands() {
     use eri_core::ControlCommand;
 
