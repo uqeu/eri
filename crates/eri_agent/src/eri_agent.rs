@@ -2,16 +2,22 @@
 //! out of the CLI so the IDE sidecar, the cloud runner, and third parties can
 //! reuse the same building blocks (this is the seed of the eri-code Agent SDK).
 //!
-//! These pieces are deliberately free of any network / auth / filesystem
-//! dependency, so they unit-test deterministically and compose anywhere:
+//! The modules:
 //!
-//!   - [`compaction`] -- the layered context-shaping pipeline run before each
-//!     model call (budget-reduction -> snip -> microcompact).
+//!   - [`request`] -- build the streaming Messages request body.
+//!   - [`transport`] -- the [`Transport`](transport::Transport) /
+//!     [`ByteStream`](transport::ByteStream) seam + `run_turn`, the
+//!     host-agnostic SSE reader. Swap the CLI's reqwest client for a mock or any
+//!     other backend without touching the loop.
+//!   - [`stream`] -- the [`TurnAccumulator`] protocol state machine (pure).
+//!   - [`tool`] -- the [`Tool`] / [`ToolBox`] custom-tool interface.
+//!   - [`compaction`] -- the layered context-shaping pipeline (budget-reduction
+//!     -> snip -> microcompact).
 //!   - [`permission`] -- the [`PermissionMode`] capability ladder.
 //!   - [`style`] -- the [`SystemStyle`] output-style presets.
 //!
-//! The agent's transport (which model, how billed) stays in the host (the CLI's
-//! `build_agent`); the host wires these blocks into its own `messages` loop.
+//! Everything except `transport` is free of any network / auth / filesystem
+//! dependency, so it unit-tests deterministically; `transport` is mockable.
 //!
 //! # Example
 //!
@@ -41,8 +47,10 @@ pub mod permission;
 pub mod request;
 pub mod stream;
 pub mod style;
+pub mod tool;
 pub mod transport;
 
 pub use permission::PermissionMode;
 pub use stream::{ToolUse, Turn, TurnAccumulator};
 pub use style::SystemStyle;
+pub use tool::{Tool, ToolBox, ToolOutcome};
