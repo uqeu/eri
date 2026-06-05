@@ -627,43 +627,40 @@ async fn drive_loop(
 use eri_agent::stream::assistant_text;
 type TurnResult = eri_agent::Turn;
 
-/// Drive the SSE stream for one turn: optionally narrate text live (`narrate`),
-/// accumulate tool inputs per content-block index, and capture stop_reason +
-/// usage.
+/// Adapts a `reqwest` streaming response to the SDK's `ByteStream` so the loop's
+/// protocol handling lives in `eri_agent` (host-agnostic + unit-tested there).
+struct ReqwestStream {
+    response: reqwest::Response,
+}
+
+#[async_trait::async_trait]
+impl eri_agent::transport::ByteStream for ReqwestStream {
+    async fn next_chunk(&mut self) -> std::result::Result<Option<Vec<u8>>, String> {
+        self.response
+            .chunk()
+            .await
+            .map(|opt| opt.map(|b| b.to_vec()))
+            .map_err(|e| e.to_string())
+    }
+}
+
+/// Drive the SSE stream for one turn: optionally narrate text live (`narrate`).
+/// The frame parsing + protocol accumulation live in `eri_agent::transport`;
+/// this just adapts the reqwest response and routes narration to stdout.
 async fn consume_turn(
-    mut response: reqwest::Response,
+    response: reqwest::Response,
     stdout: &mut std::io::Stdout,
     narrate: bool,
 ) -> Result<TurnResult> {
-    let mut buffer = String::new();
-    let mut acc = eri_agent::TurnAccumulator::new();
-
-    while let Some(chunk) = response.chunk().await.context("read SSE stream")? {
-        buffer.push_str(&String::from_utf8_lossy(&chunk));
-        while let Some(idx) = buffer.find('\n') {
-            let line = buffer[..idx].trim_end_matches('\r').to_string();
-            buffer.drain(..=idx);
-            let Some(payload) = line.strip_prefix("data:").map(str::trim) else {
-                continue;
-            };
-            if payload.is_empty() {
-                continue;
-            }
-            let Ok(ev) = serde_json::from_str::<Value>(payload) else {
-                continue;
-            };
-            // The SDK accumulator owns all the protocol state; it hands back a
-            // text fragment to narrate live (None for non-text events).
-            if let Some(text) = acc.push_event(&ev)
-                && narrate
-            {
-                let _ = write!(stdout, "{text}");
-                let _ = stdout.flush();
-            }
+    let mut stream = ReqwestStream { response };
+    eri_agent::transport::run_turn(&mut stream, |text| {
+        if narrate {
+            let _ = write!(stdout, "{text}");
+            let _ = stdout.flush();
         }
-    }
-
-    Ok(acc.finish())
+    })
+    .await
+    .map_err(|e| anyhow!("read SSE stream: {e}"))
 }
 
 /// A task-list item the agent maintains via todo_write / todo_read.

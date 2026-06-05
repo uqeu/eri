@@ -13,8 +13,10 @@ workspace = true
 path = "src/eri_agent.rs"
 
 [dependencies]
+async-trait.workspace = true
 eri_caveman = { path = "../eri_caveman" }
 serde.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }

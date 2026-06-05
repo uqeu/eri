@@ -15,6 +15,7 @@ path = "src/eri_cli.rs"
 
 [dependencies]
 anyhow.workspace = true
+async-trait.workspace = true
 clap.workspace = true
 clap_complete = "4.5"
 eri_agent = { path = "../eri_agent" }

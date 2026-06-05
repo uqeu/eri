@@ -41,6 +41,7 @@ pub mod permission;
 pub mod request;
 pub mod stream;
 pub mod style;
+pub mod transport;
 
 pub use permission::PermissionMode;
 pub use stream::{ToolUse, Turn, TurnAccumulator};
