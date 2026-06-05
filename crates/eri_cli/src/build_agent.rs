@@ -375,8 +375,12 @@ async fn drive_loop(
         }
 
         // The request shape (incl. the cached system+tools prefix) lives in the
-        // SDK crate so the host and SDK agree on it.
-        let body = eri_agent::request::messages_body(model, MAX_TOKENS, &system, &tools, messages);
+        // SDK crate so the host and SDK agree on it. We ALSO drop a cache
+        // breakpoint on the last message so the whole growing conversation is
+        // re-read from cache (~0.1x) next turn instead of re-billed in full --
+        // the big input-cost lever for multi-turn agent loops.
+        let cached = eri_agent::request::with_conversation_cache(messages);
+        let body = eri_agent::request::messages_body(model, MAX_TOKENS, &system, &tools, &cached);
 
         let response = match client
             .post_stream("/api/v1/inference/messages", &body)

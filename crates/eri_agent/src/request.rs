@@ -25,6 +25,39 @@ pub fn messages_body(
     })
 }
 
+/// Return a clone of `messages` with an `ephemeral` cache breakpoint on the LAST
+/// message's last content block. This is the key multi-turn caching move: the
+/// breakpoint caches the entire conversation prefix, so the *next* turn re-reads
+/// all prior messages at ~0.1x input cost instead of full price. Without it,
+/// only the small system+tools prefix is cached and the growing message history
+/// is re-billed in full every turn (the classic agent-loop cost leak).
+///
+/// String content is promoted to a one-block text array so the breakpoint has a
+/// block to attach to. A no-op for an empty conversation.
+pub fn with_conversation_cache(messages: &[Value]) -> Vec<Value> {
+    let mut out: Vec<Value> = messages.to_vec();
+    let Some(last) = out.last_mut() else {
+        return out;
+    };
+    match last.get_mut("content") {
+        Some(Value::Array(blocks)) => {
+            if let Some(block) = blocks.last_mut().and_then(Value::as_object_mut) {
+                block.insert("cache_control".into(), json!({ "type": "ephemeral" }));
+            }
+        }
+        Some(Value::String(s)) => {
+            let text = s.clone();
+            last["content"] = json!([{
+                "type": "text",
+                "text": text,
+                "cache_control": { "type": "ephemeral" }
+            }]);
+        }
+        _ => {}
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -44,5 +77,35 @@ mod tests {
         assert_eq!(body["system"][0]["cache_control"]["type"], "ephemeral");
         assert_eq!(body["tools"][0]["name"], "done");
         assert_eq!(body["messages"][0]["content"], "hi");
+    }
+
+    #[test]
+    fn conversation_cache_marks_the_last_message() {
+        // String content -> promoted to a text block carrying the breakpoint.
+        let msgs = vec![
+            json!({ "role": "user", "content": "first" }),
+            json!({ "role": "user", "content": "latest" }),
+        ];
+        let cached = with_conversation_cache(&msgs);
+        // Earlier messages untouched (still plain strings).
+        assert_eq!(cached[0]["content"], "first");
+        // Last message now a block array with a cache breakpoint.
+        assert_eq!(cached[1]["content"][0]["text"], "latest");
+        assert_eq!(cached[1]["content"][0]["cache_control"]["type"], "ephemeral");
+
+        // Array content -> breakpoint goes on the last block.
+        let arr = vec![json!({
+            "role": "user",
+            "content": [
+                { "type": "tool_result", "tool_use_id": "a", "content": "x" },
+                { "type": "tool_result", "tool_use_id": "b", "content": "y" }
+            ]
+        })];
+        let cached = with_conversation_cache(&arr);
+        assert!(cached[0]["content"][0].get("cache_control").is_none());
+        assert_eq!(cached[0]["content"][1]["cache_control"]["type"], "ephemeral");
+
+        // Empty -> no panic.
+        assert!(with_conversation_cache(&[]).is_empty());
     }
 }
