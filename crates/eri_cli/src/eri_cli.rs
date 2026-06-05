@@ -21,7 +21,7 @@ use std::process::ExitCode;
 use std::time::Instant;
 
 use anyhow::Context as _;
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 use eri_core::{IterEvent, PromptCtx};
 use eri_inference::{
     InferenceBackend, InferenceError, IterationRequest, MercuryBackend, MercuryConfig, TEMPLATES,
@@ -213,6 +213,13 @@ fn cwd() -> PathBuf {
     std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
 }
 
+/// Write a shell completion script for `eri` to `out`. Factored out so it is
+/// unit-testable without touching stdout.
+fn generate_completions(shell: clap_complete::Shell, out: &mut impl io::Write) {
+    let mut cmd = Cli::command();
+    clap_complete::generate(shell, &mut cmd, "eri", out);
+}
+
 #[derive(Subcommand, Debug, PartialEq, Eq)]
 pub enum Command {
     /// Generate a fresh ./index.html from a natural-language prompt.
@@ -366,6 +373,11 @@ pub enum Command {
     /// Manage isolated git worktrees for parallel sessions.
     #[command(subcommand)]
     Worktree(WorktreeCommand),
+    /// Print a shell completion script (bash | zsh | fish | powershell | elvish).
+    Completions {
+        /// The shell to generate completions for.
+        shell: clap_complete::Shell,
+    },
     /// Inspect local setup for auth, agents, MCP, and workflow files.
     Doctor,
     /// Show the active sign-in + tier + remaining quota. Alias of
@@ -661,6 +673,10 @@ async fn dispatch(cli: Cli) -> anyhow::Result<()> {
             WorktreeCommand::List => worktree::list(),
             WorktreeCommand::Remove { path, force } => worktree::remove(&path, force),
         },
+        Command::Completions { shell } => {
+            generate_completions(shell, &mut io::stdout());
+            Ok(())
+        }
         Command::Doctor => repl::print_doctor(),
     }
 }
@@ -750,6 +766,7 @@ pub fn run(command: Command) -> Result<(), CliError> {
         | Command::Skills
         | Command::Plugins
         | Command::Worktree(_)
+        | Command::Completions { .. }
         | Command::Doctor
         | Command::Status => Err(CliError::User(
             "agent-mode commands require the async dispatcher (`main`)".into(),
@@ -1485,6 +1502,26 @@ mod tests {
             assert!(
                 !help.contains(forbidden),
                 "CLI help exposes forbidden engine/vendor term: {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn generate_completions_emits_a_script() {
+        for shell in [
+            clap_complete::Shell::Bash,
+            clap_complete::Shell::Zsh,
+            clap_complete::Shell::Fish,
+        ] {
+            let mut buf: Vec<u8> = Vec::new();
+            generate_completions(shell, &mut buf);
+            let script = String::from_utf8(buf).unwrap();
+            assert!(!script.is_empty(), "{shell} completion script is empty");
+            // The script references the binary name and at least one subcommand.
+            assert!(script.contains("eri"));
+            assert!(
+                script.contains("build") || script.contains("worktree"),
+                "{shell} script should mention subcommands"
             );
         }
     }
