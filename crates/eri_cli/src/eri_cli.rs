@@ -43,6 +43,7 @@ mod eri_config;
 mod genui;
 mod git_tools;
 mod memory;
+mod plugins;
 mod project;
 mod repl;
 mod search;
@@ -352,6 +353,8 @@ pub enum Command {
     Config,
     /// List SKILL.md skills eri can run (project + global, any agent CLI).
     Skills,
+    /// List installed plugins (.eri/plugins/<name>/: commands, skills, hooks, mcp).
+    Plugins,
     /// Inspect local setup for auth, agents, MCP, and workflow files.
     Doctor,
     /// Show the active sign-in + tier + remaining quota. Alias of
@@ -583,6 +586,10 @@ async fn dispatch(command: Option<Command>) -> anyhow::Result<()> {
             skills::print_list(&skills::discover(&cwd()));
             Ok(())
         }
+        Command::Plugins => {
+            plugins::print_list(&plugins::discover(&cwd()));
+            Ok(())
+        }
         Command::Doctor => repl::print_doctor(),
     }
 }
@@ -670,6 +677,7 @@ pub fn run(command: Command) -> Result<(), CliError> {
         | Command::Admin(_)
         | Command::Config
         | Command::Skills
+        | Command::Plugins
         | Command::Doctor
         | Command::Status => Err(CliError::User(
             "agent-mode commands require the async dispatcher (`main`)".into(),

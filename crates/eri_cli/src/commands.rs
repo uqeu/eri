@@ -66,12 +66,17 @@ fn load_dir(dir: &Path, scope: &'static str, out: &mut BTreeMap<String, CustomCo
     }
 }
 
-/// Discover all custom commands for `workspace`. Global first, then project so
-/// project entries override global ones of the same name.
+/// Discover all custom commands for `workspace`. Precedence (later overrides
+/// earlier on a name collision): global, then plugins, then project -- so a
+/// project command always wins, and project plugins shadow global ones (handled
+/// by `plugins::command_dirs` ordering).
 pub fn discover(workspace: &Path) -> Vec<CustomCommand> {
     let mut map: BTreeMap<String, CustomCommand> = BTreeMap::new();
     if let Some(g) = global_dir() {
         load_dir(&g, "global", &mut map);
+    }
+    for dir in crate::plugins::command_dirs(workspace) {
+        load_dir(&dir, "plugin", &mut map);
     }
     load_dir(&project_dir(workspace), "project", &mut map);
     map.into_values().collect()
@@ -138,5 +143,25 @@ mod tests {
         let one = find(ws.path(), "REVIEW").unwrap();
         assert_eq!(expand(&one.body, "x.rs"), "Review x.rs");
         assert!(find(ws.path(), "missing").is_none());
+    }
+
+    #[test]
+    fn discover_includes_plugin_commands_with_project_override() {
+        let ws = TempDir::new().unwrap();
+        let pcmd = ws.path().join(".eri/plugins/acme/commands");
+        std::fs::create_dir_all(&pcmd).unwrap();
+        std::fs::write(pcmd.join("deploy.md"), "PLUGIN deploy").unwrap();
+        std::fs::write(pcmd.join("rollback.md"), "Roll back").unwrap();
+        // A project command of the same name must override the plugin's.
+        let proj = ws.path().join(".eri/commands");
+        std::fs::create_dir_all(&proj).unwrap();
+        std::fs::write(proj.join("deploy.md"), "PROJECT deploy").unwrap();
+
+        let deploy = find(ws.path(), "deploy").unwrap();
+        assert_eq!(deploy.scope, "project", "project overrides plugin");
+        assert!(deploy.body.contains("PROJECT"));
+        // A plugin-only command is discoverable, tagged "plugin".
+        let rb = find(ws.path(), "rollback").unwrap();
+        assert_eq!(rb.scope, "plugin");
     }
 }

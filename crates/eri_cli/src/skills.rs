@@ -140,6 +140,10 @@ pub fn discover(workspace: &Path) -> Vec<Skill> {
     for (dir, src) in project_roots(workspace) {
         load_root(&dir, src, &mut map);
     }
+    // Plugin-provided skills sit between project and global precedence.
+    for dir in crate::plugins::skill_dirs(workspace) {
+        load_root(&dir, "plugin", &mut map);
+    }
     for (dir, src) in global_roots() {
         load_root(&dir, src, &mut map);
     }
