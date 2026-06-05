@@ -48,6 +48,7 @@ mod plugins;
 mod project;
 mod repl;
 mod sandbox;
+mod sdk_tools;
 mod search;
 mod session;
 mod skills;
