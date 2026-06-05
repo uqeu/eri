@@ -32,6 +32,7 @@ mod admin;
 mod agent;
 mod agent_cmd;
 mod auth;
+mod background;
 mod build_agent;
 mod chat;
 mod checkpoint;

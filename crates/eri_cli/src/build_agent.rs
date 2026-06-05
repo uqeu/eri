@@ -435,6 +435,10 @@ async fn drive_loop(
     let system = build_system(root, opts.style);
     // Per-loop task checklist (todo_write / todo_read).
     let todos: RefCell<Vec<TodoItem>> = RefCell::new(Vec::new());
+    // Per-loop background shell tasks (bash run_in_background / bash_output /
+    // kill_bash / list_bash). Dropped with the loop -> all children killed.
+    let bg: RefCell<crate::background::BackgroundRegistry> =
+        RefCell::new(crate::background::BackgroundRegistry::new());
     let mut files_written: Vec<PathBuf> = Vec::new();
     let mut tokens_in: u64 = 0;
     let mut tokens_out: u64 = 0;
@@ -624,6 +628,7 @@ async fn drive_loop(
                         model,
                         depth,
                         &todos,
+                        &bg,
                         &tu.name,
                         &tu.input,
                         opts.sandbox,
@@ -966,12 +971,77 @@ async fn execute_tool(
     model: &str,
     depth: u8,
     todos: &RefCell<Vec<TodoItem>>,
+    bg: &RefCell<crate::background::BackgroundRegistry>,
     name: &str,
     input: &Value,
     sandbox: bool,
 ) -> ToolExec {
     match name {
-        "bash" => run_bash(root, input, sandbox).await,
+        "bash" => {
+            // Background variant: spawn + return a task id instead of blocking.
+            if input
+                .get("run_in_background")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+            {
+                let command = input.get("command").and_then(Value::as_str).unwrap_or("");
+                match bg.borrow_mut().spawn(root, command, sandbox) {
+                    Ok(id) => ToolExec {
+                        content: format!(
+                            "started background task {id}. Poll it with bash_output, stop it with kill_bash."
+                        ),
+                        is_error: false,
+                        written: Vec::new(),
+                    },
+                    Err(e) => err(e),
+                }
+            } else {
+                run_bash(root, input, sandbox).await
+            }
+        }
+        "bash_output" => {
+            let id = input.get("bash_id").and_then(Value::as_str).unwrap_or("");
+            match bg.borrow().snapshot(id) {
+                Some(s) => ToolExec {
+                    content: format!("[{}] {}\n{}", s.state, s.label, s.output),
+                    is_error: false,
+                    written: Vec::new(),
+                },
+                None => err(format!("bash_output: no background task '{id}'")),
+            }
+        }
+        "kill_bash" => {
+            let id = input.get("bash_id").and_then(Value::as_str).unwrap_or("");
+            if bg.borrow_mut().kill(id) {
+                ToolExec {
+                    content: format!("killed background task {id}"),
+                    is_error: false,
+                    written: Vec::new(),
+                }
+            } else {
+                err(format!("kill_bash: no background task '{id}'"))
+            }
+        }
+        "list_bash" => {
+            let tasks = bg.borrow().list();
+            let body = if tasks.is_empty() {
+                "no background tasks".to_string()
+            } else {
+                tasks
+                    .iter()
+                    .map(|(id, label, running)| {
+                        let st = if *running { "running" } else { "done" };
+                        format!("{id}  [{st}]  {label}")
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            };
+            ToolExec {
+                content: body,
+                is_error: false,
+                written: Vec::new(),
+            }
+        }
         "task" => run_subagent(client, root, model, depth, input).await,
         "todo_write" => write_todos(todos, input),
         "todo_read" => ToolExec {
@@ -1224,7 +1294,7 @@ fn apply_patch(root: &Path, input: &Value) -> ToolExec {
 
 /// Returns true if an env var name looks like a secret we should not hand to a
 /// model-authored shell command (it could `env`/`printenv` and exfiltrate it).
-fn is_secret_env(name: &str) -> bool {
+pub(crate) fn is_secret_env(name: &str) -> bool {
     let n = name.to_ascii_uppercase();
     n.contains("KEY")
         || n.contains("TOKEN")
@@ -1735,11 +1805,25 @@ mod bash_tests {
 
         let with_shell = tool_names(true, 0);
         assert!(with_shell.contains(&"bash".to_string()));
+        // Background-task tools ride with shell at depth 0.
+        for t in ["bash_output", "kill_bash", "list_bash"] {
+            assert!(
+                with_shell.contains(&t.to_string()),
+                "{t} should be offered with shell"
+            );
+            assert!(
+                !base.contains(&t.to_string()),
+                "{t} must not appear without shell"
+            );
+        }
 
-        // A subagent (depth 1) gets neither shell nor the ability to nest.
+        // A subagent (depth 1) gets neither shell nor the ability to nest, and
+        // no background tools.
         let sub = tool_names(false, 1);
         assert!(!sub.contains(&"task".to_string()), "no nested subagents");
         assert!(!sub.contains(&"bash".to_string()));
+        let sub_shell = tool_names(true, 1);
+        assert!(!sub_shell.contains(&"bash_output".to_string()));
     }
 }
 
@@ -1753,11 +1837,42 @@ fn bash_spec() -> Value {
             "type": "object",
             "properties": {
                 "command": { "type": "string", "description": "The shell command to run." },
-                "timeout_ms": { "type": "integer", "description": "Optional timeout in ms (default 120000, max 600000)." }
+                "timeout_ms": { "type": "integer", "description": "Optional timeout in ms (default 120000, max 600000)." },
+                "run_in_background": { "type": "boolean", "description": "Run detached and return a task id immediately (for long-lived processes like dev servers/watchers). Poll with bash_output, stop with kill_bash." }
             },
             "required": ["command"]
         }
     })
+}
+
+/// Specs for the background-task management tools, advertised alongside bash
+/// when shell is enabled (depth 0 only).
+fn background_specs() -> Vec<Value> {
+    vec![
+        json!({
+            "name": "bash_output",
+            "description": "Read the accumulated output + state of a background bash task started with run_in_background.",
+            "input_schema": {
+                "type": "object",
+                "properties": { "bash_id": { "type": "string", "description": "The task id returned by the background bash call." } },
+                "required": ["bash_id"]
+            }
+        }),
+        json!({
+            "name": "kill_bash",
+            "description": "Stop a running background bash task by id.",
+            "input_schema": {
+                "type": "object",
+                "properties": { "bash_id": { "type": "string" } },
+                "required": ["bash_id"]
+            }
+        }),
+        json!({
+            "name": "list_bash",
+            "description": "List background bash tasks (id, state, command).",
+            "input_schema": { "type": "object", "properties": {} }
+        }),
+    ]
 }
 
 /// The local tool set. `bash` is only advertised when shell is explicitly
@@ -1917,6 +2032,11 @@ fn tool_specs(allow_shell: bool, depth: u8) -> Value {
     if let Some(arr) = tools.as_array_mut() {
         if allow_shell {
             arr.insert(0, bash_spec());
+            // Background-task tools only make sense with shell, and only at the
+            // top level (subagents run focused, synchronous work).
+            if depth == 0 {
+                arr.extend(background_specs());
+            }
         }
         if depth == 0 {
             arr.push(task_spec());
@@ -2130,7 +2250,9 @@ configured MCP servers (GitHub, filesystem, browser, ...). Use them when they \
 fit the task, the same as built-in tools.\n\
 - Use git_status / git_diff to review your changes and git_commit to commit \
 logical units of work (no shell needed). When bash is available, use it to run \
-the project's own tests / build / linter to verify your work after changes.\n\
+the project's own tests / build / linter to verify your work after changes; for \
+long-lived processes (dev servers, watchers) pass run_in_background and poll with \
+bash_output / stop with kill_bash.\n\
 - When everything is built and coherent, call the done tool.\n\n\
 PROJECT SHAPE\n\
 - Choose the files and structure that fit the task -- the right entry point, \
