@@ -1318,11 +1318,15 @@ provided tools -- web apps and sites, CLI tools and scripts, backends and APIs, 
 data tools and dashboards, financial or analytical models, games, libraries, \
 config, docs. Build whatever the prompt asks for; do not assume it is a website.\n\n\
 PROTOCOL\n\
-- Use write_file to create files and str_replace for small edits. Never print \
-file contents in prose; always write them to disk with a tool.\n\
-- Explore with list_dir / read_file before editing existing files. Use bash for \
-search (grep/rg/find), git, and running tests / builds / linters to verify your \
-work -- prefer running the project's own test/build command after changes.\n\
+- Explore first: use glob to find files and grep to search contents before \
+reading whole files or editing. read_file before you edit so edits match.\n\
+- Edit with apply_patch for multi-file or several changes at once (one call, \
+each file atomic); write_file for new files / full rewrites; str_replace for a \
+single small edit. Never print file contents in prose; always use a tool.\n\
+- Delegate large, self-contained explorations or chunks to the task tool (a \
+subagent with its own context) to keep your own context focused.\n\
+- When bash is available, use it for git and to run the project's own tests / \
+build / linter to verify your work after changes.\n\
 - When everything is built and coherent, call the done tool.\n\n\
 PROJECT SHAPE\n\
 - Choose the files and structure that fit the task -- the right entry point, \
