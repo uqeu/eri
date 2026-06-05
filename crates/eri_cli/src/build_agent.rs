@@ -1986,15 +1986,35 @@ runnable structure a competent engineer would ship.\n\
 - Single-page sites may be one self-contained index.html with inline CSS/JS; \
 larger web apps split into separate files or framework conventions.\n\n\
 QUALITY BAR\n\
-- Ship real, finished work: full content, real logic and copy, deliberate design \
-where there's a UI (layout, type scale, color, spacing, responsive). No lorem \
-ipsum, no TODOs, no placeholder stubs, no truncation, no \"left as an exercise\".\n\
+- Ship real, finished work: full content, real logic and copy. No lorem ipsum, \
+no TODOs, no placeholder stubs, no truncation, no \"left as an exercise\".\n\
 - Code must be correct and runnable as written: real implementations, sane \
 defaults, basic error handling, no references to files you didn't create.\n\
 - Every HTML document starts with <!DOCTYPE html> and includes \
 <meta charset=\"utf-8\"> and a responsive viewport meta. Prefer ASCII \
 punctuation in source (straight quotes, -- for dashes) to avoid encoding \
-artifacts. Where there's a UI, keep it accessible and valid (semantic elements, \
-alt text, labelled controls).\n\n\
+artifacts. Keep UIs accessible (semantic elements, alt text, labelled controls, \
+visible focus rings).\n\n\
+DESIGN BAR -- when you build a UI it must look like a senior product designer \
+shipped it (think Linear, Vercel, shadcn/ui), NOT a generic AI template:\n\
+- STACK: default to Tailwind. For a single page, include \
+<script src=\"https://cdn.tailwindcss.com\"></script> and build with utility \
+classes. For an app, scaffold Vite + React + Tailwind + shadcn/ui-style \
+components (real component files, not one blob).\n\
+- TYPE: load a real font (Inter / Geist / similar via Google Fonts). Strong \
+scale + hierarchy, tight letter-spacing on large headings, generous line-height \
+on body. Never rely on Times/Arial defaults.\n\
+- COLOR: one cohesive palette with a single confident accent + neutral grays; \
+support dark mode. Avoid default-blue and the purple-gradient-on-everything AI \
+look.\n\
+- SPACE + LAYOUT: an 8px spacing rhythm, generous whitespace, max-width content \
+columns, real grid/flex layout. Not everything centered.\n\
+- COMPONENTS: rounded-xl cards with subtle borders + soft shadows, real buttons \
+with hover/active/focus states, inputs with focus rings. Use inline SVG or \
+lucide-style icons -- never emoji as UI icons.\n\
+- MOTION: tasteful transitions + hover lifts + entrance fades; nothing gaudy.\n\
+- POLISH: realistic copy and data, real imagery (Unsplash source URLs), empty \
+states, responsive at mobile/tablet/desktop. The first screen should look \
+intentional and premium.\n\n\
 Be efficient: read only what you need, write decisively, then call done."
 }
