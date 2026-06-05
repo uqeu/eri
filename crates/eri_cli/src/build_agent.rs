@@ -18,7 +18,6 @@
 //!     prefix reads at ~0.1x on every loop iteration.
 
 use std::cell::RefCell;
-use std::collections::BTreeMap;
 use std::io::Write as _;
 use std::path::{Component, Path, PathBuf};
 
@@ -628,43 +627,11 @@ async fn drive_loop(
     })
 }
 
-/// One extracted tool call from an assistant turn.
-struct ToolUse {
-    id: String,
-    name: String,
-    input: Value,
-}
-
-/// The assembled result of consuming one streamed assistant turn.
-struct TurnResult {
-    /// Assistant content array, verbatim, for re-sending in `messages`.
-    content: Vec<Value>,
-    /// The tool calls to execute (subset of `content`).
-    tool_uses: Vec<ToolUse>,
-    stop_reason: Option<String>,
-    usage_in: u64,
-    usage_out: u64,
-}
-
-/// A per-index streaming block accumulator.
-enum Acc {
-    Text(String),
-    Tool {
-        id: String,
-        name: String,
-        json: String,
-    },
-}
-
-/// Concatenate the text blocks of an assistant `content` array.
-fn assistant_text(content: &[Value]) -> String {
-    content
-        .iter()
-        .filter(|b| b.get("type").and_then(Value::as_str) == Some("text"))
-        .filter_map(|b| b.get("text").and_then(Value::as_str))
-        .collect::<Vec<_>>()
-        .join("")
-}
+// The streaming protocol handler lives in the eri_agent SDK crate: a pure SSE
+// accumulator (`TurnAccumulator`) producing a `Turn` (re-aliased `TurnResult`)
+// of `ToolUse`s. `consume_turn` below just reads the byte stream + narrates.
+use eri_agent::stream::assistant_text;
+type TurnResult = eri_agent::Turn;
 
 /// Drive the SSE stream for one turn: optionally narrate text live (`narrate`),
 /// accumulate tool inputs per content-block index, and capture stop_reason +
@@ -675,10 +642,7 @@ async fn consume_turn(
     narrate: bool,
 ) -> Result<TurnResult> {
     let mut buffer = String::new();
-    let mut blocks: BTreeMap<usize, Acc> = BTreeMap::new();
-    let mut stop_reason: Option<String> = None;
-    let mut usage_in: u64 = 0;
-    let mut usage_out: u64 = 0;
+    let mut acc = eri_agent::TurnAccumulator::new();
 
     while let Some(chunk) = response.chunk().await.context("read SSE stream")? {
         buffer.push_str(&String::from_utf8_lossy(&chunk));
@@ -691,114 +655,21 @@ async fn consume_turn(
             if payload.is_empty() {
                 continue;
             }
-            let ev: Value = match serde_json::from_str(payload) {
-                Ok(v) => v,
-                Err(_) => continue,
+            let Ok(ev) = serde_json::from_str::<Value>(payload) else {
+                continue;
             };
-            match ev.get("type").and_then(Value::as_str) {
-                Some("message_start") => {
-                    usage_in += u64_at(&ev, "/message/usage/input_tokens");
-                    usage_in += u64_at(&ev, "/message/usage/cache_read_input_tokens");
-                    usage_in += u64_at(&ev, "/message/usage/cache_creation_input_tokens");
-                }
-                Some("content_block_start") => {
-                    let i = ev.get("index").and_then(Value::as_u64).unwrap_or(0) as usize;
-                    let cb = ev.get("content_block");
-                    let kind = cb
-                        .and_then(|c| c.get("type"))
-                        .and_then(Value::as_str)
-                        .unwrap_or("text");
-                    if kind == "tool_use" {
-                        let id = str_at(cb, "id");
-                        let name = str_at(cb, "name");
-                        blocks.insert(
-                            i,
-                            Acc::Tool {
-                                id,
-                                name,
-                                json: String::new(),
-                            },
-                        );
-                    } else {
-                        blocks.insert(i, Acc::Text(String::new()));
-                    }
-                }
-                Some("content_block_delta") => {
-                    let i = ev.get("index").and_then(Value::as_u64).unwrap_or(0) as usize;
-                    let delta = ev.get("delta");
-                    match delta.and_then(|d| d.get("type")).and_then(Value::as_str) {
-                        Some("text_delta") => {
-                            if let Some(t) =
-                                delta.and_then(|d| d.get("text")).and_then(Value::as_str)
-                            {
-                                if let Some(Acc::Text(s)) = blocks.get_mut(&i) {
-                                    s.push_str(t);
-                                }
-                                if narrate {
-                                    let _ = write!(stdout, "{t}");
-                                    let _ = stdout.flush();
-                                }
-                            }
-                        }
-                        Some("input_json_delta") => {
-                            if let Some(p) = delta
-                                .and_then(|d| d.get("partial_json"))
-                                .and_then(Value::as_str)
-                                && let Some(Acc::Tool { json, .. }) = blocks.get_mut(&i)
-                            {
-                                json.push_str(p);
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-                Some("message_delta") => {
-                    if let Some(sr) = ev.pointer("/delta/stop_reason").and_then(Value::as_str) {
-                        stop_reason = Some(sr.to_string());
-                    }
-                    usage_out += u64_at(&ev, "/usage/output_tokens");
-                }
-                // content_block_stop, message_stop, ping, error: nothing to do.
-                _ => {}
+            // The SDK accumulator owns all the protocol state; it hands back a
+            // text fragment to narrate live (None for non-text events).
+            if let Some(text) = acc.push_event(&ev)
+                && narrate
+            {
+                let _ = write!(stdout, "{text}");
+                let _ = stdout.flush();
             }
         }
     }
 
-    // Assemble the verbatim content array and extract tool calls.
-    let mut content: Vec<Value> = Vec::new();
-    let mut tool_uses: Vec<ToolUse> = Vec::new();
-    for (_index, acc) in blocks {
-        match acc {
-            Acc::Text(s) => {
-                if !s.trim().is_empty() {
-                    content.push(json!({ "type": "text", "text": s }));
-                }
-            }
-            Acc::Tool { id, name, json } => {
-                // Empty-input tools emit no deltas; default to {}.
-                let input: Value = if json.trim().is_empty() {
-                    json!({})
-                } else {
-                    serde_json::from_str(&json).unwrap_or_else(|_| json!({}))
-                };
-                content.push(json!({
-                    "type": "tool_use",
-                    "id": id.clone(),
-                    "name": name.clone(),
-                    "input": input.clone(),
-                }));
-                tool_uses.push(ToolUse { id, name, input });
-            }
-        }
-    }
-
-    Ok(TurnResult {
-        content,
-        tool_uses,
-        stop_reason,
-        usage_in,
-        usage_out,
-    })
+    Ok(acc.finish())
 }
 
 /// A task-list item the agent maintains via todo_write / todo_read.
@@ -1356,17 +1227,6 @@ fn truncate_bytes(s: &str, max: usize) -> String {
         end -= 1;
     }
     format!("{}\n…[truncated {} bytes]", &s[..end], s.len() - end)
-}
-
-fn u64_at(v: &Value, pointer: &str) -> u64 {
-    v.pointer(pointer).and_then(Value::as_u64).unwrap_or(0)
-}
-
-fn str_at(v: Option<&Value>, key: &str) -> String {
-    v.and_then(|c| c.get(key))
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .to_string()
 }
 
 /// Recoverable mid-build stops. Returns a user-facing message for the cases

@@ -38,7 +38,9 @@
 
 pub mod compaction;
 pub mod permission;
+pub mod stream;
 pub mod style;
 
 pub use permission::PermissionMode;
+pub use stream::{ToolUse, Turn, TurnAccumulator};
 pub use style::SystemStyle;
