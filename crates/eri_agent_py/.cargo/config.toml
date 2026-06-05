@@ -1,0 +1,7 @@
+# A Python-extension cdylib resolves CPython symbols at import time, so the
+# linker must allow undefined symbols. maturin sets this automatically; this
+# config lets a plain `cargo build` (run from this crate dir) work too.
+[target.aarch64-apple-darwin]
+rustflags = ["-C", "link-arg=-undefined", "-C", "link-arg=dynamic_lookup"]
+[target.x86_64-apple-darwin]
+rustflags = ["-C", "link-arg=-undefined", "-C", "link-arg=dynamic_lookup"]

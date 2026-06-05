@@ -1,0 +1,22 @@
+[package]
+name = "eri_agent_py"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "LicenseRef-Proprietary"
+description = "Python bindings (PyO3) over the eri_agent SDK core."
+
+# NOTE: this crate is EXCLUDED from the eri workspace (see root Cargo.toml
+# `exclude`) because a Python-extension cdylib needs maturin's
+# `-undefined dynamic_lookup` linker flag, which a plain `cargo build
+# --workspace` from the repo root does not supply. Build it from THIS directory
+# (it has a local `.cargo/config.toml` that sets the flag) or via maturin.
+
+[lib]
+name = "eri_agent_py"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+eri_agent = { path = "../eri_agent" }
+pyo3 = { version = "0.22", features = ["abi3-py38", "extension-module"] }
+serde_json = "1"

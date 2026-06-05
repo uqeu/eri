@@ -1,0 +1,14 @@
+[build-system]
+requires = ["maturin>=1.5,<2"]
+build-backend = "maturin"
+
+[project]
+name = "eri-agent"
+version = "0.1.0"
+description = "Python bindings over the eri_agent SDK core: context compaction, permission model, output styles, and request shaping."
+requires-python = ">=3.8"
+license = { text = "LicenseRef-Proprietary" }
+
+[tool.maturin]
+features = ["pyo3/extension-module"]
+module-name = "eri_agent_py"

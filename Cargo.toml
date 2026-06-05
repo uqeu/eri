@@ -3,6 +3,9 @@ resolver = "2"
 exclude = [
     # vscode CLI ships its own workspace; keep it isolated from eri's.
     "ide/vscode",
+    # Python-extension cdylib -- needs maturin's linker flags, so it is built
+    # from its own dir (has a local .cargo/config.toml), not via `--workspace`.
+    "crates/eri_agent_py",
 ]
 members = [
     "crates/eri_auth",
