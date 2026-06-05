@@ -44,6 +44,7 @@ mod memory;
 mod project;
 mod repl;
 mod session;
+mod skills;
 mod update;
 
 const ERI_CLI_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -289,6 +290,8 @@ pub enum Command {
     Admin(AdminCommand),
     /// Show the resolved .eri/config.toml defaults for this directory.
     Config,
+    /// List SKILL.md skills eri can run (project + global, any agent CLI).
+    Skills,
     /// Inspect local setup for auth, agents, MCP, and workflow files.
     Doctor,
     /// Show the active sign-in + tier + remaining quota. Alias of
@@ -505,6 +508,10 @@ async fn dispatch(command: Option<Command>) -> anyhow::Result<()> {
             run_config();
             Ok(())
         }
+        Command::Skills => {
+            skills::print_list(&skills::discover(&cwd()));
+            Ok(())
+        }
         Command::Doctor => repl::print_doctor(),
     }
 }
@@ -591,6 +598,7 @@ pub fn run(command: Command) -> Result<(), CliError> {
         | Command::Init
         | Command::Admin(_)
         | Command::Config
+        | Command::Skills
         | Command::Doctor
         | Command::Status => Err(CliError::User(
             "agent-mode commands require the async dispatcher (`main`)".into(),

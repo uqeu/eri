@@ -141,6 +141,8 @@ async fn handle_slash(
         "diff" => print_diff(sess, rest),
         "status" => print_status(sess),
         "commands" => list_custom_commands(sess),
+        "skills" => list_skills(sess),
+        "skill" => run_skill(sess, checkpoints, rest).await,
         "new" => {
             sess.save().ok();
             let cwd = std::env::current_dir().context("read current directory")?;
@@ -235,6 +237,42 @@ fn print_status(sess: &Session) {
         "none"
     };
     println!("      AGENTS.md  {agents}");
+}
+
+fn list_skills(sess: &Session) {
+    crate::skills::print_list(&crate::skills::discover(&sess.workspace_path()));
+}
+
+async fn run_skill(
+    sess: &mut Session,
+    checkpoints: &mut Vec<crate::checkpoint::Snapshot>,
+    rest: &str,
+) {
+    let (name, task) = match rest.split_once(char::is_whitespace) {
+        Some((n, t)) => (n.trim(), t.trim()),
+        None => (rest.trim(), ""),
+    };
+    if name.is_empty() {
+        println!("[eri] usage: /skill <name> [task]   (see /skills)");
+        return;
+    }
+    let Some(skill) = crate::skills::find(&sess.workspace_path(), name) else {
+        println!("[eri] no skill '{name}' -- run /skills to list available skills.");
+        return;
+    };
+    println!("[eri] applying skill '{}' ({})", skill.name, skill.source);
+    let prompt = crate::skills::compose_prompt(&skill, task);
+    snapshot_before_turn(checkpoints, sess);
+    match build_agent::run_session_turn(sess, &prompt).await {
+        Ok(o) => println!(
+            "\n[eri] skill done -- {} file(s), {} in / {} out tokens",
+            o.files_written.len(),
+            o.tokens_in,
+            o.tokens_out
+        ),
+        Err(e) => eprintln!("error: {e}"),
+    }
+    sess.save().ok();
 }
 
 fn list_custom_commands(sess: &Session) {
@@ -337,6 +375,8 @@ fn print_chat_help() {
     println!("  /clear             forget the conversation (keep the session)");
     println!("  /init              scaffold AGENTS.md for this project");
     println!("  /commands          list custom .eri/commands/*.md commands");
+    println!("  /skills            list SKILL.md skills (any agent CLI)");
+    println!("  /skill <name> [t]  run a skill on a task");
     println!("  /new               start a fresh session");
     println!("  /model <tier>      switch tier: fast | thinking | auto");
     println!("  /exit              save and quit");
