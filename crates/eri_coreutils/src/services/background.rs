@@ -151,7 +151,7 @@ pub async fn rules(
     let p: WorkspaceOnly = serde_json::from_value(params)
         .map_err(|e| DispatchError::BadParams(format!("eri/background/rules: {e}")))?;
     let parsed =
-        load_janitor_rules(&p.workspace).map_err(|e| DispatchError::BadParams(e))?;
+        load_janitor_rules(&p.workspace).map_err(DispatchError::BadParams)?;
     serde_json::to_value(parsed).map_err(|e| DispatchError::Other(e.into()))
 }
 

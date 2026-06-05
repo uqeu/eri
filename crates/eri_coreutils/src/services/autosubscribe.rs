@@ -165,7 +165,7 @@ fn parse_requirements_txt(workspace: &Path) -> Vec<DepEntry> {
         }
         // Strip version specifiers — anything up to `==`, `>=`, etc.
         let name = cleaned
-            .split(|c: char| matches!(c, '=' | '>' | '<' | '!' | '~' | ';' | '['))
+            .split(['=', '>', '<', '!', '~', ';', '['])
             .next()
             .unwrap_or("")
             .trim();
@@ -223,7 +223,7 @@ fn parse_pyproject_toml(workspace: &Path) -> Vec<DepEntry> {
                     .and_then(|s| s.strip_suffix('"'))
                 {
                     let name = item
-                        .split(|c: char| matches!(c, '=' | '>' | '<' | '!' | '~' | ';' | '['))
+                        .split(['=', '>', '<', '!', '~', ';', '['])
                         .next()
                         .unwrap_or("")
                         .trim();
