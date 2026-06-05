@@ -233,6 +233,24 @@ fn cache_persists_across_reopens() {
 }
 
 #[test]
+fn rapid_reopen_is_resilient_to_lock_contention() {
+    // Regression guard: dropping a Db and immediately reopening the same path
+    // must not flake on the lingering sled file lock (open_db_with_retry).
+    // Tight loop maximizes the chance of catching the prior handle mid-teardown.
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().join("cache.sled");
+    for i in 0..15u64 {
+        let cache = Cache::open_at(&path).expect("reopen must not flake on the lock");
+        cache
+            .set(Namespace::MercuryTokenSavings, "k", &i)
+            .expect("set");
+        let got: Option<u64> = cache.get(Namespace::MercuryTokenSavings, "k").expect("get");
+        assert_eq!(got, Some(i));
+        // Drop at end of iteration, then immediately reopen next loop.
+    }
+}
+
+#[test]
 fn session_recap_entry_shape_roundtrips() {
     // Documents the canonical SessionRecap value shape so the follow-up
     // integration PR has a stable contract to target.

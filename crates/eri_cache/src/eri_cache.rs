@@ -112,7 +112,7 @@ impl Cache {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let db = sled::open(path)?;
+        let db = open_db_with_retry(path)?;
         let max_bytes = read_max_bytes_from_env();
         let cache = Cache {
             db,
@@ -355,6 +355,59 @@ fn validate_key(key: &str) -> Result<(), CacheError> {
         return Err(CacheError::BadKey("key contains null byte".into()));
     }
     Ok(())
+}
+
+/// Open a sled db, retrying briefly on transient lock contention.
+///
+/// sled holds an advisory file lock for the lifetime of a `Db`. When a process
+/// drops one `Db` and immediately reopens the same path (e.g. a fresh `eri`
+/// invocation racing the previous one's exit, or back-to-back opens in a test),
+/// the lock from the prior handle can linger for a few milliseconds while its
+/// background threads wind down. Rather than surface a spurious "could not
+/// acquire lock" error to the caller, retry a handful of times with a short
+/// backoff. Non-lock errors (corruption, permissions) return immediately.
+fn open_db_with_retry(path: &Path) -> Result<sled::Db, CacheError> {
+    const ATTEMPTS: u32 = 12;
+    const BACKOFF: std::time::Duration = std::time::Duration::from_millis(25);
+    let mut last_err: Option<sled::Error> = None;
+    for attempt in 0..ATTEMPTS {
+        match sled::open(path) {
+            Ok(db) => return Ok(db),
+            // Only a lock/would-block IO error is worth retrying; anything else
+            // (corruption, ENOSPC, permission) is terminal.
+            Err(e) if is_transient_lock_error(&e) => {
+                last_err = Some(e);
+                if attempt + 1 < ATTEMPTS {
+                    std::thread::sleep(BACKOFF);
+                }
+            }
+            Err(e) => return Err(e.into()),
+        }
+    }
+    Err(last_err
+        .expect("loop runs at least once and only exits here after a transient error")
+        .into())
+}
+
+/// Whether a sled open error reflects a transient lock contention (the prior
+/// handle hasn't released yet) rather than a permanent failure.
+///
+/// sled wraps the flock failure as `Io(Custom { kind: Other, .. })` whose
+/// message embeds the underlying `WouldBlock` ("could not acquire lock ...
+/// Resource temporarily unavailable"). The outer kind is `Other`, so we match
+/// on the message (and also accept a direct `WouldBlock`, belt-and-suspenders).
+fn is_transient_lock_error(err: &sled::Error) -> bool {
+    match err {
+        sled::Error::Io(io) => {
+            if io.kind() == std::io::ErrorKind::WouldBlock {
+                return true;
+            }
+            let msg = io.to_string();
+            msg.contains("could not acquire lock") || msg.contains("temporarily unavailable")
+        }
+        // Other variants (Corruption, ReportableBug, ...) are terminal.
+        _ => false,
+    }
 }
 
 fn default_path() -> Result<PathBuf, CacheError> {

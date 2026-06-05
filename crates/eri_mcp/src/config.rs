@@ -321,6 +321,10 @@ mod tests {
 
     #[test]
     fn project_overrides_global_when_names_collide() {
+        // Serialize with other HOME-mutating tests in this binary.
+        let _env = crate::HOME_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         // Two separate temp dirs so the project and global files don't
         // resolve to the same path.
         let workspace_dir = tempfile::tempdir().unwrap();

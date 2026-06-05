@@ -51,6 +51,14 @@ pub use protocol::{
 
 use client::Connection;
 
+/// Serializes tests that mutate the process-global `HOME` env var (to point the
+/// global-config lookup at a tempdir). Cargo runs tests in this crate's binary
+/// in parallel; without this lock a `HOME`-setting test in one module races a
+/// `load()` in another. Every test that sets `HOME` must hold this for its
+/// duration. Poison-tolerant via `into_inner()` at the call sites.
+#[cfg(test)]
+pub(crate) static HOME_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Separator used to namespace MCP handles. The IDE renders tools as
 /// `<server>__<tool>` so the same name uniquely identifies an entry across
 /// every configured server.
@@ -334,6 +342,8 @@ mod tests {
 
     #[tokio::test]
     async fn mcp_load_with_no_config_returns_empty_state() {
+        // Serialize with other HOME-mutating tests in this binary.
+        let _env = HOME_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         // Point HOME to a fresh dir with no .eri/ so the global lookup is
         // a clean miss; we don't want to read the developer's real config.
         let dir = tempfile::tempdir().unwrap();
