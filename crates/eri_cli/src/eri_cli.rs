@@ -43,6 +43,7 @@ mod genui;
 mod memory;
 mod project;
 mod repl;
+mod search;
 mod session;
 mod skills;
 mod update;

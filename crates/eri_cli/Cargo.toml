@@ -19,6 +19,9 @@ clap.workspace = true
 eri_apply = { path = "../eri_apply" }
 eri_core.workspace = true
 eri_inference.workspace = true
+globset = "0.4"
+ignore = "0.4"
+regex = "1"
 reqwest = { workspace = true, features = ["json", "stream"] }
 serde.workspace = true
 serde_json.workspace = true

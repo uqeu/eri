@@ -697,6 +697,22 @@ async fn execute_tool(root: &Path, name: &str, input: &Value) -> ToolExec {
             }
         }
         "apply_patch" => apply_patch(root, input),
+        "grep" => {
+            let r = crate::search::grep(root, input);
+            ToolExec {
+                content: r.content,
+                is_error: r.is_error,
+                written: Vec::new(),
+            }
+        }
+        "glob" => {
+            let r = crate::search::glob(root, input);
+            ToolExec {
+                content: r.content,
+                is_error: r.is_error,
+                written: Vec::new(),
+            }
+        }
         other => err(format!("unknown tool: {other}")),
     }
 }
@@ -1050,6 +1066,34 @@ fn tool_specs(allow_shell: bool) -> Value {
                     "path": { "type": "string", "description": "Workspace-relative file path." }
                 },
                 "required": ["path"]
+            }
+        },
+        {
+            "name": "grep",
+            "description": "Search file contents for a regular expression (gitignore-aware). Returns path:line: text. Use to find where things are defined/used before reading whole files.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "pattern": { "type": "string", "description": "Regular expression to match." },
+                    "path": { "type": "string", "description": "Optional workspace-relative subdir to search." },
+                    "glob": { "type": "string", "description": "Optional file filter, e.g. \"**/*.rs\"." },
+                    "case_insensitive": { "type": "boolean" },
+                    "max_results": { "type": "integer" }
+                },
+                "required": ["pattern"]
+            }
+        },
+        {
+            "name": "glob",
+            "description": "Find files by glob pattern (e.g. \"**/*.ts\"), newest first, gitignore-aware. Use to discover files before reading.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "pattern": { "type": "string", "description": "Glob pattern, e.g. \"src/**/*.rs\"." },
+                    "path": { "type": "string", "description": "Optional workspace-relative subdir." },
+                    "max_results": { "type": "integer" }
+                },
+                "required": ["pattern"]
             }
         },
         {
