@@ -39,10 +39,10 @@ impl Credentials {
     /// Resolve the active base URL. Order: env override → file →
     /// `https://tryeri.ca`.
     pub fn base_url(&self) -> String {
-        if let Ok(env) = std::env::var("ERI_BASE_URL") {
-            if !env.trim().is_empty() {
-                return env;
-            }
+        if let Ok(env) = std::env::var("ERI_BASE_URL")
+            && !env.trim().is_empty()
+        {
+            return env;
         }
         self.base_url
             .clone()
@@ -52,10 +52,10 @@ impl Credentials {
     /// Resolve the active bearer. Order: env override → file. Returns
     /// `None` when the user is signed out.
     pub fn bearer(&self) -> Option<String> {
-        if let Ok(env) = std::env::var("ERI_API_KEY") {
-            if !env.trim().is_empty() {
-                return Some(env);
-            }
+        if let Ok(env) = std::env::var("ERI_API_KEY")
+            && !env.trim().is_empty()
+        {
+            return Some(env);
         }
         self.bearer.clone()
     }

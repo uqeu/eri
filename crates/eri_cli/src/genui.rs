@@ -131,12 +131,12 @@ fn launch_desktop(intent: &str) -> Result<()> {
     write_desktop_launch_intent(intent)?;
     let request = desktop_launch_request(intent)?;
     if request.program == "open" {
-        if let Some(app_path) = request.args.iter().find(|arg| arg.ends_with(".app")) {
-            if !Path::new(app_path).exists() {
-                anyhow::bail!(
-                    "Eri Agent Manager is not built at {app_path}. Run scripts/build_eri_agent_manager.sh"
-                );
-            }
+        if let Some(app_path) = request.args.iter().find(|arg| arg.ends_with(".app"))
+            && !Path::new(app_path).exists()
+        {
+            anyhow::bail!(
+                "Eri Agent Manager is not built at {app_path}. Run scripts/build_eri_agent_manager.sh"
+            );
         }
     } else if Path::new(&request.program).is_absolute() && !Path::new(&request.program).exists() {
         anyhow::bail!(

@@ -198,15 +198,15 @@ pub async fn status() -> Result<()> {
             if let Some(t) = usage.get("tier").and_then(|v| v.as_str()) {
                 println!("Tier: {t}");
             }
-            if let Some(tokens) = usage.get("tokens") {
-                if let Some(remaining) = tokens.get("remainingIncluded").and_then(|v| v.as_i64()) {
-                    println!("Tokens remaining (included): {remaining}");
-                }
+            if let Some(tokens) = usage.get("tokens")
+                && let Some(remaining) = tokens.get("remainingIncluded").and_then(|v| v.as_i64())
+            {
+                println!("Tokens remaining (included): {remaining}");
             }
-            if let Some(period) = usage.get("period") {
-                if let Some(end) = period.get("end").and_then(|v| v.as_str()) {
-                    println!("Period ends: {end}");
-                }
+            if let Some(period) = usage.get("period")
+                && let Some(end) = period.get("end").and_then(|v| v.as_str())
+            {
+                println!("Period ends: {end}");
             }
         }
         Err(err) => {

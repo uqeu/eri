@@ -61,7 +61,7 @@ pub async fn recall(query: &str, limit: usize) -> Result<()> {
             "/api/v1/memory/recall",
             &RecallBody {
                 query,
-                limit: limit.max(1).min(100),
+                limit: limit.clamp(1, 100),
             },
         )
         .await

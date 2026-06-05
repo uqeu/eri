@@ -759,10 +759,9 @@ async fn consume_turn(
                             if let Some(p) = delta
                                 .and_then(|d| d.get("partial_json"))
                                 .and_then(Value::as_str)
+                                && let Some(Acc::Tool { json, .. }) = blocks.get_mut(&i)
                             {
-                                if let Some(Acc::Tool { json, .. }) = blocks.get_mut(&i) {
-                                    json.push_str(p);
-                                }
+                                json.push_str(p);
                             }
                         }
                         _ => {}

@@ -56,23 +56,23 @@ fn parse(text: &str, fallback_name: &str) -> (String, String, String) {
     let mut name = fallback_name.to_string();
     let mut description = String::new();
     let trimmed = text.trim_start_matches('\u{feff}');
-    if let Some(rest) = trimmed.strip_prefix("---") {
-        if let Some(end) = rest.find("\n---") {
-            let front = &rest[..end];
-            let body_start = end + "\n---".len();
-            let body = rest[body_start..].trim_start_matches('\n').to_string();
-            for line in front.lines() {
-                if let Some(v) = line.strip_prefix("name:") {
-                    let v = v.trim().trim_matches('"').trim_matches('\'');
-                    if !v.is_empty() {
-                        name = v.to_string();
-                    }
-                } else if let Some(v) = line.strip_prefix("description:") {
-                    description = v.trim().trim_matches('"').trim_matches('\'').to_string();
+    if let Some(rest) = trimmed.strip_prefix("---")
+        && let Some(end) = rest.find("\n---")
+    {
+        let front = &rest[..end];
+        let body_start = end + "\n---".len();
+        let body = rest[body_start..].trim_start_matches('\n').to_string();
+        for line in front.lines() {
+            if let Some(v) = line.strip_prefix("name:") {
+                let v = v.trim().trim_matches('"').trim_matches('\'');
+                if !v.is_empty() {
+                    name = v.to_string();
                 }
+            } else if let Some(v) = line.strip_prefix("description:") {
+                description = v.trim().trim_matches('"').trim_matches('\'').to_string();
             }
-            return (name, description, body);
         }
+        return (name, description, body);
     }
     (name, description, text.trim().to_string())
 }

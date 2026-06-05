@@ -229,7 +229,8 @@ pub fn list() -> Result<Vec<SessionMeta>> {
             tokens_out: s.tokens_out,
         });
     }
-    out.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+    // Newest first.
+    out.sort_by_key(|m| std::cmp::Reverse(m.updated_at));
     Ok(out)
 }
 

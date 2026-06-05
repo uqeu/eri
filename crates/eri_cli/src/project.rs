@@ -73,10 +73,10 @@ fn read_capped(path: &Path) -> Option<String> {
 /// read with symlink/size hardening. `None` when neither exists / both empty.
 pub fn context(root: &Path) -> Option<String> {
     let mut parts: Vec<String> = Vec::new();
-    if let Some(g) = global_agents_md() {
-        if let Some(s) = read_capped(&g) {
-            parts.push(s);
-        }
+    if let Some(g) = global_agents_md()
+        && let Some(s) = read_capped(&g)
+    {
+        parts.push(s);
     }
     if let Some(s) = read_capped(&agents_md_path(root)) {
         parts.push(s);
