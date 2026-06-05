@@ -51,6 +51,9 @@ pub async fn run(resume: ResumeMode, model: &str) -> Result<()> {
 
     print_banner(&sess);
 
+    // Per-run undo stack for /rewind. Each entry is a pre-turn workspace snapshot.
+    let mut checkpoints: Vec<crate::checkpoint::Snapshot> = Vec::new();
+
     let stdin = BufReader::new(tokio::io::stdin());
     let mut lines = stdin.lines();
     loop {
@@ -64,12 +67,13 @@ pub async fn run(resume: ResumeMode, model: &str) -> Result<()> {
             continue;
         }
         if line.starts_with('/') {
-            if handle_slash(&line, &mut sess).await? == Flow::Exit {
+            if handle_slash(&line, &mut sess, &mut checkpoints).await? == Flow::Exit {
                 break;
             }
             continue;
         }
         // A normal message -> one agentic turn with retained context.
+        snapshot_before_turn(&mut checkpoints, &sess);
         match build_agent::run_session_turn(&mut sess, &line).await {
             Ok(outcome) => {
                 println!(
@@ -100,8 +104,22 @@ enum Flow {
     Exit,
 }
 
+/// Capture a pre-turn snapshot for /rewind. Notes once if the tree is too big.
+fn snapshot_before_turn(stack: &mut Vec<crate::checkpoint::Snapshot>, sess: &Session) {
+    match crate::checkpoint::capture(&sess.workspace_path()) {
+        Some(snap) => stack.push(snap),
+        None => {
+            println!("[eri] (workspace too large to checkpoint; /rewind unavailable this turn)")
+        }
+    }
+}
+
 /// Handle an in-chat slash command. Returns whether to keep looping.
-async fn handle_slash(line: &str, sess: &mut Session) -> Result<Flow> {
+async fn handle_slash(
+    line: &str,
+    sess: &mut Session,
+    checkpoints: &mut Vec<crate::checkpoint::Snapshot>,
+) -> Result<Flow> {
     let without = line.trim_start_matches('/').trim();
     let (cmd, rest) = match without.split_once(char::is_whitespace) {
         Some((h, t)) => (h, t.trim()),
@@ -114,6 +132,7 @@ async fn handle_slash(line: &str, sess: &mut Session) -> Result<Flow> {
         "cost" | "usage" => print_cost(sess),
         "context" => print_context(sess),
         "compact" => compact(sess).await?,
+        "rewind" | "undo" => rewind(sess, checkpoints),
         "clear" => {
             sess.messages.clear();
             println!("[eri] context cleared -- the next message starts fresh (session kept)");
@@ -133,6 +152,7 @@ async fn handle_slash(line: &str, sess: &mut Session) -> Result<Flow> {
             // Fall back to a custom command from .eri/commands/<other>.md.
             if let Some(cmd) = crate::commands::find(&sess.workspace_path(), other) {
                 let prompt = crate::commands::expand(&cmd.body, rest);
+                snapshot_before_turn(checkpoints, sess);
                 match build_agent::run_session_turn(sess, &prompt).await {
                     Ok(o) => println!(
                         "\n[eri] /{other} done -- {} file(s), {} in / {} out tokens",
@@ -149,6 +169,18 @@ async fn handle_slash(line: &str, sess: &mut Session) -> Result<Flow> {
         }
     }
     Ok(Flow::Continue)
+}
+
+fn rewind(sess: &Session, checkpoints: &mut Vec<crate::checkpoint::Snapshot>) {
+    match checkpoints.pop() {
+        Some(snap) => match crate::checkpoint::restore(&sess.workspace_path(), &snap) {
+            Ok(n) => println!(
+                "[eri] rewound the last turn -- restored {n} file(s) to their previous state."
+            ),
+            Err(e) => eprintln!("[eri] rewind failed: {e}"),
+        },
+        None => println!("[eri] nothing to rewind."),
+    }
 }
 
 fn run_git(workspace: &std::path::Path, args: &[&str]) -> Option<String> {
@@ -301,6 +333,7 @@ fn print_chat_help() {
     println!("  /status            account, session, git, AGENTS.md");
     println!("  /diff [ref]        git diff --stat of the workspace");
     println!("  /compact           summarize history to shrink context");
+    println!("  /rewind            undo the last turn's file changes");
     println!("  /clear             forget the conversation (keep the session)");
     println!("  /init              scaffold AGENTS.md for this project");
     println!("  /commands          list custom .eri/commands/*.md commands");
