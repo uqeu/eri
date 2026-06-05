@@ -84,6 +84,10 @@ pub struct Cli {
     /// files (write tools are refused).
     #[arg(long)]
     pub plan: bool,
+    /// Allow the agent to run shell commands (bash tool). OFF by default --
+    /// shell is privileged and NOT sandboxed, so opt in explicitly.
+    #[arg(long)]
+    pub allow_shell: bool,
     #[command(subcommand)]
     pub command: Option<Command>,
 }
@@ -386,6 +390,7 @@ fn main() -> ExitCode {
             cli.max_turns,
             model_for_mode(resolve_mode(cli.mode, &cwd())),
             cli.plan,
+            cli.allow_shell,
         )) {
             Ok(code) => ExitCode::from(code),
             Err(error) => {
@@ -615,6 +620,7 @@ async fn run_headless(
     max_turns: Option<usize>,
     model: &str,
     plan: bool,
+    allow_shell: bool,
 ) -> anyhow::Result<u8> {
     // Prompt comes from the flag value, or stdin when `-p` is passed bare.
     let prompt = if prompt.trim().is_empty() {
@@ -633,6 +639,7 @@ async fn run_headless(
     let mut opts = build_agent::LoopOpts {
         narrate: format == OutputFormat::Text,
         allow_writes: !plan,
+        allow_shell,
         ..Default::default()
     };
     // --max-turns flag wins; else .eri/config.toml; else built-in default.

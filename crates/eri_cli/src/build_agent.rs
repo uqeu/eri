@@ -69,6 +69,13 @@ pub struct LoopOpts {
     /// the agent can read/list but write_file / str_replace are refused, so it
     /// plans without touching disk.
     pub allow_writes: bool,
+    /// Whether the `bash` shell tool is available. OFF by default -- shell is a
+    /// privileged, NON-sandboxed capability (a prompt-injected file or AGENTS.md
+    /// could steer it to exfiltrate secrets or touch files outside the
+    /// workspace), so it must be explicitly opted into (`--allow-shell`), the
+    /// same way Claude Code's Bash requires permission. When off, `bash` is not
+    /// even advertised to the model.
+    pub allow_shell: bool,
 }
 
 impl Default for LoopOpts {
@@ -77,6 +84,7 @@ impl Default for LoopOpts {
             max_turns: MAX_TURNS,
             narrate: true,
             allow_writes: true,
+            allow_shell: false,
         }
     }
 }
@@ -227,7 +235,7 @@ async fn drive_loop(
     messages: &mut Vec<Value>,
     opts: &LoopOpts,
 ) -> Result<BuildOutcome> {
-    let tools = tool_specs();
+    let tools = tool_specs(opts.allow_shell);
     let system = build_system(root);
     let mut files_written: Vec<PathBuf> = Vec::new();
     let mut tokens_in: u64 = 0;
@@ -317,10 +325,24 @@ async fn drive_loop(
                 }));
                 continue;
             }
+            // Shell is privileged + non-sandboxed: refuse unless explicitly
+            // enabled, even if the model hallucinates the tool name.
+            if tu.name == "bash" && !opts.allow_shell {
+                results.push(json!({
+                    "type": "tool_result",
+                    "tool_use_id": tu.id,
+                    "content": "the bash tool is disabled. Re-run with --allow-shell to enable shell access.",
+                    "is_error": true,
+                }));
+                continue;
+            }
             // Plan mode: refuse file-modifying + shell tools so the agent plans
             // without side effects. Read-only tools (list_dir/read_file) run.
             if !opts.allow_writes
-                && matches!(tu.name.as_str(), "write_file" | "str_replace" | "bash")
+                && matches!(
+                    tu.name.as_str(),
+                    "write_file" | "str_replace" | "apply_patch" | "bash"
+                )
             {
                 results.push(json!({
                     "type": "tool_result",
@@ -331,9 +353,9 @@ async fn drive_loop(
                 continue;
             }
             let exec = execute_tool(&root, &tu.name, &tu.input).await;
-            if let Some(p) = exec.written {
-                if !files_written.contains(&p) {
-                    files_written.push(p);
+            for p in &exec.written {
+                if !files_written.contains(p) {
+                    files_written.push(p.clone());
                 }
             }
             results.push(json!({
@@ -553,7 +575,9 @@ async fn consume_turn(
 struct ToolExec {
     content: String,
     is_error: bool,
-    written: Option<PathBuf>,
+    /// Files this tool created/modified (for the build's files_written list).
+    /// Multiple for apply_patch; one for write_file/str_replace; none otherwise.
+    written: Vec<PathBuf>,
 }
 
 async fn execute_tool(root: &Path, name: &str, input: &Value) -> ToolExec {
@@ -584,7 +608,7 @@ async fn execute_tool(root: &Path, name: &str, input: &Value) -> ToolExec {
                         ToolExec {
                             content: body,
                             is_error: false,
-                            written: None,
+                            written: Vec::new(),
                         }
                     }
                     Err(e) => err(format!("list_dir {rel}: {e}")),
@@ -599,7 +623,7 @@ async fn execute_tool(root: &Path, name: &str, input: &Value) -> ToolExec {
                     Ok(s) => ToolExec {
                         content: truncate_bytes(&s, MAX_TOOL_BYTES),
                         is_error: false,
-                        written: None,
+                        written: Vec::new(),
                     },
                     Err(e) => err(format!("read_file {rel}: {e}")),
                 },
@@ -624,7 +648,7 @@ async fn execute_tool(root: &Path, name: &str, input: &Value) -> ToolExec {
                         Ok(()) => ToolExec {
                             content: format!("wrote {} bytes to {rel}", body.len()),
                             is_error: false,
-                            written: Some(p),
+                            written: vec![p],
                         },
                         Err(e) => err(format!("write_file {rel}: {e}")),
                     }
@@ -661,7 +685,7 @@ async fn execute_tool(root: &Path, name: &str, input: &Value) -> ToolExec {
                                 Ok(()) => ToolExec {
                                     content: format!("replaced 1 occurrence in {rel}"),
                                     is_error: false,
-                                    written: Some(p),
+                                    written: vec![p],
                                 },
                                 Err(e) => err(format!("str_replace {rel}: {e}")),
                             }
@@ -672,20 +696,82 @@ async fn execute_tool(root: &Path, name: &str, input: &Value) -> ToolExec {
                 Err(e) => err(e),
             }
         }
+        "apply_patch" => apply_patch(root, input),
         other => err(format!("unknown tool: {other}")),
     }
 }
 
-/// Run a shell command in the workspace. cwd is jailed to `root`; stdin is
-/// closed; output is timeout- and size-bounded. This single tool gives the
-/// agent grep/find/git/test-runners/build for free -- the Codex/Claude `shell`
-/// surface. Gated by permission mode in `drive_loop` (blocked in plan mode).
+/// Apply one or more aider-style SEARCH/REPLACE blocks across files in a single
+/// call (multi-file, per-file atomic). Reuses `eri_apply`, which enforces its
+/// own workspace root-jail and atomicity.
+fn apply_patch(root: &Path, input: &Value) -> ToolExec {
+    let patch = input.get("patch").and_then(Value::as_str).unwrap_or("");
+    if patch.trim().is_empty() {
+        return err("apply_patch: patch is empty".to_string());
+    }
+    let edits = eri_apply::parse(patch);
+    if edits.is_empty() {
+        return err(
+            "apply_patch: no SEARCH/REPLACE blocks parsed. Each block is: \
+`<<<<<<< SEARCH <path>` (the file path on the SEARCH line) / the exact existing text / \
+`=======` / the replacement / `>>>>>>> REPLACE`."
+                .to_string(),
+        );
+    }
+    let report = eri_apply::apply(&edits, root);
+    let written: Vec<PathBuf> = report.applied.iter().map(|a| root.join(&a.path)).collect();
+    let files: std::collections::BTreeSet<_> = report.applied.iter().map(|a| &a.path).collect();
+    let mut msg = format!(
+        "applied {} edit(s) across {} file(s)",
+        report.applied.len(),
+        files.len()
+    );
+    let is_error = !report.failed.is_empty();
+    if is_error {
+        msg.push_str("\nfailures (fix and retry just these):");
+        for f in &report.failed {
+            msg.push_str(&format!("\n  {}: {:?}", f.path.display(), f.reason));
+        }
+    }
+    ToolExec {
+        content: msg,
+        is_error,
+        written,
+    }
+}
+
+/// Returns true if an env var name looks like a secret we should not hand to a
+/// model-authored shell command (it could `env`/`printenv` and exfiltrate it).
+fn is_secret_env(name: &str) -> bool {
+    let n = name.to_ascii_uppercase();
+    n.contains("KEY")
+        || n.contains("TOKEN")
+        || n.contains("SECRET")
+        || n.contains("PASSWORD")
+        || n.contains("CREDENTIAL")
+        || n.contains("SESSION")
+        || n.starts_with("AWS_")
+        || n.starts_with("GH_")
+        || n.starts_with("GITHUB_")
+        || n.starts_with("ANTHROPIC_")
+        || n.starts_with("OPENAI_")
+        || n.starts_with("ERI_")
+        || n.starts_with("STRIPE_")
+        || n.starts_with("SUPABASE_")
+}
+
+/// Run a shell command set by the model. SECURITY: this is NOT sandboxed -- the
+/// command can `cd` anywhere and reach the network; cwd is a convenience, not a
+/// boundary. It is OFF by default (`allow_shell`) and gated in `drive_loop`.
+/// Hardening here: stdin closed, output timeout- + size-bounded, the child is
+/// killed (and reaped) on timeout, and secret-looking env vars are stripped so
+/// a `printenv`-style command can't leak eri's bearer or cloud credentials.
 async fn run_bash(root: &Path, input: &Value) -> ToolExec {
     let command = input.get("command").and_then(Value::as_str).unwrap_or("");
     if command.trim().is_empty() {
         return err("bash: command is empty".to_string());
     }
-    // Default 2 min, hard ceiling 10 min (Claude Code parity).
+    // Default 2 min, hard ceiling 10 min.
     let timeout_ms = input
         .get("timeout_ms")
         .and_then(Value::as_u64)
@@ -696,7 +782,16 @@ async fn run_bash(root: &Path, input: &Value) -> ToolExec {
     cmd.arg("-c")
         .arg(command)
         .current_dir(root)
-        .stdin(std::process::Stdio::null());
+        .stdin(std::process::Stdio::null())
+        // Kill the child if the future is dropped (e.g. on timeout) so a hung
+        // command doesn't linger.
+        .kill_on_drop(true);
+    // Strip secret-looking env vars before handing the shell to the model.
+    for (name, _) in std::env::vars() {
+        if is_secret_env(&name) {
+            cmd.env_remove(&name);
+        }
+    }
 
     match tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), cmd.output()).await {
         Err(_) => err(format!("bash: timed out after {timeout_ms} ms")),
@@ -725,7 +820,7 @@ async fn run_bash(root: &Path, input: &Value) -> ToolExec {
             ToolExec {
                 content: truncate_bytes(&s, MAX_TOOL_BYTES),
                 is_error: code != 0,
-                written: None,
+                written: Vec::new(),
             }
         }
     }
@@ -735,7 +830,7 @@ fn err(msg: String) -> ToolExec {
     ToolExec {
         content: msg,
         is_error: true,
-        written: None,
+        written: Vec::new(),
     }
 }
 
@@ -867,7 +962,11 @@ mod bash_tests {
     #[tokio::test]
     async fn bash_times_out() {
         let dir = tempfile::TempDir::new().unwrap();
-        let exec = run_bash(dir.path(), &json!({ "command": "sleep 5", "timeout_ms": 1000 })).await;
+        let exec = run_bash(
+            dir.path(),
+            &json!({ "command": "sleep 5", "timeout_ms": 1000 }),
+        )
+        .await;
         assert!(exec.is_error);
         assert!(exec.content.contains("timed out"));
     }
@@ -878,24 +977,60 @@ mod bash_tests {
         let exec = run_bash(dir.path(), &json!({ "command": "   " })).await;
         assert!(exec.is_error);
     }
+
+    #[test]
+    fn is_secret_env_flags_credentials() {
+        assert!(is_secret_env("ANTHROPIC_API_KEY"));
+        assert!(is_secret_env("ERI_API_KEY"));
+        assert!(is_secret_env("AWS_SECRET_ACCESS_KEY"));
+        assert!(is_secret_env("GH_TOKEN"));
+        assert!(!is_secret_env("PATH"));
+        assert!(!is_secret_env("HOME"));
+    }
+
+    #[test]
+    fn apply_patch_applies_search_replace() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(dir.path().join("a.txt"), "hello world").unwrap();
+        let patch = "<<<<<<< SEARCH a.txt\nhello world\n=======\ngoodbye world\n>>>>>>> REPLACE\n";
+        let exec = apply_patch(dir.path(), &json!({ "patch": patch }));
+        assert!(!exec.is_error, "exec said: {}", exec.content);
+        assert_eq!(exec.written.len(), 1);
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("a.txt")).unwrap(),
+            "goodbye world"
+        );
+    }
+
+    #[test]
+    fn apply_patch_empty_errors() {
+        let dir = tempfile::TempDir::new().unwrap();
+        assert!(apply_patch(dir.path(), &json!({ "patch": "" })).is_error);
+        assert!(apply_patch(dir.path(), &json!({ "patch": "no blocks here" })).is_error);
+    }
 }
 
 /// The local tool set, path-jailed to the workspace. Minimal-but-sufficient v1
 /// (the set Claude Code / aider / Cline converge on for file building).
-fn tool_specs() -> Value {
-    json!([
-        {
-            "name": "bash",
-            "description": "Run a shell command in the workspace (sh -c). Use for search (grep/rg/find), git, running tests/builds/linters, and any task a terminal does. cwd is the workspace; stdin is closed. Output is truncated if very large. Disabled in plan mode.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "command": { "type": "string", "description": "The shell command to run." },
-                    "timeout_ms": { "type": "integer", "description": "Optional timeout in ms (default 120000, max 600000)." }
-                },
-                "required": ["command"]
-            }
-        },
+fn bash_spec() -> Value {
+    json!({
+        "name": "bash",
+        "description": "Run a shell command in the workspace (sh -c). Use for search (grep/rg/find), git, running tests/builds/linters, and any task a terminal does. cwd is the workspace; stdin is closed; output is truncated if very large.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "command": { "type": "string", "description": "The shell command to run." },
+                "timeout_ms": { "type": "integer", "description": "Optional timeout in ms (default 120000, max 600000)." }
+            },
+            "required": ["command"]
+        }
+    })
+}
+
+/// The local tool set. `bash` is only advertised when shell is explicitly
+/// enabled (`allow_shell`) -- it is a privileged, non-sandboxed capability.
+fn tool_specs(allow_shell: bool) -> Value {
+    let mut tools = json!([
         {
             "name": "list_dir",
             "description": "List files and subdirectories at a workspace-relative path. Use to explore before reading or writing. Defaults to the workspace root.",
@@ -943,11 +1078,28 @@ fn tool_specs() -> Value {
             }
         },
         {
+            "name": "apply_patch",
+            "description": "Apply one or more search/replace edits across files in ONE call (multi-file, each file atomic). Prefer this over many str_replace calls. The patch is a sequence of blocks; each block puts the file path on the SEARCH line:\n<<<<<<< SEARCH path/to/file\n<exact existing text>\n=======\n<replacement text>\n>>>>>>> REPLACE",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "patch": { "type": "string", "description": "Path + SEARCH/REPLACE blocks." }
+                },
+                "required": ["patch"]
+            }
+        },
+        {
             "name": "done",
             "description": "Call when the build is complete and all files are written. Ends the session.",
             "input_schema": { "type": "object", "properties": {} }
         }
-    ])
+    ]);
+    if allow_shell {
+        if let Some(arr) = tools.as_array_mut() {
+            arr.insert(0, bash_spec());
+        }
+    }
+    tools
 }
 
 /// Assemble the system blocks for a request: the constant builder persona

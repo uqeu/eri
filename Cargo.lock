@@ -735,6 +735,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "eri_apply",
  "eri_core",
  "eri_inference",
  "reqwest",

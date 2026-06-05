@@ -16,6 +16,7 @@ path = "src/eri_cli.rs"
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
+eri_apply = { path = "../eri_apply" }
 eri_core.workspace = true
 eri_inference.workspace = true
 reqwest = { workspace = true, features = ["json", "stream"] }
