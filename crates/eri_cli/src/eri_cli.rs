@@ -267,6 +267,16 @@ pub enum Command {
     },
     /// List saved chat sessions, newest first.
     Sessions,
+    /// Summarize where a session left off (defaults to the most recent).
+    Recap {
+        /// Session id or unambiguous prefix; omit for the latest session.
+        id: Option<String>,
+    },
+    /// Branch a session into a new one that starts from its full history.
+    Fork {
+        /// Session id or unambiguous prefix to fork.
+        id: String,
+    },
     /// List every template slug eri can scaffold from.
     ListTemplates,
     /// Drop a template's HTML into ./index.html with no network call.
@@ -593,6 +603,28 @@ async fn dispatch(cli: Cli) -> anyhow::Result<()> {
             chat::run(resume_mode, model_for_mode(m), opts).await
         }
         Command::Sessions => chat::list_sessions(),
+        Command::Recap { id } => {
+            let sess = match id {
+                Some(id) => session::resolve(&id)?,
+                None => session::latest()?.ok_or_else(|| {
+                    anyhow::anyhow!("no sessions yet -- start one with `eri chat`")
+                })?,
+            };
+            println!("{}", sess.recap());
+            Ok(())
+        }
+        Command::Fork { id } => {
+            let parent = session::resolve(&id)?;
+            let branch = parent.fork();
+            branch.save()?;
+            println!(
+                "[eri] forked {} -> {}. Continue it with `eri chat --resume {}`.",
+                parent.id.chars().take(8).collect::<String>(),
+                branch.id.chars().take(8).collect::<String>(),
+                branch.id
+            );
+            Ok(())
+        }
         Command::ListTemplates => {
             print_templates();
             Ok(())
@@ -747,6 +779,8 @@ pub fn run(command: Command) -> Result<(), CliError> {
         }
         | Command::Chat { .. }
         | Command::Sessions
+        | Command::Recap { .. }
+        | Command::Fork { .. }
         | Command::Deploy { .. }
         | Command::Ask { .. }
         | Command::Plan { .. }
@@ -1524,6 +1558,24 @@ mod tests {
                 "{shell} script should mention subcommands"
             );
         }
+    }
+
+    #[test]
+    fn parses_recap_and_fork() {
+        assert_eq!(
+            parsed_command(["eri", "recap"]),
+            Command::Recap { id: None }
+        );
+        assert_eq!(
+            parsed_command(["eri", "recap", "s_abc"]),
+            Command::Recap {
+                id: Some("s_abc".into())
+            }
+        );
+        assert_eq!(
+            parsed_command(["eri", "fork", "s_abc"]),
+            Command::Fork { id: "s_abc".into() }
+        );
     }
 
     #[test]
