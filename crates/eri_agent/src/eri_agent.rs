@@ -43,6 +43,7 @@
 //! ```
 
 pub mod compaction;
+pub mod driver;
 pub mod permission;
 pub mod request;
 pub mod stream;
