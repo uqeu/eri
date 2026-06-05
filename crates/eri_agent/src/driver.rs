@@ -229,7 +229,10 @@ mod tests {
             json!({ "type": "object" })
         }
         async fn call(&self, input: &Value) -> ToolOutcome {
-            ToolOutcome::ok(format!("wrote {}", input.get("path").and_then(Value::as_str).unwrap_or("?")))
+            ToolOutcome::ok(format!(
+                "wrote {}",
+                input.get("path").and_then(Value::as_str).unwrap_or("?")
+            ))
         }
     }
 
@@ -238,7 +241,10 @@ mod tests {
         // Turn 1: model calls write_file. Turn 2: model ends.
         let transport = MockTransport {
             queue: Mutex::new(vec![
-                sse_turn("let me write it", Some(("t1", "write_file", json!({ "path": "a.txt" })))),
+                sse_turn(
+                    "let me write it",
+                    Some(("t1", "write_file", json!({ "path": "a.txt" }))),
+                ),
                 sse_turn("all done", None),
             ]),
             opens: Mutex::new(0),
@@ -282,7 +288,15 @@ mod tests {
         };
         let tools = ToolBox::new(); // empty
         let mut messages = vec![json!({ "role": "user", "content": "go" })];
-        let result = run(&transport, &tools, &[], &mut messages, &LoopConfig::default(), |_| {}).await;
+        let result = run(
+            &transport,
+            &tools,
+            &[],
+            &mut messages,
+            &LoopConfig::default(),
+            |_| {},
+        )
+        .await;
         assert_eq!(result.stop, Stop::Done);
         let tr = &messages[2]["content"][0];
         assert_eq!(tr["is_error"], true);
@@ -300,7 +314,15 @@ mod tests {
         }
         let tools = ToolBox::new();
         let mut messages = vec![json!({ "role": "user", "content": "go" })];
-        let result = run(&Failing, &tools, &[], &mut messages, &LoopConfig::default(), |_| {}).await;
+        let result = run(
+            &Failing,
+            &tools,
+            &[],
+            &mut messages,
+            &LoopConfig::default(),
+            |_| {},
+        )
+        .await;
         assert_eq!(result.stop, Stop::Transport("at capacity".to_string()));
         assert_eq!(result.turns, 0);
     }

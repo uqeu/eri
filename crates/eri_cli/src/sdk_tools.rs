@@ -231,7 +231,14 @@ mod tests {
     async fn sdk_driver_runs_real_eri_tools_writing_a_real_file() {
         let ws = TempDir::new().unwrap();
         let transport = MockTransport(Mutex::new(vec![
-            sse("writing", Some(("t1", "write_file", json!({ "path": "out/a.txt", "content": "hi from eri" })))),
+            sse(
+                "writing",
+                Some((
+                    "t1",
+                    "write_file",
+                    json!({ "path": "out/a.txt", "content": "hi from eri" }),
+                )),
+            ),
             sse("done", None),
         ]));
         let tools = filesystem_toolbox(ws.path());
@@ -262,7 +269,10 @@ mod tests {
         let ws = TempDir::new().unwrap();
         let tools = filesystem_toolbox(ws.path());
         let out = tools
-            .dispatch("write_file", &json!({ "path": "../evil.txt", "content": "x" }))
+            .dispatch(
+                "write_file",
+                &json!({ "path": "../evil.txt", "content": "x" }),
+            )
             .await
             .unwrap();
         assert!(out.is_error);

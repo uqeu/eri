@@ -27,7 +27,10 @@ impl PermissionMode {
 
     /// Is the privileged, non-sandboxed `bash` tool available?
     pub fn allows_shell(self) -> bool {
-        matches!(self, PermissionMode::WorkspaceWrite | PermissionMode::Bypass)
+        matches!(
+            self,
+            PermissionMode::WorkspaceWrite | PermissionMode::Bypass
+        )
     }
 
     /// Derive a mode from the legacy `--plan` / `--allow-shell` flags so both

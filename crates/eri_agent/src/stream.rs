@@ -37,7 +37,11 @@ pub struct Turn {
 /// A per-index streaming block accumulator.
 enum Acc {
     Text(String),
-    Tool { id: String, name: String, json: String },
+    Tool {
+        id: String,
+        name: String,
+        json: String,
+    },
 }
 
 /// Accumulates SSE events into a [`Turn`]. Feed each parsed event to

@@ -212,7 +212,7 @@ fn clamp01(v: f64) -> f64 {
     if v.is_nan() {
         0.0
     } else {
-        v.max(0.0).min(1.0)
+        v.clamp(0.0, 1.0)
     }
 }
 

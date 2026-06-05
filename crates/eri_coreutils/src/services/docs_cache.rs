@@ -76,7 +76,7 @@ pub async fn lookup(
         }
     }
     let source = if matches.is_empty() { "miss" } else { "cache" };
-    matches.truncate(p.limit.max(1).min(20));
+    matches.truncate(p.limit.clamp(1, 20));
     serde_json::to_value(LookupReport {
         hits: matches,
         source: source.to_string(),

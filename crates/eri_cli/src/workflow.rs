@@ -79,7 +79,12 @@ fn global_dir() -> Option<PathBuf> {
     let home = std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
         .ok()?;
-    Some(PathBuf::from(home).join(".config").join("eri").join("workflows"))
+    Some(
+        PathBuf::from(home)
+            .join(".config")
+            .join("eri")
+            .join("workflows"),
+    )
 }
 
 /// Names of available workflows (project shadows global), sorted.
@@ -111,8 +116,8 @@ pub fn load(workspace: &Path, name: &str) -> Result<WorkflowSpec> {
     ];
     for path in candidates.into_iter().flatten() {
         if path.is_file() {
-            let body =
-                std::fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
+            let body = std::fs::read_to_string(&path)
+                .with_context(|| format!("read {}", path.display()))?;
             return parse(&body);
         }
     }
@@ -153,12 +158,7 @@ pub async fn run(workspace: &Path, name: &str, model: &str) -> Result<()> {
     let mut outputs: HashMap<String, String> = HashMap::new();
     for (i, step) in spec.steps.iter().enumerate() {
         let prompt = substitute(&step.prompt, &outputs);
-        println!(
-            "\n[eri] step {}/{}: {}",
-            i + 1,
-            spec.steps.len(),
-            step.name
-        );
+        println!("\n[eri] step {}/{}: {}", i + 1, spec.steps.len(), step.name);
         let outcome = crate::build_agent::run_build_agent(&prompt, workspace, model).await?;
         if let Some(halt) = &outcome.halted {
             println!("[eri] workflow halted at step '{}': {halt}", step.name);
@@ -166,7 +166,10 @@ pub async fn run(workspace: &Path, name: &str, model: &str) -> Result<()> {
         }
         outputs.insert(step.name.trim().to_string(), outcome.final_text);
     }
-    println!("\n[eri] workflow '{name}' complete ({} steps).", spec.steps.len());
+    println!(
+        "\n[eri] workflow '{name}' complete ({} steps).",
+        spec.steps.len()
+    );
     Ok(())
 }
 

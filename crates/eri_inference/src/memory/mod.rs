@@ -141,9 +141,9 @@ impl MemoryStore {
     /// `None` opens the anon path directly with no migration.
     pub fn open_for(user_id: Option<&str>) -> io::Result<Self> {
         let path = memory_path_for(user_id)?;
-        if user_id.is_some() && !path.exists() {
-            if let Ok(anon) = memory_path_for(None) {
-                if anon.exists() {
+        if user_id.is_some() && !path.exists()
+            && let Ok(anon) = memory_path_for(None)
+                && anon.exists() {
                     if let Some(parent) = path.parent() {
                         fs::create_dir_all(parent)?;
                     }
@@ -152,8 +152,6 @@ impl MemoryStore {
                     // store at the per-user path; the anon file stays put.
                     let _ = fs::rename(&anon, &path);
                 }
-            }
-        }
         Self::open_at(path)
     }
 
@@ -279,7 +277,7 @@ impl MemoryStore {
                 o.body.to_lowercase().contains(&needle) || o.kind.to_lowercase().contains(&needle)
             })
             .collect();
-        hits.sort_by(|a, b| b.ts_ms.cmp(&a.ts_ms));
+        hits.sort_by_key(|h| std::cmp::Reverse(h.ts_ms));
         hits.into_iter().take(limit).cloned().collect()
     }
 
@@ -293,7 +291,7 @@ impl MemoryStore {
             .iter()
             .filter(|o| o.workspace_hash == hash || o.kind == "fact")
             .collect();
-        hits.sort_by(|a, b| b.ts_ms.cmp(&a.ts_ms));
+        hits.sort_by_key(|h| std::cmp::Reverse(h.ts_ms));
         hits.into_iter().take(limit).cloned().collect()
     }
 }

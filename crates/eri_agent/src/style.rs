@@ -77,7 +77,10 @@ mod tests {
             assert!(seen.insert(d), "directives must be distinct");
             let low = d.to_lowercase();
             for banned in ["claude", "anthropic", "sonnet", "haiku", "mercury"] {
-                assert!(!low.contains(banned), "directive leaked vendor name: {banned}");
+                assert!(
+                    !low.contains(banned),
+                    "directive leaked vendor name: {banned}"
+                );
             }
         }
     }

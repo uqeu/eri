@@ -1,0 +1,63 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust:
+    name: rust workspace (test + lint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: format (eri_agent + eri_cli)
+        run: cargo fmt -p eri_agent -p eri_cli --check
+      - name: clippy (the clean crates, warnings = errors; --no-deps so only our code is gated)
+        run: cargo clippy -p eri_agent -p eri_cli --no-deps -- -D warnings
+      - name: test (full workspace)
+        run: cargo test --workspace
+
+  python-binding:
+    name: python binding (build + test)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: install maturin
+        run: pip install maturin
+      - name: build + install the wheel
+        working-directory: crates/eri_agent_py
+        run: maturin build --release --out dist && pip install dist/*.whl
+      - name: test against the installed wheel
+        working-directory: crates/eri_agent_py
+        run: python tests/test_bindings.py
+
+  node-binding:
+    name: node binding (build + test)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: build the native addon
+        working-directory: crates/eri_agent_node
+        run: |
+          npm install
+          npm run build
+      - name: test the package entry
+        working-directory: crates/eri_agent_node
+        run: node tests/test_bindings.mjs

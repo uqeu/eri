@@ -1,0 +1,104 @@
+name: release-sdk
+
+# Publish the eri_agent SDK bindings when a release tag is pushed:
+#   git tag sdk-v0.1.0 && git push origin sdk-v0.1.0
+#
+# Requires repo secrets (Settings -> Secrets and variables -> Actions):
+#   PYPI_API_TOKEN   -- a PyPI API token (publishes the wheels/sdist)
+#   NPM_TOKEN        -- an npm automation token (publishes the npm package)
+# Without those secrets the publish steps are skipped, so the build still
+# validates on every tag.
+
+on:
+  push:
+    tags:
+      - "sdk-v*"
+
+permissions:
+  contents: read
+
+jobs:
+  python-wheels:
+    name: build python wheels (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: build wheels (maturin)
+        uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          args: --release --out dist --manifest-path crates/eri_agent_py/Cargo.toml
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.os }}
+          path: dist/*.whl
+
+  python-sdist:
+    name: build python sdist
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          args: --out dist --manifest-path crates/eri_agent_py/Cargo.toml
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: dist/*.tar.gz
+
+  publish-pypi:
+    name: publish to PyPI
+    needs: [python-wheels, python-sdist]
+    runs-on: ubuntu-latest
+    if: ${{ github.repository_owner != '' }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: publish (skipped if no token)
+        env:
+          MATURIN_PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+        run: |
+          if [ -z "$MATURIN_PYPI_TOKEN" ]; then
+            echo "PYPI_API_TOKEN not set -- skipping publish (artifacts are built + uploaded)."
+            exit 0
+          fi
+          pip install maturin
+          maturin upload --skip-existing dist/*
+
+  node-publish:
+    name: build + publish npm package (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+      - name: build native addon
+        working-directory: crates/eri_agent_node
+        run: |
+          npm install
+          npm run build
+      - name: publish (skipped if no token; only the linux runner publishes)
+        if: ${{ matrix.os == 'ubuntu-latest' }}
+        working-directory: crates/eri_agent_node
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "NPM_TOKEN not set -- skipping publish (package is built)."
+            exit 0
+          fi
+          npm publish --access restricted

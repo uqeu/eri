@@ -364,7 +364,7 @@ pub fn builtin_catalog() -> Vec<ThemeSpec> {
         ),
     ]
     .into_iter()
-    .chain(extended_catalog().into_iter())
+    .chain(extended_catalog())
     .collect()
 }
 
@@ -374,6 +374,7 @@ pub fn builtin_catalog() -> Vec<ThemeSpec> {
 /// catalog can be authored at full verbosity while the long tail uses
 /// the compact `extended` helper.
 fn extended_catalog() -> Vec<ThemeSpec> {
+    #[allow(clippy::too_many_arguments)]
     fn ex(
         slug: &str,
         family: &str,
