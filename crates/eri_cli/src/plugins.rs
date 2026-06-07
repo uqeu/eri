@@ -199,47 +199,75 @@ mod tests {
         fs::write(path, body).unwrap();
     }
 
+    /// Run `f` with HOME pointed at an empty temp dir so `global_plugins_dir()`
+    /// resolves to nothing. Without this, `discover` picks up the developer's
+    /// real `~/.config/eri/plugins`, making these assertions environment
+    /// -dependent. Serialized on the shared env lock (HOME is process-global).
+    fn with_empty_global_home<F: FnOnce()>(f: F) {
+        let _g = crate::config::ENV_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = TempDir::new().unwrap();
+        let prev = std::env::var("HOME").ok();
+        unsafe {
+            std::env::set_var("HOME", home.path());
+        }
+        f();
+        unsafe {
+            match prev.as_deref() {
+                Some(v) => std::env::set_var("HOME", v),
+                None => std::env::remove_var("HOME"),
+            }
+        }
+    }
+
     #[test]
     fn discovers_plugin_parts_and_dirs() {
-        let ws = TempDir::new().unwrap();
-        let base = ws.path().join(".eri/plugins/acme");
-        write(&base.join("commands/deploy.md"), "Deploy $ARGUMENTS");
-        write(
-            &base.join("skills/lint/SKILL.md"),
-            "---\nname: lint\n---\nlint it",
-        );
-        write(&base.join("hooks.json"), "{}");
-        write(&base.join("plugin.toml"), "description = \"Acme pack\"\n");
+        with_empty_global_home(|| {
+            let ws = TempDir::new().unwrap();
+            let base = ws.path().join(".eri/plugins/acme");
+            write(&base.join("commands/deploy.md"), "Deploy $ARGUMENTS");
+            write(
+                &base.join("skills/lint/SKILL.md"),
+                "---\nname: lint\n---\nlint it",
+            );
+            write(&base.join("hooks.json"), "{}");
+            write(&base.join("plugin.toml"), "description = \"Acme pack\"\n");
 
-        let found = discover(ws.path());
-        assert_eq!(found.len(), 1);
-        let p = &found[0];
-        assert_eq!(p.name, "acme");
-        assert_eq!(p.scope, "project");
-        assert_eq!(p.description.as_deref(), Some("Acme pack"));
-        assert!(p.has_commands && p.has_skills && p.has_hooks);
-        assert!(!p.has_mcp);
-        assert_eq!(p.parts(), "commands, skills, hooks");
+            let found = discover(ws.path());
+            assert_eq!(found.len(), 1);
+            let p = &found[0];
+            assert_eq!(p.name, "acme");
+            assert_eq!(p.scope, "project");
+            assert_eq!(p.description.as_deref(), Some("Acme pack"));
+            assert!(p.has_commands && p.has_skills && p.has_hooks);
+            assert!(!p.has_mcp);
+            assert_eq!(p.parts(), "commands, skills, hooks");
 
-        // The per-kind dir helpers point at the right subdirs.
-        assert_eq!(command_dirs(ws.path()), vec![base.join("commands")]);
-        assert_eq!(skill_dirs(ws.path()), vec![base.join("skills")]);
+            // The per-kind dir helpers point at the right subdirs.
+            assert_eq!(command_dirs(ws.path()), vec![base.join("commands")]);
+            assert_eq!(skill_dirs(ws.path()), vec![base.join("skills")]);
+        });
     }
 
     #[test]
     fn empty_when_no_plugins_dir() {
-        let ws = TempDir::new().unwrap();
-        assert!(discover(ws.path()).is_empty());
-        assert!(command_dirs(ws.path()).is_empty());
+        with_empty_global_home(|| {
+            let ws = TempDir::new().unwrap();
+            assert!(discover(ws.path()).is_empty());
+            assert!(command_dirs(ws.path()).is_empty());
+        });
     }
 
     #[test]
     fn ignores_files_and_dotdirs() {
-        let ws = TempDir::new().unwrap();
-        let plugins = ws.path().join(".eri/plugins");
-        fs::create_dir_all(&plugins).unwrap();
-        fs::write(plugins.join("not-a-plugin.txt"), "x").unwrap();
-        fs::create_dir_all(plugins.join(".hidden")).unwrap();
-        assert!(discover(ws.path()).is_empty());
+        with_empty_global_home(|| {
+            let ws = TempDir::new().unwrap();
+            let plugins = ws.path().join(".eri/plugins");
+            fs::create_dir_all(&plugins).unwrap();
+            fs::write(plugins.join("not-a-plugin.txt"), "x").unwrap();
+            fs::create_dir_all(plugins.join(".hidden")).unwrap();
+            assert!(discover(ws.path()).is_empty());
+        });
     }
 }

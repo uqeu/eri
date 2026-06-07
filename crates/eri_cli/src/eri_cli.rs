@@ -32,6 +32,7 @@ mod admin;
 mod agent;
 mod agent_cmd;
 mod auth;
+mod awareness;
 mod background;
 mod build_agent;
 mod chat;
@@ -39,11 +40,14 @@ mod checkpoint;
 mod client;
 mod commands;
 mod config;
+mod control_agent;
 mod eri_config;
 mod genui;
 mod git_tools;
 mod line_editor;
 mod memory;
+mod memory_tools;
+mod plan_tui;
 mod plugins;
 mod project;
 mod repl;
@@ -319,8 +323,39 @@ pub enum Command {
         /// Render the agent event stream as plain text or artifact JSON.
         #[arg(long, value_enum, default_value_t = agent::AgentOutputMode::Text)]
         output: agent::AgentOutputMode,
+        /// Open the interactive plan TUI (arrow-nav questions, notes, tasks)
+        /// and hand the approved plan to the build loop. Ignored when stdout
+        /// isn't a TTY or with --output artifact-json.
+        #[arg(short, long)]
+        interactive: bool,
         /// The goal to plan.
         prompt: Vec<String>,
+    },
+    /// Control the computer hands-free toward a goal (eyes/voice → actions).
+    /// Defaults to a SAFE dry-run that shows the planned actions without
+    /// actuating; pass --live once the macOS control bridge is granted.
+    Control {
+        /// Actually actuate the computer (mouse/keyboard/apps). Without this,
+        /// eri only prints what it WOULD do.
+        #[arg(long)]
+        live: bool,
+        /// Auto-confirm risky actions (quit/send/etc.) without prompting. For
+        /// trusted/headless runs only — off by default.
+        #[arg(long)]
+        yes: bool,
+        /// Speed/quality tier for the control loop's reasoning model.
+        #[arg(long, value_enum)]
+        mode: Option<Mode>,
+        /// The goal, e.g. "open YouTube and search lofi".
+        goal: Vec<String>,
+    },
+    /// Ambient awareness: watch the screen locally and narrate what changes.
+    /// Token-frugal (reads the cheap accessibility tree, not pixels). Needs the
+    /// eri app's control bridge (launch it from the app).
+    Watch {
+        /// Stop after N seconds (0 = run until Ctrl-C).
+        #[arg(long, default_value_t = 0)]
+        seconds: u64,
     },
     /// Add tests for a path or the whole workspace (Tester persona).
     Test {
@@ -678,9 +713,30 @@ async fn dispatch(cli: Cli) -> anyhow::Result<()> {
         }
         // -- new agent-mode commands (async) --
         Command::Ask { prompt } => agent::ask(&prompt.join(" ")).await,
-        Command::Plan { prompt, output } => {
-            agent::plan_with_output(&prompt.join(" "), output).await
+        Command::Plan {
+            prompt,
+            output,
+            interactive,
+        } => {
+            let goal = prompt.join(" ");
+            // Interactive TUI only when asked AND on a real terminal AND not
+            // emitting machine output; otherwise fall back to plain streaming.
+            let use_tui = interactive
+                && output == agent::AgentOutputMode::Text
+                && std::io::IsTerminal::is_terminal(&std::io::stdout());
+            if use_tui {
+                run_plan_interactive(&goal).await
+            } else {
+                agent::plan_with_output(&goal, output).await
+            }
         }
+        Command::Control {
+            live,
+            yes,
+            mode,
+            goal,
+        } => run_control(&goal.join(" "), live, yes, mode).await,
+        Command::Watch { seconds } => run_watch(seconds).await,
         Command::Test { scope } => agent::test(&scope).await,
         Command::Refactor { scope } => agent::refactor(&scope).await,
         Command::Explain { target } => agent::explain(&target).await,
@@ -813,6 +869,8 @@ pub fn run(command: Command) -> Result<(), CliError> {
         | Command::Deploy { .. }
         | Command::Ask { .. }
         | Command::Plan { .. }
+        | Command::Control { .. }
+        | Command::Watch { .. }
         | Command::Test { .. }
         | Command::Refactor { .. }
         | Command::Explain { .. }
@@ -1036,6 +1094,136 @@ async fn run_iterate_metered(instruction: &str, file: &Path, model: &str) -> any
         outcome.tokens_in,
         outcome.tokens_out
     );
+    Ok(())
+}
+
+/// `eri plan -i`: open the interactive planner, then offer to hand the agreed
+/// plan + the user's decisions straight to the build loop.
+async fn run_plan_interactive(goal: &str) -> anyhow::Result<()> {
+    let Some(build_prompt) = agent::plan_interactive(goal).await? else {
+        println!("[eri] plan discarded.");
+        return Ok(());
+    };
+
+    // Approved. Offer the handoff explicitly — a `plan` shouldn't silently
+    // start spending on a build.
+    print!("[eri] Build this plan now? [y/N] ");
+    io::Write::flush(&mut io::stdout())?;
+    let mut answer = String::new();
+    io::stdin().read_line(&mut answer)?;
+    if !matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes") {
+        println!("[eri] plan approved but not built. Run `eri build` when ready.");
+        return Ok(());
+    }
+
+    let workspace = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let model = model_for_mode(resolve_mode(None, &workspace));
+    let outcome = build_agent::run_build_agent(&build_prompt, &workspace, model).await?;
+    println!(
+        "\n[eri] build: {} file(s) in {} turn(s) -- {} in / {} out tokens",
+        outcome.files_written.len(),
+        outcome.turns,
+        outcome.tokens_in,
+        outcome.tokens_out
+    );
+    Ok(())
+}
+
+/// `eri control`: hands-free computer control toward a goal. Defaults to a
+/// SAFE dry-run (shows the planned actions, actuates nothing); `--live` is
+/// reserved for once the macOS control bridge is granted (next increment).
+async fn run_control(goal: &str, live: bool, yes: bool, mode: Option<Mode>) -> anyhow::Result<()> {
+    if goal.trim().is_empty() {
+        anyhow::bail!("control needs a goal, e.g. eri control \"open YouTube and search lofi\"");
+    }
+    let workspace = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let model = model_for_mode(resolve_mode(mode, &workspace));
+    let gate = if yes {
+        control_agent::ControlGate::auto_confirm()
+    } else {
+        control_agent::ControlGate::new()
+    };
+    let mut confirm = |desc: &str| -> bool {
+        print!("[eri] confirm: {desc}? [y/N] ");
+        let _ = io::Write::flush(&mut io::stdout());
+        let mut s = String::new();
+        if io::stdin().read_line(&mut s).is_err() {
+            return false;
+        }
+        matches!(s.trim().to_ascii_lowercase().as_str(), "y" | "yes")
+    };
+
+    // Live actuation needs the macOS app's control endpoint (it does the real
+    // AX/CGEvent work). Standalone `--live` can't actuate, so it falls back to
+    // dry-run with a clear note rather than silently doing nothing.
+    let live_bridge = if live {
+        control_agent::HttpBridge::from_env()
+    } else {
+        None
+    };
+    let summary = if let Some(bridge) = live_bridge {
+        println!("[eri] live control: actuating via the eri app.\n");
+        control_agent::run_control_agent(goal, model, &bridge, &gate, &mut confirm, 24).await?
+    } else {
+        if live {
+            println!(
+                "[eri] --live needs the eri app's control bridge (ERI_CONTROL_ENDPOINT). \
+                 Launch control from the app to actuate; showing a dry-run here.\n"
+            );
+        } else {
+            println!(
+                "[eri] dry-run: planning actions only (no actuation). Use --live from the eri app to actuate.\n"
+            );
+        }
+        let bridge = control_agent::DryRunBridge;
+        control_agent::run_control_agent(goal, model, &bridge, &gate, &mut confirm, 24).await?
+    };
+    if !summary.trim().is_empty() {
+        println!("\n[eri] {summary}");
+    }
+    Ok(())
+}
+
+/// `eri watch`: ambient awareness preview. Polls the control bridge's cheap AX
+/// snapshot on a cadence and narrates meaningful changes — local + token-frugal
+/// (no model calls; pixels only when the policy escalates, which this preview
+/// doesn't do). Needs the eri app's control bridge.
+async fn run_watch(seconds: u64) -> anyhow::Result<()> {
+    use crate::control_agent::ControlBridge;
+    let Some(bridge) = control_agent::HttpBridge::from_env() else {
+        anyhow::bail!(
+            "ambient awareness needs the control bridge (ERI_CONTROL_ENDPOINT) — launch `watch` from the eri app."
+        );
+    };
+    let mut aware = awareness::Awareness::new(2_000, 8);
+    let started = std::time::Instant::now();
+    println!("[eri] watching the screen locally (token-frugal; Ctrl-C to stop).");
+    loop {
+        if seconds > 0 && started.elapsed().as_secs() >= seconds {
+            break;
+        }
+        match bridge.snapshot().await {
+            Ok(graph) => {
+                let now_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis() as u64)
+                    .unwrap_or(0);
+                let observed = aware.observe(&graph, now_ms);
+                if observed.note_updated
+                    && let Some(note) = aware.latest()
+                {
+                    println!("[eri] {note}");
+                }
+            }
+            Err(e) => eprintln!("[eri] snapshot error: {e}"),
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+    }
+    println!("[eri] watched {} situation(s).", aware.note_count());
+    // The fenced ambient context (what eri would inject into chat/control).
+    if let Some(context) = aware.context_note() {
+        println!("\n{context}");
+    }
     Ok(())
 }
 
@@ -1536,10 +1724,23 @@ mod tests {
     #[test]
     fn parses_plan_with_artifact_output() {
         match parsed_command(["eri", "plan", "--output", "artifact-json", "fix", "billing"]) {
-            Command::Plan { prompt, output } => {
+            Command::Plan {
+                prompt,
+                output,
+                interactive,
+            } => {
                 assert_eq!(prompt, vec!["fix", "billing"]);
                 assert_eq!(output, agent::AgentOutputMode::ArtifactJson);
+                assert!(!interactive);
             }
+            other => panic!("expected Plan, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_plan_interactive_flag() {
+        match parsed_command(["eri", "plan", "-i", "build", "a", "thing"]) {
+            Command::Plan { interactive, .. } => assert!(interactive),
             other => panic!("expected Plan, got {other:?}"),
         }
     }

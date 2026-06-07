@@ -294,6 +294,87 @@ impl MemoryStore {
         hits.sort_by_key(|h| std::cmp::Reverse(h.ts_ms));
         hits.into_iter().take(limit).cloned().collect()
     }
+
+    /// Hybrid retrieval (mem0-inspired): fuse semantic similarity, lexical
+    /// keyword overlap, and recency — ranked entirely on the CPU, so it spends
+    /// ZERO model tokens. Semantic alone misses keyword-exact hits (proper
+    /// nouns, identifiers) that hash-embeddings score near zero; lexical alone
+    /// misses paraphrases; recency keeps fresh context on top. Backfills any
+    /// missing embeddings once (like `recall_semantic`). Returns `(obs, score)`
+    /// best-first. This is eri's anticipation backbone.
+    pub fn recall_hybrid(
+        &mut self,
+        query: &str,
+        workspace: &Path,
+        limit: usize,
+    ) -> io::Result<Vec<(Observation, f32)>> {
+        let mut dirty = false;
+        for o in self.file.observations.iter_mut() {
+            if o.embedding.is_empty() {
+                o.embedding = embeddings::embed_text(&o.body);
+                dirty = true;
+            }
+        }
+        if dirty {
+            self.save()?;
+        }
+
+        let hash = workspace_hash(workspace);
+        let now = now_ms();
+        let qvec = embeddings::embed_text(query);
+        let qtokens = tokenize(query);
+
+        let mut scored: Vec<(Observation, f32)> = self
+            .file
+            .observations
+            .iter()
+            .filter(|o| o.workspace_hash == hash || o.kind == "fact")
+            .map(|o| {
+                // cosine is [-1,1]; map to [0,1] so the weighted sum is sane.
+                let sem = (embeddings::cosine(&qvec, &o.embedding) + 1.0) / 2.0;
+                let lex = lexical_overlap(&qtokens, &o.body);
+                let rec = recency_score(o.ts_ms, now);
+                // Durable, user-chosen memories get a small standing boost.
+                let kind_boost = match o.kind.as_str() {
+                    "fact" => 0.10,
+                    "preference" | "habit" => 0.08,
+                    _ => 0.0,
+                };
+                let score = 0.55 * sem + 0.30 * lex + 0.15 * rec + kind_boost;
+                (o.clone(), score)
+            })
+            .collect();
+        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        scored.truncate(limit);
+        Ok(scored)
+    }
+}
+
+/// Lowercase alphanumeric tokens of length > 1 (drops punctuation + 1-char
+/// noise). Shared by the lexical-overlap scorer for query + body.
+fn tokenize(s: &str) -> Vec<String> {
+    s.to_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|t| t.len() > 1)
+        .map(str::to_string)
+        .collect()
+}
+
+/// Fraction of the query's terms present in `body` — coverage, not raw count,
+/// so a long memory doesn't win just by being long.
+fn lexical_overlap(qtokens: &[String], body: &str) -> f32 {
+    if qtokens.is_empty() {
+        return 0.0;
+    }
+    let btoks: std::collections::HashSet<String> = tokenize(body).into_iter().collect();
+    let hits = qtokens.iter().filter(|t| btoks.contains(*t)).count();
+    hits as f32 / qtokens.len() as f32
+}
+
+/// Exponential recency decay with a ~7-day half-life, in [0,1].
+fn recency_score(ts_ms: u64, now: u64) -> f32 {
+    let age_days = now.saturating_sub(ts_ms) as f32 / (24.0 * 60.0 * 60.0 * 1000.0);
+    0.5f32.powf(age_days / 7.0)
 }
 
 /// Format the top patterns as a markdown block suitable for prepending to
@@ -386,6 +467,41 @@ mod tests {
         let hits = store.recall("pascalcase", ws, 5);
         assert_eq!(hits.len(), 1);
         assert!(hits[0].body.contains("PascalCase"));
+    }
+
+    #[test]
+    fn recall_hybrid_surfaces_keyword_exact_match() {
+        let (dir, mut store) = open_temp();
+        let ws = dir.path();
+        store
+            .insert("fact", ws, "deploys to Vercel with the eri-web project")
+            .unwrap();
+        store
+            .insert("fact", ws, "likes dark mode and tailwind")
+            .unwrap();
+        store
+            .insert("fact", ws, "writes integration tests in playwright")
+            .unwrap();
+        // A keyword the hash-embedder would score near-randomly is still found
+        // via the lexical channel and ranked first.
+        let hits = store.recall_hybrid("playwright", ws, 3).unwrap();
+        assert!(!hits.is_empty());
+        assert!(
+            hits[0].0.body.contains("playwright"),
+            "expected the playwright fact on top, got: {}",
+            hits[0].0.body
+        );
+    }
+
+    #[test]
+    fn recall_hybrid_scores_are_descending() {
+        let (dir, mut store) = open_temp();
+        let ws = dir.path();
+        store.insert("fact", ws, "uses rust and cargo").unwrap();
+        store.insert("fact", ws, "prefers vim keybindings").unwrap();
+        let hits = store.recall_hybrid("rust cargo build", ws, 2).unwrap();
+        assert_eq!(hits.len(), 2);
+        assert!(hits[0].1 >= hits[1].1, "scores must be sorted desc");
     }
 
     #[test]

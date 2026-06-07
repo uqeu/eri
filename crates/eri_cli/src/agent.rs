@@ -66,6 +66,119 @@ pub async fn plan_with_output(prompt: &str, output: AgentOutputMode) -> Result<(
     run_intent("plan", prompt, Some("architect"), &[], output).await
 }
 
+/// Interactive plan mode: stream the Architect's plan, then open the TUI so the
+/// user can refine it (answer multi-select questions, add notes, check tasks).
+/// Returns `Some(build_prompt)` — the plan plus the user's decisions, ready to
+/// hand to the build loop — when approved, or `None` when cancelled.
+pub async fn plan_interactive(prompt: &str) -> Result<Option<String>> {
+    if prompt.is_empty() {
+        anyhow::bail!("plan needs a goal to plan for");
+    }
+    eprintln!("[eri] drafting a plan…");
+    let plan_text = capture_intent_text("plan", prompt, Some("architect")).await?;
+    if plan_text.trim().is_empty() {
+        anyhow::bail!("the planner returned no content");
+    }
+
+    let mut state = crate::plan_tui::PlanState::new("eri plan", plan_text.trim())
+        .with_questions(default_plan_questions())
+        .with_tasks(parse_tasks(&plan_text));
+    if let Some(code) = first_code_block(&plan_text) {
+        state = state.with_preview(code);
+    }
+    let outcome = crate::plan_tui::run(state)?;
+    if !outcome.approved {
+        return Ok(None);
+    }
+
+    let mut build_prompt = format!("{prompt}\n\n## Agreed plan\n{}", plan_text.trim());
+    if !outcome.decisions.trim().is_empty() {
+        build_prompt.push_str(&format!("\n\n## Decisions\n{}", outcome.decisions.trim()));
+    }
+    Ok(Some(build_prompt))
+}
+
+/// A small, generally-useful refinement question set for the planner. Mixes a
+/// single-select (radio) and multi-select to exercise both interaction modes.
+fn default_plan_questions() -> Vec<crate::plan_tui::Question> {
+    use crate::plan_tui::{PlanOption, Question};
+    vec![
+        Question::new(
+            "How thorough should the build be?",
+            vec![
+                PlanOption::new("Just what's asked"),
+                PlanOption::new("Thorough (tests + polish)"),
+                PlanOption::new("Exhaustive (edge cases + docs)"),
+            ],
+            false,
+        ),
+        Question::new(
+            "Extras to include",
+            vec![
+                PlanOption::new("Unit tests"),
+                PlanOption::new("README / docs"),
+                PlanOption::new("Error handling"),
+                PlanOption::new("Example usage"),
+            ],
+            true,
+        ),
+    ]
+}
+
+/// Best-effort: pull checklist items out of the plan prose. Bullet lines
+/// (`- `, `* `) and numbered steps (`1.`, `2)`) become tasks; capped so the
+/// checklist stays scannable.
+fn parse_tasks(plan_text: &str) -> Vec<crate::plan_tui::Task> {
+    let mut tasks = Vec::new();
+    for raw in plan_text.lines() {
+        let line = raw.trim();
+        let item = line
+            .strip_prefix("- ")
+            .or_else(|| line.strip_prefix("* "))
+            .or_else(|| numbered_item(line));
+        if let Some(text) = item {
+            let text = text.trim();
+            if !text.is_empty() && text.len() <= 120 {
+                tasks.push(crate::plan_tui::Task::new(text));
+            }
+        }
+        if tasks.len() >= 8 {
+            break;
+        }
+    }
+    tasks
+}
+
+/// The contents of the first fenced ``` code block in the plan, for the TUI's
+/// preview pane. `None` when the plan has no fenced code.
+fn first_code_block(plan_text: &str) -> Option<String> {
+    let mut lines = plan_text.lines();
+    // Find the opening fence.
+    lines.by_ref().find(|l| l.trim_start().starts_with("```"))?;
+    let mut body = Vec::new();
+    for line in lines {
+        if line.trim_start().starts_with("```") {
+            break;
+        }
+        body.push(line);
+    }
+    if body.is_empty() {
+        None
+    } else {
+        Some(body.join("\n"))
+    }
+}
+
+/// `12. foo` / `3) bar` -> the text after the marker, else None.
+fn numbered_item(line: &str) -> Option<&str> {
+    let digits: String = line.chars().take_while(char::is_ascii_digit).collect();
+    if digits.is_empty() {
+        return None;
+    }
+    let rest = &line[digits.len()..];
+    rest.strip_prefix(". ").or_else(|| rest.strip_prefix(") "))
+}
+
 pub async fn ship_with_output(prompt: &str, output: AgentOutputMode) -> Result<()> {
     run_intent("ship", prompt, Some("shipper"), &[], output).await
 }
@@ -165,6 +278,75 @@ async fn run_intent(
         .map_err(crate::build_agent::friendly_proxy_error)?;
 
     stream_events(response, output).await
+}
+
+/// Run an intent but COLLECT the streamed `text` events into a string instead
+/// of printing them — used by the interactive planner to capture the plan
+/// prose before opening the TUI. Token totals are ignored here.
+async fn capture_intent_text(intent: &str, prompt: &str, persona: Option<&str>) -> Result<String> {
+    let creds = config::load()?;
+    if !creds.is_signed_in() {
+        anyhow::bail!("not signed in — run `eri auth login` first");
+    }
+    let client = Client::from_credentials(&creds)?;
+    let workspace_root = std::env::current_dir()
+        .ok()
+        .map(|p| p.to_string_lossy().to_string());
+    let body = AgentRunBody {
+        intent,
+        prompt,
+        workspace_root,
+        persona,
+        targets: Vec::new(),
+    };
+    let mut response = client
+        .post_stream("/api/v1/agent/run", &body)
+        .await
+        .map_err(crate::build_agent::friendly_proxy_error)?;
+
+    let mut buffer = String::new();
+    let mut text = String::new();
+    while let Some(chunk) = response.chunk().await.context("read SSE stream")? {
+        buffer.push_str(&String::from_utf8_lossy(&chunk));
+        while let Some(idx) = buffer.find('\n') {
+            let line = buffer[..idx].trim_end_matches('\r').to_string();
+            buffer.drain(..=idx);
+            collect_text_line(&line, &mut text)?;
+        }
+    }
+    if !buffer.is_empty() {
+        let trailing = buffer.clone();
+        collect_text_line(&trailing, &mut text)?;
+    }
+    Ok(text)
+}
+
+/// Parse one SSE/NDJSON line and append any `text` payload to `out`.
+fn collect_text_line(line: &str, out: &mut String) -> Result<()> {
+    let payload = if let Some(rest) = line.strip_prefix("data:") {
+        rest.trim()
+    } else if !line.is_empty() && !line.starts_with("event:") && !line.starts_with(':') {
+        line.trim()
+    } else {
+        return Ok(());
+    };
+    if payload.is_empty() || payload == "[DONE]" {
+        return Ok(());
+    }
+    match serde_json::from_str::<AgentEvent>(payload) {
+        Ok(event) => {
+            if event.kind == "error" {
+                if let Some(msg) = event.message {
+                    anyhow::bail!("agent error: {msg}");
+                }
+            } else if let Some(t) = event.text {
+                out.push_str(&t);
+            }
+        }
+        // Non-JSON lines from a plain backend: treat as raw prose.
+        Err(_) => out.push_str(payload),
+    }
+    Ok(())
 }
 
 async fn stream_events(mut response: reqwest::Response, output: AgentOutputMode) -> Result<()> {

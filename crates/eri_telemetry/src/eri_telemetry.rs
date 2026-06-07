@@ -130,6 +130,13 @@ pub fn track(event_name: &str, properties: Value) {
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::sync::Mutex;
+
+    /// Serializes tests that mutate `HOME`. Cargo runs tests in parallel and
+    /// `HOME` is process-global, so the two HOME-dependent tests below would
+    /// otherwise race (one's `set_var` lands mid-flight in the other, changing
+    /// the resolved telemetry-id path). Hold this guard for each such test.
+    static HOME_LOCK: Mutex<()> = Mutex::new(());
 
     /// Snapshot env vars so a single failing test can't leak state into the
     /// rest of the suite. Cargo runs tests in parallel by default, so we still
@@ -187,6 +194,7 @@ mod tests {
 
     #[test]
     fn telemetry_id_path_resolves_under_home() {
+        let _lock = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let _guard = EnvGuard::set("HOME", "/tmp/eri-telemetry-test-home");
         let path = telemetry_id_path().expect("HOME is set");
         assert!(path.ends_with(".eri/telemetry-id"));
@@ -194,6 +202,7 @@ mod tests {
 
     #[test]
     fn load_or_create_distinct_id_persists_uuid() {
+        let _lock = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::tempdir().expect("tempdir");
         let _guard = EnvGuard::set("HOME", tmp.path().to_str().expect("utf8 path"));
         let first = load_or_create_distinct_id();

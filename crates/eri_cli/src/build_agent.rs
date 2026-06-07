@@ -33,7 +33,7 @@ use crate::config;
 /// (e.g. Haiku for `--mode fast`, Sonnet for `--mode thinking`).
 pub const DEFAULT_MODEL: &str = "claude-sonnet-4-6";
 /// Per-turn output ceiling. Streaming lets this be large without HTTP timeouts.
-const MAX_TOKENS: u32 = 32_000;
+pub(crate) const MAX_TOKENS: u32 = 32_000;
 /// Hard cap on loop iterations — a runaway-tool backstop.
 const MAX_TURNS: usize = 24;
 /// Cap a single file read/write payload so one tool can't blow the context.
@@ -117,7 +117,7 @@ impl LoopOpts {
 }
 
 /// A signed-in inference client, or a clear "run `eri auth login`" error.
-fn signed_in_client() -> Result<Client> {
+pub(crate) fn signed_in_client() -> Result<Client> {
     let creds = config::load()?;
     if !creds.is_signed_in() {
         bail!("not signed in — run `eri auth login` first");
@@ -275,6 +275,19 @@ async fn drive_loop(
         (None, Vec::new())
     };
     let mut tools = tool_specs(opts.allow_shell, depth);
+    // Local memory + semantic code retrieval (depth-0 only; subagents stay
+    // lean). Best-effort: a failure to open leaves `mem` None and the loop
+    // runs exactly as before. Fully offline.
+    let mem = if depth == 0 {
+        crate::memory_tools::MemoryCtx::open(root, None)
+    } else {
+        None
+    };
+    if mem.is_some()
+        && let Some(arr) = tools.as_array_mut()
+    {
+        arr.extend(crate::memory_tools::tool_specs());
+    }
     if !mcp_tools.is_empty() {
         if let Some(arr) = tools.as_array_mut() {
             arr.extend(mcp_tool_specs(&mcp_tools));
@@ -341,7 +354,23 @@ async fn drive_loop(
         }
     };
 
-    let system = build_system(root, opts.style);
+    let mut system = build_system(root, opts.style);
+    // Auto-recall: surface the most relevant remembered facts for this prompt
+    // as a fenced, lower-trust system note (same fencing spirit as AGENTS.md).
+    // Cheap (cosine over a local JSON file) and offline; skipped when nothing
+    // is remembered yet so a fresh project gets no noise.
+    if let Some(ctx) = mem.as_ref() {
+        let prompt = messages
+            .first()
+            .and_then(|m| m.get("content"))
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        if !prompt.is_empty()
+            && let Some(note) = ctx.recall_note(prompt, 5)
+        {
+            system.push(json!({ "type": "text", "text": note }));
+        }
+    }
     // Per-loop task checklist (todo_write / todo_read).
     let todos: RefCell<Vec<TodoItem>> = RefCell::new(Vec::new());
     // Per-loop background shell tasks (bash run_in_background / bash_output /
@@ -536,6 +565,7 @@ async fn drive_loop(
                         depth,
                         &todos,
                         &bg,
+                        mem.as_ref(),
                         &tu.name,
                         &tu.input,
                         opts.sandbox,
@@ -651,7 +681,7 @@ impl eri_agent::transport::ByteStream for ReqwestStream {
 /// Drive the SSE stream for one turn: optionally narrate text live (`narrate`).
 /// The frame parsing + protocol accumulation live in `eri_agent::transport`;
 /// this just adapts the reqwest response and routes narration to stdout.
-async fn consume_turn(
+pub(crate) async fn consume_turn(
     response: reqwest::Response,
     stdout: &mut std::io::Stdout,
     narrate: bool,
@@ -732,12 +762,12 @@ fn write_todos(todos: &RefCell<Vec<TodoItem>>, input: &Value) -> ToolExec {
 }
 
 /// Outcome of one local tool execution.
-struct ToolExec {
-    content: String,
-    is_error: bool,
+pub(crate) struct ToolExec {
+    pub(crate) content: String,
+    pub(crate) is_error: bool,
     /// Files this tool created/modified (for the build's files_written list).
     /// Multiple for apply_patch; one for write_file/str_replace; none otherwise.
-    written: Vec<PathBuf>,
+    pub(crate) written: Vec<PathBuf>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -748,10 +778,19 @@ async fn execute_tool(
     depth: u8,
     todos: &RefCell<Vec<TodoItem>>,
     bg: &RefCell<crate::background::BackgroundRegistry>,
+    mem: Option<&crate::memory_tools::MemoryCtx>,
     name: &str,
     input: &Value,
     sandbox: bool,
 ) -> ToolExec {
+    // Local memory tools (depth-0 only). Routed first so the spec gating and
+    // the executor agree: if a memory tool is advertised, `mem` is Some.
+    if crate::memory_tools::owns(name) {
+        return match mem {
+            Some(ctx) => crate::memory_tools::dispatch(ctx, name, input),
+            None => err(format!("{name}: memory is unavailable in this context")),
+        };
+    }
     match name {
         "bash" => {
             // Background variant: spawn + return a task id instead of blocking.
@@ -1976,6 +2015,13 @@ logical units of work (no shell needed). When bash is available, use it to run \
 the project's own tests / build / linter to verify your work after changes; for \
 long-lived processes (dev servers, watchers) pass run_in_background and poll with \
 bash_output / stop with kill_bash.\n\
+- MEMORY (local, offline): prefer search_context to locate relevant code by \
+meaning instead of read_file-ing whole files -- it returns the few chunks that \
+matter and keeps you fast and cheap; read_file only when you need a full file. \
+Use recall at the start of a task to surface prior context, and remember to \
+persist durable facts (build/test commands, conventions, architecture \
+decisions, stable user preferences) so future sessions start informed. Don't \
+remember transient or secret values.\n\
 - When everything is built and coherent, call the done tool.\n\n\
 PROJECT SHAPE\n\
 - Choose the files and structure that fit the task -- the right entry point, \

@@ -9,6 +9,14 @@ description = "Terminal-native Eri agent for interactive sessions, one-shot buil
 [lints]
 workspace = true
 
+[features]
+# Off by default: the memory tools embed locally with the deterministic hash
+# backend (offline, zero-setup). Opt in to route embeddings through a local
+# Ollama server (`nomic-embed-text`) for higher recall quality — still local,
+# never cloud. Enable with `--features embed-ollama` + `ERI_EMBED=ollama`.
+default = []
+embed-ollama = ["eri_index/ollama"]
+
 [[bin]]
 name = "eri"
 path = "src/eri_cli.rs"
@@ -18,12 +26,15 @@ anyhow.workspace = true
 async-trait.workspace = true
 clap.workspace = true
 clap_complete = "4.5"
+crossterm = "0.28"
+ratatui = "0.29"
 eri_agent = { path = "../eri_agent" }
 eri_apply = { path = "../eri_apply" }
 eri_caveman = { path = "../eri_caveman" }
 eri_core.workspace = true
 eri_git = { path = "../eri_git" }
 eri_hooks = { path = "../eri_hooks" }
+eri_index = { path = "../eri_index", default-features = false }
 eri_mcp = { path = "../eri_mcp" }
 eri_inference.workspace = true
 globset = "0.4"
