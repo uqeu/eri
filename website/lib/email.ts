@@ -11,7 +11,9 @@ import { PaymentFailedEmail } from "@/emails/payment-failed";
 import { PaymentReceiptEmail } from "@/emails/payment-receipt";
 import { UsageThresholdEmail } from "@/emails/usage-threshold";
 
-const FROM = "eri <phlotu@gmail.com>";
+// Send-from address. Replies land in the real Google Workspace inbox for
+// khai@tryeri.ca. Resend must have tryeri.ca verified for this to deliver.
+const FROM = "eri <khai@tryeri.ca>";
 
 function baseUrl(): string {
   return process.env.NEXT_PUBLIC_BASE_URL ?? "https://www.tryeri.ca";
