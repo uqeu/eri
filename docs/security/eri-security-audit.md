@@ -83,6 +83,60 @@ Good to run, with guardrails. **You:** create the project, give me the DSN. I'll
 
 ---
 
+## Full 50-category status (your list)
+✅ fixed/safe in code · 🟡 partial · ⚠️ you (infra/dashboard/process) · 🔜 queued code
+
+1. Exposed DB creds — ✅ server-only (`DATABASE_URL` env), never in client
+2. Public .env — ⚠️ confirm `.env` gitignored + not committed
+3. Hardcoded API keys — ✅ none; all via env (providers, Sentry, Resend)
+4. Weak/missing auth — 🟢 bearer + rotating sessions · ⚠️ admin MFA
+5. No authz checks — ✅ every query scoped to authed user
+6. Users access others' data — ✅ audited clean
+7. Open DB read/write — ✅ RLS now ON for all 11 tables
+8. Misconfig Supabase/S3 — ✅ RLS fixed · ⚠️ confirm no public buckets + least-priv DB role
+9. Admin routes unprotected — ✅ `is_admin` checked · ⚠️ admin MFA
+10. Debug pages in prod — ✅ source maps off · ⚠️ confirm no debug routes
+11. Build logs leak secrets — ⚠️ CI log hygiene (you)
+12. Verbose errors — ✅ OAuth leak fixed · 🔜 general error-message pass
+13. Leaked repo/history — ⚠️ keep repo private + gitleaks scan (you)
+14. Secrets in frontend JS — ✅ none; keys server-only + source maps off
+15. Client-only security checks — ✅ metering/quota server-authoritative
+16. Missing input validation — 🔜 zod pass (basic parseBody exists)
+17. SQL injection — ✅ parameterized everywhere
+18. NoSQL injection — ✅ N/A (Postgres, parameterized)
+19. XSS — 🟢 React escaping + CSP · 🔜 WKWebView markdown render review
+20. CSRF — ✅ API is bearer (not cookie); OAuth state validated; refresh cookie SameSite=lax
+21. Insecure file uploads — ✅ N/A in money path
+22. Path traversal — ✅ agent file tools resolve within workspace
+23. SSRF — 🔜 agent web-fetch allowlist (CSP connect-src scoped already)
+24. Broken password reset — 🟢 token-based · 🔜 confirm expiry/single-use
+25. Weak session mgmt — 🟢 rotating refresh · 🔜 M2 refresh-cookie httpOnly
+26. JWT secrets — ⚠️ confirm strong/unique `JWT_SECRET` (you)
+27. Overly permissive CORS — ✅ no wildcard; CSP scoped
+28. Rate limits missing — ✅ FIXED — Upstash global on auth + AI endpoints
+29. Public test/staging — ⚠️ protect preview deploys (you)
+30. Default creds — ✅ none
+31. Webhook sig verification — ⚠️ verify Stripe webhook sig when added (you/🔜)
+32. Payment checks frontend-only — ✅ tier/quota + Stripe server-side
+33. IDOR — ✅ clean
+34. APIs trust user IDs/roles — ✅ id from validated bearer, never body
+35. Logs leak tokens/PII — ✅ Sentry scrubbed · 🔜 general log-redaction pass
+36. Source maps in prod — ✅ off
+37. Dependency vulns — 🟡 14→11 (safe fix) · ⚠️ remaining need reviewed major bumps
+38. Outdated packages — ⚠️ Dependabot/Renovate (you)
+39. Prompt injection — 🟢 AGENTS.md/tool output fenced as data · 🔜 explicit policy + red-team
+40. AI tools w/o perms — 🟢 confirm-gate on risky control actions; depth-0 gating
+41. Excessive DB perms — ⚠️ app DB role least-privilege (you)
+42. No audit logs — 🟢 `admin_audit_log` + `recordAudit` · 🔜 extend to security events
+43. No monitoring/alerting — ✅ Sentry wired · ⚠️ set alerts (token spikes, auth failures)
+44. No backup/restore — ⚠️ Supabase PITR + restore drill (you)
+45. Public internal dashboards — 🟢 admin gated · ⚠️ confirm
+46. Missing security headers — ✅ added (HSTS, CSP, nosniff, frame DENY, COOP, Permissions-Policy)
+47. Cookies HttpOnly/Secure/SameSite — 🟡 access cookie hardened; refresh cookie httpOnly (🔜 M2)
+48. Unencrypted sensitive data — 🟢 memory_blobs E2E-encrypted; Supabase at-rest on · ⚠️ confirm
+49. Poor tenant isolation — ✅ user-scoped + RLS
+50. Over-trusting generated code — 🟢 confirm-gates + diff review (process)
+
 ## The one rule (apply to every new feature)
 > Can untrusted text make the agent spend money, read secrets, write files, run code, control the computer, or send data out?
 > If yes → it needs scoping + confirmation + server-side metering + rate limit + audit log. The **runtime** enforces permissions; the model only requests.
