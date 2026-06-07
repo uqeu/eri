@@ -7,6 +7,7 @@ import {
 } from "@/lib/auth";
 import { rateLimit } from "@/lib/rate_limit";
 import { sendWelcomeEmail } from "@/lib/email";
+import { canonicalizeEmail } from "@/lib/email-normalize";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -55,13 +56,15 @@ export async function POST(request: Request): Promise<NextResponse> {
     );
   }
 
-  const email = body.email.trim().toLowerCase();
-  if (!EMAIL_RE.test(email) || email.length > 254) {
+  const rawEmail = body.email.trim().toLowerCase();
+  if (!EMAIL_RE.test(rawEmail) || rawEmail.length > 254) {
     return NextResponse.json(
       { error: "Enter a valid email." },
       { status: 400 },
     );
   }
+  // Store + dedupe on the canonical form so +tag aliases can't farm accounts.
+  const email = canonicalizeEmail(rawEmail);
   if (body.password.length < 8 || body.password.length > 256) {
     return NextResponse.json(
       { error: "Password must be 8-256 characters." },
