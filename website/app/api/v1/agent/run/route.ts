@@ -73,7 +73,7 @@ export async function POST(request: Request): Promise<Response> {
   if (!auth) {
     return sseError(401, "unauthorized");
   }
-  const limited = rateLimitToken(auth.apiToken.id, { tier: auth.user.tier });
+  const limited = await rateLimitToken(auth.apiToken.id, { tier: auth.user.tier });
   if (limited) return limited;
 
   let body: AgentRunBody;

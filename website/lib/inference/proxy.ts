@@ -140,7 +140,7 @@ export async function runProxy(
   // 2) Per-token gateway rate limit (separate from monthly quota). Pass
   // the user's tier so the 429 envelope shows the right context in the
   // IDE's rate-limit toast.
-  const limited = rateLimitToken(auth.apiToken.id, { tier: auth.user.tier });
+  const limited = await rateLimitToken(auth.apiToken.id, { tier: auth.user.tier });
   if (limited) return limited;
 
   // 3) Body.
