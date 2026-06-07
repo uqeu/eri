@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 // meter the quota gate enforces) + usage_records (tokens/cost/daily). The old
 // `usage_pings` table is dead and intentionally NOT read here.
 export async function GET(request: Request): Promise<NextResponse> {
-  const limited = rateLimit(request, "usage.summary");
+  const limited = await rateLimit(request, "usage.summary");
   if (limited) return limited;
 
   const user = await userFromBearer(request.headers.get("authorization"));

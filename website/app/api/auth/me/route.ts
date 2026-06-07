@@ -13,7 +13,7 @@ export const dynamic = "force-dynamic";
 const DISPLAY_NAME_MAX = 80;
 
 export async function GET(request: Request): Promise<NextResponse> {
-  const limited = rateLimit(request, "auth.me");
+  const limited = await rateLimit(request, "auth.me");
   if (limited) return limited;
 
   const user = await userFromBearer(request.headers.get("authorization"));
@@ -36,7 +36,7 @@ export async function GET(request: Request): Promise<NextResponse> {
  * Response: `{ user: PublicUser }`
  */
 export async function PATCH(request: Request): Promise<NextResponse> {
-  const limited = rateLimit(request, "auth.me");
+  const limited = await rateLimit(request, "auth.me");
   if (limited) return limited;
 
   const auth = await userFromBearer(request.headers.get("authorization"));

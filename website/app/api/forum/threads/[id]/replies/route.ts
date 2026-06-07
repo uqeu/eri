@@ -27,7 +27,7 @@ export async function POST(
   request: Request,
   { params }: RouteParams,
 ): Promise<NextResponse> {
-  const limited = rateLimit(request, "forum.replies.create");
+  const limited = await rateLimit(request, "forum.replies.create");
   if (limited) return limited;
 
   const user = await userFromBearer(request.headers.get("authorization"));

@@ -13,7 +13,7 @@ export async function GET(
   request: Request,
   { params }: RouteParams,
 ): Promise<NextResponse> {
-  const limited = rateLimit(request, "forum.threads.get");
+  const limited = await rateLimit(request, "forum.threads.get");
   if (limited) return limited;
 
   const thread = await getThread(params.id);

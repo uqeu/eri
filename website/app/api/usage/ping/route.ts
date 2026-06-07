@@ -89,7 +89,7 @@ function parseBody(value: unknown): PingBody | null {
 }
 
 export async function POST(request: Request): Promise<NextResponse> {
-  const limited = rateLimit(request, "usage.ping");
+  const limited = await rateLimit(request, "usage.ping");
   if (limited) return limited;
 
   const user = await userFromBearer(request.headers.get("authorization"));

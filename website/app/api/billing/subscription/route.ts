@@ -7,7 +7,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request): Promise<NextResponse> {
-  const limited = rateLimit(request, "billing.subscription");
+  const limited = await rateLimit(request, "billing.subscription");
   if (limited) return limited;
 
   const user = await userFromBearer(request.headers.get("authorization"));

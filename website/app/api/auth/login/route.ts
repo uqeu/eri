@@ -22,7 +22,7 @@ function parseBody(value: unknown): LoginBody | null {
 }
 
 export async function POST(request: Request): Promise<NextResponse> {
-  const limited = rateLimit(request, "auth.login");
+  const limited = await rateLimit(request, "auth.login");
   if (limited) return limited;
 
   let raw: unknown;

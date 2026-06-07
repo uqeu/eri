@@ -42,7 +42,7 @@ function parseBody(value: unknown): CheckoutBody | null {
 }
 
 export async function POST(request: Request): Promise<NextResponse> {
-  const limited = rateLimit(request, "billing.checkout");
+  const limited = await rateLimit(request, "billing.checkout");
   if (limited) return limited;
 
   const user = await userFromBearer(request.headers.get("authorization"));

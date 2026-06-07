@@ -20,7 +20,7 @@ interface DeviceWire {
  * id (which the revoke endpoint uses) and human-readable metadata.
  */
 export async function GET(request: Request): Promise<NextResponse> {
-  const limited = rateLimit(request, "auth.devices.list");
+  const limited = await rateLimit(request, "auth.devices.list");
   if (limited) return limited;
 
   const user = await userFromBearer(request.headers.get("authorization"));

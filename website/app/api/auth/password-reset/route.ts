@@ -27,7 +27,7 @@ async function mintResetToken(userId: string): Promise<string> {
 }
 
 export async function POST(request: Request): Promise<NextResponse> {
-  const limited = rateLimit(request, "auth.password-reset");
+  const limited = await rateLimit(request, "auth.password-reset");
   if (limited) return limited;
 
   let raw: unknown;

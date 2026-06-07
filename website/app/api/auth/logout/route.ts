@@ -6,7 +6,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request): Promise<NextResponse> {
-  const limited = rateLimit(request, "auth.logout");
+  const limited = await rateLimit(request, "auth.logout");
   if (limited) return limited;
 
   let raw: unknown;

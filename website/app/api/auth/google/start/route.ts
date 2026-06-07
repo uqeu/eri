@@ -32,7 +32,7 @@ function sanitizeNext(value: string | null): string | null {
 }
 
 export async function GET(request: Request): Promise<NextResponse> {
-  const limited = rateLimit(request, "auth.oauth_start");
+  const limited = await rateLimit(request, "auth.oauth_start");
   if (limited) return limited;
 
   let authUrl: string;

@@ -40,7 +40,7 @@ function validateTitleAndBody(
 }
 
 export async function GET(request: Request): Promise<NextResponse> {
-  const limited = rateLimit(request, "forum.threads.list");
+  const limited = await rateLimit(request, "forum.threads.list");
   if (limited) return limited;
 
   const url = new URL(request.url);
@@ -66,7 +66,7 @@ export async function GET(request: Request): Promise<NextResponse> {
 }
 
 export async function POST(request: Request): Promise<NextResponse> {
-  const limited = rateLimit(request, "forum.threads.create");
+  const limited = await rateLimit(request, "forum.threads.create");
   if (limited) return limited;
 
   const user = await userFromBearer(request.headers.get("authorization"));
