@@ -218,6 +218,28 @@ export async function createUser(input: CreateUserInput): Promise<UserRow> {
   return mapUser(row);
 }
 
+/**
+ * How many accounts have signed up from this (hashed) IP. Used to cap free
+ * accounts per origin. The table stores only an HMAC of the IP, never the raw
+ * address. Server-only (RLS on, no policies — unreachable via anon/PostgREST).
+ */
+export async function countSignupOriginsByIpHash(ipHash: string): Promise<number> {
+  const rows = await sql()<{ count: string }[]>`
+    SELECT COUNT(*)::text AS count FROM signup_origins WHERE ip_hash = ${ipHash}
+  `;
+  return Number(rows[0]?.count ?? "0");
+}
+
+/** Record that `userId` signed up from `ipHash` (free-account abuse signal). */
+export async function recordSignupOrigin(
+  ipHash: string,
+  userId: string,
+): Promise<void> {
+  await sql()`
+    INSERT INTO signup_origins (ip_hash, user_id) VALUES (${ipHash}, ${userId})
+  `;
+}
+
 export async function setUserStripeCustomerId(
   userId: string,
   stripeCustomerId: string,
