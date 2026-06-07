@@ -151,9 +151,10 @@ export async function GET(request: Request): Promise<NextResponse> {
       sub: userInfo.id,
       error: error instanceof Error ? { message, stack: error.stack } : error,
     });
+    // SECURITY: never leak internal error text to the browser/URL/referrer
+    // logs — the detail is already captured server-side via console.error above.
     const target = new URL("/sign-in", request.url);
     target.searchParams.set("oauth_error", "db_error");
-    target.searchParams.set("oauth_debug", message.slice(0, 200));
     return NextResponse.redirect(target, { status: 302 });
   }
 
