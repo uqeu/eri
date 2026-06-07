@@ -537,7 +537,34 @@ pub enum UpdateCommand {
     },
 }
 
+/// Initialize crash reporting when `SENTRY_DSN` is set. PII is OFF and a
+/// before-send scrubber strips anything that could carry user content (request
+/// data, headers, server name, the user object) — we report crashes, never
+/// prompts/code/secrets. Returns the guard, which must live for the process so
+/// queued events flush on exit. No-op (None) when the DSN is unset.
+fn init_sentry() -> Option<sentry::ClientInitGuard> {
+    let dsn = std::env::var("SENTRY_DSN").ok().filter(|d| !d.is_empty())?;
+    Some(sentry::init((
+        dsn,
+        sentry::ClientOptions {
+            release: sentry::release_name!(),
+            send_default_pii: false,
+            before_send: Some(std::sync::Arc::new(
+                |mut event: sentry::protocol::Event<'static>| {
+                    event.request = None;
+                    event.user = None;
+                    event.server_name = None;
+                    Some(event)
+                },
+            )),
+            ..Default::default()
+        },
+    )))
+}
+
 fn main() -> ExitCode {
+    // Held for the whole process so panics are captured + flushed on exit.
+    let _sentry = init_sentry();
     let cli = Cli::parse();
     let rt = match tokio::runtime::Builder::new_current_thread()
         .enable_all()

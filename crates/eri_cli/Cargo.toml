@@ -42,6 +42,9 @@ ignore = "0.4"
 regex = "1"
 reqwest = { workspace = true, features = ["json", "stream"] }
 rustyline = "14"
+# Crash reporting. Off unless SENTRY_DSN is set at runtime; reqwest+rustls
+# transport (no curl), panic capture. PII is scrubbed in init_sentry().
+sentry = { version = "0.48", default-features = false, features = ["backtrace", "contexts", "panic", "reqwest", "rustls"] }
 serde.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["full"] }

@@ -26,7 +26,8 @@ function unsubscribeUrl(email: string): string {
 let cachedClient: Resend | null = null;
 
 function client(): Resend | null {
-  const apiKey = process.env.RESEND_API_KEY;
+  // Accept either name so whichever you set in Vercel works.
+  const apiKey = process.env.RESEND_API_KEY ?? process.env.RESEND_API_TOKEN;
   if (!apiKey) return null;
   if (cachedClient) return cachedClient;
   cachedClient = new Resend(apiKey);

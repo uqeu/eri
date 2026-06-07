@@ -38,6 +38,9 @@ const securityHeaders = [
 
 const nextConfig = {
   reactStrictMode: true,
+  // Next 14 needs this flag for instrumentation.ts (Sentry server init). Stable
+  // in Next 15 — drop the flag after upgrading.
+  experimental: { instrumentationHook: true },
   // Never ship readable source maps to the browser in production — they let
   // anyone reconstruct our client source (the "don't let them reverse-engineer
   // eri" requirement). Server-side logic stays on the server regardless.
