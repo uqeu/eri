@@ -19,6 +19,7 @@ import {
   type ProviderId,
 } from "./providers";
 import { rateLimitToken } from "./rate_limit";
+import { resolveModelRoute } from "./routing";
 
 /**
  * Core proxy entry point. Each `/api/v1/inference/<verb>` route is a
@@ -154,11 +155,19 @@ export async function runProxy(
     });
   }
 
+  // 4a) Server-side route resolution. Default is a passthrough; the only live
+  //    remap is the DeepSeek "fast tier" pre-wire, which is OFF unless
+  //    ERI_DEEPSEEK_FAST=true. When it reroutes, we swap the effective
+  //    provider AND rewrite the body's model so the upstream understands it.
+  const route = resolveModelRoute(options.provider, modelFromBody(body));
+  const effectiveProvider = route.provider;
+  const effectiveBody = route.rerouted ? withModel(body, route.model) : body;
+
   // 4b) Cost guard — block Opus / o1 / gpt-5-pro on the eri proxy. We pay
   //    for these out of our master keys, and eri's positioning is "thrifty
   //    harness over the cheapest capable models". Set ERI_ALLOW_PREMIUM=true
   //    in Vercel env if you need to bypass.
-  const cost = checkModelAllowed(modelFromBody(body));
+  const cost = checkModelAllowed(modelFromBody(effectiveBody));
   if (!cost.allowed) {
     return jsonError(403, {
       error: "model_not_allowed",
@@ -174,14 +183,14 @@ export async function runProxy(
   const shouldBill = options.bill !== false;
   let warning: "ghost" | null = null;
   if (shouldBill) {
-    const estimate = estimateTokens(body);
+    const estimate = estimateTokens(effectiveBody);
     const check = await ensureWithinQuota(auth.user.id, auth.user.tier, estimate);
     if (!check.ok) {
       // 402 Payment Required — caller knows to surface a paywall.
       await recordUsage({
         user_id: auth.user.id,
-        provider: options.provider,
-        model: modelFromBody(body),
+        provider: effectiveProvider,
+        model: modelFromBody(effectiveBody),
         intent: options.intent ?? null,
         tokens_in: 0,
         tokens_out: 0,
@@ -194,10 +203,10 @@ export async function runProxy(
     if (check.status === "ghost_warning") warning = "ghost";
   }
 
-  // 6) Master-key forward.
+  // 6) Master-key forward (against the effective provider after routing).
   let masterKey: string;
   try {
-    masterKey = getMasterKey(options.provider);
+    masterKey = getMasterKey(effectiveProvider);
   } catch (error) {
     if (error instanceof MissingMasterKeyError) {
       console.error("inference.master_key_missing", { provider: error.provider });
@@ -209,14 +218,20 @@ export async function runProxy(
   return forwardAndLog({
     request,
     auth,
-    body,
-    provider: options.provider,
+    body: effectiveBody,
+    provider: effectiveProvider,
     intent: options.intent ?? null,
-    upstreamUrl: resolveUpstreamUrl(options, body),
+    upstreamUrl: resolveUpstreamUrl({ ...options, provider: effectiveProvider }, effectiveBody),
     apiKey: masterKey,
     bill: shouldBill,
     warning,
   });
+}
+
+/** Immutable shallow copy of a JSON body with `model` replaced. */
+function withModel(body: unknown, model: string): unknown {
+  if (typeof body !== "object" || body === null) return body;
+  return { ...(body as Record<string, unknown>), model };
 }
 
 function resolveUpstreamUrl(options: ProxyOptions, body: unknown): string {
@@ -443,17 +458,45 @@ async function countStreamUsage(
     const { value, done } = await reader.read();
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
-    // SSE frames are separated by blank lines. Walk them to find the
-    // provider's terminal usage frame.
+    // SSE frames are separated by blank lines. Walk them and merge usage as
+    // we go: Anthropic splits the counts across frames (`message_start` has
+    // input + cache, `message_delta` has output), so a naive replace would
+    // clobber the cache fields. Per-field max is the safe accumulation.
     let idx;
     while ((idx = buffer.indexOf("\n\n")) !== -1) {
       const frame = buffer.slice(0, idx);
       buffer = buffer.slice(idx + 2);
       const candidate = parseUsageFromSSEFrame(frame, provider);
-      if (candidate) usage = candidate;
+      if (candidate) usage = mergeUsage(usage, candidate);
     }
   }
   return usage;
+}
+
+/** Combine two partial usage reads by taking the max of each field. */
+function mergeUsage(a: UsageCounts, b: UsageCounts): UsageCounts {
+  return {
+    tokens_in: Math.max(a.tokens_in, b.tokens_in),
+    tokens_out: Math.max(a.tokens_out, b.tokens_out),
+    cache_read_input_tokens: Math.max(
+      a.cache_read_input_tokens ?? 0,
+      b.cache_read_input_tokens ?? 0,
+    ),
+    cache_creation_input_tokens: Math.max(
+      a.cache_creation_input_tokens ?? 0,
+      b.cache_creation_input_tokens ?? 0,
+    ),
+  };
+}
+
+/** True when any token field carries a positive count. */
+function hasUsage(u: UsageCounts): boolean {
+  return (
+    u.tokens_in > 0 ||
+    u.tokens_out > 0 ||
+    (u.cache_read_input_tokens ?? 0) > 0 ||
+    (u.cache_creation_input_tokens ?? 0) > 0
+  );
 }
 
 function parseUsageFromSSEFrame(
@@ -470,14 +513,14 @@ function parseUsageFromSSEFrame(
     try {
       const json = JSON.parse(payload);
       const usage = extractUsage(provider, json);
-      if (usage.tokens_in > 0 || usage.tokens_out > 0) return usage;
+      if (hasUsage(usage)) return usage;
       // Anthropic puts usage inside `message_delta.usage` mid-stream.
       if (typeof json === "object" && json !== null) {
         const obj = json as Record<string, unknown>;
         const delta = obj.usage ?? (obj.message as Record<string, unknown> | undefined)?.usage;
         if (delta) {
           const nested = extractUsage(provider, { usage: delta });
-          if (nested.tokens_in > 0 || nested.tokens_out > 0) return nested;
+          if (hasUsage(nested)) return nested;
         }
       }
     } catch {

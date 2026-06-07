@@ -27,9 +27,25 @@ export function estimateTokens(jsonBody: unknown): number {
 }
 
 export interface UsageCounts {
+  /** Uncached input tokens, billed at the full input rate. */
   tokens_in: number;
   tokens_out: number;
+  /**
+   * Input tokens served from the prompt cache. Anthropic bills these at ~0.1x
+   * the input rate, so they MUST be priced separately for COGS to be accurate.
+   * Optional + zero-defaulted so older call sites keep working.
+   */
+  cache_read_input_tokens?: number;
+  /**
+   * Input tokens written to the prompt cache (the cache breakpoint prefix).
+   * Anthropic bills these at ~1.25x the input rate.
+   */
+  cache_creation_input_tokens?: number;
 }
+
+/** Cost multipliers vs the base input rate for cached tokens (Anthropic). */
+const CACHE_READ_MULT = 0.1;
+const CACHE_CREATION_MULT = 1.25;
 
 function asInt(value: unknown): number {
   if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
@@ -59,9 +75,14 @@ export function extractUsage(
 
   switch (provider) {
     case "anthropic":
+      // Anthropic reports `input_tokens` EXCLUDING cache; cache reads/writes
+      // are separate fields. So tokens_in stays the uncached count (no double
+      // count) and the cache kinds ride alongside for accurate COGS pricing.
       return {
         tokens_in: asInt(usage.input_tokens),
         tokens_out: asInt(usage.output_tokens),
+        cache_read_input_tokens: asInt(usage.cache_read_input_tokens),
+        cache_creation_input_tokens: asInt(usage.cache_creation_input_tokens),
       };
     case "openai":
     case "inception":
@@ -96,6 +117,11 @@ const PRICE_TABLE: Record<string, { in: number; out: number }> = {
   "gemini-2.5-pro":           { in: 1.25, out: 5  },
   "gemini-2.5-flash":         { in: 0.075,out: 0.3 },
   "mercury-coder":            { in: 0,    out: 0  }, // free-tier per project memory
+  // DeepSeek (pre-wired, off by default — see route gating). Speaks the
+  // Anthropic Messages format, so its usage flows through the anthropic case
+  // above and prices via these rows once the route flag is flipped on.
+  "deepseek-v4-flash":        { in: 0.14, out: 0.28 },
+  "deepseek-v4-pro":          { in: 0.435,out: 0.87 },
 };
 
 /**
@@ -118,12 +144,33 @@ function priceForModel(model: string): { in: number; out: number } | null {
     return { in: 1.25, out: 5 };
   if (m.startsWith("gemini-2")) return { in: 0.075, out: 0.3 };
   if (m.startsWith("mercury")) return { in: 0, out: 0 };
+  if (m.startsWith("deepseek-v4-pro") || m.startsWith("deepseek-reasoner"))
+    return { in: 0.435, out: 0.87 };
+  if (m.startsWith("deepseek")) return { in: 0.14, out: 0.28 };
   return null;
 }
 
+/**
+ * Cost in micro-USD. Critically, the three input-token kinds are priced at
+ * DIFFERENT rates — pricing them all at the base input rate (the old behavior)
+ * badly under-counts COGS once conversation caching kicks in, because most
+ * input then arrives as cheap cache reads while a smaller slice is the pricey
+ * cache-creation write. Output is unchanged.
+ *
+ *   uncached_in × in
+ *   + cache_read     × in × 0.10
+ *   + cache_creation × in × 1.25
+ *   + out            × out
+ */
 export function estimateCostMicros(model: string, usage: UsageCounts): number {
   const row = priceForModel(model);
   if (!row) return 0;
-  const cost = usage.tokens_in * row.in + usage.tokens_out * row.out;
+  const cacheRead = usage.cache_read_input_tokens ?? 0;
+  const cacheCreation = usage.cache_creation_input_tokens ?? 0;
+  const cost =
+    usage.tokens_in * row.in +
+    cacheRead * row.in * CACHE_READ_MULT +
+    cacheCreation * row.in * CACHE_CREATION_MULT +
+    usage.tokens_out * row.out;
   return Math.round(cost);
 }

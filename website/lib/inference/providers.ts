@@ -5,7 +5,12 @@
  * header, which we always overwrite with the master key.
  */
 
-export type ProviderId = "anthropic" | "openai" | "google" | "inception";
+export type ProviderId =
+  | "anthropic"
+  | "openai"
+  | "google"
+  | "inception"
+  | "deepseek";
 
 export interface ProviderConfig {
   id: ProviderId;
@@ -45,11 +50,28 @@ const INCEPTION: ProviderConfig = {
   authHeader: (key) => ({ authorization: `Bearer ${key}` }),
 };
 
+// DeepSeek exposes a drop-in Anthropic Messages endpoint, so it shares the
+// exact request/response shape (and SSE usage frames) as ANTHROPIC — only the
+// URL + key differ. Pre-wired but inert until the route flag flips it on; see
+// resolveModelRoute in routing.ts. Off by default (Claude credits are free
+// until ~Nov); this matters only once those expire and cost is real money.
+const DEEPSEEK: ProviderConfig = {
+  id: "deepseek",
+  envKey: "DEEPSEEK_MASTER_KEY",
+  defaultUrl: "https://api.deepseek.com/anthropic/v1/messages",
+  authHeader: (key) => ({
+    "x-api-key": key,
+    authorization: `Bearer ${key}`,
+    "anthropic-version": "2023-06-01",
+  }),
+};
+
 const REGISTRY: Record<ProviderId, ProviderConfig> = {
   anthropic: ANTHROPIC,
   openai: OPENAI,
   google: GOOGLE,
   inception: INCEPTION,
+  deepseek: DEEPSEEK,
 };
 
 export function providerConfig(id: ProviderId): ProviderConfig {
@@ -57,7 +79,13 @@ export function providerConfig(id: ProviderId): ProviderConfig {
 }
 
 export function isProviderId(value: string): value is ProviderId {
-  return value === "anthropic" || value === "openai" || value === "google" || value === "inception";
+  return (
+    value === "anthropic" ||
+    value === "openai" ||
+    value === "google" ||
+    value === "inception" ||
+    value === "deepseek"
+  );
 }
 
 export class MissingMasterKeyError extends Error {
