@@ -77,13 +77,16 @@ export async function POST(request: Request): Promise<NextResponse> {
     );
   }
 
-  await recordTurn({
-    userId: user.id,
-    kind: body.kind,
-    inputTokens: body.input_tokens,
-    outputTokens: body.output_tokens,
-    costCents: body.cost_cents,
-  });
+  // SECURITY: do NOT trust client-supplied token/cost numbers — a user could
+  // report 0 (or anything) to corrupt cost/COGS reporting. This endpoint exists
+  // only to count free-tier turns (voice/cmdk/composer); each POST is one row,
+  // and that server-derived COUNT is the authoritative rate-limit signal. Real
+  // token billing flows through the metered inference proxy. The body's
+  // token/cost fields are still validated (reject malformed) but discarded.
+  void body.input_tokens;
+  void body.output_tokens;
+  void body.cost_cents;
+  await recordTurn({ userId: user.id, kind: body.kind });
 
   return new NextResponse(null, { status: 204 });
 }

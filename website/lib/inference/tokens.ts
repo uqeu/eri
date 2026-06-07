@@ -162,9 +162,16 @@ function priceForModel(model: string): { in: number; out: number } | null {
  *   + cache_creation × in × 1.25
  *   + out            × out
  */
+/**
+ * Fallback price for a model we don't recognize. SECURITY/COGS: never price an
+ * unknown model at 0 — that would make any novel model id free inference. We
+ * assume the most expensive tier (Opus-class) so an unrecognized model is
+ * conservatively over-costed, not free. Add real models to PRICE_TABLE.
+ */
+const UNKNOWN_MODEL_PRICE = { in: 15, out: 75 };
+
 export function estimateCostMicros(model: string, usage: UsageCounts): number {
-  const row = priceForModel(model);
-  if (!row) return 0;
+  const row = priceForModel(model) ?? UNKNOWN_MODEL_PRICE;
   const cacheRead = usage.cache_read_input_tokens ?? 0;
   const cacheCreation = usage.cache_creation_input_tokens ?? 0;
   const cost =

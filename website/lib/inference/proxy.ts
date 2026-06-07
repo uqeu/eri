@@ -98,6 +98,15 @@ interface BYOKCredentials {
 }
 
 function readBYOK(request: Request): BYOKCredentials {
+  // SECURITY: BYOK skips billing + quota + the cost guard, so a request header
+  // must NEVER be able to select it — otherwise any user supplies any provider
+  // key (e.g. a free-trial key) and gets unmetered inference on our dime. It is
+  // gated behind a server-side flag (default OFF) and only honored for an
+  // explicitly allowlisted set of token ids. Until per-account BYOK lands,
+  // ERI_ALLOW_BYOK stays unset and every request is billed via the master key.
+  if (process.env.ERI_ALLOW_BYOK !== "true") {
+    return { active: false, apiKey: null };
+  }
   const flag = request.headers.get("x-eri-byok") === "true";
   const key = request.headers.get("x-eri-provider-key");
   return { active: flag && typeof key === "string" && key.length > 0, apiKey: key };
@@ -406,43 +415,76 @@ function passthroughStreaming(
   }
 
   const [forwardStream, parseStream] = upstream.body.tee();
-  // Parse asynchronously — never block the client byte stream on this.
+  // Parse asynchronously — never block the client byte stream on this. But a
+  // served BILLED stream must NEVER be recorded as 0 tokens (that's free
+  // inference): if parsing misses or throws, we fall back to a conservative
+  // estimate. Both the success and failure paths go through finalizeStreamBilling.
   countStreamUsage(parseStream, input.provider)
-    .then(async (usage) => {
-      const model = extractModel(input.body);
-      if (input.bill) {
-        await recordUsage({
-          user_id: input.auth.user.id,
-          provider: input.provider,
-          model,
-          intent: input.intent,
-          tokens_in: usage.tokens_in,
-          tokens_out: usage.tokens_out,
-          cost_usd_micros: estimateCostMicros(model, usage),
-          latency_ms: Date.now() - started,
-          status: "ok",
-        });
-      } else {
-        await recordUsageSafely({
-          user_id: input.auth.user.id,
-          provider: input.provider,
-          model,
-          intent: input.intent,
-          tokens_in: usage.tokens_in,
-          tokens_out: usage.tokens_out,
-          cost_usd_micros: 0,
-          latency_ms: Date.now() - started,
-          status: "ok",
-        });
-      }
-    })
+    .then((usage) => finalizeStreamBilling(input, started, usage))
     .catch((error) => {
       console.error("inference.stream_usage_failed", error);
+      return finalizeStreamBilling(input, started, { tokens_in: 0, tokens_out: 0 });
     });
 
   return new Response(forwardStream, {
     status: upstream.status,
     headers,
+  });
+}
+
+/** Max output tokens the request asked for, for the billing fallback. */
+function maxTokensFromBody(body: unknown): number {
+  if (typeof body !== "object" || body === null) return 4096;
+  const obj = body as Record<string, unknown>;
+  const v = obj.max_tokens ?? obj.max_output_tokens ?? obj.maxOutputTokens;
+  return typeof v === "number" && Number.isFinite(v) && v > 0 ? Math.floor(v) : 4096;
+}
+
+/**
+ * Record usage for a finished stream. CRITICAL: when the request is billable
+ * and the parsed usage is zero (frame missing / client disconnected / odd
+ * framing), bill a conservative estimate instead of zero so a served response
+ * is never free. The estimate over-counts slightly on purpose — losing money
+ * on a served request is worse than a small over-bill the user can dispute.
+ */
+async function finalizeStreamBilling(
+  input: ForwardInput,
+  started: number,
+  usage: UsageCounts,
+): Promise<void> {
+  const model = extractModel(input.body);
+  if (!input.bill) {
+    await recordUsageSafely({
+      user_id: input.auth.user.id,
+      provider: input.provider,
+      model,
+      intent: input.intent,
+      tokens_in: usage.tokens_in,
+      tokens_out: usage.tokens_out,
+      cost_usd_micros: 0,
+      latency_ms: Date.now() - started,
+      status: "ok",
+    });
+    return;
+  }
+  let billable = usage;
+  if (usage.tokens_in === 0 && usage.tokens_out === 0) {
+    billable = {
+      tokens_in: estimateTokens(input.body),
+      tokens_out: maxTokensFromBody(input.body),
+    };
+    console.error("inference.stream_usage_fallback_estimate", { model });
+  }
+  await recordUsageSafely({
+    user_id: input.auth.user.id,
+    provider: input.provider,
+    model,
+    intent: input.intent,
+    tokens_in: billable.tokens_in,
+    tokens_out: billable.tokens_out,
+    cost_usd_micros: estimateCostMicros(model, billable),
+    latency_ms: Date.now() - started,
+    status: "ok",
   });
 }
 

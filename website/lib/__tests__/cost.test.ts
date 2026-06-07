@@ -83,8 +83,13 @@ assert.equal(parsed.tokens_in, 500);
 assert.equal(parsed.cache_read_input_tokens, 40_000);
 assert.equal(parsed.cache_creation_input_tokens, 2_000);
 
-// Unknown model still prices nothing (no accidental billing).
-assert.equal(estimateCostMicros("totally-unknown", turn), 0);
+// SECURITY: an unknown model must NOT be free — it falls back to the most
+// expensive (Opus-class) rate so a novel model id can't be used for free
+// inference. Was previously 0; that was a usage-theft hole.
+assert.ok(
+  estimateCostMicros("totally-unknown", { tokens_in: 1000, tokens_out: 0 }) === 15_000,
+  "unknown model must price at the high fallback, not zero",
+);
 
 // eslint-disable-next-line no-console
 console.log("cost.test.ts: all assertions passed");
