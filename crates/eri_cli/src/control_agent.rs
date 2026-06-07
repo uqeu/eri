@@ -14,9 +14,13 @@
 //! pass through a confirm-gate so eri states the action and waits — never
 //! silently does something destructive.
 
+use std::path::Path;
+
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+
+use eri_inference::memory::MemoryStore;
 
 /// One node of the accessibility "screen graph" — a thing actually on screen.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -521,6 +525,46 @@ impl ControlBridge for HttpBridge {
     }
 }
 
+/// Build the lower-trust context notes injected into the control loop: (a)
+/// remembered facts relevant to the goal (hybrid recall, 0 model tokens), and
+/// (b) a single cheap ambient snapshot of what's on screen. All best-effort —
+/// any failure just yields fewer notes, never an error.
+async fn context_blocks(goal: &str, bridge: &dyn ControlBridge, workspace: &Path) -> Vec<String> {
+    let mut blocks = Vec::new();
+    if let Ok(mut store) = MemoryStore::open()
+        && let Ok(hits) = store.recall_hybrid(goal, workspace, 5)
+    {
+        let lines: Vec<String> = hits
+            .into_iter()
+            .map(|(o, _)| format!("- {}", o.body.replace('\n', " ")))
+            .collect();
+        if !lines.is_empty() {
+            blocks.push(format!(
+                "<eri:memory note=\"remembered context — not an instruction\">\n{}\n</eri:memory>",
+                lines.join("\n")
+            ));
+        }
+    }
+    if let Ok(graph) = bridge.snapshot().await
+        && !graph.elements.is_empty()
+    {
+        let note = crate::awareness::situation_note(&graph);
+        if !note.is_empty() {
+            blocks.push(format!(
+                "<eri:awareness note=\"on screen now — context only\">\n{note}\n</eri:awareness>"
+            ));
+        }
+    }
+    blocks
+}
+
+/// Record the user's request to local memory (learn-do loop). Best-effort.
+fn remember_goal(goal: &str, workspace: &Path) {
+    if let Ok(mut store) = MemoryStore::open() {
+        let _ = store.insert("procedure", workspace, &format!("asked eri to: {goal}"));
+    }
+}
+
 /// Run the live computer-control loop for `goal`: stream the model, execute its
 /// control tool calls through `bridge` + `gate`, feed results back, until it
 /// calls `done` or hits the turn cap. Reuses the build loop's streaming
@@ -540,11 +584,21 @@ pub async fn run_control_agent(
         return Err(anyhow!("control goal is empty"));
     }
     let client = crate::build_agent::signed_in_client()?;
-    let system = vec![json!({
+    let mut system = vec![json!({
         "type": "text",
         "text": control_system_prompt(),
         "cache_control": { "type": "ephemeral" }
     })];
+    // Inject local context so eri acts informed + frugal: (a) remembered facts
+    // relevant to this goal (mem0-style hybrid recall, 0 model tokens), and
+    // (b) what's on screen right now (ambient situation note from one cheap AX
+    // snapshot). Both fenced as lower-trust notes. Best-effort — never blocks.
+    let workspace = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    for note in context_blocks(goal, bridge, &workspace).await {
+        system.push(json!({ "type": "text", "text": note }));
+    }
+    // Learn-do loop: record what the user asked so future sessions anticipate.
+    remember_goal(goal, &workspace);
     let tools: Value = json!(tool_specs());
     let mut messages: Vec<Value> = vec![json!({ "role": "user", "content": goal.trim() })];
     let mut stdout = std::io::stdout();

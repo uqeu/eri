@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Eri</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Funnel+Display:wght@400;500;600;700;800&display=swap" />
+    <link rel="stylesheet" href="./manager.css" />
+  </head>
+  <body data-view="launcher" data-theme="dark">
+    <div class="app">
+      <!-- Title bar: just the mark + theme + account. Everything else lives in /. -->
+      <header class="titlebar">
+        <button class="wordmark" type="button" data-command="goHome" title="New conversation">
+          <span class="mark">eri</span>
+          <span class="ws-name" id="workspaceLabel"></span>
+        </button>
+        <div class="titlebar-tools">
+          <button class="tool theme-toggle" type="button" data-command="toggleTheme" id="themeToggle" aria-label="Toggle theme" title="Theme">
+            <span class="ico-moon">☾</span><span class="ico-sun">☀</span>
+          </button>
+          <button class="tool account" type="button" data-command="authAction" id="accountBtn">Sign in</button>
+        </div>
+      </header>
+
+      <!-- ============ LAUNCHER ============ -->
+      <main class="launcher" id="launcher">
+        <div class="launcher-inner">
+          <div class="welcome"><div class="welcome-mark">eri</div></div>
+
+          <form class="composer launcher-composer" id="launcherForm">
+            <textarea
+              id="launcherInput"
+              class="composer-input"
+              rows="1"
+              spellcheck="false"
+              placeholder="What do you want to build?"></textarea>
+            <div class="composer-bar">
+              <button class="mic" type="button" data-command="toggleVoice" id="voiceDot" aria-label="Voice" title="Talk to build">
+                <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M8 1.6a1.9 1.9 0 0 0-1.9 1.9v3.9a1.9 1.9 0 1 0 3.8 0V3.5A1.9 1.9 0 0 0 8 1.6zM4.1 7.4a3.9 3.9 0 0 0 7.8 0M8 11.3v3.1M5.8 14.4h4.4" stroke="currentColor" stroke-width="1.25" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </button>
+              <button class="mic" type="button" data-command="controlGoal" aria-label="Let eri control your computer" title="Hands-free: let eri do this on your computer">
+                <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 2.5l8 5.5-3.4 1.1L10 13l-1.7.8-1.5-3.3L4 12.8z" stroke="currentColor" stroke-width="1.1" fill="none" stroke-linejoin="round"/></svg>
+              </button>
+              <span class="composer-hint">/ for commands · @ to mention</span>
+              <button class="send-circle" type="submit" id="launcherSend" aria-label="Build">
+                <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M8 13V3.5M8 3.5l-4 4M8 3.5l4 4" stroke="currentColor" stroke-width="1.7" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </button>
+            </div>
+          </form>
+        </div>
+      </main>
+
+      <!-- ============ WORKSPACE: chat (narrow) + live preview (hero) ============ -->
+      <section class="workspace" id="workspace" hidden>
+        <div class="chat">
+          <div class="chat-head">
+            <div class="chat-title" id="chatTitle">New conversation</div>
+            <div class="run-pill" id="runPill" data-state="idle">idle</div>
+          </div>
+
+          <div class="thread" id="thread"></div>
+
+          <details class="artifacts" id="artifactsWrap">
+            <summary>Artifacts <span class="muted" id="artifactsCount"></span></summary>
+            <div class="artifact-list" id="artifacts"></div>
+          </details>
+
+          <form class="composer chat-composer" id="chatForm">
+            <textarea
+              id="chatInput"
+              class="composer-input"
+              rows="1"
+              spellcheck="false"
+              placeholder="Reply, or / for commands"></textarea>
+            <div class="composer-bar">
+              <button class="mic" type="button" data-command="toggleVoice" id="voiceDotChat" aria-label="Voice" title="Talk">
+                <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M8 1.6a1.9 1.9 0 0 0-1.9 1.9v3.9a1.9 1.9 0 1 0 3.8 0V3.5A1.9 1.9 0 0 0 8 1.6zM4.1 7.4a3.9 3.9 0 0 0 7.8 0M8 11.3v3.1M5.8 14.4h4.4" stroke="currentColor" stroke-width="1.25" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </button>
+              <button class="mic" type="button" data-command="controlGoal" aria-label="Let eri control your computer" title="Hands-free: let eri do this on your computer">
+                <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 2.5l8 5.5-3.4 1.1L10 13l-1.7.8-1.5-3.3L4 12.8z" stroke="currentColor" stroke-width="1.1" fill="none" stroke-linejoin="round"/></svg>
+              </button>
+              <button class="mic" type="button" data-command="panicStop" aria-label="Stop all actuation" title="Stop all actuation (⌘⌥⎋)">
+                <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><rect x="4.5" y="4.5" width="7" height="7" rx="1" stroke="currentColor" stroke-width="1.25" fill="none"/></svg>
+              </button>
+              <button class="send-circle" type="submit" aria-label="Send">
+                <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M8 13V3.5M8 3.5l-4 4M8 3.5l4 4" stroke="currentColor" stroke-width="1.7" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <div class="canvas">
+          <div class="canvas-head">
+            <div class="seg canvas-tabs" role="tablist" aria-label="View">
+              <button type="button" class="seg-btn is-on" data-command="setCanvas" data-canvas="preview">Preview</button>
+              <button type="button" class="seg-btn" data-command="setCanvas" data-canvas="code">Code</button>
+              <button type="button" class="seg-btn" data-command="setCanvas" data-canvas="diff">Diff</button>
+            </div>
+          </div>
+
+          <div class="canvas-pane" data-pane="preview">
+            <div class="browser">
+              <div class="browser-bar">
+                <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+                <span class="url" id="previewUrl">preview ready</span>
+                <button class="browser-open" type="button" data-command="openPreview">Open</button>
+              </div>
+              <div class="browser-view" id="previewView">
+                <div class="preview-empty" id="previewEmpty">
+                  <div class="preview-empty-mark">eri</div>
+                  <p>Your app appears here as it builds.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="canvas-pane" data-pane="code" hidden>
+            <div class="code">
+              <div class="file-tree" id="fileTree"></div>
+              <div class="file-view">
+                <div class="file-view-head" id="fileViewName">No file selected</div>
+                <pre class="file-body" id="fileBody"><code>Select a file to view its contents.</code></pre>
+              </div>
+            </div>
+          </div>
+
+          <div class="canvas-pane" data-pane="diff" hidden>
+            <div class="diff-empty" id="diffEmpty"><p>No pending changes.</p></div>
+            <div class="diff-list" id="diffList"></div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- Sign-in dialog -->
+    <dialog class="sheet auth-sheet" id="authSheet">
+      <div class="auth-body">
+        <div class="auth-mark">eri</div>
+        <div class="auth-title" id="authTitle">Sign in to eri</div>
+        <p class="auth-sub" id="authSub">Opening your browser. Approve there, or use the code below.</p>
+        <div class="auth-code-wrap" id="authCodeWrap" hidden>
+          <div class="auth-code-label">Your code</div>
+          <div class="auth-code" id="authCode">····-····</div>
+        </div>
+        <button class="auth-link" id="authLink" type="button" data-command="openAuthUrl" hidden>Open sign-in page</button>
+        <div class="auth-status" id="authStatusLine"><span class="spin"></span><span id="authStatusText">Starting…</span></div>
+        <button class="ghost auth-cancel" type="button" data-command="closeAuth">Cancel</button>
+      </div>
+    </dialog>
+
+    <!-- Sources popover -->
+    <dialog class="sheet" id="sourcesSheet">
+      <div class="sheet-head">
+        <strong>Indexed sources</strong>
+        <button class="ghost" type="button" data-command="closeSources">Close</button>
+      </div>
+      <div class="sheet-body" id="sourcesBody"></div>
+    </dialog>
+
+    <!-- Slash / mention combobox -->
+    <div class="cbx" id="cbx" hidden role="listbox"></div>
+
+    <script src="./manager.js"></script>
+  </body>
+</html>
