@@ -532,6 +532,10 @@ final class AgentManagerController: NSObject, NSWindowDelegate, WKNavigationDele
             var env = ProcessInfo.processInfo.environment
             env["ERI_CONTROL_ENDPOINT"] = endpoint
             if let token = self.controlToken { env["ERI_CONTROL_TOKEN"] = token }
+            // Where the `look` tool finds the local face-redaction sidecar.
+            if let redact = self.resolveRepoFile(["scripts", "eri_redact.py"]) {
+                env["ERI_REDACT_SCRIPT"] = redact.path
+            }
             process.environment = env
             process.standardOutput = pipe
             process.standardError = pipe
