@@ -93,6 +93,24 @@ impl ControlAction {
         }
     }
 
+    /// The permission category that, if the user has granted it, lets this
+    /// risky action run without a per-action confirm. `None` = always confirm
+    /// (or it isn't risky). Refusals are never mapped here — they can't be
+    /// granted away.
+    pub fn permission(&self) -> Option<crate::control_safety::Permission> {
+        use crate::control_safety::Permission;
+        match self {
+            ControlAction::QuitApp(_) => Some(Permission::QuitApps),
+            ControlAction::Key(combo) if is_destructive_combo(combo) => {
+                Some(Permission::DestructiveKeys)
+            }
+            ControlAction::Type(text) if looks_destructive(text) => {
+                Some(Permission::DestructiveCommands)
+            }
+            _ => None,
+        }
+    }
+
     /// Human-readable description for the confirm prompt + narration.
     pub fn describe(&self) -> String {
         match self {
@@ -130,40 +148,70 @@ pub enum Disposition {
     Executed(String),
     /// Action is risky and was held; carries the description to confirm.
     NeedsConfirmation(String),
+    /// Action is something eri must never do (password/money/CAPTCHA/access
+    /// control). It was NOT run; carries the spoken hand-back message. Unlike
+    /// `NeedsConfirmation`, "yes" cannot unlock this — the user must do it.
+    Refused(String),
 }
 
-/// Gates risky actions behind explicit confirmation. `auto_confirm` exists for
-/// non-interactive/headless runs and tests; the interactive default is false.
+/// Gates risky actions behind explicit confirmation, refuses sensitive ones
+/// outright, and honors a persisted permission allowlist. `auto_confirm` exists
+/// for non-interactive/headless runs and tests; the interactive default is
+/// false. Refusals always apply, even with `auto_confirm` — they are not a
+/// confirmation, they are a boundary.
 #[derive(Debug, Default)]
 pub struct ControlGate {
     auto_confirm: bool,
+    permissions: crate::control_safety::PermissionStore,
 }
 
 impl ControlGate {
-    pub fn new() -> Self {
+    /// Build a gate with a pre-loaded permission allowlist (granted categories
+    /// skip the per-action confirm). Use `ControlGate::default()` for an empty,
+    /// confirm-everything gate.
+    pub fn with_permissions(
+        auto_confirm: bool,
+        permissions: crate::control_safety::PermissionStore,
+    ) -> Self {
         Self {
-            auto_confirm: false,
+            auto_confirm,
+            permissions,
         }
     }
 
-    pub fn auto_confirm() -> Self {
-        Self { auto_confirm: true }
-    }
-
-    /// Submit an action. Risky actions are held (unless `auto_confirm`);
-    /// everything else runs immediately on the bridge.
+    /// Submit an action. Order of checks (each a hard guarantee):
+    /// 1. **Refuse** sensitive actions (password/money/CAPTCHA/access control) —
+    ///    never run, hand back to the user.
+    /// 2. **Confirm** risky actions, UNLESS the user granted that permission or
+    ///    `auto_confirm` is set.
+    /// 3. Otherwise run immediately.
     pub async fn submit(
         &self,
         bridge: &dyn ControlBridge,
         action: &ControlAction,
     ) -> Result<Disposition> {
-        if action.is_risky() && !self.auto_confirm {
-            return Ok(Disposition::NeedsConfirmation(action.describe()));
+        // (1) Refusal — check typed text against the sensitive-action classifier.
+        if let ControlAction::Type(text) = action
+            && let Some(kind) = crate::control_safety::classify_refusal(text)
+        {
+            return Ok(Disposition::Refused(kind.handback_message().to_string()));
         }
+        // (2) Confirmation — risky unless explicitly permitted.
+        if action.is_risky() && !self.auto_confirm {
+            let granted = action
+                .permission()
+                .is_some_and(|p| self.permissions.is_granted(p));
+            if !granted {
+                return Ok(Disposition::NeedsConfirmation(action.describe()));
+            }
+        }
+        // (3) Run.
         Ok(Disposition::Executed(apply(bridge, action).await?))
     }
 
-    /// Run a previously-held action after the user said yes.
+    /// Run a previously-held action after the user said yes. Refusals can never
+    /// reach here (the gate never returns `NeedsConfirmation` for them), so this
+    /// stays a thin pass-through.
     pub async fn confirm(
         &self,
         bridge: &dyn ControlBridge,
@@ -356,7 +404,7 @@ pub struct StepOutcome {
 pub async fn execute_tool_calls(
     bridge: &dyn ControlBridge,
     gate: &ControlGate,
-    confirm: &mut dyn FnMut(&str) -> bool,
+    confirm: &mut dyn FnMut(&str, Option<crate::control_safety::Permission>) -> bool,
     calls: &[(String, String, Value)],
 ) -> StepOutcome {
     let mut out = StepOutcome::default();
@@ -407,8 +455,21 @@ pub async fn execute_tool_calls(
                 out.log.push(format!("{} -> {result}", action.describe()));
                 out.results.push(tool_result(id, &result, false));
             }
+            Ok(Disposition::Refused(message)) => {
+                // A boundary, not a failure: eri won't do this, and tells the
+                // user why. Feed the handback back to the model (not an error)
+                // so it relays the message and waits for the user instead of
+                // retrying. The retracted/blocked intent is NOT recorded as a
+                // goal eri is pursuing.
+                out.log.push(format!("refused: {} — {message}", action.describe()));
+                out.results.push(tool_result(
+                    id,
+                    &format!("REFUSED (hand back to the user): {message}"),
+                    false,
+                ));
+            }
             Ok(Disposition::NeedsConfirmation(desc)) => {
-                if confirm(&desc) {
+                if confirm(&desc, action.permission()) {
                     match gate.confirm(bridge, &action).await {
                         Ok(result) => {
                             out.log.push(format!("confirmed: {desc} -> {result}"));
@@ -506,10 +567,25 @@ operating the computer with the provided tools. ALWAYS call screen_observe \
 first to see the current app and its actionable elements, then act, then \
 observe again to verify. Prefer clicking elements by their id over \
 coordinates. Use open_app to launch/focus apps. Keep steps minimal -- do not \
-take unnecessary actions. quit_app and other destructive actions require the \
-user's confirmation (the harness will ask). When the goal is achieved, call \
-done with a one-line summary. Be efficient: observe only when state may have \
-changed."
+take unnecessary actions. When the goal is achieved, call done with a one-line \
+summary. Be efficient: observe only when state may have changed.\n\n\
+SAFETY (the harness enforces these in code; your job is to behave consistently \
+with them and narrate clearly):\n\
+- STOP/CANCEL: if the user says stop, no, wait, never mind, forget it, or \
+otherwise retracts, immediately stop. Do not keep pursuing a retracted request \
+or treat it as something they still want. Acknowledge briefly and wait.\n\
+- REFUSE, DON'T ASK: you do NOT enter passwords, PINs, 2FA/OTP codes, API keys, \
+or other secrets; you do NOT type bank/card/account/SSN/ID numbers; you do NOT \
+move money or place financial trades; you do NOT solve CAPTCHAs; you do NOT \
+change sharing/permission/security settings. For these, hand it back: tell the \
+user plainly that this part is theirs to do, e.g. \"I won't type your password \
+-- go ahead and enter it, then tell me to continue,\" and wait. A tool_result \
+that begins with REFUSED means exactly this: relay the message and wait.\n\
+- CONFIRM RISKY: quitting apps, delete shortcuts, and destructive commands are \
+held for confirmation. If a tool_result says the user declined, do not retry; \
+move on or ask what they'd prefer. If you keep needing the same confirmation, \
+you may suggest they allow it permanently (\"want me to remember I can quit apps \
+so I don't ask each time?\")."
 }
 
 /// A safe bridge that performs NO actuation -- it logs what eri *would* do.
@@ -734,13 +810,20 @@ pub async fn run_control_agent(
     model: &str,
     bridge: &dyn ControlBridge,
     gate: &ControlGate,
-    confirm: &mut dyn FnMut(&str) -> bool,
+    confirm: &mut dyn FnMut(&str, Option<crate::control_safety::Permission>) -> bool,
     max_turns: usize,
 ) -> Result<String> {
     use std::io::Write;
 
     if goal.trim().is_empty() {
         return Err(anyhow!("control goal is empty"));
+    }
+    // Cancellation guard: if the whole utterance is a retraction ("no, stop,
+    // forget it"), there is nothing to do. Critically, we return BEFORE
+    // `remember_goal` / any model call, so the retracted intent is never
+    // recorded as something eri is pursuing or folded into its memory.
+    if crate::control_safety::is_cancellation(goal) {
+        return Ok("Okay — stopped. Nothing was done. Tell me what you'd like instead.".to_string());
     }
     let client = crate::build_agent::signed_in_client()?;
     let mut system = vec![json!({
@@ -977,7 +1060,7 @@ mod tests {
     #[tokio::test]
     async fn gate_runs_safe_actions_immediately() {
         let bridge = MockBridge::with_snapshot(graph());
-        let gate = ControlGate::new();
+        let gate = ControlGate::default();
         let d = gate
             .submit(&bridge, &ControlAction::OpenApp("Safari".into()))
             .await
@@ -989,7 +1072,7 @@ mod tests {
     #[tokio::test]
     async fn gate_holds_risky_action_until_confirmed() {
         let bridge = MockBridge::default();
-        let gate = ControlGate::new();
+        let gate = ControlGate::default();
         let quit = ControlAction::QuitApp("Cursor".into());
         // Submitting does NOT execute — it asks for confirmation.
         let d = gate.submit(&bridge, &quit).await.unwrap();
@@ -1004,7 +1087,7 @@ mod tests {
     #[tokio::test]
     async fn auto_confirm_bypasses_the_gate() {
         let bridge = MockBridge::default();
-        let gate = ControlGate::auto_confirm();
+        let gate = ControlGate::with_permissions(true, Default::default());
         let d = gate
             .submit(&bridge, &ControlAction::QuitApp("X".into()))
             .await
@@ -1013,9 +1096,71 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn gate_refuses_typing_a_password_even_with_auto_confirm() {
+        // Refusal is a boundary, not a confirmation — auto_confirm can't unlock it.
+        let bridge = MockBridge::default();
+        let gate = ControlGate::with_permissions(true, Default::default());
+        let action = ControlAction::Type("my password is hunter2".into());
+        let d = gate.submit(&bridge, &action).await.unwrap();
+        match d {
+            Disposition::Refused(msg) => assert!(msg.to_lowercase().contains("password")),
+            other => panic!("expected refusal, got {other:?}"),
+        }
+        assert!(bridge.calls().is_empty(), "must never type a secret");
+    }
+
+    #[tokio::test]
+    async fn granted_permission_skips_confirmation() {
+        // With QuitApps granted, the gate runs the quit without holding it.
+        let bridge = MockBridge::default();
+        let mut perms = crate::control_safety::PermissionStore::default();
+        perms.grant(crate::control_safety::Permission::QuitApps);
+        let gate = ControlGate::with_permissions(false, perms);
+        let d = gate
+            .submit(&bridge, &ControlAction::QuitApp("Cursor".into()))
+            .await
+            .unwrap();
+        assert_eq!(d, Disposition::Executed("quit Cursor".into()));
+        assert_eq!(bridge.calls(), vec!["quit:Cursor"]);
+    }
+
+    #[tokio::test]
+    async fn ungranted_permission_still_confirms() {
+        // A different grant must NOT unlock quit.
+        let bridge = MockBridge::default();
+        let mut perms = crate::control_safety::PermissionStore::default();
+        perms.grant(crate::control_safety::Permission::OpenApps);
+        let gate = ControlGate::with_permissions(false, perms);
+        let d = gate
+            .submit(&bridge, &ControlAction::QuitApp("Cursor".into()))
+            .await
+            .unwrap();
+        assert_eq!(d, Disposition::NeedsConfirmation("quit Cursor".into()));
+        assert!(bridge.calls().is_empty());
+    }
+
+    #[tokio::test]
+    async fn executor_hands_back_refused_actions_without_running_them() {
+        let bridge = MockBridge::default();
+        let gate = ControlGate::default();
+        let mut confirm = |_: &str, _: Option<_>| true;
+        let calls = vec![(
+            "1".into(),
+            "type".into(),
+            json!({ "text": "enter my credit card number 4111..." }),
+        )];
+        let out = execute_tool_calls(&bridge, &gate, &mut confirm, &calls).await;
+        assert!(bridge.calls().is_empty(), "refused action must not run");
+        let content = out.results[0]["content"].as_str().unwrap();
+        assert!(content.starts_with("REFUSED"), "hands back, not executed");
+        // Not an error to retry — it's a boundary the user resolves.
+        assert!(!out.results[0]["is_error"].as_bool().unwrap_or(false));
+    }
+
+    #[tokio::test]
     async fn observe_returns_the_compact_graph() {
         let bridge = MockBridge::with_snapshot(graph());
-        let gate = ControlGate::new();
+        let gate = ControlGate::default();
         let d = gate.submit(&bridge, &ControlAction::Observe).await.unwrap();
         match d {
             Disposition::Executed(text) => assert!(text.contains("[e1] AXTextField")),
@@ -1026,8 +1171,8 @@ mod tests {
     #[tokio::test]
     async fn executor_runs_a_full_open_type_click_done_sequence() {
         let bridge = MockBridge::with_snapshot(graph());
-        let gate = ControlGate::new();
-        let mut confirm = |_: &str| true;
+        let gate = ControlGate::default();
+        let mut confirm = |_: &str, _: Option<_>| true;
         let calls = vec![
             ("1".into(), "open_app".into(), json!({ "name": "Safari" })),
             ("2".into(), "type".into(), json!({ "text": "lofi" })),
@@ -1046,8 +1191,8 @@ mod tests {
     #[tokio::test]
     async fn executor_skips_risky_action_when_user_declines() {
         let bridge = MockBridge::default();
-        let gate = ControlGate::new();
-        let mut confirm = |_: &str| false; // user says no
+        let gate = ControlGate::default();
+        let mut confirm = |_: &str, _: Option<_>| false; // user says no
         let calls = vec![("1".into(), "quit_app".into(), json!({ "name": "Cursor" }))];
         let out = execute_tool_calls(&bridge, &gate, &mut confirm, &calls).await;
         assert!(!out.done);
@@ -1059,8 +1204,8 @@ mod tests {
     #[tokio::test]
     async fn executor_runs_risky_action_when_user_confirms() {
         let bridge = MockBridge::default();
-        let gate = ControlGate::new();
-        let mut confirm = |_: &str| true; // user says yes
+        let gate = ControlGate::default();
+        let mut confirm = |_: &str, _: Option<_>| true; // user says yes
         let calls = vec![("1".into(), "quit_app".into(), json!({ "name": "Cursor" }))];
         let out = execute_tool_calls(&bridge, &gate, &mut confirm, &calls).await;
         assert_eq!(bridge.calls(), vec!["quit:Cursor"]);
@@ -1070,8 +1215,8 @@ mod tests {
     #[tokio::test]
     async fn executor_reports_bad_tool_call_as_error_not_panic() {
         let bridge = MockBridge::default();
-        let gate = ControlGate::new();
-        let mut confirm = |_: &str| true;
+        let gate = ControlGate::default();
+        let mut confirm = |_: &str, _: Option<_>| true;
         let calls = vec![("1".into(), "click".into(), json!({}))]; // missing target
         let out = execute_tool_calls(&bridge, &gate, &mut confirm, &calls).await;
         assert!(out.results[0]["is_error"].as_bool().unwrap());
@@ -1094,8 +1239,8 @@ mod tests {
         // path), so `look` MUST refuse to return the frame rather than ship an
         // unredacted screen. This is the core privacy guarantee.
         let bridge = MockBridge::default();
-        let gate = ControlGate::new();
-        let mut confirm = |_: &str| true;
+        let gate = ControlGate::default();
+        let mut confirm = |_: &str, _: Option<_>| true;
         // Point the redactor at a definitely-missing script so it fails fast.
         // SAFETY: single-threaded test; we own this process-local var.
         unsafe { std::env::set_var("ERI_REDACT_SCRIPT", "/nonexistent/eri_redact.py") };

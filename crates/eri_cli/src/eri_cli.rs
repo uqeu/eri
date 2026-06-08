@@ -41,6 +41,7 @@ mod client;
 mod commands;
 mod config;
 mod control_agent;
+mod control_safety;
 mod eri_config;
 mod genui;
 mod git_tools;
@@ -1177,20 +1178,52 @@ async fn run_control(goal: &str, live: bool, yes: bool, mode: Option<Mode>) -> a
     }
     let workspace = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let model = model_for_mode(resolve_mode(mode, &workspace));
-    let gate = if yes {
-        control_agent::ControlGate::auto_confirm()
-    } else {
-        control_agent::ControlGate::new()
-    };
-    let mut confirm = |desc: &str| -> bool {
-        print!("[eri] confirm: {desc}? [y/N] ");
-        let _ = io::Write::flush(&mut io::stdout());
-        let mut s = String::new();
-        if io::stdin().read_line(&mut s).is_err() {
-            return false;
-        }
-        matches!(s.trim().to_ascii_lowercase().as_str(), "y" | "yes")
-    };
+    // Honor any permissions the user has already granted ("you can do this next
+    // time") so eri doesn't re-ask for categories they've blessed. Refusals are
+    // never in this store — they can't be granted away.
+    let permissions = control_safety::PermissionStore::default_path()
+        .map(|p| control_safety::PermissionStore::load(&p))
+        .unwrap_or_default();
+    if !permissions.is_empty() {
+        let labels: Vec<&str> = permissions.granted().map(|p| p.label()).collect();
+        println!("[eri] granted permissions: {}", labels.join(", "));
+    }
+    let gate = control_agent::ControlGate::with_permissions(yes, permissions);
+    // Confirm prompt with a Claude-style "allow always" option: y = once,
+    // a = always (persist the grant so eri won't re-ask next time), N = no.
+    // "always" is only offered when the action maps to a grantable permission;
+    // sensitive refusals never reach here, so they can't be granted away.
+    let mut confirm =
+        |desc: &str, perm: Option<control_safety::Permission>| -> bool {
+            let prompt = if perm.is_some() {
+                format!("[eri] confirm: {desc}? [y]es once / [a]lways / [N]o ")
+            } else {
+                format!("[eri] confirm: {desc}? [y/N] ")
+            };
+            print!("{prompt}");
+            let _ = io::Write::flush(&mut io::stdout());
+            let mut s = String::new();
+            if io::stdin().read_line(&mut s).is_err() {
+                return false;
+            }
+            match s.trim().to_ascii_lowercase().as_str() {
+                "y" | "yes" => true,
+                "a" | "always" => {
+                    if let Some(p) = perm
+                        && let Some(path) = control_safety::PermissionStore::default_path()
+                    {
+                        let mut store = control_safety::PermissionStore::load(&path);
+                        store.grant(p);
+                        match store.save(&path) {
+                            Ok(()) => println!("[eri] remembered: I can {} from now on.", p.label()),
+                            Err(e) => eprintln!("[eri] could not save permission: {e}"),
+                        }
+                    }
+                    true
+                }
+                _ => false,
+            }
+        };
 
     // Live actuation needs the macOS app's control endpoint (it does the real
     // AX/CGEvent work). Standalone `--live` can't actuate, so it falls back to
