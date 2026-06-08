@@ -32,6 +32,7 @@ import ApplicationServices
 import CoreGraphics
 import Network
 import Foundation
+import ScreenCaptureKit
 
 // MARK: - Accessibility snapshot
 
@@ -271,6 +272,57 @@ func quitApp(_ name: String) -> [String: Any] {
     return any ? ["result": "quit \(name)"] : ["error": "failed to quit \(name)"]
 }
 
+// MARK: - Screen capture (vision-frame percept)
+
+/// Capture the main display as a base64 PNG. Permission-gated (Screen
+/// Recording). PRIVACY: the returned frame is RAW — the consumer MUST run it
+/// through `eri_redact.py` (face scrub) before sending it to any cloud vision
+/// model. Capture stays on-device; nothing leaves here.
+/// Holds the capture result across the async/sync boundary (avoids mutating a
+/// captured var inside the @Sendable Task closure).
+final class CaptureResult: @unchecked Sendable {
+    var value: [String: Any] = ["error": "screen capture timed out"]
+}
+
+func captureScreen() -> [String: Any] {
+    guard CGPreflightScreenCaptureAccess() else {
+        CGRequestScreenCaptureAccess() // prompts the user once
+        return ["error": "Screen Recording permission not granted. Enable eri in System Settings > Privacy & Security > Screen Recording, then retry."]
+    }
+    let holder = CaptureResult()
+    let sem = DispatchSemaphore(value: 0)
+    Task {
+        defer { sem.signal() }
+        do {
+            let content = try await SCShareableContent.excludingDesktopWindows(
+                false, onScreenWindowsOnly: true)
+            guard let display = content.displays.first else {
+                holder.value = ["error": "no display found"]
+                return
+            }
+            let filter = SCContentFilter(display: display, excludingWindows: [])
+            let config = SCStreamConfiguration()
+            config.width = display.width
+            config.height = display.height
+            let cgImage = try await SCScreenshotManager.captureImage(
+                contentFilter: filter, configuration: config)
+            let rep = NSBitmapImageRep(cgImage: cgImage)
+            if let png = rep.representation(using: .png, properties: [:]) {
+                holder.value = [
+                    "image": png.base64EncodedString(), "format": "png",
+                    "width": cgImage.width, "height": cgImage.height,
+                ]
+            } else {
+                holder.value = ["error": "failed to encode PNG"]
+            }
+        } catch {
+            holder.value = ["error": "capture failed: \(error.localizedDescription)"]
+        }
+    }
+    _ = sem.wait(timeout: .now() + 5)
+    return holder.value
+}
+
 // MARK: - Request dispatch
 
 func handle(_ body: [String: Any]) -> [String: Any] {
@@ -296,6 +348,8 @@ func handle(_ body: [String: Any]) -> [String: Any] {
         return quitApp(n)
     case "wait":
         return ["result": "ok"]
+    case "capture":
+        return captureScreen()
     default:
         return ["error": "unknown kind \(kind)"]
     }
