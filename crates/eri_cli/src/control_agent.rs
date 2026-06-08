@@ -80,9 +80,17 @@ pub enum ControlAction {
 
 impl ControlAction {
     /// Risky/irreversible or outward-facing actions must be confirmed before
-    /// they run. Conservative by default — when in doubt, gate it.
+    /// they run. Conservative by default — when in doubt, gate it. Beyond the
+    /// obvious (quit), this is CONTENT-AWARE: a keystroke or typed string that
+    /// looks destructive (⌘⌫, `rm -rf`, `DROP TABLE`, force-push, …) is gated
+    /// too, since the agent types into whatever's focused (often a terminal).
     pub fn is_risky(&self) -> bool {
-        matches!(self, ControlAction::QuitApp(_))
+        match self {
+            ControlAction::QuitApp(_) => true,
+            ControlAction::Key(combo) => is_destructive_combo(combo),
+            ControlAction::Type(text) => looks_destructive(text),
+            _ => false,
+        }
     }
 
     /// Human-readable description for the confirm prompt + narration.
@@ -163,6 +171,49 @@ impl ControlGate {
     ) -> Result<String> {
         apply(bridge, action).await
     }
+}
+
+/// A keyboard shortcut that deletes/destroys, so it needs confirmation.
+fn is_destructive_combo(combo: &str) -> bool {
+    let c = combo.to_lowercase().replace(' ', "");
+    let has_mod =
+        c.contains("cmd") || c.contains("command") || c.contains("ctrl") || c.contains("control");
+    // ⌘⌫ / ⌘⇧⌫ = move to trash / delete immediately; ⌘Q = quit.
+    (has_mod && (c.contains("delete") || c.contains("backspace")))
+        || c.contains("cmd+q")
+        || c.contains("command+q")
+}
+
+/// Typed text that looks like a destructive command — gate it before the agent
+/// presses it into a terminal/SQL console/etc. Heuristic + conservative: a few
+/// false positives (an extra confirm) are far cheaper than one `rm -rf` slipping
+/// through. Substring match, case-insensitive.
+fn looks_destructive(text: &str) -> bool {
+    let t = text.to_lowercase();
+    const PATTERNS: &[&str] = &[
+        "rm -rf",
+        "rm -r ",
+        "rm -f",
+        "sudo rm",
+        "mkfs",
+        "dd if=",
+        "dd of=/dev",
+        "> /dev/sd",
+        ":(){", // fork bomb
+        "drop table",
+        "drop database",
+        "truncate table",
+        "delete from ",
+        "git push --force",
+        "git push -f",
+        "git reset --hard",
+        "git clean -fd",
+        "shutdown",
+        "reboot",
+        "diskutil erase",
+        "format c:",
+    ];
+    PATTERNS.iter().any(|p| t.contains(p))
 }
 
 /// Dispatch an action to the bridge (no gating — callers gate first).
@@ -876,6 +927,51 @@ mod tests {
         assert!(ControlAction::QuitApp("Cursor".into()).is_risky());
         assert!(!ControlAction::OpenApp("Safari".into()).is_risky());
         assert!(!ControlAction::Type("x".into()).is_risky());
+    }
+
+    #[test]
+    fn destructive_typed_text_is_gated() {
+        let risky = [
+            "rm -rf /",
+            "sudo rm -rf node_modules",
+            "DROP TABLE users;",
+            "git push --force origin main",
+            "git reset --hard HEAD~3",
+            "DELETE FROM accounts WHERE 1=1",
+        ];
+        for t in risky {
+            assert!(ControlAction::Type(t.into()).is_risky(), "should gate: {t}");
+        }
+        // Benign typing is NOT gated (no confirmation friction).
+        for t in [
+            "hello world",
+            "lofi hip hop",
+            "const x = 1;",
+            "format the date",
+        ] {
+            assert!(
+                !ControlAction::Type(t.into()).is_risky(),
+                "should NOT gate: {t}"
+            );
+        }
+    }
+
+    #[test]
+    fn destructive_key_combos_are_gated() {
+        for k in [
+            "cmd+delete",
+            "cmd+shift+delete",
+            "command+backspace",
+            "cmd+q",
+        ] {
+            assert!(ControlAction::Key(k.into()).is_risky(), "should gate: {k}");
+        }
+        for k in ["cmd+l", "enter", "cmd+c", "tab"] {
+            assert!(
+                !ControlAction::Key(k.into()).is_risky(),
+                "should NOT gate: {k}"
+            );
+        }
     }
 
     #[tokio::test]
