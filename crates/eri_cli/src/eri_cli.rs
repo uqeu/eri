@@ -45,6 +45,7 @@ mod eri_config;
 mod genui;
 mod git_tools;
 mod line_editor;
+mod mcp_server;
 mod memory;
 mod memory_tools;
 mod plan_tui;
@@ -473,6 +474,10 @@ pub enum MemoryCommand {
 pub enum McpCommand {
     /// Show configured local MCP servers.
     List,
+    /// Run eri AS an MCP server (stdio) so other agents (Claude Desktop, …) can
+    /// call eri's local memory tools. Add to a client config with
+    /// `command: "eri", args: ["mcp", "serve"]`.
+    Serve,
 }
 
 #[derive(Subcommand, Debug, PartialEq, Eq)]
@@ -785,6 +790,13 @@ async fn dispatch(cli: Cli) -> anyhow::Result<()> {
         Command::Memory(MemoryCommand::Remember { text }) => memory::remember(&text).await,
         Command::Memory(MemoryCommand::Forget { target }) => memory::forget(&target).await,
         Command::Mcp(McpCommand::List) => repl::print_mcp_status(),
+        Command::Mcp(McpCommand::Serve) => {
+            let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+            match memory_tools::MemoryCtx::open(&cwd, None) {
+                Some(ctx) => mcp_server::serve(&ctx),
+                None => anyhow::bail!("could not open eri memory store for the MCP server"),
+            }
+        }
         Command::Update(UpdateCommand::Check { channel, output }) => {
             update::check(update::UpdateCheckOptions { channel, output }).await
         }
