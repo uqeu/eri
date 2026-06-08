@@ -22,10 +22,10 @@ export function Hero(): React.ReactElement {
 
           <div className="flex flex-wrap items-center gap-3">
             <Link
-              href="/contact"
+              href="/download"
               className="inline-flex items-center rounded-md bg-text px-4 py-2 text-[14px] font-medium text-bg hover:opacity-90 transition-opacity"
             >
-              Get early access
+              Download eri
             </Link>
             <Link
               href="/docs"

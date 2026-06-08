@@ -15,28 +15,28 @@ interface Step {
 
 const STEPS: ReadonlyArray<Step> = [
   {
-    title: "1. Install eri",
-    body: "Download from tryeri.ca/download. On macOS, drag eri.app into Applications and launch. On Windows, run the installer. On Linux, follow the per-distro instructions. First launch will ask for microphone and accessibility permissions — grant them to enable voice and inline editing, or skip them and use eri as a keyboard-first workbench.",
+    title: "1. Download eri",
+    body: "Get the macOS app from tryeri.ca/download, or install the CLI with `curl -fsSL https://tryeri.ca/install | sh`. First launch walks you through microphone, accessibility, and screen-recording permissions — these let eri hear you, see your screen, and act for you. Grant what you're comfortable with; you can use eri keyboard-first and add the rest later.",
   },
   {
-    title: "2. Sign in",
-    body: "Click Sign in on the launch screen and choose the account path you prefer. You'll land in your home tab with no projects yet.",
+    title: "2. Log in and sync your device",
+    body: "Sign in with your eri account (or run `eri auth login` in the terminal). Your plan, memory, and preferences sync to this device, so eri picks up where you left off and starts learning how you work.",
   },
   {
-    title: "3. Review workspace secrets",
-    body: "Open Settings → Secrets before your first agent turn. Paid plans include managed cloud turns; local and external service credentials stay in your OS keychain and are scoped to the workspace. See /docs/byok for the longer version.",
+    title: "3. Set your hotkey",
+    body: "Pick any shortcut — it can be anything. From then on, that key pulls eri up instantly, anywhere on your computer. eri stays active in the background, ready to listen, look, and act the moment you call it.",
   },
   {
-    title: "4. Open a project",
-    body: "File → Open Folder. Pick any directory — even a fresh one. eri indexes the files in the background so prompts can reference them by name.",
+    title: "4. Talk to it — or point with your eyes",
+    body: "Press your hotkey and say what you want: \"open my email,\" \"search YouTube for lofi,\" \"draft a reply to this, then open my inbox.\" eri reads what's on screen, plans the steps, and does them — confirming before anything risky. Look at the thing you mean and say \"click this,\" and gaze resolves the target.",
   },
   {
-    title: "5. Run your first edit",
-    body: "Hit ⌘K (or Ctrl-K on Windows/Linux) to open the composer. Type what you want changed — for example: \"Add a function in main.py that prints the first 10 prime numbers.\" eri proposes the change as a diff. Review it. Click Apply to write it to disk, or Cancel to throw it away. That's the local loop.",
+    title: "5. Let it build, too",
+    body: "Open a folder (or run `eri build` / `eri chat` in any repo) and ask: \"add a settings page and run the tests.\" The same agent that runs your computer plans, edits across files, previews the diff, and ships — voice- and gaze-driven. Review and apply, or throw it away.",
   },
   {
-    title: "6. Try voice (optional)",
-    body: "Hit the microphone button or say the wakeword. Speak your prompt as you would type it. eri's local transcription pipeline turns it into text, then runs the same composer flow. Audio stays on your device; the reviewed request is the only part eligible for cloud handoff.",
+    title: "6. Watch it get sharper",
+    body: "eri keeps a private, on-device memory of your projects, habits, and preferences, and starts to anticipate — \"you usually open this next, want me to?\" Voice, gaze, and memory stay on your machine; the cloud is used only when it genuinely helps, and you always see what left the device.",
   },
 ];
 
@@ -54,13 +54,14 @@ export default function QuickstartPage() {
             <span className="text-paper/55">Quickstart</span>
           </div>
           <h1 className="mt-5 font-display text-4xl sm:text-6xl tracking-tight text-balance">
-            Ten minutes to first edit.
+            Ten minutes to hands-free.
           </h1>
           <p className="mt-5 text-lg text-muted leading-relaxed">
-            The shortest path from a fresh download to a working
-            agent-assisted edit. If anything below diverges from what you see
-            in the app, the app wins — email phlotu@gmail.com and the
-            operator will update this page.
+            The shortest path from a fresh download to eri running your
+            computer — listening, looking at your screen, and getting work
+            done. If anything below diverges from what you see in the app, the
+            app wins — email phlotu@gmail.com and the operator will update
+            this page.
           </p>
         </div>
       </section>

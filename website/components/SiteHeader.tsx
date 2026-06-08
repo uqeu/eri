@@ -9,6 +9,7 @@ interface SiteHeaderProps {
 }
 
 const NAV_LINKS: ReadonlyArray<{ href: string; label: string }> = [
+  { href: "/download", label: "Download" },
   { href: "/pricing", label: "Pricing" },
   { href: "/features", label: "Features" },
   { href: "/security", label: "Security" },
