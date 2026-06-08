@@ -137,6 +137,16 @@ Good to run, with guardrails. **You:** create the project, give me the DSN. I'll
 49. Poor tenant isolation — ✅ user-scoped + RLS
 50. Over-trusting generated code — 🟢 confirm-gates + diff review (process)
 
+## Privacy: face redaction (Loom) — adopted; recognition deliberately excluded
+`scripts/eri_redact.py` (ported from the user's Loom engine) detects + redacts
+ALL faces locally (blur/black/pixelate) so screen frames are scrubbed BEFORE any
+cloud-vision send. It runs on-device (MediaPipe BlazeFace + OpenCV), like the
+gaze sidecar. **Face *recognition* / identity matching is intentionally NOT
+shipped** — storing face embeddings is biometric data (GDPR / Illinois BIPA /
+Texas CUBI) and a lawsuit/fine liability. If targeted redaction is ever needed,
+keep it strictly local + in-memory + opt-in, never a persisted face gallery.
+Wires into the awareness vision-frame step (P1/P2) as a mandatory pre-send filter.
+
 ## The one rule (apply to every new feature)
 > Can untrusted text make the agent spend money, read secrets, write files, run code, control the computer, or send data out?
 > If yes → it needs scoping + confirmation + server-side metering + rate limit + audit log. The **runtime** enforces permissions; the model only requests.
