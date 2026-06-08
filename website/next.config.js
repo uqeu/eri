@@ -40,7 +40,17 @@ const nextConfig = {
   reactStrictMode: true,
   // Next 14 needs this flag for instrumentation.ts (Sentry server init). Stable
   // in Next 15 — drop the flag after upgrading.
-  experimental: { instrumentationHook: true },
+  experimental: {
+    instrumentationHook: true,
+    // @sentry/node (and its OTEL auto-instrumentation helpers) use Node built-ins
+    // and dynamic require hooks that webpack can't bundle. Mark them external so
+    // they're require()'d at runtime on the Node server instead of bundled.
+    serverComponentsExternalPackages: [
+      "@sentry/node",
+      "import-in-the-middle",
+      "require-in-the-middle",
+    ],
+  },
   // Never ship readable source maps to the browser in production — they let
   // anyone reconstruct our client source (the "don't let them reverse-engineer
   // eri" requirement). Server-side logic stays on the server regardless.
@@ -49,6 +59,39 @@ const nextConfig = {
   poweredByHeader: false,
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
+  },
+  // @sentry/node + its OpenTelemetry auto-instrumentation use Node built-ins
+  // (node:child_process, worker_threads) and dynamic require hooks that webpack
+  // can't bundle. On the server build, externalize the whole tree so it's
+  // require()'d at runtime instead. Client/edge bundles never see it (the
+  // instrumentation hook bails unless NEXT_RUNTIME === "nodejs").
+  webpack(config, { isServer }) {
+    if (isServer) {
+      const externalize = [
+        "@sentry/node",
+        "@sentry/core",
+        "@sentry/opentelemetry",
+        "@opentelemetry/instrumentation",
+        "import-in-the-middle",
+        "require-in-the-middle",
+      ];
+      const original = config.externals;
+      config.externals = [
+        ({ request }, callback) => {
+          if (
+            request &&
+            externalize.some(
+              (p) => request === p || request.startsWith(`${p}/`),
+            )
+          ) {
+            return callback(null, `commonjs ${request}`);
+          }
+          return callback();
+        },
+        ...(Array.isArray(original) ? original : original ? [original] : []),
+      ];
+    }
+    return config;
   },
 };
 
