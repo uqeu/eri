@@ -222,6 +222,8 @@ pub struct VoiceCapture {
 mod engine;
 pub use engine::{VoiceConfig, VoiceEngine, VoiceSink};
 
+pub mod dictation;
+
 impl VoiceCapture {
     /// Spawn the capture + transcription pipeline. Returns a [`VoiceCapture`]
     /// handle that stops everything when dropped, plus a receiver of
