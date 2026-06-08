@@ -1,4 +1,5 @@
 import { Hero } from "@/components/Hero";
+import { CapabilityPillars } from "@/components/CapabilityPillars";
 import { EriWorkbench } from "@/components/EriWorkbench";
 import { HeroBig } from "@/components/HeroBig";
 import { PromptPipeline } from "@/components/PromptPipeline";
@@ -35,7 +36,9 @@ export default function HomePage(): React.ReactElement {
     <main>
       <Hero />
 
-      <Chapter n={1} title="A local workbench that can actually ship.">
+      <CapabilityPillars />
+
+      <Chapter n={1} title="It builds, too — a local workbench that ships.">
         <EriWorkbench />
       </Chapter>
 

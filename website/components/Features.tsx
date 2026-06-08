@@ -27,8 +27,31 @@ function Icon({ children }: { children: React.ReactNode }): React.ReactElement {
 
 const FEATURES: ReadonlyArray<Feature> = [
   {
-    title: "Voice-driven editing",
-    body: "Speak the change you want. eri transcribes locally, resolves your intent, and writes the patch before you finish the sentence.",
+    title: "Control anything, hands-free",
+    body: "Open Discord, search YouTube, fix this file, join the call — say it or point with your eyes and eri operates your real apps. It confirms before anything risky, and one hotkey stops it cold.",
+    availability: "soon",
+    signature: true,
+    icon: (
+      <Icon>
+        <path d="M5 3l14 9-6 1.5 3 6-2.5 1-3-6L5 19V3Z" />
+      </Icon>
+    ),
+  },
+  {
+    title: "It sees what you see",
+    body: "eri understands what's on your screen — the error, the form, the design — so you never re-explain. Faces are blurred on-device before anything is ever sent out.",
+    availability: "soon",
+    signature: true,
+    icon: (
+      <Icon>
+        <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" />
+        <circle cx="12" cy="12" r="3" />
+      </Icon>
+    ),
+  },
+  {
+    title: "Talk naturally; it writes it clean",
+    body: "Dictate anywhere. eri fixes the grammar, learns your vocabulary, expands your snippets, and turns rambling into polished text. Just say 'fix that word.'",
     availability: "now",
     signature: true,
     icon: (
@@ -40,125 +63,43 @@ const FEATURES: ReadonlyArray<Feature> = [
     ),
   },
   {
-    title: "Diffusion preview",
-    body: "See edits arrive as a coherent preview, not a typewriter crawl. Eri lands multi-line patches in under two seconds.",
+    title: "It remembers you",
+    body: "A private, on-device memory of how you work — your projects, habits, preferences — that anticipates. 'You usually open this next — want me to?'",
     availability: "now",
     signature: true,
     icon: (
       <Icon>
-        <path d="M4 6h16" />
-        <path d="M4 12h10" />
-        <path d="M4 18h13" />
-        <path d="M19 9l3 3-3 3" />
+        <path d="M12 3a7 7 0 0 0-4 12.7V19a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2v-3.3A7 7 0 0 0 12 3Z" />
+        <path d="M9 21h6" />
       </Icon>
     ),
   },
   {
-    title: "Iteration history",
-    body: "Every turn becomes a checkpoint. Scrub backward through prompts, diffs, and previews — recover any version of the file in one click.",
-    availability: "now",
-    signature: true,
-    icon: (
-      <Icon>
-        <path d="M3 12a9 9 0 1 0 3-6.7" />
-        <path d="M3 4v5h5" />
-        <path d="M12 8v5l3 2" />
-      </Icon>
-    ),
-  },
-  {
-    title: "Gaze targeting",
-    body: "Look at the element you want changed. eri reads your webcam, locks onto the target, and resolves pronouns like 'this' or 'here'.",
-    availability: "now",
-    signature: true,
-    icon: (
-      <Icon>
-        <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" />
-        <circle cx="12" cy="12" r="3" />
-      </Icon>
-    ),
-  },
-  {
-    title: "Tab completion",
-    body: "Predictive multi-line suggestions that read your cursor, your imports, and the next likely move. Accept with a single tap.",
+    title: "It builds, too",
+    body: "A full coding agent: it plans, edits across files, runs your tests, and ships. The same assistant that runs your computer also writes your software.",
     availability: "now",
     icon: (
       <Icon>
-        <path d="M4 7h11" />
-        <path d="M11 3l4 4-4 4" />
-        <path d="M20 12v5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-5" />
+        <path d="M8 9l-4 3 4 3" />
+        <path d="M16 9l4 3-4 3" />
+        <path d="M13 5l-2 14" />
       </Icon>
     ),
   },
   {
-    title: "Cmd-K inline edit",
-    body: "Highlight a span, hit Cmd-K, describe the change in plain English. The patch lands in the buffer with diff markers ready to apply.",
+    title: "Private by design",
+    body: "Voice, gaze, and memory live on your machine. The cloud is used only when it genuinely helps — and you always see what left the device.",
     availability: "now",
     icon: (
       <Icon>
-        <rect x="3" y="3" width="18" height="18" rx="3" />
-        <path d="M9 9h6v6" />
-        <path d="M15 9l-6 6" />
+        <path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6l7-3Z" />
+        <path d="M9 12l2 2 4-4" />
       </Icon>
     ),
   },
   {
-    title: "Composer",
-    body: "Pin a goal, stream edits across many files at once, watch every diff land in a single review pane. Multi-file refactors without the tab dance.",
-    availability: "now",
-    icon: (
-      <Icon>
-        <rect x="3" y="4" width="8" height="7" rx="1.5" />
-        <rect x="13" y="4" width="8" height="7" rx="1.5" />
-        <rect x="3" y="13" width="8" height="7" rx="1.5" />
-        <rect x="13" y="13" width="8" height="7" rx="1.5" />
-      </Icon>
-    ),
-  },
-  {
-    title: "Agent mode",
-    body: "Hand eri a goal and let it plan, edit, run, and verify across your repo. Every action is reviewable, every step is reversible.",
-    availability: "soon",
-    icon: (
-      <Icon>
-        <circle cx="12" cy="12" r="3" />
-        <path d="M12 2v3" />
-        <path d="M12 19v3" />
-        <path d="M4.2 4.2l2.1 2.1" />
-        <path d="M17.7 17.7l2.1 2.1" />
-        <path d="M2 12h3" />
-        <path d="M19 12h3" />
-        <path d="M4.2 19.8l2.1-2.1" />
-        <path d="M17.7 6.3l2.1-2.1" />
-      </Icon>
-    ),
-  },
-  {
-    title: "@-mentions",
-    body: "Pull files, folders, web pages, docs, or the entire codebase into context with a single @. No copy-paste, no token games.",
-    availability: "now",
-    icon: (
-      <Icon>
-        <circle cx="12" cy="12" r="4" />
-        <path d="M16 12v1.5a2.5 2.5 0 0 0 5 0V12a9 9 0 1 0-3.5 7.1" />
-      </Icon>
-    ),
-  },
-  {
-    title: "Codebase indexing",
-    body: "Local embeddings stay on your machine. eri finds the function you mean even when you describe it from three rooms away.",
-    availability: "now",
-    icon: (
-      <Icon>
-        <ellipse cx="12" cy="5" rx="8" ry="2.5" />
-        <path d="M4 5v6c0 1.4 3.6 2.5 8 2.5s8-1.1 8-2.5V5" />
-        <path d="M4 11v6c0 1.4 3.6 2.5 8 2.5s8-1.1 8-2.5v-6" />
-      </Icon>
-    ),
-  },
-  {
-    title: "MCP support",
-    body: "Plug any Model Context Protocol server into the loop — Slack, Linear, Postgres, your own internal tools. Bring the data, keep the keys.",
+    title: "An MCP hub",
+    body: "eri plugs into any Model Context Protocol server — and exposes its own tools as one, so Claude Desktop and other agents can call eri's memory and skills.",
     availability: "now",
     icon: (
       <Icon>
@@ -170,19 +111,14 @@ const FEATURES: ReadonlyArray<Feature> = [
     ),
   },
   {
-    title: "Task routing",
-    body: "Route build, review, research, UI, and shell work to the right Eri agent from one workspace file. Or stay fully local for private tasks.",
+    title: "Token-frugal",
+    body: "eri reads the cheap signals first and only pays for the expensive model when it's worth it — so you get more out of your plan, automatically.",
     availability: "now",
     icon: (
       <Icon>
-        <circle cx="6" cy="6" r="2.5" />
-        <circle cx="18" cy="6" r="2.5" />
-        <circle cx="6" cy="18" r="2.5" />
-        <circle cx="18" cy="18" r="2.5" />
-        <path d="M8.5 6h7" />
-        <path d="M6 8.5v7" />
-        <path d="M18 8.5v7" />
-        <path d="M8.5 18h7" />
+        <circle cx="12" cy="12" r="8" />
+        <path d="M12 7v10" />
+        <path d="M9.5 9.5h3.5a1.75 1.75 0 0 1 0 3.5H9.5" />
       </Icon>
     ),
   },
@@ -212,16 +148,16 @@ export function Features(): React.ReactElement {
         <div className="flex items-end justify-between gap-6 flex-wrap">
           <div className="max-w-3xl">
             <p className="text-xs uppercase tracking-[0.25em] text-muted">
-              The surface
+              What eri does
             </p>
             <h2 className="mt-4 font-display text-3xl sm:text-5xl tracking-tight max-w-2xl text-balance font-normal">
-              Every reflex of the modern workbench,{" "}
-              <span className="italic text-accent">owned by the agent.</span>
+              One agent for everything you do{" "}
+              <span className="italic text-accent">on a computer.</span>
             </h2>
           </div>
           <p className="max-w-sm text-paper/60 text-[15px] leading-relaxed">
-            Eri keeps files, search, git, terminal, preview, MCP, voice, gaze,
-            and review in one agent-controlled loop.
+            Control, vision, voice, memory, and code — in one local-first agent
+            that learns how you work.
           </p>
         </div>
 
