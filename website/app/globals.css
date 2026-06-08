@@ -23,6 +23,12 @@
   --accent-muted: rgba(224, 255, 79, 0.12);
   --accent-faint: rgba(224, 255, 79, 0.04);
 
+  /* Primary-action accent (the .btn-primary fill). Declared here because the
+     button referenced --sage / --sage-deep that were never defined, leaving it
+     with no background. */
+  --sage:      #e0ff4f;
+  --sage-deep: #cdee3a;
+
   --text-display: clamp(3rem, 8vw, 6.5rem);
   --text-h1: clamp(2.5rem, 5vw, 4rem);
   --text-h2: clamp(2rem, 3.5vw, 3rem);
@@ -275,6 +281,73 @@ html, body {
 
   .marquee-track:hover {
     animation-play-state: paused;
+  }
+
+  /* Staggered entrance: start hidden, rise + fade in. Pair with an inline
+     animation-delay for a cascade. `both` fill keeps the 0% state during the
+     delay so there's no pre-animation flash. */
+  .rise {
+    opacity: 0;
+    animation: fadeUp 0.7s var(--ease-out) both;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .rise,
+    .marquee-track,
+    .wave-bar,
+    .pulse-dot {
+      animation: none;
+    }
+    .rise {
+      opacity: 1;
+    }
+  }
+
+  /* Ambient hero wash — a soft off-center radial that gives the hero depth
+     without introducing a chrome accent (neutral light, very low alpha). */
+  .hero-wash {
+    background-image:
+      radial-gradient(60% 50% at 78% 18%, rgba(237, 237, 237, 0.05) 0%, transparent 62%),
+      radial-gradient(50% 45% at 8% 4%, rgba(224, 255, 79, 0.04) 0%, transparent 60%);
+  }
+
+  /* macOS-style window chrome for product mockups. */
+  .win-chrome {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    box-shadow:
+      0 1px 0 0 rgba(255, 255, 255, 0.04) inset,
+      0 40px 80px -32px rgba(0, 0, 0, 0.8),
+      0 8px 24px -12px rgba(0, 0, 0, 0.6);
+  }
+
+  /* Cursor-style spotlight ring that tracks --mx/--my (set in JS). */
+  .spotlight {
+    position: relative;
+  }
+  .spotlight::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 1px;
+    background: radial-gradient(
+      240px circle at var(--mx, 50%) var(--my, 0%),
+      rgba(224, 255, 79, 0.35),
+      transparent 60%
+    );
+    -webkit-mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity var(--dur-base) var(--ease-out);
+  }
+  .spotlight:hover::before {
+    opacity: 1;
   }
 }
 
