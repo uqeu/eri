@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { HeroVisual } from "./HeroVisual";
+import { DemoPlayer } from "./DemoPlayer";
 
 const PROOF: ReadonlyArray<{ k: string; v: string }> = [
   { k: "On-device", v: "voice · eyes · memory" },
@@ -85,12 +85,12 @@ export function Hero(): React.ReactElement {
             </dl>
           </div>
 
-          {/* Right: the signature mockup */}
+          {/* Right: the signature motion demo (Remotion) */}
           <div
             className="rise lg:translate-x-2"
             style={{ animationDelay: "180ms" }}
           >
-            <HeroVisual />
+            <DemoPlayer />
           </div>
         </div>
       </div>

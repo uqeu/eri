@@ -38,6 +38,8 @@ const securityHeaders = [
 
 const nextConfig = {
   reactStrictMode: true,
+  // Remotion ships modern ESM; let Next transpile it for the client bundle.
+  transpilePackages: ["remotion", "@remotion/player"],
   // Next 14 needs this flag for instrumentation.ts (Sentry server init). Stable
   // in Next 15 — drop the flag after upgrading.
   experimental: {
