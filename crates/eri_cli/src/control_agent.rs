@@ -105,6 +105,9 @@ impl ControlAction {
 #[async_trait::async_trait]
 pub trait ControlBridge: Send + Sync {
     async fn snapshot(&self) -> Result<ScreenGraph>;
+    /// Capture the screen as a base64 PNG (raw — caller must redact before any
+    /// cloud send).
+    async fn capture(&self) -> Result<String>;
     async fn click(&self, target: &ClickTarget) -> Result<String>;
     async fn type_text(&self, text: &str) -> Result<String>;
     async fn key(&self, combo: &str) -> Result<String>;
@@ -221,6 +224,11 @@ pub fn tool_specs() -> Vec<Value> {
             "input_schema": { "type": "object", "properties": {} }
         }),
         json!({
+            "name": "look",
+            "description": "Capture the actual screen pixels as an image (faces auto-blurred locally for privacy). Use ONLY when screen_observe (accessibility text) isn't enough — e.g. canvas/games/custom UI or to read something not exposed as an element. More expensive than screen_observe, so prefer that first.",
+            "input_schema": { "type": "object", "properties": {} }
+        }),
+        json!({
             "name": "click",
             "description": "Click a UI element by its id from screen_observe (preferred), or fall back to screen coordinates x,y only if no element matches.",
             "input_schema": {
@@ -307,6 +315,33 @@ pub async fn execute_tool_calls(
             out.results.push(tool_result(id, "acknowledged", false));
             continue;
         }
+        // `look`: capture the screen, REDACT faces locally, and return the
+        // redacted image to the model. FAIL-CLOSED: if redaction can't run, we
+        // refuse to send the frame (never ship an unredacted screen to cloud).
+        if name == "look" {
+            out.results.push(match bridge.capture().await {
+                Ok(b64) => match redact_png(&b64).await {
+                    Ok(redacted) => {
+                        out.log.push("looked at the screen (faces redacted)".into());
+                        image_tool_result(id, &redacted)
+                    }
+                    Err(e) => {
+                        out.log
+                            .push(format!("look refused — redaction failed: {e}"));
+                        tool_result(
+                            id,
+                            &format!(
+                                "refused: could not redact the screen ({e}); not sending it. \
+                                 Use screen_observe (accessibility) instead."
+                            ),
+                            true,
+                        )
+                    }
+                },
+                Err(e) => tool_result(id, &format!("capture failed: {e}"), true),
+            });
+            continue;
+        }
         let action = match parse_action(name, input) {
             Ok(a) => a,
             Err(e) => {
@@ -359,6 +394,60 @@ fn tool_result(id: &str, content: &str, is_error: bool) -> Value {
     })
 }
 
+/// A tool_result carrying a (redacted) PNG image block, so the model can see the
+/// screen. Anthropic accepts image blocks inside tool_result content.
+fn image_tool_result(id: &str, png_b64: &str) -> Value {
+    json!({
+        "type": "tool_result",
+        "tool_use_id": id,
+        "content": [{
+            "type": "image",
+            "source": { "type": "base64", "media_type": "image/png", "data": png_b64 },
+        }],
+    })
+}
+
+/// Redact faces in a base64 PNG by piping it through the local `eri_redact.py`
+/// sidecar. FAIL-CLOSED by design: any failure (sidecar missing, CV deps absent,
+/// bad output) returns Err so the caller refuses to send an unredacted frame.
+async fn redact_png(png_b64: &str) -> Result<String> {
+    let script =
+        std::env::var("ERI_REDACT_SCRIPT").unwrap_or_else(|_| "scripts/eri_redact.py".to_string());
+    let mut child = tokio::process::Command::new("python3")
+        .arg(&script)
+        .arg("--stdio")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|e| anyhow!("redactor spawn failed: {e}"))?;
+    let req = format!("{}\n", json!({ "image": png_b64 }));
+    {
+        use tokio::io::AsyncWriteExt;
+        let mut stdin = child.stdin.take().ok_or_else(|| anyhow!("no stdin"))?;
+        stdin
+            .write_all(req.as_bytes())
+            .await
+            .map_err(|e| anyhow!("redactor write: {e}"))?;
+        stdin.shutdown().await.ok();
+    }
+    let output = child
+        .wait_with_output()
+        .await
+        .map_err(|e| anyhow!("redactor wait: {e}"))?;
+    let line = String::from_utf8_lossy(&output.stdout);
+    let reply: Value = serde_json::from_str(line.lines().next().unwrap_or("").trim())
+        .map_err(|e| anyhow!("redactor output not JSON: {e}"))?;
+    if let Some(err) = reply.get("error").and_then(Value::as_str) {
+        return Err(anyhow!("redactor: {err}"));
+    }
+    reply
+        .get("image")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| anyhow!("redactor reply missing image"))
+}
+
 /// Builder persona for the control loop. Accessibility-first + frugal.
 fn control_system_prompt() -> &'static str {
     "You are eri's computer-control agent. You accomplish the user's goal by \
@@ -386,6 +475,9 @@ impl ControlBridge for DryRunBridge {
             window: String::new(),
             elements: Vec::new(),
         })
+    }
+    async fn capture(&self) -> Result<String> {
+        Err(anyhow!("DRY RUN: no screen capture"))
     }
     async fn click(&self, t: &ClickTarget) -> Result<String> {
         Ok(format!("DRY RUN: would click {t:?}"))
@@ -448,6 +540,18 @@ pub fn parse_wire_snapshot(reply: &Value) -> Result<ScreenGraph> {
     serde_json::from_value(screen.clone()).map_err(|e| anyhow!("bad screen graph: {e}"))
 }
 
+/// Parse a capture reply: `{"image": "<base64 png>"}` (or `{"error"}`).
+pub fn parse_wire_capture(reply: &Value) -> Result<String> {
+    if let Some(err) = reply.get("error").and_then(Value::as_str) {
+        return Err(anyhow!("{err}"));
+    }
+    reply
+        .get("image")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| anyhow!("capture reply missing `image`: {reply}"))
+}
+
 /// The real actuation bridge: POSTs each action to a loopback endpoint hosted
 /// by the macOS app (which does the AX/CGEvent/NSWorkspace work) and parses the
 /// reply. The endpoint URL comes from `ERI_CONTROL_ENDPOINT`, set by the app
@@ -507,6 +611,10 @@ impl ControlBridge for HttpBridge {
     async fn snapshot(&self) -> Result<ScreenGraph> {
         let reply = self.post(action_to_wire(&ControlAction::Observe)).await?;
         parse_wire_snapshot(&reply)
+    }
+    async fn capture(&self) -> Result<String> {
+        let reply = self.post(json!({ "kind": "capture" })).await?;
+        parse_wire_capture(&reply)
     }
     async fn click(&self, target: &ClickTarget) -> Result<String> {
         self.act(&ControlAction::Click(target.clone())).await
@@ -676,6 +784,10 @@ mod tests {
         async fn snapshot(&self) -> Result<ScreenGraph> {
             self.calls.lock().unwrap().push("snapshot".into());
             Ok(self.snapshots.lock().unwrap().pop().unwrap_or_default())
+        }
+        async fn capture(&self) -> Result<String> {
+            self.calls.lock().unwrap().push("capture".into());
+            Ok("ZmFrZS1wbmc=".into()) // base64("fake-png")
         }
         async fn click(&self, t: &ClickTarget) -> Result<String> {
             self.calls.lock().unwrap().push(format!("click:{t:?}"));
@@ -871,6 +983,52 @@ mod tests {
     }
 
     #[test]
+    fn parse_wire_capture_handles_image_and_error() {
+        assert_eq!(
+            parse_wire_capture(&json!({ "image": "abc", "format": "png" })).unwrap(),
+            "abc"
+        );
+        assert!(parse_wire_capture(&json!({ "error": "denied" })).is_err());
+        assert!(parse_wire_capture(&json!({ "nope": 1 })).is_err());
+    }
+
+    #[tokio::test]
+    async fn look_fails_closed_when_redaction_unavailable() {
+        // The redactor sidecar can't run in this test env (no CV deps / script
+        // path), so `look` MUST refuse to return the frame rather than ship an
+        // unredacted screen. This is the core privacy guarantee.
+        let bridge = MockBridge::default();
+        let gate = ControlGate::new();
+        let mut confirm = |_: &str| true;
+        // Point the redactor at a definitely-missing script so it fails fast.
+        // SAFETY: single-threaded test; we own this process-local var.
+        unsafe { std::env::set_var("ERI_REDACT_SCRIPT", "/nonexistent/eri_redact.py") };
+        let calls = vec![("1".into(), "look".into(), json!({}))];
+        let out = execute_tool_calls(&bridge, &gate, &mut confirm, &calls).await;
+        unsafe { std::env::remove_var("ERI_REDACT_SCRIPT") };
+
+        assert!(
+            bridge.calls().contains(&"capture".to_string()),
+            "should capture"
+        );
+        let res = &out.results[0];
+        assert!(
+            res["is_error"].as_bool().unwrap_or(false),
+            "must fail closed"
+        );
+        let content = res["content"].as_str().unwrap_or("");
+        assert!(
+            content.contains("refused") || content.contains("redact"),
+            "must explain the refusal, got: {content}"
+        );
+        // Crucially: NO image block was emitted.
+        assert!(
+            res["content"].as_array().is_none(),
+            "must not emit an image"
+        );
+    }
+
+    #[test]
     fn action_wire_roundtrip_is_stable() {
         // The Rust↔app contract: these shapes must match the Swift server.
         assert_eq!(
@@ -938,13 +1096,14 @@ mod tests {
     #[test]
     fn tool_specs_cover_the_action_surface() {
         let specs = tool_specs();
-        assert_eq!(specs.len(), 7);
+        assert_eq!(specs.len(), 8);
         let names: Vec<&str> = specs
             .iter()
             .map(|s| s.get("name").and_then(Value::as_str).unwrap())
             .collect();
         for expected in [
             "screen_observe",
+            "look",
             "click",
             "type",
             "key",
