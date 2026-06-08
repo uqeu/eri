@@ -52,15 +52,23 @@ export function SiteHeader({ variant = "transparent" }: SiteHeaderProps) {
         </Link>
 
         <nav className="hidden md:flex items-center gap-1">
-          {NAV_LINKS.map((link) => (
-            <Link
-              key={link.href}
-              href={link.href}
-              className="px-3 py-1.5 text-[14px] text-text-sec hover:text-text transition-colors rounded-sm"
-            >
-              {link.label}
-            </Link>
-          ))}
+          {NAV_LINKS.map((link) => {
+            const active =
+              pathname === link.href ||
+              (link.href !== "/" && pathname?.startsWith(`${link.href}/`));
+            return (
+              <Link
+                key={link.href}
+                href={link.href}
+                aria-current={active ? "page" : undefined}
+                className={`px-3 py-1.5 text-[14px] transition-colors rounded-sm ${
+                  active ? "text-text" : "text-text-sec hover:text-text"
+                }`}
+              >
+                {link.label}
+              </Link>
+            );
+          })}
         </nav>
 
         <div className="flex items-center gap-2">
