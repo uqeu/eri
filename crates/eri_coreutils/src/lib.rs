@@ -17,6 +17,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 pub mod audit;
+pub mod blocks;
 pub mod crash;
 pub mod host_client;
 pub mod services;
@@ -164,7 +165,10 @@ pub enum DispatchError {
     /// The eri.dev backend rejected the call because the user is over their
     /// tier quota. The IDE surfaces this with an upgrade CTA instead of the
     /// generic error toast.
-    OverQuota { tier: String, remaining: i64 },
+    OverQuota {
+        tier: String,
+        remaining: i64,
+    },
     /// The user is inside their monthly budget but hit a short-window
     /// throttle (per-hour / per-day cap). The IDE surfaces a non-blocking
     /// toast with the reset time instead of the upgrade modal — the
@@ -312,7 +316,11 @@ pub async fn dispatch(
                     DispatchError::OverQuota { tier, remaining } => {
                         format!("OVER_QUOTA: tier={tier} remaining={remaining}")
                     }
-                    DispatchError::RateLimited { tier, window, reset_at } => {
+                    DispatchError::RateLimited {
+                        tier,
+                        window,
+                        reset_at,
+                    } => {
                         format!("RATE_LIMIT: tier={tier} window={window} resetAt={reset_at}")
                     }
                     DispatchError::Other(e) => e.to_string(),
@@ -465,12 +473,8 @@ async fn dispatch_inner(
         "eri/inference/iterate" => {
             services::iterate::iterate(request.params.clone(), tier_state, services).await
         }
-        "eri/ship/run" => {
-            services::ship::run(request.params.clone(), tier_state, services).await
-        }
-        "eri/slash/run" => {
-            services::slash::run(request.params.clone(), tier_state, services).await
-        }
+        "eri/ship/run" => services::ship::run(request.params.clone(), tier_state, services).await,
+        "eri/slash/run" => services::slash::run(request.params.clone(), tier_state, services).await,
         "eri/memory/recall" => {
             services::memory::recall(request.params.clone(), tier_state, services).await
         }
@@ -674,9 +678,7 @@ async fn dispatch_inner(
         }
 
         // --- Natural-language voice intent router ---
-        "eri/voice/route" => {
-            services::voice_route::route(request.params.clone(), services).await
-        }
+        "eri/voice/route" => services::voice_route::route(request.params.clone(), services).await,
 
         // --- Gaze sidecar (free tier; local-only, never leaves the machine) ---
         "eri/gaze/start" => services::gaze::start(request.params.clone(), services).await,
