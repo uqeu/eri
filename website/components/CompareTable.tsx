@@ -1,85 +1,85 @@
 interface ComparisonRow {
   readonly feature: string;
   readonly eri: string;
-  readonly cursor: string;
-  readonly v0: string;
-  readonly bolt: string;
-  readonly lovable: string;
+  readonly editor: string;
+  readonly appBuilder: string;
+  readonly chatbot: string;
+  readonly automation: string;
 }
 
 const COLUMNS: ReadonlyArray<{ key: keyof ComparisonRow; label: string; highlight?: boolean }> = [
   { key: "feature", label: "" },
   { key: "eri", label: "eri", highlight: true },
-  { key: "cursor", label: "Cursor" },
-  { key: "v0", label: "v0" },
-  { key: "bolt", label: "Bolt" },
-  { key: "lovable", label: "Lovable" },
+  { key: "editor", label: "Editor" },
+  { key: "appBuilder", label: "App builder" },
+  { key: "chatbot", label: "Chatbot" },
+  { key: "automation", label: "Automation" },
 ];
 
 const ROWS: ReadonlyArray<ComparisonRow> = [
   {
     feature: "Voice-first build",
     eri: "yes",
-    cursor: "no",
-    v0: "no",
-    bolt: "no",
-    lovable: "no",
+    editor: "no",
+    appBuilder: "no",
+    chatbot: "no",
+    automation: "no",
   },
   {
-    feature: "Diffusion edits",
-    eri: "eri's engine",
-    cursor: "no",
-    v0: "no",
-    bolt: "no",
-    lovable: "no",
+    feature: "Agent-owned edits",
+    eri: "Eri",
+    editor: "partial",
+    appBuilder: "yes",
+    chatbot: "no",
+    automation: "partial",
   },
   {
     feature: "Native macOS",
     eri: "yes",
-    cursor: "yes",
-    v0: "browser",
-    bolt: "browser",
-    lovable: "browser",
+    editor: "yes",
+    appBuilder: "browser",
+    chatbot: "browser",
+    automation: "varies",
   },
   {
     feature: "Sub-2s median edit",
     eri: "1.8s",
-    cursor: "varies",
-    v0: "no",
-    bolt: "no",
-    lovable: "no",
+    editor: "varies",
+    appBuilder: "no",
+    chatbot: "no",
+    automation: "varies",
   },
   {
-    feature: "Pick model mid-sentence",
+    feature: "Switch agent mid-sentence",
     eri: "yes",
-    cursor: "manual",
-    v0: "fixed",
-    bolt: "fixed",
-    lovable: "fixed",
+    editor: "manual",
+    appBuilder: "fixed",
+    chatbot: "fixed",
+    automation: "manual",
   },
   {
     feature: "Personalized AI",
     eri: "Personalized Eri",
-    cursor: "no",
-    v0: "no",
-    bolt: "no",
-    lovable: "no",
+    editor: "no",
+    appBuilder: "no",
+    chatbot: "no",
+    automation: "partial",
   },
   {
     feature: "Code stays local",
     eri: "yes",
-    cursor: "partial",
-    v0: "no",
-    bolt: "no",
-    lovable: "no",
+    editor: "partial",
+    appBuilder: "no",
+    chatbot: "no",
+    automation: "partial",
   },
   {
     feature: "Bring your own keys",
-    eri: "every model",
-    cursor: "limited",
-    v0: "no",
-    bolt: "no",
-    lovable: "no",
+    eri: "connectors",
+    editor: "limited",
+    appBuilder: "no",
+    chatbot: "manual",
+    automation: "yes",
   },
 ];
 
@@ -128,9 +128,9 @@ export function CompareTable(): React.ReactElement {
             How eri compares.
           </h2>
           <p className="mt-5 text-body text-paper/60">
-            Cursor is the pro IDE. v0, Bolt and Lovable are prompt-to-app for
-            browsers. eri sits between them: voice in, diffusion out, native and
-            yours.
+            Eri sits between editor, app builder, chatbot, and automation:
+            local workbench power, agent-owned workflow, reviewable artifacts,
+            and cloud handoff when the task needs it.
           </p>
         </div>
 
@@ -169,16 +169,16 @@ export function CompareTable(): React.ReactElement {
                     <Cell value={row.eri} highlight />
                   </div>
                   <div className="px-4 py-4">
-                    <Cell value={row.cursor} highlight={false} />
+                    <Cell value={row.editor} highlight={false} />
                   </div>
                   <div className="px-4 py-4">
-                    <Cell value={row.v0} highlight={false} />
+                    <Cell value={row.appBuilder} highlight={false} />
                   </div>
                   <div className="px-4 py-4">
-                    <Cell value={row.bolt} highlight={false} />
+                    <Cell value={row.chatbot} highlight={false} />
                   </div>
                   <div className="px-4 py-4">
-                    <Cell value={row.lovable} highlight={false} />
+                    <Cell value={row.automation} highlight={false} />
                   </div>
                 </div>
               ))}

@@ -70,7 +70,7 @@ function parseBody(value: unknown): SignupBody | null {
 }
 
 export async function POST(request: Request): Promise<NextResponse> {
-  const limited = rateLimit(request, "auth.signup");
+  const limited = await rateLimit(request, "auth.signup");
   if (limited) return limited;
 
   let raw: unknown;

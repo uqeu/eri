@@ -4,7 +4,7 @@ import { FooterBig } from "@/components/FooterBig";
 
 export const metadata: Metadata = {
   title: "Docs — eri",
-  description: "Documentation for the eri voice-first IDE. Coming soon.",
+  description: "Documentation for the eri local agentic workbench. Coming soon.",
 };
 
 interface DocLink {
@@ -19,21 +19,21 @@ const DOC_LINKS: ReadonlyArray<DocLink> = [
     href: "/docs/quickstart",
     title: "Quickstart",
     description:
-      "Install, sign in, and run your first AI-assisted edit. Ten-minute path from download to working diff.",
+      "Install, sign in, open a workspace, and run your first agent-assisted edit.",
     status: "Draft",
   },
   {
     href: "/docs/ide",
-    title: "The IDE",
+    title: "Workbench",
     description:
-      "Layout, panels, the composer, the apply step, keymaps, and how to make eri behave like the editor you already use.",
+      "Layout, panels, composer, terminal context, review flow, and the editor substrate inside eri.",
     status: "Draft",
   },
   {
     href: "/docs/sidecar",
-    title: "The Rust sidecar",
+    title: "Local runtime",
     description:
-      "How the eri_coreutils sidecar talks to the IDE, what each crate does, and the protocol between them.",
+      "How local project state, commands, permissions, and agent actions are coordinated on your machine.",
     status: "Draft",
   },
   {
@@ -45,9 +45,9 @@ const DOC_LINKS: ReadonlyArray<DocLink> = [
   },
   {
     href: "/docs/byok",
-    title: "Bring your own keys",
+    title: "Workspace secrets",
     description:
-      "Connecting Anthropic, OpenAI, Google, or an OpenAI-compatible endpoint with your own API key.",
+      "How local secrets are stored, scoped, and used when a task needs external services.",
     status: "Draft",
   },
 ];
@@ -65,9 +65,10 @@ export default function DocsPage() {
             Docs.
           </h1>
           <p className="mt-5 text-lg text-muted leading-relaxed">
-            Working documentation for eri — the IDE, the Rust sidecar, MCP
-            integration, BYOK. The pages below are drafts that grow as the
-            product does. If a topic isn&apos;t covered yet, email{" "}
+            Working documentation for eri — the workbench, local runtime, MCP
+            integration, secrets, and cloud handoff. The pages below are
+            drafts that grow as the product does. If a topic isn&apos;t covered
+            yet, email{" "}
             <a
               href="mailto:phlotu@gmail.com"
               className="text-accent underline underline-offset-4"

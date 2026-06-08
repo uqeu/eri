@@ -13,7 +13,7 @@ export const dynamic = "force-dynamic";
  * ALL of the user's active api_tokens. Each revoked device 401s on its next call.
  */
 export async function POST(request: Request): Promise<NextResponse> {
-  const limited = rateLimit(request, "auth.devices.revoke_all");
+  const limited = await rateLimit(request, "auth.devices.revoke_all");
   if (limited) return limited;
 
   const user = await userFromBearer(request.headers.get("authorization"));

@@ -4,7 +4,7 @@ import { FooterBig } from "@/components/FooterBig";
 export const metadata: Metadata = {
   title: "About — eri",
   description:
-    "eri is a voice-first, local-first IDE for the people who think faster than they type.",
+    "eri is a local agentic workbench for people who want code, CLI runs, and cloud handoff in one loop.",
 };
 
 interface Pillar {
@@ -14,16 +14,16 @@ interface Pillar {
 
 const PILLARS: ReadonlyArray<Pillar> = [
   {
-    title: "Voice is the input layer",
-    body: "Typing is a bottleneck most of the day. Talking matches the speed of thinking. eri turns the half-formed sentence in your head into a working diff before you'd have finished the function signature. The transcription runs on your laptop, not ours.",
+    title: "Intent is the input layer",
+    body: "Some work starts as a sentence, some as a selected file, some as a terminal failure. eri turns that intent into a reviewed plan, a working diff, or the next command without making you leave the workspace.",
   },
   {
-    title: "Diffusion is the model",
-    body: "Autoregressive models write code one token at a time. Eri's engine denoises the whole patch at once. For multi-line refactors, this is the difference between waiting and shipping.",
+    title: "The loop is local",
+    body: "Project files, edit history, voice transcription, command output, and review state live on your machine. Cloud services are an explicit handoff for work that needs remote compute, longer runs, or a hosted environment.",
   },
   {
-    title: "Your machine is the runtime",
-    body: "Voice transcription, gaze tracking, text-to-speech, and the editor itself stay local. Only the model inference call leaves the device, and you choose where it goes and which key signs it.",
+    title: "The CLI is part of the product",
+    body: "Agents should be able to inspect files, run commands, read failures, and propose the next step. eri treats the terminal as first-class context instead of a window you copy errors out of.",
   },
 ];
 
@@ -35,19 +35,19 @@ interface ManifestoLine {
 const MANIFESTO: ReadonlyArray<ManifestoLine> = [
   {
     tag: "01",
-    text: "We don't want your code on our servers. Your repository lives on your laptop. The only thing we see is the prompt you ask us to forward, and only when you choose to route through us.",
+    text: "We don't want your repo on our servers. Your project lives on your laptop unless you deliberately hand off a task to cloud runtime.",
   },
   {
     tag: "02",
-    text: "We don't want to sell your usage data. We don't have an ad model. We don't sell prompts, completions, or telemetry. If we ever change this, we'll tell you in plain English first, not in a Terms update.",
+    text: "We don't want to sell your usage data. We don't have an ad model. We don't sell prompts, outputs, command logs, or telemetry. If we ever change this, we'll tell you in plain English first, not in a Terms update.",
   },
   {
     tag: "03",
-    text: "We don't want to obscure which model handled your request. The iterator panel logs the model, token count, and latency for every voice turn. If we auto-route, we show the decision. No \"Auto\" hand-wave.",
+    text: "We don't want invisible automation. Agent turns should show what changed, what ran, what failed, and what gets sent outside the machine before it leaves.",
   },
   {
     tag: "04",
-    text: "We don't want to surprise-bill you. Every paid tier is hard-capped at its monthly headline price. When you hit the cap, eri stops cloud turns and lets you continue with your own key. There is no overage line item.",
+    text: "We don't want surprise bills. Paid tiers are hard-capped at their monthly headline price. When you hit the cap, eri stops metered cloud turns instead of inventing an overage line item.",
   },
 ];
 
@@ -61,13 +61,12 @@ export default function AboutPage() {
             About
           </p>
           <h1 className="mt-5 font-display text-4xl sm:text-6xl tracking-tight text-balance">
-            We're building the IDE that listens.
+            We're building the local workbench for agentic software work.
           </h1>
           <p className="mt-6 text-lg text-muted leading-relaxed">
-            eri started as a side project: one engineer, a mic, and a hunch
-            that staring at a blinking cursor was no longer the fastest way to
-            write software. Three drafts later, it turned into something we
-            wanted to ship.
+            eri started as a side project: one engineer, a repo, and the hunch
+            that serious agent work needed to live closer to the files,
+            commands, and review habits developers already trust.
           </p>
         </div>
       </section>
@@ -78,20 +77,18 @@ export default function AboutPage() {
             Why eri exists
           </h2>
           <p className="mt-6 text-paper/90 leading-relaxed">
-            The first wave of AI editors made autocomplete dramatically
-            better. The second wave gave us chat sidebars. Both still assume
-            the human is the one driving the keyboard. We think that's the
-            wrong frame. The keyboard is a 19th-century interface. Voice plus
-            gaze plus a model that understands the whole repo is something
-            else — a pair programmer who is awake, attentive, and never asks
-            you to rephrase.
+            The first wave of coding assistants made autocomplete dramatically
+            better. The second wave gave us chat sidebars. Both still treated
+            the terminal, editor, issue context, and deployment path as
+            separate places. We think the useful frame is a workbench: one
+            local loop where an agent can inspect, edit, run, explain, and ask
+            before handing work to the cloud.
           </p>
           <p className="mt-5 text-paper/90 leading-relaxed">
-            eri is a VSCodium fork with a local Rust sidecar. The editor, the
-            voice pipeline, the gaze tracker, and the iteration history are
-            our own code. We kept the VSCode extension surface so your
-            keymaps and plugins still work — we replaced the loop, not the
-            ergonomics.
+            eri is not a generic editor skin or a wrapper around a remote API.
+            It is a local product surface for agentic work: files, diffs,
+            terminal output, task history, voice input, and cloud handoff
+            arranged around the developer's review loop.
           </p>
         </div>
       </section>

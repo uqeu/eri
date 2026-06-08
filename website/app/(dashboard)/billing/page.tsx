@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
+import { useSearchParams } from "next/navigation";
 import { authedFetch, useUser } from "@/lib/auth-client";
+import { checkoutPlanFromParam, type PaidSignupPlan } from "@/lib/signup-flow";
 
 type BillingCadence = "monthly" | "yearly";
 type PaidPlan = "starter" | "pro" | "pro_plus" | "teams";
@@ -277,6 +279,8 @@ function Section({ title, description, children }: SectionProps) {
 
 export default function BillingPage() {
   const { user } = useUser();
+  const searchParams = useSearchParams();
+  const requestedPlan = checkoutPlanFromParam(searchParams?.get("plan") ?? null);
   const [subscription, setSubscription] = useState<SubscriptionSummary | null>(
     null,
   );
@@ -285,6 +289,9 @@ export default function BillingPage() {
   const [pending, setPending] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [picking, setPicking] = useState<boolean>(false);
+  const [autoCheckoutPlan, setAutoCheckoutPlan] = useState<PaidSignupPlan | null>(
+    requestedPlan === "free" ? null : requestedPlan,
+  );
 
   useEffect(() => {
     if (!user) return;
@@ -337,6 +344,13 @@ export default function BillingPage() {
       setPending(null);
     }
   }
+
+  useEffect(() => {
+    if (!user || !autoCheckoutPlan || pending) return;
+    setAutoCheckoutPlan(null);
+    setPicking(true);
+    void upgrade(autoCheckoutPlan);
+  }, [autoCheckoutPlan, pending, user]);
 
   async function openPortal(): Promise<void> {
     setPending("portal");

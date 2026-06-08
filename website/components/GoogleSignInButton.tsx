@@ -5,11 +5,12 @@ import { useSearchParams } from "next/navigation";
 
 interface GoogleSignInButtonProps {
   label?: string;
+  next?: string;
 }
 
 export function GoogleSignInButton(props: GoogleSignInButtonProps) {
   return (
-    <Suspense fallback={<GoogleSignInButtonInner {...props} href="/api/auth/google/start" />}>
+    <Suspense fallback={<GoogleSignInButtonInner {...props} href={googleHref(props.next)} />}>
       <GoogleSignInButtonWithParams {...props} />
     </Suspense>
   );
@@ -17,14 +18,19 @@ export function GoogleSignInButton(props: GoogleSignInButtonProps) {
 
 function GoogleSignInButtonWithParams({
   label = "Continue with Google",
+  next: explicitNext,
 }: GoogleSignInButtonProps) {
   const params = useSearchParams();
-  const next = params?.get("next");
-  const href = next
-    ? `/api/auth/google/start?next=${encodeURIComponent(next)}`
-    : "/api/auth/google/start";
+  const next = explicitNext ?? params?.get("next");
+  const href = googleHref(next);
 
   return <GoogleSignInButtonInner label={label} href={href} />;
+}
+
+function googleHref(next: string | null | undefined): string {
+  return next
+    ? `/api/auth/google/start?next=${encodeURIComponent(next)}`
+    : "/api/auth/google/start";
 }
 
 function GoogleSignInButtonInner({

@@ -198,18 +198,18 @@ interface FeatureRow {
 }
 
 const DIFFERENTIATORS: ReadonlyArray<FeatureRow> = [
-  { label: "Voice on existing repos", note: "Whisper-on-device, sub-second" },
-  { label: "Gaze targeting", note: "MediaPipe in-process, camera frames stay local" },
-  { label: "Diffusion edits", note: "The patch resolves; no left-to-right wait" },
-  { label: "Local Tab", note: "Embedded inference on your hardware" },
+  { label: "Terminal-native Eri", note: "Run agents from the shell or UI" },
+  { label: "Agent Manager", note: "Assign reviewers, builders, and shippers" },
+  { label: "Artifacts + GenUI", note: "Preview the work before it lands" },
+  { label: "Local-first context", note: "Repo search, MCP, and skills stay close" },
 ];
 
 // Which differentiator each step highlights in the right rail.
 const STEP_TO_DIFF: ReadonlyArray<string> = [
-  "Gaze targeting",
-  "Voice on existing repos",
-  "Diffusion edits",
-  "Local Tab",
+  "Terminal-native Eri",
+  "Agent Manager",
+  "Artifacts + GenUI",
+  "Local-first context",
 ];
 
 // How long the auto-loop stays paused after a user interaction (ms).
@@ -339,7 +339,7 @@ export function HeroBig(): React.ReactElement {
 
   return (
     <section
-      id="parity"
+      id="workbench-loop"
       className="relative overflow-hidden border-y border-white/[0.06]"
     >
       <div
@@ -353,7 +353,7 @@ export function HeroBig(): React.ReactElement {
 
       <div className="relative mx-auto max-w-7xl px-6 py-24 sm:py-32">
         <div className="max-w-3xl">
-          <p className="mono-cap text-accent">The eri loop</p>
+          <p className="mono-cap text-accent">The shipping loop</p>
           <h2
             className="mt-4 font-display text-balance"
             style={{
@@ -363,17 +363,16 @@ export function HeroBig(): React.ReactElement {
               letterSpacing: "-0.03em",
             }}
           >
-            Your eyes stay on the prototype.
+            Keep the work local.
             <br />
             <span className="italic text-paper/65">
-              The code rewrites itself.
+              Let agents do the heavy lift.
             </span>
           </h2>
           <p className="mt-6 text-body text-paper/55 max-w-2xl">
-            Look at the part you want to change. Say it out loud. The diffusion
-            engine streams the patch into the file and the prototype updates
-            under your gaze. Voice, vision, completion, and apply all run on
-            your hardware — the planner is the only call that crosses the wire.
+            Start in the terminal or the workbench. Eri gathers repo context,
+            routes the turn to the right agent, renders a preview artifact, and
+            keeps checkpoints ready while you review and ship.
           </p>
         </div>
 
@@ -405,20 +404,19 @@ export function HeroBig(): React.ReactElement {
               className="font-display text-xl text-paper"
               style={{ fontWeight: 400 }}
             >
-              Every shortcut you have muscle memory for.
+              The CLI, workbench, and cloud agents stay in sync.
             </p>
             <p className="mt-1.5 text-[14px] text-paper/55">
-              Plus the muscle eri brings on its own — predicting your next move,
-              learning your patterns, remembering you across sessions. Your{" "}
-              <code className="font-mono text-paper/80">settings.json</code>,
-              keybindings, and extensions carry over on first launch.
+              Launch locally, hand tasks to specialized agents, review the
+              generated artifact, checkpoint the change, then push or deploy
+              without losing the thread.
             </p>
           </div>
           <Link
             href="/features"
             className="btn-ghost inline-flex items-center justify-center gap-2 px-5 py-2.5 text-[14px] shrink-0"
           >
-            See the full feature map
+            See the product surface
             <span aria-hidden>→</span>
           </Link>
         </div>
@@ -842,7 +840,7 @@ function Prototype({
             Start free trial →
           </button>
           <p className="mt-2 font-mono text-[10px] text-paper/35">
-            No card. 14 days. Local-first.
+            Local install. Cloud agents when needed.
           </p>
         </div>
       </div>
@@ -985,13 +983,13 @@ function DifferentiatorsRail({
           className="font-display text-2xl sm:text-3xl text-paper"
           style={{ fontWeight: 400, letterSpacing: "-0.02em" }}
         >
-          Only in eri
+          Built into Eri
         </h3>
-        <p className="mono-cap text-accent">The reason to switch</p>
+        <p className="mono-cap text-accent">Workbench primitives</p>
       </div>
       <p className="text-[13px] text-paper/55 mb-5">
-        The four primitives that turn the loop on the left into a single
-        gesture — and the ones nobody else has shipped.
+        The primitives that connect local install, CLI agents, cloud workers,
+        and reviewable artifacts into one shipping loop.
       </p>
       <ul className="space-y-2.5 flex-1">
         {DIFFERENTIATORS.map((feature) => {
@@ -1043,8 +1041,9 @@ function DifferentiatorsRail({
         })}
       </ul>
       <p className="mt-5 pt-4 border-t border-white/[0.06] text-[12px] text-paper/45 leading-relaxed">
-        Tab, ⌘K, Composer, agents, @-mentions, MCP — all in the box. The four
-        above are the part nobody else ships.
+        Terminal agent, Agent Manager, MCP, API keys, skills, universal search,
+        GenUI previews, checkpoints, and ship actions are all part of the same
+        workbench.
       </p>
     </div>
   );

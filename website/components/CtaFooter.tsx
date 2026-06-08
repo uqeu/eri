@@ -9,13 +9,14 @@ export function CtaFooter(): React.ReactElement {
             className="text-display font-normal leading-[0.98] text-balance text-text"
             style={{ letterSpacing: "-0.03em", fontWeight: 500 }}
           >
-            Build at the speed{" "}
-            <span className="text-text-sec">you think.</span>
+            Ship from your{" "}
+            <span className="text-text-sec">local workbench.</span>
           </h2>
 
           <p className="text-text-sec text-[17px] leading-[1.55] max-w-prose mt-7">
-            The agentic editor for engineers who think faster than they type.
-            Bring your own keys. Local-first.
+            Eri brings the terminal agent, Agent Manager, MCP context, GenUI
+            artifacts, previews, reviews, checkpoints, and deploys into one
+            local-first loop. Bring your own keys or use Eri Cloud.
           </p>
 
           <div className="mt-9 flex flex-wrap items-center gap-3">
@@ -23,7 +24,7 @@ export function CtaFooter(): React.ReactElement {
               href="/download"
               className="inline-flex items-center rounded-md bg-text px-4 py-2 text-[14px] font-medium text-bg hover:opacity-90 transition-opacity"
             >
-              Download for macOS
+              Install locally
             </Link>
             <Link
               href="/contact"

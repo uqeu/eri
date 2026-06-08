@@ -43,7 +43,7 @@ export async function issueApiToken(input: {
     id: newApiTokenId(),
     user_id: input.userId,
     token_hash: hashToken(raw),
-    label: input.label ?? "IDE",
+    label: input.label ?? "Eri",
   });
   return { raw, row };
 }

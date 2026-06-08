@@ -176,9 +176,9 @@ export function Footer(): React.ReactElement {
               />
             </Link>
             <p className="mt-5 text-[14px] leading-relaxed text-paper/55">
-              The IDE that listens, watches, and edits — all on your hardware.
-              Speak your intent, the diffusion engine resolves the patch, and
-              your repo grows under your gaze.
+              The local workbench for agentic software work. Speak or type the
+              next step, review the patch, run the CLI, and hand off cloud work
+              when your laptop should not be the runtime.
             </p>
             <div className="mt-7 flex flex-wrap items-center gap-2">
               <span className="inline-flex items-center gap-2 rounded-full border border-white/[0.08] bg-white/[0.02] px-3 py-1.5 font-mono text-[11px] uppercase tracking-wider text-paper/55">
@@ -227,8 +227,8 @@ export function Footer(): React.ReactElement {
               aria-hidden
               className="h-1.5 w-1.5 rounded-full bg-accent shadow-[0_0_8px_rgba(224,255,79,0.5)]"
             />
-            BYOK keys never leave your machine — stored in OS Keychain, never
-            synced to our servers.
+            Workspace secrets stay local by default — stored in OS Keychain,
+            never synced to our servers.
           </span>
         </div>
 

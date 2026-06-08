@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-const COMMANDS = ["transcript", "gaze", "diffuse", "agent", "models", "history", "clear"] as const;
+const COMMANDS = ["transcript", "gaze", "preview", "agent", "tools", "history", "clear"] as const;
 
 export function CLIWindow(): React.ReactElement {
   const [input, setInput] = useState<string>("");
@@ -27,9 +27,9 @@ export function CLIWindow(): React.ReactElement {
         <div className="space-y-1 text-white/65">
           <div>⬢ Heard · 420ms</div>
           <div>⬢ Read sign-in/page.tsx, sign-up/page.tsx</div>
-          <div>⬢ Routed to Claude Sonnet 4.6</div>
+          <div>⬢ Routed to Eri Builder</div>
           <div>⬢ Wrote sign-in/page.tsx · +47 −12</div>
-          <div>⬢ Diffused preview · 1.4s</div>
+          <div>⬢ Refreshed preview · 1.4s</div>
         </div>
         <div className="text-white/85">Staged on branch <span className="text-[#bfd7c1]">eri/auth-refactor</span>. Look at it to commit.</div>
       </div>

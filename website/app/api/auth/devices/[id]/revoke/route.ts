@@ -17,7 +17,7 @@ export async function POST(
   request: Request,
   { params }: { params: { id: string } },
 ): Promise<NextResponse> {
-  const limited = rateLimit(request, "auth.devices.revoke");
+  const limited = await rateLimit(request, "auth.devices.revoke");
   if (limited) return limited;
 
   const user = await userFromBearer(request.headers.get("authorization"));

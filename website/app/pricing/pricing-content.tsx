@@ -49,17 +49,17 @@ const PLANS: ReadonlyArray<Plan> = [
     priceMonthly: "Free",
     priceYearlyAsMonthly: "Free",
     cadenceNote: "forever",
-    tagline: "Voice, gaze, and diffusion — nothing held back. No card.",
+    tagline: "A local agentic workbench you can trust before you ship.",
     blurb:
-      "Voice, gaze, diffusion preview, full editor. Iterate freely on eri's engine — when you're ready to ship to frontier models, upgrade. No card to start, no surprise bills.",
+      "Start with the local workbench, CLI, previews, and checkpoints. Eri can plan, edit, and verify on your machine; upgrade when you want larger cloud handoffs or team runners. No card to start, no surprise bills.",
     includesHeader: "Includes",
     turns: { monthly: 150, weekly: 50, daily: 10, hourly: 3 },
     features: [
-      { glyph: "full", label: "Voice transcription — on us" },
-      { glyph: "full", label: "Diffusion edits + Cmd-K palette" },
-      { glyph: "half", label: "150 eri-engine turns per month" },
+      { glyph: "full", label: "Local agent workbench + CLI" },
+      { glyph: "full", label: "Previews, checkpoints, and Cmd-K edits" },
+      { glyph: "half", label: "150 cloud handoff turns per month" },
       { glyph: "full", label: "Templates + iteration history" },
-      { glyph: "ring", label: "Frontier models require upgrade" },
+      { glyph: "ring", label: "Cloud runners require upgrade" },
       { glyph: "ring", label: "Community Discord support" },
     ],
     cta: { href: "/sign-up?plan=free", label: "Start free" },
@@ -78,17 +78,17 @@ const PLANS: ReadonlyArray<Plan> = [
     priceMonthly: 15,
     priceYearlyAsMonthly: 12,
     cadenceNote: "",
-    tagline: "eri that learns the way you build, session over session.",
+    tagline: "A steadier local agent with memory across real projects.",
     blurb:
-      "Adaptive eri remembers what you ship, the patterns you reach for, and how you phrase things. Pick a premium voice that fits the way you work.",
+      "Eri remembers project context, prior checkpoints, and the workflows you repeat. Use the desktop workbench or CLI to plan, edit, preview, and verify servers with less re-explaining.",
     includesHeader: "Everything in Free, plus",
     turns: { monthly: 1839, weekly: 459, daily: 65, hourly: 8 },
     features: [
-      { glyph: "full", label: "Cross-session memory" },
-      { glyph: "full", label: "Pick a premium voice" },
+      { glyph: "full", label: "Cross-session project memory" },
+      { glyph: "full", label: "Optional voice and gaze targeting inputs" },
       { glyph: "full", label: "No eri branding on shipped apps" },
-      { glyph: "full", label: "eri-cloud credits included" },
-      { glyph: "half", label: "Expanded engine quota" },
+      { glyph: "full", label: "Eri cloud handoff credits included" },
+      { glyph: "half", label: "Expanded agent turn quota" },
       { glyph: "ring", label: "Email support" },
     ],
     cta: { href: "/sign-up?plan=starter", label: "Choose Individual I" },
@@ -107,17 +107,17 @@ const PLANS: ReadonlyArray<Plan> = [
     priceMonthly: 30,
     priceYearlyAsMonthly: 24,
     cadenceNote: "",
-    tagline: "Adaptive, plus the model that fits the task. Background agents grind your backlog while you sleep.",
+    tagline: "Local workbench first, cloud runners when the task should leave your laptop.",
     blurb:
-      "Frontier eri picks the right brain per task — eri's diffusion engine for short edits, a heavier reasoner when the task needs it. Async agents finish the rest while you sleep.",
+      "Hand off reviews, deploy prep, server checks, and longer backlog work to cloud runners. Eri keeps the checkpoint trail visible so you can inspect what changed before it ships.",
     includesHeader: "Everything in Individual I, plus",
     turns: { monthly: 3254, weekly: 813, daily: 116, hourly: 14 },
     features: [
-      { glyph: "full", label: "Multi-model routing — the right brain per task" },
+      { glyph: "full", label: "Cloud runners for review and deploy prep" },
       { glyph: "full", label: "Background agents that work while you idle" },
-      { glyph: "full", label: "Inline Cmd-K edits included" },
-      { glyph: "full", label: "Custom integrations" },
-      { glyph: "half", label: "Extended context window" },
+      { glyph: "full", label: "Server verification and preview handoff" },
+      { glyph: "full", label: "Custom MCP integrations" },
+      { glyph: "half", label: "Larger project context" },
       { glyph: "ring", label: "Priority email + Discord" },
     ],
     cta: { href: "/sign-up?plan=pro", label: "Choose Individual II" },
@@ -136,17 +136,17 @@ const PLANS: ReadonlyArray<Plan> = [
     priceMonthly: 60,
     priceYearlyAsMonthly: 48,
     cadenceNote: "",
-    tagline: "eri trained on your patterns. A private brain that's only yours.",
+    tagline: "A private workbench tuned to your repo, team, and release path.",
     blurb:
-      "Personalized eri studies your codebase locally — your conventions, your naming, your tests — and biases every suggestion toward how you actually write code. A private brain that never pools with anyone else's.",
+      "Eri studies your codebase locally: conventions, naming, tests, review habits, and deployment rituals. Keep the private project brain beside your repo while teams hand longer work to managed cloud runners.",
     includesHeader: "Everything in Individual II, plus",
     turns: { monthly: 6084, weekly: 1521, daily: 217, hourly: 27 },
     features: [
-      { glyph: "full", label: "Exclusive voice presets + blending" },
-      { glyph: "full", label: "Trained on your codebase patterns (locally)" },
-      { glyph: "full", label: "Private brain — never pooled" },
-      { glyph: "full", label: "Largest context window" },
-      { glyph: "full", label: "Priority polish queue" },
+      { glyph: "full", label: "Team-ready cloud runner capacity" },
+      { glyph: "full", label: "Learns your codebase patterns locally" },
+      { glyph: "full", label: "Private project brain — never pooled" },
+      { glyph: "full", label: "Largest project context" },
+      { glyph: "full", label: "Priority review and deploy queue" },
       { glyph: "ring", label: "Priority support" },
     ],
     cta: { href: "/sign-up?plan=pro_plus", label: "Choose Individual III" },
@@ -179,44 +179,58 @@ const text = (label: string, tone: "default" | "accent" | "muted" = "default"): 
 
 const COMPARISON: ReadonlyArray<ComparisonCategory> = [
   {
-    title: "Models",
+    title: "Workbench + agent",
     rows: [
       {
-        label: "Diffusion turns on eri's engine",
+        label: "Local agent workbench",
+        values: [yes, yes, yes, yes],
+      },
+      {
+        label: "Cloud handoff turns",
         values: [limited, expanded, unlimited, unlimited],
       },
-      { label: "Inline Cmd-K edit turns", values: [no, yes, yes, yes] },
-      { label: "Premium model routing", values: [no, no, yes, yes] },
-      { label: "Polish queue priority", values: [no, no, no, yes] },
+      { label: "Inline Cmd-K edits", values: [yes, yes, yes, yes] },
+      { label: "Background cloud runners", values: [no, no, yes, yes] },
+      { label: "Review and deploy queue priority", values: [no, no, no, yes] },
       {
-        label: "Frontier model context window",
+        label: "Project context window",
         values: [text("27K"), text("54K"), text("128K"), text("256K")],
       },
+    ],
+  },
+  {
+    title: "Checkpoints + shipping",
+    rows: [
+      { label: "Preview generation", values: [yes, yes, yes, yes] },
+      { label: "Checkpoint history", values: [yes, yes, yes, yes] },
+      { label: "Server verification", values: [limited, expanded, yes, yes] },
+      { label: "Automated review pass", values: [no, no, yes, yes] },
+      { label: "Deploy handoff", values: [no, yes, yes, yes] },
     ],
   },
   {
     title: "Adaptive features",
     rows: [
       { label: "Cross-session memory", values: [no, yes, yes, yes] },
-      { label: "Multi-model routing", values: [no, no, yes, yes] },
-      { label: "Codebase-trained brain", values: [no, no, no, yes] },
-      { label: "Private brain (never shared)", values: [no, no, no, yes] },
+      { label: "Custom MCP integrations", values: [no, yes, yes, yes] },
+      { label: "Codebase pattern learning", values: [no, no, no, yes] },
+      { label: "Private project brain (never shared)", values: [no, no, no, yes] },
     ],
   },
   {
-    title: "Voice + interaction",
+    title: "Targeting inputs",
     rows: [
-      { label: "Voice commands (always-listening)", values: [yes, yes, yes, yes] },
+      { label: "Text commands and CLI prompts", values: [yes, yes, yes, yes] },
       {
-        label: "Stock voice — on us",
+        label: "Optional voice targeting",
         values: [
-          text("Stock", "accent"),
-          text("Premium presets", "accent"),
-          text("Premium presets", "accent"),
-          text("Exclusive + blending", "accent"),
+          text("Included", "accent"),
+          text("Included", "accent"),
+          text("Included", "accent"),
+          text("Included", "accent"),
         ],
       },
-      { label: "Eye tracking", values: [yes, yes, yes, yes] },
+      { label: "Optional gaze targeting", values: [yes, yes, yes, yes] },
       { label: "Cmd-K palette", values: [yes, yes, yes, yes] },
     ],
   },
@@ -225,7 +239,7 @@ const COMPARISON: ReadonlyArray<ComparisonCategory> = [
     rows: [
       { label: "Code stays on your machine", values: [yes, yes, yes, yes] },
       {
-        label: "Used to train our models",
+        label: "Used for shared training",
         values: [
           text("No", "accent"),
           text("No", "accent"),
@@ -240,7 +254,7 @@ const COMPARISON: ReadonlyArray<ComparisonCategory> = [
     ],
   },
   {
-    title: "Terminal + scripts",
+    title: "CLI + MCP",
     rows: [
       {
         label: "Terminal CLI (`eri ask`, `eri ship`, `eri plan`…)",
@@ -250,14 +264,14 @@ const COMPARISON: ReadonlyArray<ComparisonCategory> = [
       { label: "TypeScript SDK (`@eri/sdk`)", values: [no, yes, yes, yes] },
       { label: "Python SDK (`pip install eri`)", values: [no, yes, yes, yes] },
       {
-        label: "Drop-in MCP server (Claude Code / Cursor / Cline)",
+        label: "Drop-in MCP server",
         values: [no, yes, yes, yes],
-        note: "`brew install eri-mcp-server` and your client gets eri's brain.",
+        note: "`brew install eri-mcp-server` and connect Eri to MCP-capable tools.",
       },
       {
-        label: "VS Code companion extension",
+        label: "Automatic app updates",
         values: [no, yes, yes, yes],
-        note: "If you stay on vanilla VS Code, you still get ask/plan/ship.",
+        note: "Keep the workbench, CLI, and MCP server current without manual reinstall loops.",
       },
     ],
   },
@@ -281,7 +295,7 @@ interface FaqItem {
 const FAQ: ReadonlyArray<FaqItem> = [
   {
     q: "Is Free actually free?",
-    a: "Yes. No credit card, no trial clock. Stock voice is on us. When you hit the monthly cap, eri keeps working locally — no surprise bill, ever.",
+    a: "Yes. No credit card, no trial clock. When you hit the monthly cloud handoff cap, Eri keeps working locally — no surprise bill, ever.",
   },
   {
     q: "Can I cancel anytime?",
@@ -289,27 +303,27 @@ const FAQ: ReadonlyArray<FaqItem> = [
   },
   {
     q: "What happens to my apps if I downgrade?",
-    a: "Your projects, iteration history, and deployed apps all stay. The only things that change are the cloud-only features (premium eri voice presets, removed branding, expanded engine quotas). Your code is yours either way.",
+    a: "Your projects, checkpoints, previews, and deployed apps all stay. The only things that change are cloud-only features such as removed branding, expanded handoff quota, and managed runner capacity. Your code is yours either way.",
   },
   {
-    q: "What is BYOK?",
-    a: "Bring your own provider keys on paid tiers — eri reads them from macOS Keychain. We never proxy, mirror, or sync them. Paid tiers also include eri-cloud credits if you'd rather not bring keys.",
+    q: "What is local-first cloud handoff?",
+    a: "The workbench and CLI run locally by default. When a job needs longer runtime, managed infrastructure, review, deploy prep, or server verification away from your machine, you hand it to Eri cloud with a visible checkpoint trail.",
   },
   {
     q: "Do I need an API key to use eri?",
-    a: "Inside the eri.app desktop you sign in once and we issue a bearer (`eri_sk_…`) you never see; the IDE uses it transparently. Outside the desktop — terminal CLI, npm SDK, Python SDK, MCP server, the VS Code companion — that same bearer is what authenticates every call. Sign in with `eri auth login`, copy from the Devices page, or set `ERI_API_KEY` in your env and you're in.",
+    a: "No external service key is required for normal use. Inside the Eri desktop app you sign in once and we issue a bearer (`eri_sk_...`) you never see; the workbench uses it transparently. Outside the desktop — terminal CLI, npm SDK, Python SDK, and MCP server — that same bearer authenticates Eri calls.",
   },
   {
     q: "Why do paid plans exist at all? eri seems local-first.",
-    a: "Mercury (the diffusion engine) is genuinely free at the provider level — Inception's per-turn cost is negligible. But when a turn calls Sonnet 4.5, GPT-4o, or Gemini for reasoning the model bill is real ($3–$15 per million tokens), and that's what the paid tiers cover: cloud frontier-token allowances, sustained throughput, and the eri-cloud agents (auto-review, background janitor) that need to run on our infra instead of yours.",
+    a: "Local work is cheap because it runs on your machine. Paid plans cover the pieces that need managed infrastructure: cloud handoff turns, longer-running agents, automated review, deploy prep, server verification, updates, support, and team-ready runner capacity.",
   },
   {
     q: "What's the cost breakdown, transparently?",
-    a: "Roughly: $1–$2/user/month in infra (Vercel, Supabase, voice transcription), $0.50/user/month for Mercury, and the rest depends on how heavily the user hits the frontier proxy. Pro covers ~750k input + output tokens of Sonnet/Haiku-mix routing. Pro+ covers ~4M. Once you exceed the cap you can keep using eri locally + BYOK; no metered overage, no surprise bill.",
+    a: "Roughly: account infrastructure, preview hosting, update delivery, support, and the managed runner time behind cloud handoffs. Higher tiers buy more runner capacity and priority for review, verification, and deploy work. Once you exceed the cap you can keep using Eri locally; no metered overage, no surprise bill.",
   },
   {
     q: "What happens when I hit my monthly cap?",
-    a: "Cloud turns pause. eri keeps working — Cmd-K, agent, composer, voice — using your own provider key for the rest of the month. There is no metered overage and we never bill above the headline price. Your cap resets at the start of the next billing cycle.",
+    a: "Cloud handoffs pause. Eri keeps working locally — Cmd-K, agent, composer, previews, checkpoints, voice, and gaze inputs — for the rest of the month. There is no metered overage and we never bill above the headline price. Your cap resets at the start of the next billing cycle.",
   },
   {
     q: "Do you offer student, non-profit, or open-source discounts?",
@@ -329,11 +343,11 @@ const FAQ: ReadonlyArray<FaqItem> = [
   },
   {
     q: "Frontier vs Personalized?",
-    a: "Frontier (Individual II) gives you multi-model routing — eri picks the right brain per task. Personalized (Individual III) adds locally-trained pattern recognition on your codebase and a private brain that doesn't pool with other users. Frontier makes eri smarter; Personalized makes eri yours.",
+    a: "Individual II adds managed cloud runners for longer review, verification, deploy, and backlog work. Individual III adds local pattern learning on your codebase plus a private project brain that doesn't pool with other users. II gives you more handoff capacity; III makes Eri fit your repo and release habits.",
   },
   {
     q: "Does Personalized train on my code?",
-    a: "No. Your code never leaves your machine. Personalization is local pattern recognition + cached embeddings via eri_cache — not training data shipped to a third party. The private brain is a per-user vector store living next to your project, not a fine-tune.",
+    a: "No. Your code never leaves your machine for shared training. Personalization is local pattern recognition plus cached project context via eri_cache. The private brain is a per-user project store living next to your repo, not training data shipped away.",
   },
 ];
 
@@ -629,7 +643,7 @@ function TurnLimitsBlock({ turns }: { turns: TurnLimits }): React.ReactElement {
   return (
     <div className="rounded-md border border-white/10 bg-white/[0.02] px-4 py-3">
       <p className="font-mono text-[9px] uppercase tracking-[0.22em] text-muted">
-        Voice turns
+        Agent turns
       </p>
       <div className="mt-2 grid grid-cols-4 gap-3">
         {[
@@ -974,16 +988,15 @@ export function PricingContent(): React.ReactElement {
               </div>
               <div className="flex-1">
                 <p className="text-paper/85 leading-relaxed">
-                  A <span className="text-paper">voice turn</span> is one
-                  round-trip with eri's engine: one push-to-talk submission, one
-                  Cmd-K inline edit, or one Composer multi-file plan. Each turn
-                  averages 15K input and 3K output tokens.
+                  An <span className="text-paper">agent turn</span> is one
+                  useful round-trip with Eri: a workbench instruction, CLI
+                  prompt, Cmd-K inline edit, server verification, or Composer
+                  multi-file plan.
                 </p>
                 <p className="mt-2 text-muted leading-relaxed text-sm">
-                  Tab completions don't count — they're metered separately.
                   Daily caps are soft (occasional overruns are fine); hourly
-                  caps stop a runaway agent from draining your month in five
-                  minutes.
+                  caps stop a runaway cloud handoff from draining your month in
+                  five minutes. Local work continues after cloud turns pause.
                 </p>
               </div>
             </div>
@@ -1002,25 +1015,25 @@ export function PricingContent(): React.ReactElement {
                 <div>
                   <p className="text-paper/90 text-sm">Metered overage.</p>
                   <p className="mt-1 text-xs text-muted leading-relaxed">
-                    Hit the monthly cap and cloud turns pause. Your own key still works.
+                    Hit the monthly cap and cloud handoffs pause. Local work keeps going.
                   </p>
                 </div>
               </div>
               <div className="flex gap-3">
                 <span aria-hidden className="mt-2 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-paper/40" />
                 <div>
-                  <p className="text-paper/90 text-sm">Opaque auto-routing.</p>
+                  <p className="text-paper/90 text-sm">Opaque cloud work.</p>
                   <p className="mt-1 text-xs text-muted leading-relaxed">
-                    Every turn shows which model answered and how much it cost in tokens and time.
+                    Cloud handoffs keep visible checkpoints, logs, and reviewable changes.
                   </p>
                 </div>
               </div>
               <div className="flex gap-3">
                 <span aria-hidden className="mt-2 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-paper/40" />
                 <div>
-                  <p className="text-paper/90 text-sm">Bring your own keys on paid tiers.</p>
+                  <p className="text-paper/90 text-sm">Workbench lock-in.</p>
                   <p className="mt-1 text-xs text-muted leading-relaxed">
-                    Stock eri voice ships in on Free — we cover it. You only bring keys if you want to.
+                    Use the desktop, terminal CLI, SDKs, or MCP server against one account.
                   </p>
                 </div>
               </div>
@@ -1029,7 +1042,7 @@ export function PricingContent(): React.ReactElement {
                 <div>
                   <p className="text-paper/90 text-sm">Add-ons for the basics.</p>
                   <p className="mt-1 text-xs text-muted leading-relaxed">
-                    Voice, gaze, Cmd-K, diffusion preview, and iteration history ship on every tier.
+                    Cmd-K, previews, checkpoints, voice input, and gaze targeting ship on every tier.
                   </p>
                 </div>
               </div>
@@ -1049,7 +1062,8 @@ export function PricingContent(): React.ReactElement {
           </h2>
           <p className="mt-4 max-w-2xl text-muted leading-relaxed">
             Every feature, side by side. Categories group what Eri can do, how
-            you talk to it, and what's on us versus what you bring.
+            you target work, and when jobs stay local versus move to managed
+            runners.
           </p>
 
           <ComparisonTable />
@@ -1072,27 +1086,25 @@ export function PricingContent(): React.ReactElement {
           </h2>
           <div className="mt-8 space-y-4 text-base text-paper/80 leading-relaxed">
             <p>
-              Mercury (eri's diffusion engine) is genuinely cheap to run, so
-              Free + every paid tier ships generous Mercury allowances. The
-              real cost of running eri at scale is{" "}
-              <em className="text-paper">frontier reasoning</em> — Sonnet 4.5,
-              GPT-4o, Gemini Flash Thinking — billed by Anthropic, OpenAI,
-              and Google at $3–$15 per million tokens. Each paid tier maps
-              directly to a monthly frontier budget we pay for on your behalf.
+              Local work stays inexpensive because the agentic workbench, CLI,
+              previews, and checkpoints run on your machine. The real cost of
+              running Eri at scale is managed infrastructure: cloud runners,
+              server verification, preview handoff, update delivery, review
+              queues, and support. Each paid tier maps to the amount of
+              off-machine work we run on your behalf.
             </p>
             <p>
-              Pro covers roughly <strong className="text-paper">750k</strong>{" "}
-              input + output tokens of mixed Sonnet/Haiku routing —{" "}
-              <em>~25 ships, ~3,000 ask turns</em> in our usage data.
-              Pro+ covers <strong className="text-paper">~4M</strong> tokens.
-              When you exceed the budget, eri keeps working locally and via
-              BYOK; we never bill above the headline price.
+              Individual II is built for regular review, verification, deploy,
+              and backlog handoffs. Individual III adds more runner capacity
+              plus local project personalization for teams and heavier release
+              paths. When you exceed the budget, Eri keeps working locally; we
+              never bill above the headline price.
             </p>
             <p>
-              Pricing is identical whether you reach eri through the
+              Pricing is identical whether you reach Eri through the
               desktop, the terminal CLI, the npm SDK, the Python SDK, the
-              MCP server, or the VS Code companion. One bearer, one bucket,
-              one bill.
+              MCP server, or managed cloud runners. One bearer, one bucket, one
+              bill.
             </p>
           </div>
         </div>

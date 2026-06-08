@@ -2,7 +2,7 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
-// EriIDE — an interactive, IDE-style demo of the eri loop.
+// EriWorkbench — an interactive workbench demo of the eri loop.
 //
 // Three files, three scene decks: a pricing card (interactive toggle), an
 // analytics dashboard (KPIs + sparkline + bar chart), and a forecast chart
@@ -169,7 +169,7 @@ const PAGE_STEPS: ReadonlyArray<LoopStep> = [
     voicePhrase: "fade the price when it changes",
     compiledPrompt:
       "wrap Price.value transition with 200ms opacity fade on change",
-    routedTo: "Claude Sonnet 4.6 · careful diffs",
+    routedTo: "Eri Coder · careful diffs",
     codeLineIndex: 6,
     newCode: [
       { kind: "plain", text: "      " },
@@ -318,7 +318,7 @@ const DASHBOARD_STEPS: ReadonlyArray<LoopStep> = [
     voicePhrase: "tint the sparkline by trend",
     compiledPrompt:
       "color sparkline accent based on first vs last value (rising = accent, falling = warm)",
-    routedTo: "Claude Sonnet 4.6 · careful diffs",
+    routedTo: "Eri Coder · careful diffs",
     codeLineIndex: 7,
     newCode: [
       { kind: "plain", text: "      " },
@@ -366,7 +366,7 @@ const DASHBOARD_STEPS: ReadonlyArray<LoopStep> = [
     voicePhrase: "show a tooltip on hover",
     compiledPrompt:
       "add hover tooltip with value + week label to BarChart bars",
-    routedTo: "Claude Opus 4.7 · long horizon",
+    routedTo: "Eri Reviewer · long horizon",
     codeLineIndex: 8,
     newCode: [
       { kind: "plain", text: "      " },
@@ -454,7 +454,7 @@ const FORECAST_STEPS: ReadonlyArray<LoopStep> = [
     voicePhrase: "show the confidence band",
     compiledPrompt:
       "render p10/p90 confidence band beneath forecast segment with accent tint",
-    routedTo: "Claude Sonnet 4.6 · careful diffs",
+    routedTo: "Eri Coder · careful diffs",
     codeLineIndex: 6,
     newCode: [
       { kind: "plain", text: "    " },
@@ -488,7 +488,7 @@ const FORECAST_STEPS: ReadonlyArray<LoopStep> = [
     voicePhrase: "mark the anomalies",
     compiledPrompt:
       "render outlier points as accent dots with z-score > 2 threshold",
-    routedTo: "Claude Opus 4.7 · long horizon",
+    routedTo: "Eri Reviewer · long horizon",
     codeLineIndex: 6,
     newCode: [
       { kind: "plain", text: "    " },
@@ -598,7 +598,7 @@ interface SceneFlags {
 //   Main component
 // ============================================================
 
-export function EriIDE(): React.ReactElement {
+export function EriWorkbench(): React.ReactElement {
   const [tick, setTick] = useState<number>(0);
   const [pausedAt, setPausedAt] = useState<number | null>(null);
   const [activeFile, setActiveFile] = useState<FileId>("page.tsx");
@@ -731,11 +731,11 @@ export function EriIDE(): React.ReactElement {
           <span className="h-3 w-3 rounded-full bg-[#28c840]" aria-hidden />
         </div>
         <p className="font-mono text-[11px] text-paper/45 absolute left-1/2 -translate-x-1/2">
-          eri · pricing-app
+          eri workbench · pricing-app
         </p>
         <div className="flex items-center gap-2">
           <span className="font-mono text-[10px] text-paper/35">
-            ⌘K to ship
+            review → ship
           </span>
         </div>
       </div>
@@ -823,7 +823,7 @@ function Sidebar({
   return (
     <aside className="hidden lg:flex flex-col bg-[#080808] py-4 px-3 text-[12px] font-mono">
       <p className="text-paper/35 text-[10px] uppercase tracking-wider mb-3 px-2">
-        Explorer
+        Workspace
       </p>
       <FileTreeNode label="pricing-app" expanded depth={0} />
       <FileTreeNode label="src" expanded depth={1} />
@@ -852,7 +852,7 @@ function Sidebar({
       <div className="mt-auto border-t border-white/[0.04] pt-3 px-2">
         <p className="text-paper/40 text-[10px] flex items-center gap-2">
           <span className="h-1.5 w-1.5 rounded-full bg-accent" aria-hidden />
-          eri · learning
+          agent memory
         </p>
         <p className="text-paper/30 text-[10px] mt-1.5">
           412 turns · last edit 2m ago

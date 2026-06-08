@@ -16,13 +16,13 @@ const mono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "eri — Talk to your IDE",
+  title: "eri — Local agentic workbench",
   description:
-    "eri is the voice-first AI IDE. Say what you want, watch it build, ship to Vercel in under 4 seconds.",
+    "eri is a local agentic workbench for code, CLI runs, and cloud handoff. Plan, edit, test, and ship from your machine.",
   openGraph: {
-    title: "eri — Talk to your IDE",
+    title: "eri — Local agentic workbench",
     description:
-      "The voice-first AI IDE. Say what you want, watch it build, ship to Vercel in under 4 seconds.",
+      "A local agentic workbench for code, CLI runs, and cloud handoff. Plan, edit, test, and ship from your machine.",
     type: "website",
   },
 };

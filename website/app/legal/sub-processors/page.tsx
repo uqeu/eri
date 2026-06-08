@@ -62,8 +62,8 @@ interface ModelProvider {
 
 const MODEL_PROVIDERS: ReadonlyArray<ModelProvider> = [
   {
-    name: "eri inference (Mercury 2 wrap)",
-    purpose: "Default code generation via diffusion model — forwarded without retention",
+    name: "Eri Cloud inference",
+    purpose: "Default cloud agent generation — forwarded without retention",
     href: "https://www.inceptionlabs.ai/",
   },
   {

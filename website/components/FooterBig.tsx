@@ -80,8 +80,8 @@ export function FooterBig(): React.ReactElement {
               </span>
             </Link>
             <p className="mt-6 max-w-sm text-[14px] leading-relaxed text-text-sec">
-              The voice-first IDE for solo founders and small teams. Native
-              macOS, diffusion edits, your keys, your repo, your shape of work.
+              The local-first agentic workbench for teams that ship from their
+              repos, terminals, APIs, MCP servers, and cloud agents.
             </p>
             <div className="mt-7 flex items-center gap-2">
               {SOCIALS.map((s) => (

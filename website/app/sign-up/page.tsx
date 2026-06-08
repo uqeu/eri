@@ -1,10 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useState, type FormEvent } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useState, type FormEvent } from "react";
 import { setSession, type AuthSuccessResponse } from "@/lib/auth-client";
 import { GoogleSignInButton } from "@/components/GoogleSignInButton";
+import {
+  checkoutPlanFromParam,
+  destinationAfterSignup,
+  googleNextPathForPlan,
+} from "@/lib/signup-flow";
 
 function isAuthSuccess(value: unknown): value is AuthSuccessResponse {
   if (typeof value !== "object" || value === null) return false;
@@ -25,7 +30,37 @@ function errorMessage(value: unknown): string {
 }
 
 export default function SignUpPage() {
+  return (
+    <Suspense fallback={<SignUpFallback />}>
+      <SignUpPageInner />
+    </Suspense>
+  );
+}
+
+function SignUpFallback() {
+  return (
+    <main className="min-h-screen flex items-center justify-center px-6 py-12">
+      <div className="w-full max-w-md">
+        <Link
+          href="/"
+          className="font-display text-2xl tracking-tight hover:text-accent transition"
+        >
+          eri
+        </Link>
+        <h1 className="mt-10 font-display text-4xl tracking-tight">
+          Create your account
+        </h1>
+        <p className="mt-3 text-muted">Loading sign-up…</p>
+      </div>
+    </main>
+  );
+}
+
+function SignUpPageInner() {
   const router = useRouter();
+  const params = useSearchParams();
+  const selectedPlan = checkoutPlanFromParam(params?.get("plan") ?? null);
+  const nextPath = googleNextPathForPlan(selectedPlan);
   const [displayName, setDisplayName] = useState<string>("");
   const [email, setEmail] = useState<string>("");
   const [password, setPassword] = useState<string>("");
@@ -56,7 +91,7 @@ export default function SignUpPage() {
         return;
       }
       setSession(body);
-      router.push("/dashboard");
+      router.push(destinationAfterSignup(selectedPlan));
     } catch {
       setError("Network error. Try again.");
     } finally {
@@ -77,11 +112,13 @@ export default function SignUpPage() {
           Create your account
         </h1>
         <p className="mt-3 text-muted">
-          Get started with eri. Free tier — no card required.
+          {selectedPlan === "free"
+            ? "Get started with eri. Free tier — no card required."
+            : "Create your account first. Checkout opens next."}
         </p>
 
         <div className="mt-10">
-          <GoogleSignInButton label="Continue with Google" />
+          <GoogleSignInButton label="Continue with Google" next={nextPath} />
         </div>
 
         <div className="my-8 flex items-center gap-4 text-xs uppercase tracking-[0.2em] text-muted">

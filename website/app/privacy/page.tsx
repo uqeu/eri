@@ -4,7 +4,7 @@ import { FooterBig } from "@/components/FooterBig";
 export const metadata: Metadata = {
   title: "Privacy — eri",
   description:
-    "Plain-English privacy policy: voice is local, gaze is local, only eri's engine calls leave the device.",
+    "Plain-English privacy policy: voice is local, gaze is local, only Eri Cloud calls leave the device.",
 };
 
 interface Section {
@@ -31,7 +31,7 @@ const SECTIONS: ReadonlyArray<Section> = [
   },
   {
     heading: "5. Model calls",
-    body: "When you trigger an edit, eri sends the relevant code context to a model provider. By default this is the eri inference proxy (a paid wrap of a diffusion code model). If you've configured Anthropic, OpenAI, Google, or a local endpoint with your own key (BYOK), the call goes there instead and the operator does not see the request body. For the proxied case, requests are forwarded without logging request or response bodies.",
+    body: "When you trigger a cloud-backed edit, eri sends the relevant code context to Eri Cloud inference. If you've configured an external or local endpoint with your own key (BYOK), the call goes there instead and the operator does not see the request body. For the proxied case, requests are forwarded without logging request or response bodies.",
   },
   {
     heading: "6. Cookies & analytics",
@@ -63,7 +63,7 @@ const SECTIONS: ReadonlyArray<Section> = [
   },
   {
     heading: "13. Training",
-    body: "The operator does not train models on your prompts, code, or any data you put into eri. The model providers you connect have their own training policies — check their privacy pages. The eri inference proxy passes data through without retaining it for training.",
+    body: "The operator does not train models on your prompts, code, or any data you put into eri. The external endpoints you connect have their own training policies — check their privacy pages. Eri Cloud inference passes data through without retaining it for training.",
   },
   {
     heading: "14. Children",

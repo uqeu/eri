@@ -21,7 +21,7 @@ const ARTICLES: ReadonlyArray<Article> = [
   {
     question: "How do I install eri?",
     answer:
-      "Download the latest build from tryeri.ca/download, open the installer, and drag eri into your Applications folder (macOS) or run the installer (Windows / Linux). The first launch will ask for microphone and accessibility permissions — granting them lets voice and inline editing work; declining still leaves you with a usable IDE.",
+      "Download the latest build from tryeri.ca/download, open the installer, and drag eri into your Applications folder (macOS) or run the installer (Windows / Linux). The first launch will ask for microphone and accessibility permissions — granting them lets voice, gaze, and inline edits work; declining still leaves you with a usable workbench.",
   },
   {
     question: "How do I sign in?",
@@ -31,12 +31,12 @@ const ARTICLES: ReadonlyArray<Article> = [
   {
     question: "Free vs paid — what do I get?",
     answer:
-      "The free tier lets you use eri with your own provider keys (BYOK) — Anthropic, OpenAI, Google, or a local endpoint. The paid tier gives you the eri inference proxy (diffusion-based code generation) and counts your usage against a monthly allowance. Full breakdown lives at /pricing.",
+      "The free tier gives you the local CLI, workbench, MCP setup, and BYOK/local endpoint support. Paid tiers add Eri Cloud for heavier agent runs, review, server verification, updates, and background handoff. Full breakdown lives at /pricing.",
   },
   {
     question: "How do I run my first AI-assisted edit?",
     answer:
-      "Open any project folder. Hit ⌘K to bring up the composer. Type or say what you want to change. eri will propose an edit as a diff; review it; accept or reject. Your code never leaves your machine for review — only the prompt and the relevant context are sent to the model.",
+      "Open any project folder. Hit ⌘K or run `eri plan` from the terminal. Type or say what you want to change. Eri proposes a diff, opens preview when needed, and keeps the turn reviewable before you accept it.",
   },
   {
     question: "Where do I find the docs?",

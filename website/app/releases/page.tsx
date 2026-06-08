@@ -21,13 +21,13 @@ const RELEASES: ReadonlyArray<Release> = [
     codename: "Marlowe",
     date: "May 14, 2026",
     summary:
-      "Current branch. The diffusion runtime finally clears four seconds end-to-end on the median Apple Silicon machine. Voice activity detection got a full rewrite.",
+      "Current branch. The local agent loop clears four seconds end-to-end on the median Apple Silicon machine. Voice activity detection got a full rewrite.",
     highlights: [
       "Median voice-to-deploy time on M-series: 3.8s (down from 5.2s in 0.3).",
       "New lazy VAD with 40ms first-syllable latency and a 60% reduction in false wakeups.",
       "Multi-cursor edits across files now stream as a single coalesced diff.",
       "Gaze tracker re-trained on a 4× larger dataset; calibration time halved.",
-      "BYOK support for Google AI Studio and any OpenAI-compatible endpoint.",
+      "BYOK support for local and external endpoints.",
     ],
     fixes: [
       "Resolved a freeze when the wakeword detector lost its lease on the audio device.",
@@ -58,11 +58,11 @@ const RELEASES: ReadonlyArray<Release> = [
     codename: "Kerouac",
     date: "January 22, 2026",
     summary:
-      "The first build we let strangers run. Onboarding now finishes in under sixty seconds and the editor reaches steady state on first launch.",
+      "The first build we let strangers run. Onboarding now finishes in under sixty seconds and the workbench reaches steady state on first launch.",
     highlights: [
       "End-to-end onboarding flow with mic, gaze, and project import wired together.",
-      "Eri's engine now drives all multi-line edits by default.",
-      "Editor surface holds 120 fps through full-file diffusion on the reference machine.",
+      "Eri now drives all multi-line edits by default.",
+      "Workbench surface holds 120 fps through full-file agent edits on the reference machine.",
       "Auto-update through the in-app channel switcher.",
     ],
     fixes: [
@@ -75,10 +75,10 @@ const RELEASES: ReadonlyArray<Release> = [
     codename: "Jensen",
     date: "November 10, 2025",
     summary:
-      "First end-to-end voice → diffusion → diff loop running on a single laptop.",
+      "First end-to-end voice → agent edit → diff loop running on a single laptop.",
     highlights: [
-      "First working voice-to-diff pipeline.",
-      "Minimal editor surface forked from VSCodium — keybindings and extensions carry over.",
+      "First working voice-to-agent-edit pipeline.",
+      "Minimal workbench surface with keybindings and extensions preserved.",
       "Hand-rolled wakeword and TTS pipeline running entirely on-device.",
     ],
     fixes: [],

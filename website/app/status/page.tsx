@@ -31,9 +31,9 @@ const COMPONENTS: ReadonlyArray<Component> = [
     note: "Stripe checkout and subscription state.",
   },
   {
-    name: "eri inference proxy",
+    name: "Eri Cloud agents",
     status: "operational",
-    note: "Default model forwarding for paid plans.",
+    note: "Cloud planning, review, verification, and background handoff.",
   },
 ];
 

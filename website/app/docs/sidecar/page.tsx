@@ -5,7 +5,7 @@ import { FooterBig } from "@/components/FooterBig";
 export const metadata: Metadata = {
   title: "The sidecar — eri Docs",
   description:
-    "The eri_coreutils Rust sidecar — what it does, how it talks to the IDE, and the crate layout.",
+    "The eri_coreutils Rust sidecar — what it does, how it talks to the Eri app, and the crate layout.",
 };
 
 interface Crate {
@@ -17,17 +17,17 @@ const CRATES: ReadonlyArray<Crate> = [
   {
     name: "eri_coreutils",
     purpose:
-      "The umbrella crate. Exposes the JSON-RPC surface the IDE talks to and re-exports the focused crates below.",
+      "The umbrella crate. Exposes the JSON-RPC surface the Eri app talks to and re-exports the focused crates below.",
   },
   {
     name: "eri_inference",
     purpose:
-      "Model backends, template registry, streaming token bookkeeping, and the diffusion provider wrap.",
+      "Eri routing, template registry, streaming token bookkeeping, and cloud/local capability wrappers.",
   },
   {
     name: "eri_git",
     purpose:
-      "Git operations the IDE needs — status, diff, blame, commit, stash. Wraps libgit2 with eri-specific helpers.",
+      "Git operations Eri needs — status, diff, blame, commit, stash. Wraps libgit2 with eri-specific helpers.",
   },
   {
     name: "eri_index",
@@ -58,10 +58,10 @@ export default function SidecarDocsPage() {
             The Rust sidecar.
           </h1>
           <p className="mt-5 text-lg text-muted leading-relaxed">
-            The IDE is a VSCodium fork. Everything that isn&apos;t the
-            editor — model calls, git plumbing, the workspace index, MCP —
-            runs in a Rust process called the sidecar. The IDE talks to it
-            over a local socket. This is what each crate is for.
+            Eri keeps heavy local tooling in a Rust process called the sidecar.
+            Agent calls, git plumbing, the workspace index, MCP, and apply
+            helpers run there. The app talks to it over a local socket. This
+            is what each crate is for.
           </p>
         </div>
       </section>
@@ -91,14 +91,13 @@ export default function SidecarDocsPage() {
             Why a sidecar
           </h2>
           <p className="mt-4 text-muted leading-relaxed">
-            VSCodium is a TypeScript/Electron environment. eri&apos;s
-            performance-sensitive work — large diffs, tokeniser bookkeeping,
+            Eri&apos;s app shell is TypeScript/Electron, while the
+            performance-sensitive work — large diffs, tokenizer bookkeeping,
             workspace indexing, MCP fan-out — wants memory-managed,
-            multi-threaded native code. Splitting the model and tooling
-            layer into a Rust process lets each side play to its
-            strengths. The IDE stays a thin shell around the editor; the
-            sidecar can be upgraded independently and even reused outside
-            VSCodium later.
+            multi-threaded native code. Splitting the agent tooling layer into
+            a Rust process lets each side play to its strengths. The app stays
+            focused on workflow; the sidecar can be upgraded independently and
+            reused by the CLI.
           </p>
         </div>
       </section>

@@ -20,7 +20,7 @@ const POSTS: ReadonlyArray<Post> = [
   {
     slug: "why-we-built-eri",
     title: "Why we built eri",
-    dek: "The story of how a frustrated demo on a kitchen table turned into a voice-first IDE — and why the second wave of AI editors is going to look nothing like the first.",
+    dek: "The story of how a frustrated demo on a kitchen table turned into a local agentic workbench — and why the next wave of software tools is going to look nothing like the first.",
     date: "May 14, 2026",
     readTime: "7 min read",
     author: "the eri team",
@@ -35,8 +35,8 @@ const POSTS: ReadonlyArray<Post> = [
   },
   {
     slug: "the-diffusion-advantage",
-    title: "The diffusion advantage",
-    dek: "Why we bet the runtime on a diffusion code model instead of another autoregressive one, what changed in our internal benchmarks, and where it still falls short.",
+    title: "The agent-edit advantage",
+    dek: "Why we bet the runtime on whole-change edits, what changed in our internal benchmarks, and where the loop still falls short.",
     date: "April 9, 2026",
     readTime: "9 min read",
     author: "the eri team",
@@ -56,7 +56,7 @@ export default function BlogIndexPage() {
             Notes from the workbench.
           </h1>
           <p className="mt-5 text-lg text-muted leading-relaxed">
-            Long-form posts about the shape of voice-first development, what
+            Long-form posts about the shape of agent-first development, what
             we're learning as we build, and the occasional rant about
             autocomplete.
           </p>

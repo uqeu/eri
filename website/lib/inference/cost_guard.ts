@@ -91,7 +91,7 @@ export function checkModelAllowed(modelId: string): CostCheckResult {
 function suggestedAlternative(modelId: string): string {
   const lower = modelId.toLowerCase();
   if (lower.includes("opus") || lower.startsWith("claude")) {
-    return "claude-sonnet-4-5-20251015";
+    return "claude-sonnet-4-6";
   }
   if (lower.startsWith("o1") || lower.includes("gpt-5")) {
     return "gpt-4o";
@@ -99,5 +99,5 @@ function suggestedAlternative(modelId: string): string {
   if (lower.includes("gemini")) {
     return "gemini-2.0-flash-thinking-exp";
   }
-  return "claude-sonnet-4-5-20251015";
+  return "claude-sonnet-4-6";
 }

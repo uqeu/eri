@@ -26,7 +26,7 @@ interface BundleItem {
 
 const BUNDLE_ITEMS: ReadonlyArray<BundleItem> = [
   { label: "Tab completion", note: "Local engine, bundled in subscription" },
-  { label: "Diffusion edits", note: "Multi-line patches, one resolve" },
+  { label: "Agent edits", note: "Multi-line patches, one resolve" },
   { label: "Semantic search", note: "Index lives on your disk" },
   { label: "Voice + gaze", note: "Always available, no add-on" },
   { label: "MCP servers", note: "Plug in tools you already trust" },
@@ -109,7 +109,7 @@ export function HeroBoundary(): React.ReactElement {
             Every feature is in the price. There is no second meter.
           </h4>
           <p className="mt-3 text-[14px] leading-relaxed text-paper/65">
-            Tab, diffusion edits, semantic search, voice, gaze, MCP,
+            Tab, agent edits, semantic search, voice, gaze, MCP,
             checkpoints — all included. Tab runs in-process on your machine,
             so the heaviest call in the loop has no per-token cost. Subscribe
             once; nothing else opens a tab in your billing console.
@@ -150,10 +150,10 @@ export function HeroBoundary(): React.ReactElement {
             One thing crosses the wire. We tell you which one and when.
           </h4>
           <p className="mt-3 text-[14px] leading-relaxed text-paper/60">
-            Planning and multi-file reasoning route to the diffusion engine —
-            and only that. Every call shows the model, the token count, and
-            the wall-clock latency in the iterator panel. Flip on audit and
-            every call lands in a log file you own.
+            Planning and multi-file reasoning route through Eri Cloud only
+            when the task needs it. Every turn shows what ran, what changed,
+            and how long it took. Flip on audit and every call lands in a log
+            file you own.
           </p>
           <ul className="mt-5 space-y-2 text-[12px] font-mono text-paper/65">
             <li className="flex items-start justify-between gap-3">
@@ -163,7 +163,7 @@ export function HeroBoundary(): React.ReactElement {
             <li className="flex items-start justify-between gap-3">
               <span className="text-paper/45">Visible per turn</span>
               <span className="text-paper/80 text-right">
-                Model · tokens · latency
+                Engine · tokens · latency
               </span>
             </li>
             <li className="flex items-start justify-between gap-3">

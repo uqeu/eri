@@ -1,8 +1,8 @@
 // `/playground` — try eri without installing anything.
 //
 // Type a prompt, get a streamed answer. We intentionally don't expose
-// the full ship pipeline here (no filesystem, no tandem, no apply) —
-// the playground is a "feel the brain" surface so visitors decide to
+// the full ship pipeline here (no filesystem, no apply) — the
+// playground is a "feel the agent" surface so visitors decide to
 // install. The whole UI talks to `/api/v1/agent/playground` which
 // requires no bearer (rate-limited per-IP instead).
 
@@ -12,7 +12,7 @@ import { Playground } from "./playground-client";
 export const metadata: Metadata = {
   title: "eri · playground",
   description:
-    "Try eri's brain in your browser — no install, no sign-in. Type a prompt, watch the agent route + stream a response.",
+    "Try Eri in your browser — no install, no sign-in. Type a prompt, watch the agent route and stream a response.",
 };
 
 export const runtime = "nodejs";
@@ -29,9 +29,9 @@ export default function PlaygroundPage(): JSX.Element {
           Try eri in the browser
         </h1>
         <p className="text-zinc-400">
-          Type a prompt below. eri's brain picks a model and streams the
-          answer back — no sign-in, no install. To use the full IDE
-          (voice, gaze, tandem ship, persistent memory), install eri.app or
+          Type a prompt below. Eri picks a route and streams the answer back
+          — no sign-in, no install. To use the full local workbench
+          (voice, gaze, ship loop, persistent memory), install eri.app or
           run <code className="rounded bg-zinc-900 px-1 py-0.5 text-zinc-200">curl -fsSL https://tryeri.ca/install | sh</code>.
         </p>
       </header>

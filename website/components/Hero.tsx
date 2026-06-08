@@ -10,12 +10,13 @@ export function Hero(): React.ReactElement {
             className="text-h1 text-balance mb-6 leading-[1.02]"
             style={{ letterSpacing: "-0.03em", fontWeight: 500 }}
           >
-            An agentic editor that builds at the speed you think.
+            The local agentic workbench for shipping software.
           </h1>
 
           <p className="text-text-sec text-[17px] leading-[1.55] max-w-prose mb-9">
-            eri listens to your voice, watches where you point, and remembers
-            how you build. It gets sharper every session you give it.
+            Install Eri locally, run the terminal agent, manage specialized
+            agents, and connect MCP, APIs, skills, search, previews, reviews,
+            checkpoints, and deploys in one workflow.
           </p>
 
           <div className="flex flex-wrap items-center gap-3">
@@ -23,7 +24,7 @@ export function Hero(): React.ReactElement {
               href="/download"
               className="inline-flex items-center rounded-md bg-text px-4 py-2 text-[14px] font-medium text-bg hover:opacity-90 transition-opacity"
             >
-              Download for macOS
+              Install locally
             </Link>
             <Link
               href="/contact"

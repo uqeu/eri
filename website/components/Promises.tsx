@@ -13,20 +13,20 @@ const PROMISES: ReadonlyArray<Promise> = [
   {
     tag: "Local across the stack",
     title: "Voice, gaze, Tab, apply, and the index live on your hardware.",
-    body: "Whisper transcribes, MediaPipe tracks your gaze, an embedded inference runtime drives Tab and fast-apply, and the semantic index is a SQLite file on your disk. Only planning calls cross the network — and only to the diffusion engine you subscribed to.",
+    body: "Local speech, gaze targeting, embedded completion, fast-apply, and the semantic index live on your machine. Only cloud-grade planning calls cross the network, and those are labeled as Eri Cloud turns.",
     proof: "Semantic index path: ~/.eri/index.sqlite — visible, portable, deletable.",
   },
   {
     tag: "Bundled, not metered",
     title: "Tab and edits are in the box.",
-    body: "Tab completion runs in-process via embedded inference on your machine — bundled with the subscription, no per-token meter, no BYOK required to use it. Diffusion edits, semantic search, voice, gaze, MCP, and checkpoints all ride the same flat price.",
+    body: "Tab completion runs in-process via embedded inference on your machine — bundled with the subscription, no per-token meter, no BYOK required to use it. Agent edits, semantic search, voice, gaze, MCP, and checkpoints all ride the same flat price.",
     proof: "Local Tab via embedded inference. Zero per-token cost on the heaviest call in the loop.",
   },
   {
     tag: "Transparent routing",
-    title: "See which model handled each turn.",
-    body: "Every turn shows the model that answered, the token count, and the wall-clock latency in the iterator panel. When eri picks between providers, the decision is on screen — not behind a vague \"Auto\" badge that quietly downgrades you to a cheaper model.",
-    proof: "Each turn logs model, tokens, and latency in the turn footer. No hidden downgrades.",
+    title: "See which Eri route handled each turn.",
+    body: "Every turn shows the Eri route, token count, and wall-clock latency in the iterator panel. When Eri switches from local work to cloud work, the decision is on screen.",
+    proof: "Each turn logs route, tokens, and latency in the turn footer. No hidden downgrades.",
   },
   {
     tag: "Hard-capped pricing",

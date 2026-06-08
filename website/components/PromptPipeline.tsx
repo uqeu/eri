@@ -61,9 +61,9 @@ interface Scene {
 
 const MODELS: ReadonlyArray<ModelLane> = [
   { key: "eri-engine", name: "eri's engine", lane: "diffusion · short edits", tier: "FREE" },
-  { key: "sonnet", name: "Claude Sonnet 4.6", lane: "polish · careful diffs", tier: "STARTER" },
-  { key: "opus", name: "Claude Opus 4.7", lane: "reasoning · long horizon", tier: "PRO" },
-  { key: "gemini", name: "Gemini 2.5 Pro", lane: "multimodal · image-in", tier: "PRO+" },
+  { key: "coder", name: "Eri Coder", lane: "polish · careful diffs", tier: "STARTER" },
+  { key: "reviewer", name: "Eri Reviewer", lane: "reasoning · long horizon", tier: "PRO" },
+  { key: "vision", name: "Eri Vision", lane: "multimodal · image-in", tier: "PRO+" },
 ];
 
 const SCENES: ReadonlyArray<Scene> = [
@@ -102,7 +102,7 @@ const SCENES: ReadonlyArray<Scene> = [
     codebase: "tsconfig paths: @/lib/* · prettier sort-imports rule on",
     compiled:
       "drop unused React + useMemo imports, alphabetize the remaining lines, keep type-only imports grouped at the top per the existing prettier order",
-    picked: "sonnet",
+    picked: "coder",
     reason: "careful, deterministic cleanup — polish lane",
     previewKind: "imports",
     previewLabel: "auth-form.tsx · imports",
@@ -123,7 +123,7 @@ const SCENES: ReadonlyArray<Scene> = [
     codebase: "uses cookie sessions · 6 files touch /(auth) · 2 server routes",
     compiled:
       "refactor /(auth)/* to server actions, replace cookie middleware with iron-session, migrate sign-in + sign-up + forgot-password, update the 6 callers, leave a Release Notes bullet",
-    picked: "opus",
+    picked: "reviewer",
     reason: "cross-file refactor with state migration — deep lane",
     previewKind: "auth",
     previewLabel: "sign-in.tsx",
@@ -144,7 +144,7 @@ const SCENES: ReadonlyArray<Scene> = [
     codebase: "design tokens loaded · Inter + Space Grotesk · radii.xl=20",
     compiled:
       "implement the hero shown in the attached frame: gradient mesh top-left, badge row centered, two CTAs with the eri-accent fill, match exact spacing from the image",
-    picked: "gemini",
+    picked: "vision",
     reason: "image grounding required — multimodal lane",
     previewKind: "figma",
     previewLabel: "pricing-hero.tsx",
@@ -205,7 +205,7 @@ const SCENES: ReadonlyArray<Scene> = [
     codebase: "Nav · flex container · 4 children · current main-axis: flex-start",
     compiled:
       "change Nav from justify-start to justify-center; verify mobile breakpoint stays left-aligned",
-    picked: "sonnet",
+    picked: "coder",
     reason: "small refactor with layout reasoning — polish lane",
     previewKind: "nav",
     previewLabel: "Nav.tsx",
@@ -226,7 +226,7 @@ const SCENES: ReadonlyArray<Scene> = [
     codebase: "useState binding · 7 references in same file · 0 cross-file",
     compiled:
       "rename usePricing.data → usePricing.pricingTiers across all 7 references in file; keep the type-binding intact",
-    picked: "sonnet",
+    picked: "coder",
     reason: "rename with reference tracking — polish lane",
     previewKind: "renameCode",
     previewLabel: "usePricing.tsx",
@@ -344,20 +344,19 @@ export function PromptPipeline(): React.ReactElement {
             Context pipeline
           </div>
           <h2 className="text-3xl font-semibold tracking-tight text-[#d6d6dd] sm:text-4xl">
-            Three lazy words. One precise prompt.
+            Universal context. Routed agents.
           </h2>
           <p className="mt-4 text-[#8b8b96]">
-            You speak in fragments. eri reads your gaze, your last few turns,
-            and the file you&apos;re actually in — then compiles a prompt the
-            model can act on, and routes it to whichever brain handles that
-            kind of work best.
+            Eri reads the repo, terminal session, MCP servers, APIs, skills,
+            recent turns, and attached artifacts, then compiles the work into a
+            grounded agent turn and routes it to the right builder.
           </p>
         </div>
 
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
           {/* INPUT COLUMN */}
           <div className="lg:col-span-4">
-            <ColumnHeader index={1} title="Input" subtitle="signals eri already has" />
+            <ColumnHeader index={1} title="Input" subtitle="context eri already has" />
             <div className="space-y-2">
               {inputRows.map((row, i) => {
                 const isLit = inPulsePhase ? i === litRow : compileDone ? false : i <= 3;
@@ -370,7 +369,7 @@ export function PromptPipeline(): React.ReactElement {
 
           {/* COMPILE COLUMN */}
           <div className="lg:col-span-4">
-            <ColumnHeader index={2} title="Compile" subtitle="assemble + ground" />
+            <ColumnHeader index={2} title="Compile" subtitle="ground the task" />
             <div className="rounded-md border border-white/10 bg-[#181818] p-4">
               <div className="mb-3 flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -411,7 +410,7 @@ export function PromptPipeline(): React.ReactElement {
 
           {/* ROUTE COLUMN */}
           <div className="lg:col-span-4">
-            <ColumnHeader index={3} title="Route" subtitle="pick the right brain" />
+            <ColumnHeader index={3} title="Route" subtitle="pick the right agent" />
             <div className="rounded-md border border-white/10 bg-[#181818] p-4">
               <div className="mb-3 flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -448,7 +447,7 @@ export function PromptPipeline(): React.ReactElement {
                   </div>
                 ) : (
                   <div className="text-[11px] text-[#8b8b96]">
-                    waiting on compiled prompt…
+                    waiting on grounded context…
                   </div>
                 )}
               </div>
@@ -466,16 +465,16 @@ export function PromptPipeline(): React.ReactElement {
 
         <div className="mt-10 flex flex-wrap items-center gap-x-6 gap-y-2 text-[11px] text-[#8b8b96]">
           <span className="flex items-center gap-1.5">
-            <TierPill tier="FREE" /> baseline pipeline
+            <TierPill tier="FREE" /> local agent loop
           </span>
           <span className="flex items-center gap-1.5">
-            <TierPill tier="STARTER" /> iteration history
+            <TierPill tier="STARTER" /> checkpoint history
           </span>
           <span className="flex items-center gap-1.5">
-            <TierPill tier="PRO" /> codebase brain · auto-route
+            <TierPill tier="PRO" /> universal context · auto-route
           </span>
           <span className="flex items-center gap-1.5">
-            <TierPill tier="PRO+" /> multimodal · voice override
+            <TierPill tier="PRO+" /> cloud agents · GenUI
           </span>
         </div>
       </div>
@@ -764,7 +763,7 @@ function PreviewStrip({
             </div>
             <div className="mt-1 text-[11px] text-[#d6d6dd]">
               {routerActive
-                ? "change rendered in your editor preview — gaze ring follows."
+                ? "change rendered in the preview artifact — review is ready."
                 : "diffusion denoising · preview will resolve on lock."}
             </div>
           </div>
@@ -994,7 +993,7 @@ function FigmaPreview({ applied }: { applied: boolean }): React.ReactElement {
               Ship faster with eri.
             </div>
             <div className="mt-1 text-[10px] text-[#8b8b96]">
-              voice · gaze · routed models
+              context · agents · artifacts
             </div>
             <button className="mt-2 rounded bg-[#e0ff4f] px-3 py-1 text-[10px] font-medium text-[#0A0A0A]">
               Get early access
@@ -1036,7 +1035,7 @@ function HeroHeadlinePreview({ applied }: { applied: boolean }): React.ReactElem
           opacity: applied ? 0.85 : 1,
         }}
       >
-        voice · gaze · diffusion edits
+        local context · agentic edits
       </div>
     </div>
   );

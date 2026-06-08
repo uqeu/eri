@@ -1,9 +1,8 @@
 "use client";
 
-// Bento-style multi-model matrix. Each card has a model, a tagline written
-// for eri's product context, a status pill, and a "default" selector dot.
-// One model is the active default at a time and it rotates on a slow tick
-// so the surface feels like a routing decision, not a static logo wall.
+// Bento-style agent-routing matrix. Each card has an Eri role, a tagline
+// written for eri's product context, a status pill, and a selector dot.
+// One route is the active default at a time and it rotates on a slow tick.
 
 import { useEffect, useState } from "react";
 
@@ -30,64 +29,64 @@ interface ModelCard {
 const MODELS: ReadonlyArray<ModelCard> = [
   {
     key: "eri-engine",
-    name: "eri's engine",
+    name: "Eri Editor",
     vendor: "eri",
-    vendorTag: "// in-house · diffusion",
-    role: "diffusion edits",
+    vendorTag: "// local · edit",
+    role: "agent edits",
     tagline:
-      "The whole diff at once. Eri's engine denoises a multi-file change in the time a tokenizer would still be warming up.",
+      "The whole diff at once. Eri resolves a multi-file change before the turn loses momentum.",
     stat: "1.8s",
     statLabel: "median edit",
     note: "default for in-editor turns",
     state: "warm",
   },
   {
-    key: "opus-47",
-    name: "Claude Opus 4.7",
-    vendor: "Anthropic",
-    vendorTag: "// anthropic · 1M ctx",
+    key: "architect",
+    name: "Eri Architect",
+    vendor: "eri",
+    vendorTag: "// cloud · architecture",
     role: "deep reasoning",
     tagline:
-      "Ask it to read the whole repo and propose the refactor that nobody dares to write. Opus is eri's slow lane when correctness matters more than speed.",
-    stat: "1M",
-    statLabel: "context window",
+      "Ask it to read the whole repo and propose the refactor nobody wants to hand-plan. Architect is Eri's slow lane when correctness matters more than speed.",
+    stat: "repo",
+    statLabel: "context scope",
     note: "default for architecture turns",
     state: "warm",
   },
   {
-    key: "sonnet-46",
-    name: "Claude Sonnet 4.6",
-    vendor: "Anthropic",
-    vendorTag: "// anthropic · polish",
+    key: "reviewer",
+    name: "Eri Reviewer",
+    vendor: "eri",
+    vendorTag: "// cloud · review",
     role: "polish lane",
     tagline:
-      "Catch the lint, fix the imports, write the commit message. Sonnet runs alongside eri's engine so the diff lands clean without a second prompt.",
+      "Catch the lint, fix the imports, write the commit message. Reviewer runs alongside the edit path so the diff lands clean without a second prompt.",
     stat: "≤ 4s",
     statLabel: "polish pass",
     note: "default for cleanup turns",
     state: "queued",
   },
   {
-    key: "gpt-5",
-    name: "GPT-5",
-    vendor: "OpenAI",
-    vendorTag: "// openai · planner",
+    key: "planner",
+    name: "Eri Planner",
+    vendor: "eri",
+    vendorTag: "// cloud · planner",
     role: "long-form planning",
     tagline:
-      "When the request is a whole document — a spec, a migration plan, a long test suite — GPT-5 plans it out and eri executes the parts.",
-    stat: "200k",
-    statLabel: "planning window",
+      "When the request is a whole document — a spec, a migration plan, a long test suite — Planner turns it into steps Eri can execute.",
+    stat: "plan",
+    statLabel: "artifact",
     note: "default for planning turns",
     state: "byok-ready",
   },
   {
-    key: "gemini-25-pro",
-    name: "Gemini 2.5 Pro",
-    vendor: "Google",
-    vendorTag: "// google · vision-in",
+    key: "vision",
+    name: "Eri Vision",
+    vendor: "eri",
+    vendorTag: "// local/cloud · vision",
     role: "multimodal",
     tagline:
-      "Show it the Figma, the screenshot, the design doc. Gemini reads the picture and eri writes the component to match.",
+      "Show it the screenshot, design doc, or product surface. Vision reads the picture and Eri writes the component to match.",
     stat: "image-in",
     statLabel: "modality",
     note: "default for visual turns",
@@ -115,21 +114,20 @@ export function ModelMatrix(): React.ReactElement {
       <div className="mx-auto max-w-7xl px-6 py-24 sm:py-32">
         <div className="flex items-end justify-between gap-8 flex-wrap">
           <div className="max-w-3xl">
-            <p className="mono-cap text-accent">Model routing</p>
+            <p className="mono-cap text-accent">Agent routing</p>
             <h2 className="mt-5 font-display text-h2 text-balance font-normal leading-[1.02]">
-              Five frontier models.{" "}
+              Five Eri routes.{" "}
               <span className="italic accent-shimmer">
                 Pick one with your voice.
               </span>
             </h2>
             <p className="mt-5 max-w-xl text-paper/60 text-[15px] leading-relaxed">
-              Eri ships with a small router that knows the strengths of every
-              model and a manual override that fits in a single spoken phrase.
-              Bring your own keys for every provider — eri never proxies the
-              call.
+              Eri ships with a router that knows when a task needs editing,
+              review, planning, vision, or shipping. Manual override fits in
+              a single spoken phrase.
             </p>
             <p className="mt-3 max-w-xl text-paper/40 text-[12px] leading-relaxed">
-              eri uses multiple frontier models behind eri's engine API.
+              Public surfaces show Eri routes; internal dispatch stays behind Eri.
             </p>
           </div>
           <RouteBadge model={MODELS[activeIdx]!} />
@@ -314,9 +312,9 @@ const FOOTNOTES: ReadonlyArray<FootnoteCardProps> = [
     kicker: "BYOK",
     body: (
       <>
-        Your keys, your billing. Eri binds each provider to a Keychain Access
-        entry scoped to the editor process — the renderer never reads the
-        secret, the sidecar signs requests in a sandboxed worker.
+        Your keys, your billing. Eri binds every external connector to a
+        Keychain Access entry scoped to the app process — the renderer never
+        reads the secret, the local service signs requests in a sandboxed worker.
       </>
     ),
   },
@@ -324,10 +322,10 @@ const FOOTNOTES: ReadonlyArray<FootnoteCardProps> = [
     kicker: "Voice override",
     body: (
       <>
-        Say <span className="text-paper/90">&ldquo;use Opus for this
-        one&rdquo;</span> mid-turn. A local whisper.cpp pass spots the hot
-        keyword <span className="font-mono text-paper/75">use&nbsp;X</span>{" "}
-        before the sentence finishes; the next turn falls back to your default.
+        Say <span className="text-paper/90">&ldquo;use Reviewer for this
+        one&rdquo;</span> mid-turn. A local speech pass spots the hot keyword
+        <span className="font-mono text-paper/75"> use&nbsp;X </span>before
+        the sentence finishes; the next turn falls back to your default.
       </>
     ),
   },
@@ -335,9 +333,9 @@ const FOOTNOTES: ReadonlyArray<FootnoteCardProps> = [
     kicker: "Local fallback",
     body: (
       <>
-        Lose the network and eri swaps the route to a 4-bit Llama-3.2-3B
-        running on the same machine. The diff queues against the cloud lane and
-        replays the moment your uplink returns — the loop never stops.
+        Lose the network and Eri keeps local tools active. Cloud-only turns
+        queue with a checkpoint and replay the moment your uplink returns —
+        the loop never stops.
       </>
     ),
   },

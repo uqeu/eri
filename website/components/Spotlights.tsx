@@ -21,9 +21,9 @@ export function Spotlights(): React.ReactElement {
             </h2>
           </div>
           <p className="max-w-sm text-paper/60 text-[15px] leading-relaxed">
-            Eri is a VSCodium fork with the Cursor feel — composer, palette,
-            voice, gaze, diffusion, agents. Same keymap, same extensions, new
-            loop.
+            Eri is the agent workbench: composer, preview, shell, git,
+            checkpoints, voice, gaze, and MCP. Same developer power, but the
+            agent loop is the product.
           </p>
         </div>
 

@@ -41,7 +41,7 @@ const FEATURES: ReadonlyArray<Feature> = [
   },
   {
     title: "Diffusion preview",
-    body: "See edits arrive as a denoising wash, not a typewriter crawl. Eri's engine lands multi-line patches in under two seconds.",
+    body: "See edits arrive as a coherent preview, not a typewriter crawl. Eri lands multi-line patches in under two seconds.",
     availability: "now",
     signature: true,
     icon: (
@@ -170,8 +170,8 @@ const FEATURES: ReadonlyArray<Feature> = [
     ),
   },
   {
-    title: "Multi-model routing",
-    body: "Send edits to eri's engine, polish to Claude, chat to GPT-4o, experiments to Gemini — all from one TOML. Or stay fully local with Llama.",
+    title: "Task routing",
+    body: "Route build, review, research, UI, and shell work to the right Eri agent from one workspace file. Or stay fully local for private tasks.",
     availability: "now",
     icon: (
       <Icon>
@@ -215,13 +215,13 @@ export function Features(): React.ReactElement {
               The surface
             </p>
             <h2 className="mt-4 font-display text-3xl sm:text-5xl tracking-tight max-w-2xl text-balance font-normal">
-              Every Cursor reflex,{" "}
-              <span className="italic text-accent">plus the ones it skipped.</span>
+              Every reflex of the modern workbench,{" "}
+              <span className="italic text-accent">owned by the agent.</span>
             </h2>
           </div>
           <p className="max-w-sm text-paper/60 text-[15px] leading-relaxed">
-            eri matches Cursor feature-for-feature, then adds voice, gaze, and
-            diffusion edits on top.
+            Eri keeps files, search, git, terminal, preview, MCP, voice, gaze,
+            and review in one agent-controlled loop.
           </p>
         </div>
 

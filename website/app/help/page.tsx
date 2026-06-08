@@ -52,11 +52,11 @@ const CATEGORIES: ReadonlyArray<Category> = [
   {
     href: "/help/troubleshooting",
     title: "Troubleshooting",
-    summary: "Common errors, install issues, model connection problems.",
+    summary: "Common errors, install issues, Eri Cloud connection problems.",
     topics: [
       "Sign-in keeps failing",
       "Voice / microphone doesn't work",
-      "Model returns no output",
+      "Eri Cloud returns no output",
       "Resetting the app",
     ],
   },

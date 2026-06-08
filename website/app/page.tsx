@@ -1,5 +1,5 @@
 import { Hero } from "@/components/Hero";
-import { EriIDE } from "@/components/EriIDE";
+import { EriWorkbench } from "@/components/EriWorkbench";
 import { HeroBig } from "@/components/HeroBig";
 import { PromptPipeline } from "@/components/PromptPipeline";
 import { CtaFooter } from "@/components/CtaFooter";
@@ -35,15 +35,15 @@ export default function HomePage(): React.ReactElement {
     <main>
       <Hero />
 
-      <Chapter n={1} title="An IDE that watches, listens, ships.">
-        <EriIDE />
+      <Chapter n={1} title="A local workbench that can actually ship.">
+        <EriWorkbench />
       </Chapter>
 
-      <Chapter n={2} title="The loop. Look. Speak. Ship.">
+      <Chapter n={2} title="Preview, review, checkpoint, ship.">
         <HeroBig />
       </Chapter>
 
-      <Chapter n={3} title="Three lazy words. One precise prompt.">
+      <Chapter n={3} title="Your whole context. One routed agent turn.">
         <PromptPipeline />
       </Chapter>
 

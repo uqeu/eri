@@ -28,12 +28,12 @@ const LANES: ReadonlyArray<Lane> = [
   {
     key: "eri",
     label: "Eri",
-    sub: "voice + diffusion",
+    sub: "agent + artifacts",
     total: "0:28",
     accent: true,
     steps: [
       { at: 0.04, label: "say it", kind: "voice" },
-      { at: 0.18, label: "eri engine diffuses the diff", kind: "diff" },
+      { at: 0.18, label: "eri lands the diff", kind: "diff" },
       { at: 0.38, label: "type check passes", kind: "test" },
       { at: 0.52, label: "preview reloads", kind: "deploy" },
       { at: 0.7, label: "ship it", kind: "voice" },
@@ -42,8 +42,8 @@ const LANES: ReadonlyArray<Lane> = [
   },
   {
     key: "typing",
-    label: "Typing-only editor",
-    sub: "autocomplete + chat",
+    label: "Manual loop",
+    sub: "chat + handoff",
     total: "9:40",
     accent: false,
     steps: [
@@ -92,10 +92,9 @@ export function Compare(): React.ReactElement {
             </span>
           </h2>
           <p className="mt-5 max-w-xl text-paper/60 text-[15px] leading-relaxed">
-            We timed the same task — &ldquo;add a pricing toggle and ship it&rdquo; —
-            on eri and on a popular typing-only editor. Both running the same
-            frontier model. The difference is voice, diffusion, and one tool that
-            owns the whole loop.
+            The same task — &ldquo;add a pricing toggle and ship it&rdquo; — is
+            slower when planning, editing, preview, review, and deploy live in
+            separate places. Eri keeps the loop in one agent-owned surface.
           </p>
         </div>
 
@@ -107,7 +106,7 @@ export function Compare(): React.ReactElement {
 
         <div className="mt-8 flex flex-wrap items-center gap-x-6 gap-y-2 mono-cap text-paper/40">
           <span>◉ voice turn</span>
-          <span>▦ diffusion edit</span>
+          <span>▦ applied edit</span>
           <span>› typed step</span>
           <span>✓ test / lint</span>
           <span>↗ deploy step</span>

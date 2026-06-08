@@ -28,12 +28,12 @@ const ENTRIES: ReadonlyArray<Entry> = [
   },
   {
     date: "2026-05-16",
-    title: "eri's engine apply path, eri voice picker, tryeri.ca",
+    title: "Eri apply path, voice picker, tryeri.ca",
     items: [
-      "Switched edit path to eri's engine — average iteration down to 1.7s",
+      "Switched edit path to Eri's agent apply loop — average iteration down to 1.7s",
       "eri voice picker via ElevenLabs presets for Starter+ tiers",
       "tryeri.ca landing page launched",
-      "BYOK flow for Free tier (eri's engine + ElevenLabs keys)",
+      "BYOK flow for Free tier",
       "Iteration timelines shareable at /p/[slug]",
     ],
   },
@@ -41,9 +41,9 @@ const ENTRIES: ReadonlyArray<Entry> = [
     date: "2026-05-14",
     title: "eri 0.1 — first release",
     items: [
-      "Voice-first IDE loop end to end (transcribe → edit → apply → reload)",
+      "Voice-first agent loop end to end (transcribe → edit → apply → reload)",
       "Gaze targeting via on-device sidecar",
-      "One-shot ship with model polish pass",
+      "One-shot ship with review pass",
       "Iteration history with rollback to any prior state",
       "Invite-only access opened",
     ],

@@ -90,7 +90,7 @@ async function upsertGoogleUser(
 }
 
 export async function GET(request: Request): Promise<NextResponse> {
-  const limited = rateLimit(request, "auth.oauth_callback");
+  const limited = await rateLimit(request, "auth.oauth_callback");
   if (limited) return limited;
 
   const url = new URL(request.url);

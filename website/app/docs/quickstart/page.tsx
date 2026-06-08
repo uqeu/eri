@@ -4,7 +4,8 @@ import { FooterBig } from "@/components/FooterBig";
 
 export const metadata: Metadata = {
   title: "Quickstart — eri Docs",
-  description: "Install, sign in, and run your first AI-assisted edit in ten minutes.",
+  description:
+    "Install, sign in, and run your first agent-assisted edit in ten minutes.",
 };
 
 interface Step {
@@ -15,15 +16,15 @@ interface Step {
 const STEPS: ReadonlyArray<Step> = [
   {
     title: "1. Install eri",
-    body: "Download from tryeri.ca/download. On macOS, drag eri.app into Applications and launch. On Windows, run the installer. On Linux, follow the per-distro instructions. First launch will ask for microphone and accessibility permissions — grant them to enable voice and inline editing, or skip to use eri as a text-only IDE.",
+    body: "Download from tryeri.ca/download. On macOS, drag eri.app into Applications and launch. On Windows, run the installer. On Linux, follow the per-distro instructions. First launch will ask for microphone and accessibility permissions — grant them to enable voice and inline editing, or skip them and use eri as a keyboard-first workbench.",
   },
   {
     title: "2. Sign in",
-    body: "Click Sign in on the launch screen. Sign in with Google is the recommended path. If you'd rather use email and password, the link is below the Google button. You'll land in your home tab with no projects yet.",
+    body: "Click Sign in on the launch screen and choose the account path you prefer. You'll land in your home tab with no projects yet.",
   },
   {
-    title: "3. Connect a model",
-    body: "If you're on the paid plan, the eri inference proxy is already wired up — skip ahead. Otherwise, Settings → Models → Add provider. Paste your Anthropic, OpenAI, or Google key. Keys are stored in your OS keychain and never leave your machine. See /docs/byok for the longer version.",
+    title: "3. Review workspace secrets",
+    body: "Open Settings → Secrets before your first agent turn. Paid plans include managed cloud turns; local and external service credentials stay in your OS keychain and are scoped to the workspace. See /docs/byok for the longer version.",
   },
   {
     title: "4. Open a project",
@@ -31,11 +32,11 @@ const STEPS: ReadonlyArray<Step> = [
   },
   {
     title: "5. Run your first edit",
-    body: "Hit ⌘K (or Ctrl-K on Windows/Linux) to open the composer. Type what you want changed — for example: \"Add a function in main.py that prints the first 10 prime numbers.\" eri proposes the change as a diff. Review it. Click Apply to write it to disk, or Cancel to throw it away. That's the loop.",
+    body: "Hit ⌘K (or Ctrl-K on Windows/Linux) to open the composer. Type what you want changed — for example: \"Add a function in main.py that prints the first 10 prime numbers.\" eri proposes the change as a diff. Review it. Click Apply to write it to disk, or Cancel to throw it away. That's the local loop.",
   },
   {
     title: "6. Try voice (optional)",
-    body: "Hit the microphone button or say the wakeword. Speak your prompt as you would type it. eri's local transcription pipeline turns it into text, then runs the same composer flow. Audio stays on your device; only the resulting prompt is sent to the model.",
+    body: "Hit the microphone button or say the wakeword. Speak your prompt as you would type it. eri's local transcription pipeline turns it into text, then runs the same composer flow. Audio stays on your device; the reviewed request is the only part eligible for cloud handoff.",
   },
 ];
 
@@ -57,7 +58,7 @@ export default function QuickstartPage() {
           </h1>
           <p className="mt-5 text-lg text-muted leading-relaxed">
             The shortest path from a fresh download to a working
-            AI-assisted edit. If anything below diverges from what you see
+            agent-assisted edit. If anything below diverges from what you see
             in the app, the app wins — email phlotu@gmail.com and the
             operator will update this page.
           </p>

@@ -101,10 +101,10 @@ export function Playground(): JSX.Element {
       <div className="flex items-center justify-between">
         <p className="text-xs text-zinc-500">
           {intent === "ask"
-            ? "One-off Q&A — uses Sonnet."
+            ? "One-off Q&A — uses Eri Ask."
             : intent === "plan"
-              ? "Step-by-step plan — uses Sonnet."
-              : "HTML draft — uses Mercury (free)."}
+              ? "Step-by-step plan — uses Eri Planner."
+              : "HTML draft — uses Eri Sketch."}
         </p>
         <button
           type="submit"

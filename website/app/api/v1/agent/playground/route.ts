@@ -1,11 +1,11 @@
 // `/api/v1/agent/playground` — anonymous, IP-rate-limited demo of
-// eri's brain. Distinct from `/api/v1/agent/run` because it doesn't
+// Eri. Distinct from `/api/v1/agent/run` because it doesn't
 // require a bearer token. Caps per IP at 10 turns / hour to keep
 // abuse bounded; longer or more demanding prompts hit the standard
-// `over_quota` path the IDE/CLI already understand.
+// `over_quota` path the app/CLI already understand.
 //
-// Models: Mercury for `sketch`, Haiku for `ask`/`plan` (free, fast,
-// cheap — the playground is a sales surface).
+// The playground shows public Eri routes only; provider details stay behind
+// the server.
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -71,10 +71,10 @@ export async function POST(request: Request): Promise<Response> {
 
   const masterKey = process.env.ANTHROPIC_MASTER_KEY;
   if (intent !== "sketch" && !masterKey) {
-    return sseError(503, "provider_unavailable");
+    return sseError(503, "eri_engine_unavailable");
   }
   if (intent === "sketch" && !process.env.INCEPTION_MASTER_KEY) {
-    return sseError(503, "provider_unavailable");
+    return sseError(503, "eri_engine_unavailable");
   }
 
   return new Response(
@@ -139,7 +139,7 @@ async function streamHaiku(
     }),
   });
   if (!response.ok || !response.body) {
-    throw new Error(`provider ${response.status}`);
+    throw new Error(`Eri Cloud ${response.status}`);
   }
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
@@ -199,7 +199,7 @@ async function streamInception(
     }),
   });
   if (!response.ok) {
-    throw new Error(`provider ${response.status}`);
+    throw new Error(`Eri Cloud ${response.status}`);
   }
   const data = (await response.json()) as {
     choices?: { message?: { content?: string } }[];

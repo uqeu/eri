@@ -5,7 +5,7 @@ import { FooterBig } from "@/components/FooterBig";
 export const metadata: Metadata = {
   title: "Troubleshooting — eri Help",
   description:
-    "Fixes for the most common issues: sign-in failures, microphone problems, model errors, app reset.",
+    "Fixes for the most common issues: sign-in failures, microphone problems, Eri Cloud errors, app reset.",
 };
 
 interface Article {
@@ -27,12 +27,12 @@ const ARTICLES: ReadonlyArray<Article> = [
   {
     question: "Voice / microphone isn't working.",
     answer:
-      "Open System Settings → Privacy & Security → Microphone (macOS) and make sure eri is allowed. Restart the app after granting permission. If the wakeword still doesn't trigger, try Settings → Voice → Recalibrate. Bluetooth headsets sometimes drop audio quality below what the wakeword model needs — switching to the built-in mic is a quick test.",
+      "Open System Settings → Privacy & Security → Microphone (macOS) and make sure eri is allowed. Restart the app after granting permission. If the wakeword still doesn't trigger, try Settings → Voice → Recalibrate. Bluetooth headsets sometimes drop audio quality below what the local listener needs — switching to the built-in mic is a quick test.",
   },
   {
-    question: "The model returns no output or an error.",
+    question: "Eri Cloud returns no output or an error.",
     answer:
-      "Three things to check: (1) your BYOK API key is valid and has credit/quota left on the provider side; (2) your network can reach the provider endpoint (corporate proxies often block them); (3) eri is up to date — Settings → About → Check for updates. If the model returns an error, the message usually comes from the provider; paste it into a support email and the operator can help interpret.",
+      "Three things to check: (1) your account has quota left; (2) your network can reach tryeri.ca; (3) eri is up to date — Settings → About → Check for updates, or run `eri update check`. If the error persists, paste it into a support email and the operator can help interpret.",
   },
   {
     question: "Edits aren't applying or apply to the wrong file.",

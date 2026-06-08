@@ -6,7 +6,7 @@ import { CapabilityGrid } from "@/components/CapabilityGrid";
 export const metadata: Metadata = {
   title: "Features — eri",
   description:
-    "The complete eri feature catalog — 28 capabilities spanning Cursor parity, voice, gaze, diffusion edits, and iteration history.",
+    "The complete eri feature catalog — local agents, terminal workbench, universal context, MCP tools, GenUI artifacts, review, checkpoints, and cloud handoff.",
 };
 
 interface MarqueeStat {
@@ -16,9 +16,9 @@ interface MarqueeStat {
 
 const MARQUEE_STATS: ReadonlyArray<MarqueeStat> = [
   { value: "28", label: "Total capabilities" },
-  { value: "4", label: "eri-only differentiators" },
-  { value: "24", label: "Cursor-parity surfaces" },
-  { value: "<2s", label: "Median edit latency" },
+  { value: "5", label: "Workbench layers" },
+  { value: "8", label: "Source types" },
+  { value: "3", label: "Run modes" },
 ];
 
 export default function FeaturesPage(): React.ReactElement {
@@ -31,13 +31,13 @@ export default function FeaturesPage(): React.ReactElement {
             Features
           </p>
           <h1 className="mt-5 font-display text-4xl sm:text-6xl tracking-tight max-w-3xl text-balance font-normal">
-            Every reflex of the modern IDE,{" "}
-            <span className="italic text-accent">spoken to.</span>
+            An agentic local workbench for the way real work ships.
           </h1>
           <p className="mt-6 max-w-xl text-lg text-paper/70 leading-relaxed">
-            eri ships Cursor-grade tab completion, inline edit, composer, agent
-            mode, and codebase chat. Then it adds voice, gaze, diffusion preview,
-            and iteration history — the parts a keyboard alone can&apos;t reach.
+            eri installs as a local agent and terminal console, then connects
+            MCP tools, APIs, skills, docs, datasets, traces, and cloud runners
+            into one previewable loop: read, plan, build, review, checkpoint,
+            and ship.
           </p>
 
           <div className="mt-12 grid gap-px overflow-hidden rounded-lg border border-white/[0.08] bg-white/[0.06] sm:grid-cols-4">
@@ -68,8 +68,9 @@ export default function FeaturesPage(): React.ReactElement {
                 See the loop in motion.
               </h2>
               <p className="mt-4 text-paper/65 leading-relaxed">
-                Features are easier to feel than to read. The demo walks the full
-                surface in under three minutes.
+                Features are easier to feel than to read. The demo walks the
+                local workbench, agent manager, context graph, generated UI, and
+                ship loop in under three minutes.
               </p>
             </div>
             <Link

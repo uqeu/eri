@@ -17,7 +17,7 @@ const FACTS: ReadonlyArray<Fact> = [
   { label: "Based in", value: "Ontario, Canada" },
   { label: "Team size", value: "One person" },
   { label: "Stage", value: "Independent, self-funded" },
-  { label: "Product", value: "eri — voice-first IDE" },
+  { label: "Product", value: "eri — local agentic workbench" },
 ];
 
 interface Asset {
@@ -74,11 +74,11 @@ export default function PressPage() {
             About eri
           </h2>
           <p className="mt-6 text-paper/90 leading-relaxed">
-            eri is a voice-first IDE for solo founders and small product teams.
-            Built on VSCodium with a Rust sidecar, and powered by a diffusion
-            code model, eri turns spoken intent into a working diff in under
-            four seconds. Voice, gaze, and the editor run locally; only model
-            calls leave the device.
+            eri is a local agentic workbench for solo founders and small
+            product teams. It brings code, diffs, terminal output, task
+            history, voice input, and cloud handoff into one review loop so
+            developers can move from intent to working changes without
+            scattering context across tools.
           </p>
           <p className="mt-5 text-paper/90 leading-relaxed">
             eri is an independent project started in 2025, operated from

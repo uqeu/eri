@@ -3,9 +3,9 @@ import Link from "next/link";
 import { FooterBig } from "@/components/FooterBig";
 
 export const metadata: Metadata = {
-  title: "The IDE — eri Docs",
+  title: "Workbench — eri Docs",
   description:
-    "Layout, panels, composer, apply step, and keymaps inside the eri IDE.",
+    "Layout, panels, composer, terminal context, review flow, and keymaps inside eri.",
 };
 
 interface Section {
@@ -15,16 +15,16 @@ interface Section {
 
 const SECTIONS: ReadonlyArray<Section> = [
   {
-    heading: "Layout",
-    body: "eri is a VSCodium-fork IDE with the standard left activity bar, a centre editor area, and a right AI panel. The AI panel is the home of the composer (⌘K), the chat (⌘L), and the mention picker (@ for files, # for symbols, / for slash commands). Everything you know from VS Code keybindings still works — the AI surfaces are additive.",
+    heading: "Workbench layout",
+    body: "eri keeps code, terminal output, task history, and agent review in one local workspace. The centre area is the editor substrate; the side panels hold the composer (⌘K), chat (⌘L), mentions (@ for files, # for symbols, / for commands), and the review queue.",
   },
   {
     heading: "The composer",
-    body: "⌘K opens the composer. Type a prompt, optionally @-mention files or #-mention symbols, and hit Enter. eri sends only the mentioned context (plus the current selection or active file) to the model. The model responds with a diff in search-and-replace blocks, which the apply step writes to disk after you review.",
+    body: "⌘K opens the composer. Type a prompt, optionally @-mention files or #-mention symbols, and hit Enter. eri builds a bounded request from the mentioned context plus the current selection or active file. The response becomes a proposed diff, command, or plan that waits for your review.",
   },
   {
-    heading: "Apply step",
-    body: "Every model edit lands in a review panel before it touches your files. Hunks can be accepted individually, partially accepted, or rejected. Until you accept, nothing changes on disk. eri keeps a local checkpoint of the file state before each apply, so a bad edit can be reverted in one action.",
+    heading: "Review step",
+    body: "Every agent edit lands in a review panel before it touches your files. Hunks can be accepted individually, partially accepted, or rejected. Until you accept, nothing changes on disk. eri keeps a local checkpoint of the file state before each apply, so a bad edit can be reverted in one action.",
   },
   {
     heading: "Mentions",
@@ -32,11 +32,15 @@ const SECTIONS: ReadonlyArray<Section> = [
   },
   {
     heading: "Voice mode",
-    body: "The microphone button (or wakeword) starts local transcription. Audio frames stay on the device; only the resulting prompt is sent. Voice mode supports the same @-mentions and slash commands as the keyboard composer — speak them naturally and the parser handles them.",
+    body: "The microphone button (or wakeword) starts local transcription. Audio frames stay on the device. Voice mode supports the same @-mentions and slash commands as the keyboard composer — speak them naturally and the parser handles them.",
   },
   {
-    heading: "Gaze mode",
-    body: "If you've enabled gaze tracking, eri uses your gaze to follow which file or symbol you're looking at and biases the composer's default context accordingly. The gaze estimator runs entirely on the device and produces no telemetry. Disable it in Settings → Privacy if you'd rather not.",
+    heading: "Terminal context",
+    body: "Command output is part of the workspace. When a build, test, or script fails, eri can use the active terminal buffer as context, propose the next command, and keep the reasoning attached to the task history.",
+  },
+  {
+    heading: "Cloud handoff",
+    body: "Local work stays local until a task needs remote runtime, longer execution, or hosted resources. Cloud handoff shows what will leave the machine, what credentials are in scope, and where the run will happen before you start it.",
   },
   {
     heading: "Keymaps",
@@ -55,15 +59,15 @@ export default function IdeDocsPage() {
               Docs
             </Link>
             <span aria-hidden className="text-paper/30">/</span>
-            <span className="text-paper/55">The IDE</span>
+            <span className="text-paper/55">Workbench</span>
           </div>
           <h1 className="mt-5 font-display text-4xl sm:text-6xl tracking-tight text-balance">
-            The IDE.
+            The workbench.
           </h1>
           <p className="mt-5 text-lg text-muted leading-relaxed">
-            How the editor, composer, and apply step fit together. The
-            short version: ⌘K to ask, review the diff, accept the hunks
-            you want.
+            How the editor substrate, composer, terminal context, review
+            step, and cloud handoff fit together. The short version: ⌘K to
+            ask, review what changes, then apply or run only what you accept.
           </p>
         </div>
       </section>

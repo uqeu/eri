@@ -49,7 +49,7 @@ export const DEFAULT_PLAN: BuilderCheckerPlan = {
     {
       role: "builder",
       provider: "anthropic",
-      model: "claude-sonnet-4-5-20251015",
+      model: "claude-sonnet-4-6",
     },
     {
       role: "builder",
