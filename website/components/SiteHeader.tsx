@@ -114,7 +114,7 @@ export function SiteHeader({ variant = "transparent" }: SiteHeaderProps) {
                 href="/sign-up"
                 className="inline-flex items-center gap-1.5 rounded-md bg-text px-3.5 py-1.5 text-[13px] font-medium text-bg hover:opacity-90 transition-colors"
               >
-                Try eri free
+                Request access
                 <span aria-hidden className="text-[10px]">
                   →
                 </span>

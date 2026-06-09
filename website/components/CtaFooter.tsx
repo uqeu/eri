@@ -14,9 +14,9 @@ export function CtaFooter(): React.ReactElement {
           </h2>
 
           <p className="text-text-sec text-[17px] leading-[1.55] max-w-prose mt-7">
-            Eri brings the terminal agent, Agent Manager, MCP context, GenUI
-            artifacts, previews, reviews, checkpoints, and deploys into one
-            local-first loop. Bring your own keys or use Eri Cloud.
+            eri brings the terminal agent, Agent Manager, MCP context, previews,
+            reviews, and checkpoints into one local-first loop. Bring your own
+            keys, or use eri Cloud. In private alpha now.
           </p>
 
           <div className="mt-9 flex flex-wrap items-center gap-3">
@@ -24,13 +24,13 @@ export function CtaFooter(): React.ReactElement {
               href="/download"
               className="inline-flex items-center rounded-md bg-text px-4 py-2 text-[14px] font-medium text-bg hover:opacity-90 transition-opacity"
             >
-              Install locally
+              Request access
             </Link>
             <Link
               href="/contact"
               className="inline-flex items-center text-[14px] text-text-sec hover:text-text transition-colors"
             >
-              Request access
+              Talk to us
               <span className="ml-1.5">→</span>
             </Link>
           </div>
