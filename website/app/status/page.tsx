@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { FooterBig } from "@/components/FooterBig";
 
 export const metadata: Metadata = {
@@ -118,17 +117,8 @@ export default function StatusPage() {
           <p className="mt-4 text-muted leading-relaxed">
             No incidents recorded yet. When something does break, a short
             write-up will go here — what happened, who was affected, what was
-            done about it. For real-time chatter during an incident, the
-            operator usually posts on{" "}
-            <Link
-              href="https://x.com/eri"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-paper underline underline-offset-4 decoration-white/30 transition hover:text-accent"
-            >
-              the eri X account
-            </Link>
-            .
+            done about it. During an incident, updates also go out by email to
+            signed-in users.
           </p>
         </div>
       </section>

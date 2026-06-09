@@ -51,58 +51,6 @@ const COLUMNS: ReadonlyArray<FooterColumn> = [
   },
 ];
 
-interface SocialDef {
-  readonly href: string;
-  readonly label: string;
-  readonly path: React.ReactNode;
-  readonly viewBox?: string;
-  readonly size?: string;
-}
-
-const SOCIALS: ReadonlyArray<SocialDef> = [
-  {
-    href: "https://x.com/eri",
-    label: "X / Twitter",
-    size: "h-[14px] w-[14px]",
-    path: (
-      <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
-    ),
-  },
-  {
-    href: "https://youtube.com/@eri",
-    label: "YouTube",
-    size: "h-4 w-4",
-    path: (
-      <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.546 15.568V8.432L15.818 12l-6.272 3.568z" />
-    ),
-  },
-];
-
-interface SocialIconProps {
-  readonly social: SocialDef;
-}
-
-function SocialIcon({ social }: SocialIconProps): React.ReactElement {
-  return (
-    <a
-      href={social.href}
-      target="_blank"
-      rel="noreferrer noopener"
-      aria-label={social.label}
-      className="group inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/[0.06] text-paper/45 transition hover:border-white/20 hover:text-paper hover:bg-white/[0.03]"
-    >
-      <svg
-        viewBox="0 0 24 24"
-        className={social.size ?? "h-4 w-4"}
-        fill="currentColor"
-        aria-hidden
-      >
-        {social.path}
-      </svg>
-    </a>
-  );
-}
-
 interface FooterColumnProps {
   readonly column: FooterColumn;
 }
@@ -238,11 +186,6 @@ export function Footer(): React.ReactElement {
             <span className="text-paper/30">
               independent project · ontario, canada · provided as-is
             </span>
-          </div>
-          <div className="flex items-center gap-2">
-            {SOCIALS.map((s) => (
-              <SocialIcon key={s.label} social={s} />
-            ))}
           </div>
         </div>
 

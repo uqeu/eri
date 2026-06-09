@@ -40,29 +40,6 @@ const COLUMNS: ReadonlyArray<FooterColumn> = [
   },
 ];
 
-interface SocialDef {
-  readonly href: string;
-  readonly label: string;
-  readonly path: React.ReactNode;
-}
-
-const SOCIALS: ReadonlyArray<SocialDef> = [
-  {
-    href: "https://x.com/eri",
-    label: "X",
-    path: (
-      <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
-    ),
-  },
-  {
-    href: "https://youtube.com/@eri",
-    label: "YouTube",
-    path: (
-      <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.546 15.568V8.432L15.818 12l-6.272 3.568z" />
-    ),
-  },
-];
-
 export function FooterBig(): React.ReactElement {
   const year = new Date().getFullYear();
 
@@ -80,30 +57,9 @@ export function FooterBig(): React.ReactElement {
               </span>
             </Link>
             <p className="mt-6 max-w-sm text-[14px] leading-relaxed text-text-sec">
-              The local-first agentic workbench for teams that ship from their
-              repos, terminals, APIs, MCP servers, and cloud agents.
+              A local-first agent that controls your computer, writes your code,
+              and learns how you work. An independent project, in private alpha.
             </p>
-            <div className="mt-7 flex items-center gap-2">
-              {SOCIALS.map((s) => (
-                <a
-                  key={s.label}
-                  href={s.href}
-                  target="_blank"
-                  rel="noreferrer noopener"
-                  aria-label={s.label}
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border text-text-ter transition-colors hover:border-border-strong hover:bg-bg-card-2 hover:text-text"
-                >
-                  <svg
-                    viewBox="0 0 24 24"
-                    className="h-4 w-4"
-                    fill="currentColor"
-                    aria-hidden
-                  >
-                    {s.path}
-                  </svg>
-                </a>
-              ))}
-            </div>
           </div>
 
           {COLUMNS.map((col) => (
