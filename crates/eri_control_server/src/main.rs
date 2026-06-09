@@ -262,6 +262,7 @@ mod platform {
     }
 
     pub fn open_app(name: &str) -> Result<()> {
+        validate_app_name(name)?;
         let status = Command::new("/usr/bin/open")
             .args(["-a", name])
             .status()
@@ -273,9 +274,41 @@ mod platform {
     }
 
     pub fn quit_app(name: &str) -> Result<()> {
-        osascript(&format!(r#"tell application "{}" to quit"#, name.replace('"', "")))
-            .map(|_| ())
-            .with_context(|| format!("quit {name:?}"))
+        validate_app_name(name)?;
+        // Pass `name` as an AppleScript argv parameter, NOT interpolated into the
+        // script source — so a crafted app name can't inject AppleScript.
+        let out = Command::new("/usr/bin/osascript")
+            .args([
+                "-e",
+                "on run argv",
+                "-e",
+                "tell application (item 1 of argv) to quit",
+                "-e",
+                "end run",
+                "--",
+                name,
+            ])
+            .output()
+            .context("spawn osascript")?;
+        if !out.status.success() {
+            anyhow::bail!("quit {name:?}: {}", String::from_utf8_lossy(&out.stderr).trim());
+        }
+        Ok(())
+    }
+
+    /// App names come from the model over the loopback bridge; keep them to a
+    /// conservative charset so they can't smuggle quotes/newlines/escapes into
+    /// `open`/`osascript`. Real macOS app names fit easily inside this.
+    fn validate_app_name(name: &str) -> Result<()> {
+        let ok = !name.is_empty()
+            && name.len() <= 64
+            && name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, ' ' | '.' | '_' | '-'));
+        if !ok {
+            anyhow::bail!("invalid app name: {name:?}");
+        }
+        Ok(())
     }
 
     fn osascript(script: &str) -> Result<String> {
