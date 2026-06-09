@@ -2,6 +2,7 @@ import Link from "next/link";
 import { DemoShowcase } from "./DemoShowcase";
 import { InstallBlock } from "./InstallBlock";
 import { EriToolsTerminal } from "./EriToolsTerminal";
+import { EriAssistantCard } from "./EriAssistantCard";
 
 export function Hero(): React.ReactElement {
   return (
@@ -71,7 +72,8 @@ export function Hero(): React.ReactElement {
           style={{ animationDelay: "320ms" }}
         >
           <DemoShowcase />
-          <EriToolsTerminal className="relative z-10 mt-4 md:absolute md:bottom-5 md:left-5 md:mt-0 md:w-[380px] md:max-w-[48%]" />
+          <EriToolsTerminal className="relative z-10 mt-4 md:absolute md:bottom-5 md:left-5 md:mt-0 md:w-[380px] md:max-w-[46%]" />
+          <EriAssistantCard className="relative z-10 mx-auto mt-4 w-full max-w-[340px] md:absolute md:right-5 md:bottom-8 md:mt-0 md:w-[320px]" />
         </div>
       </div>
     </section>
