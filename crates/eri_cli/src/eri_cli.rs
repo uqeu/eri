@@ -47,8 +47,10 @@ mod genui;
 mod git_tools;
 mod line_editor;
 mod mcp_server;
+mod assistant;
 mod memory;
 mod memory_tools;
+mod research;
 mod plan_tui;
 mod plugins;
 mod project;
@@ -358,6 +360,35 @@ pub enum Command {
         /// Stop after N seconds (0 = run until Ctrl-C).
         #[arg(long, default_value_t = 0)]
         seconds: u64,
+    },
+    /// Manage the per-app control denylist — apps eri must not look at or touch.
+    /// `eri apps` lists them; `eri apps deny Discord` adds one; `eri apps allow
+    /// Discord` removes one. Denied apps are refused before any open/quit.
+    Apps {
+        /// `deny <app>`, `allow <app>`, or omit (or `list`) to show the denylist.
+        action: Vec<String>,
+    },
+    /// A "here's your day" recap from what eri remembers (local memory only).
+    /// No fabrication — reports only what's actually on record. Your calendar
+    /// and email join this once you connect them.
+    Brief,
+    /// Web research from the live web — eri searches and answers with sources.
+    /// Needs a provider key (set ANTHROPIC_API_KEY). Never fabricates an answer.
+    Research {
+        /// The question, e.g. "what is pgvector?".
+        query: Vec<String>,
+    },
+    /// Email assistant over a connected email MCP server (Gmail, etc.). With no
+    /// server connected it shows you how to add one — it never invents an inbox.
+    Email {
+        /// Optional action: `summarize`, `draft`, `triage` (or omit).
+        action: Vec<String>,
+    },
+    /// Calendar assistant over a connected calendar MCP server. With no server
+    /// connected it shows you how to add one — it never invents a schedule.
+    Calendar {
+        /// Optional action: `status`, `ready-check` (or omit).
+        action: Vec<String>,
     },
     /// Add tests for a path or the whole workspace (Tester persona).
     Test {
@@ -769,6 +800,11 @@ async fn dispatch(cli: Cli) -> anyhow::Result<()> {
             mode,
             goal,
         } => run_control(&goal.join(" "), live, yes, mode).await,
+        Command::Apps { action } => run_apps(&action),
+        Command::Brief => memory::brief(),
+        Command::Research { query } => research::research(&query.join(" ")),
+        Command::Email { action } => assistant::email(&action.join(" ")).await,
+        Command::Calendar { action } => assistant::calendar(&action.join(" ")).await,
         Command::Watch { seconds } => run_watch(seconds).await,
         Command::Test { scope } => agent::test(&scope).await,
         Command::Refactor { scope } => agent::refactor(&scope).await,
@@ -910,6 +946,11 @@ pub fn run(command: Command) -> Result<(), CliError> {
         | Command::Ask { .. }
         | Command::Plan { .. }
         | Command::Control { .. }
+        | Command::Apps { .. }
+        | Command::Brief
+        | Command::Research { .. }
+        | Command::Email { .. }
+        | Command::Calendar { .. }
         | Command::Watch { .. }
         | Command::Test { .. }
         | Command::Refactor { .. }
@@ -1172,6 +1213,62 @@ async fn run_plan_interactive(goal: &str) -> anyhow::Result<()> {
 /// `eri control`: hands-free computer control toward a goal. Defaults to a
 /// SAFE dry-run (shows the planned actions, actuates nothing); `--live` is
 /// reserved for once the macOS control bridge is granted (next increment).
+/// `eri apps` — manage the per-app control denylist. With no args (or `list`),
+/// print the denied apps; `deny <app>` adds one; `allow <app>` removes one.
+/// Persists to the same store as control permissions. Local-only, no network.
+/// Enforcement lives in the control gate (a denied app is refused before any
+/// open/quit), so this command is the user's switch for that boundary.
+fn run_apps(action: &[String]) -> anyhow::Result<()> {
+    let Some(path) = control_safety::PermissionStore::default_path() else {
+        anyhow::bail!("could not resolve the eri config directory");
+    };
+    let mut store = control_safety::PermissionStore::load(&path);
+
+    let verb = action.first().map(|s| s.to_ascii_lowercase());
+    let rest = action.get(1..).map(|r| r.join(" ")).unwrap_or_default();
+    let rest = rest.trim();
+
+    match verb.as_deref() {
+        None | Some("list") | Some("ls") => {
+            let apps: Vec<&String> = store.denied_apps().collect();
+            if apps.is_empty() {
+                println!("[eri] no apps are off-limits — eri may look at and control any app.");
+                println!("      add one with:  eri apps deny <app>   (e.g. eri apps deny Discord)");
+            } else {
+                println!("[eri] off-limits apps (eri won't open, quit, or touch these):");
+                for a in apps {
+                    println!("  · {a}");
+                }
+            }
+        }
+        Some("deny") | Some("block") => {
+            if rest.is_empty() {
+                anyhow::bail!("which app? e.g. eri apps deny Discord");
+            }
+            store.deny_app(rest);
+            store.save(&path)?;
+            println!("[eri] off-limits: I won't open, quit, or touch {rest}.");
+        }
+        Some("allow") | Some("unblock") => {
+            if rest.is_empty() {
+                anyhow::bail!("which app? e.g. eri apps allow Discord");
+            }
+            if store.allow_app(rest) {
+                store.save(&path)?;
+                println!("[eri] {rest} is allowed again.");
+            } else {
+                println!("[eri] {rest} wasn't on the denylist.");
+            }
+        }
+        Some(other) => {
+            anyhow::bail!(
+                "unknown action {other:?}. use:  eri apps [list | deny <app> | allow <app>]"
+            );
+        }
+    }
+    Ok(())
+}
+
 async fn run_control(goal: &str, live: bool, yes: bool, mode: Option<Mode>) -> anyhow::Result<()> {
     if goal.trim().is_empty() {
         anyhow::bail!("control needs a goal, e.g. eri control \"open YouTube and search lofi\"");

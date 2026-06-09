@@ -247,12 +247,28 @@ impl Permission {
     }
 }
 
-/// A persistable allowlist of granted permissions. Refusals (credentials,
-/// money, CAPTCHAs, access control) are intentionally NOT representable here —
-/// they can never be granted away, by design.
+/// Normalize an app name for denylist comparison: lowercase, trim, drop a
+/// trailing `.app`. So "Discord", "discord", and "Discord.app" all match.
+pub fn normalize_app_name(name: &str) -> String {
+    let lowered = name.trim().to_lowercase();
+    lowered.strip_suffix(".app").unwrap_or(&lowered).trim().to_string()
+}
+
+/// A persistable allowlist of granted permissions plus a per-app **denylist**.
+///
+/// Refusals (credentials, money, CAPTCHAs, access control) are intentionally NOT
+/// representable here — they can never be granted away, by design.
+///
+/// The app denylist is the user's "don't look at these apps" boundary: any app
+/// on it is off-limits to perception (snapshot/capture) and actuation, enforced
+/// in the control loop before eri ever reads or touches it.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct PermissionStore {
     granted: BTreeSet<Permission>,
+    /// Normalized app names eri must not look at or act on. `#[serde(default)]`
+    /// so permission files written before this field existed still load.
+    #[serde(default)]
+    denied_apps: BTreeSet<String>,
 }
 
 impl PermissionStore {
@@ -291,7 +307,33 @@ impl PermissionStore {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.granted.is_empty()
+        self.granted.is_empty() && self.denied_apps.is_empty()
+    }
+
+    // ── per-app denylist ("don't look at Discord") ──
+
+    /// Add an app to the denylist. Stored normalized so future lookups match
+    /// regardless of casing or a `.app` suffix.
+    pub fn deny_app(&mut self, app: &str) {
+        let norm = normalize_app_name(app);
+        if !norm.is_empty() {
+            self.denied_apps.insert(norm);
+        }
+    }
+
+    /// Remove an app from the denylist. Returns true if it was present.
+    pub fn allow_app(&mut self, app: &str) -> bool {
+        self.denied_apps.remove(&normalize_app_name(app))
+    }
+
+    /// Is this app off-limits? Compared on the normalized name, so "Discord",
+    /// "discord", and "Discord.app" all resolve to the same denial.
+    pub fn is_app_denied(&self, app: &str) -> bool {
+        self.denied_apps.contains(&normalize_app_name(app))
+    }
+
+    pub fn denied_apps(&self) -> impl Iterator<Item = &String> {
+        self.denied_apps.iter()
     }
 }
 
@@ -412,5 +454,67 @@ mod tests {
     fn missing_permission_file_is_empty_store() {
         let store = PermissionStore::load(Path::new("/nonexistent/eri/perms.json"));
         assert!(store.is_empty());
+    }
+
+    #[test]
+    fn app_denylist_matches_regardless_of_case_or_suffix() {
+        let mut store = PermissionStore::default();
+        store.deny_app("Discord");
+        // Same app, different surface forms all resolve to one denial.
+        assert!(store.is_app_denied("discord"));
+        assert!(store.is_app_denied("Discord.app"));
+        assert!(store.is_app_denied("  DISCORD  "));
+        // An app that was never denied is allowed.
+        assert!(!store.is_app_denied("Mail"));
+        // Adding the same app twice doesn't duplicate it.
+        store.deny_app("discord.app");
+        assert_eq!(store.denied_apps().count(), 1);
+    }
+
+    #[test]
+    fn app_denylist_allow_removes_and_reports() {
+        let mut store = PermissionStore::default();
+        store.deny_app("Slack");
+        assert!(store.is_app_denied("slack"));
+        assert!(store.allow_app("Slack")); // present → removed
+        assert!(!store.is_app_denied("slack"));
+        assert!(!store.allow_app("Slack")); // already gone → false
+    }
+
+    #[test]
+    fn app_denylist_persists_across_save_load() {
+        let dir = std::env::temp_dir().join(format!("eri_deny_test_{}", std::process::id()));
+        let path = dir.join("perms.json");
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let mut store = PermissionStore::default();
+        store.grant(Permission::OpenApps);
+        store.deny_app("Discord");
+        store.deny_app("1Password");
+        store.save(&path).unwrap();
+
+        let loaded = PermissionStore::load(&path);
+        assert!(loaded.is_granted(Permission::OpenApps));
+        assert!(loaded.is_app_denied("discord"));
+        assert!(loaded.is_app_denied("1password"));
+        assert!(!loaded.is_app_denied("mail"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn legacy_permission_file_without_denylist_still_loads() {
+        // A file written before the denylist field existed (only `granted`).
+        let dir = std::env::temp_dir().join(format!("eri_legacy_test_{}", std::process::id()));
+        let path = dir.join("perms.json");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(&path, r#"{"granted":["quit_apps"]}"#).unwrap();
+
+        let loaded = PermissionStore::load(&path);
+        assert!(loaded.is_granted(Permission::QuitApps));
+        assert_eq!(loaded.denied_apps().count(), 0); // serde(default) → empty set
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

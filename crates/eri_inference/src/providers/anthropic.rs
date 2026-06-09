@@ -137,8 +137,83 @@ impl AnthropicProvider {
             }],
             max_tokens,
             stream,
+            tools: Vec::new(),
         };
         serde_json::to_string(&payload).map_err(InferenceError::Json)
+    }
+
+    /// Build a one-shot web-search request body: a single user turn with the
+    /// server-side `web_search` tool enabled. Pure (no I/O) so it's unit-testable.
+    pub(crate) fn build_search_body(
+        &self,
+        query: &str,
+        max_tokens: u32,
+    ) -> Result<String, InferenceError> {
+        let payload = AnthropicMessagesRequest {
+            model: &self.model,
+            system: "You are eri's research assistant. Search the web, then answer \
+                     concisely with the key facts and cite sources inline. If the \
+                     question is about something on the user's screen, focus on \
+                     explaining it plainly.",
+            messages: vec![AnthropicMessage {
+                role: "user",
+                content: query,
+            }],
+            max_tokens,
+            stream: false,
+            tools: vec![WebSearchTool {
+                tool_type: "web_search_20250305",
+                name: "web_search",
+                max_uses: 5,
+            }],
+        };
+        serde_json::to_string(&payload).map_err(InferenceError::Json)
+    }
+
+    /// One-shot web research via Claude's server-side web search. Returns the
+    /// synthesized, cited answer text (Claude folds search results into text
+    /// blocks). Reuses the same auth + endpoint as `complete`.
+    pub fn search_web(&self, query: &str) -> Result<String, InferenceError> {
+        let body = self.build_search_body(query, 1024)?;
+        let agent = ureq::AgentBuilder::new()
+            .timeout_connect(Duration::from_secs(5))
+            .timeout(Duration::from_secs(300))
+            .build();
+        let request = agent
+            .post(&self.endpoint)
+            .set("content-type", "application/json")
+            .set("anthropic-version", ANTHROPIC_API_VERSION);
+        let request = match &self.auth {
+            AnthropicAuth::Byok { api_key } => request.set("x-api-key", api_key),
+            AnthropicAuth::Proxy { session_token } => {
+                request.set("authorization", &format!("Bearer {session_token}"))
+            }
+        };
+        let response = match request.send_string(&body) {
+            Ok(response) => response,
+            Err(ureq::Error::Status(status, response)) => {
+                let b = response.into_string().unwrap_or_default();
+                return Err(InferenceError::Transport(format!(
+                    "anthropic web search returned {status}: {b}"
+                )));
+            }
+            Err(other) => {
+                return Err(InferenceError::Transport(format!(
+                    "anthropic web search transport failure: {other}"
+                )));
+            }
+        };
+        let text = response
+            .into_string()
+            .map_err(|err| InferenceError::Transport(err.to_string()))?;
+        let parsed: AnthropicResponse = serde_json::from_str(&text)?;
+        let answer: String = parsed
+            .content
+            .iter()
+            .filter(|b| b.block_type == "text")
+            .filter_map(|b| b.text.clone())
+            .collect();
+        Ok(answer)
     }
 }
 
@@ -168,6 +243,21 @@ struct AnthropicMessagesRequest<'a> {
     messages: Vec<AnthropicMessage<'a>>,
     max_tokens: u32,
     stream: bool,
+    /// Server-side tools (currently only web search). Omitted from the wire when
+    /// empty so ordinary completions are byte-for-byte unchanged.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    tools: Vec<WebSearchTool>,
+}
+
+/// Anthropic's built-in server-side web search tool. Claude runs the searches
+/// itself and folds the cited answer into the response's text blocks — eri pays
+/// the tokens, no separate search API or key required.
+#[derive(Serialize)]
+struct WebSearchTool {
+    #[serde(rename = "type")]
+    tool_type: &'static str,
+    name: &'static str,
+    max_uses: u32,
 }
 
 #[derive(Serialize)]
@@ -406,6 +496,34 @@ mod tests {
             provider.endpoint(),
             "https://eri.dev/api/v1/inference/anthropic/messages"
         );
+    }
+
+    #[test]
+    fn search_body_enables_web_search_tool_with_query() {
+        let provider = AnthropicProvider::for_model_with_key("claude-sonnet-4-6", "sk-ant")
+            .expect("provider builds");
+        let body = provider
+            .build_search_body("what is pgvector?", 1024)
+            .expect("body builds");
+        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+        // The server-side web_search tool is present and correctly typed.
+        assert_eq!(v["tools"][0]["type"], "web_search_20250305");
+        assert_eq!(v["tools"][0]["name"], "web_search");
+        // The user's question is carried verbatim.
+        assert_eq!(v["messages"][0]["content"], "what is pgvector?");
+        assert_eq!(v["stream"], false);
+    }
+
+    #[test]
+    fn ordinary_completion_omits_tools_field_entirely() {
+        // A normal complete() body must be unchanged — no empty `tools` key.
+        let provider = AnthropicProvider::for_model_with_key("claude-sonnet-4-6", "sk-ant")
+            .expect("provider builds");
+        let body = provider
+            .build_request_body("sys", "hi", 256, false)
+            .expect("body builds");
+        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert!(v.get("tools").is_none(), "tools must be omitted when empty");
     }
 
     #[test]

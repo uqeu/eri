@@ -111,6 +111,17 @@ impl ControlAction {
         }
     }
 
+    /// The app this action names, if any. Used to enforce the per-app denylist
+    /// ("don't touch Discord") before actuating. Actions that don't name an app
+    /// (click/type/key/observe) return `None` — perception-side scoping of the
+    /// *frontmost* app is handled separately.
+    pub fn target_app(&self) -> Option<&str> {
+        match self {
+            ControlAction::OpenApp(a) | ControlAction::QuitApp(a) => Some(a.as_str()),
+            _ => None,
+        }
+    }
+
     /// Human-readable description for the confirm prompt + narration.
     pub fn describe(&self) -> String {
         match self {
@@ -190,6 +201,17 @@ impl ControlGate {
         bridge: &dyn ControlBridge,
         action: &ControlAction,
     ) -> Result<Disposition> {
+        // (0) App denylist — the user said "don't touch this app." A hard
+        // boundary like a refusal: not run, and "yes" can't unlock it; only
+        // removing the app from the denylist does.
+        if let Some(app) = action.target_app()
+            && self.permissions.is_app_denied(app)
+        {
+            return Ok(Disposition::Refused(format!(
+                "You asked me to stay out of {app}, so I won't open or touch it. \
+                 Tell me \"you can use {app} again\" if you want to change that."
+            )));
+        }
         // (1) Refusal — check typed text against the sensitive-action classifier.
         if let ControlAction::Type(text) = action
             && let Some(kind) = crate::control_safety::classify_refusal(text)
@@ -1107,6 +1129,39 @@ mod tests {
             other => panic!("expected refusal, got {other:?}"),
         }
         assert!(bridge.calls().is_empty(), "must never type a secret");
+    }
+
+    #[tokio::test]
+    async fn gate_refuses_denied_app_even_with_auto_confirm() {
+        // The per-app denylist ("don't touch Discord") is a boundary like a
+        // refusal — not run, and auto_confirm/"yes" can't unlock it.
+        let bridge = MockBridge::default();
+        let mut perms = crate::control_safety::PermissionStore::default();
+        perms.deny_app("Discord");
+        let gate = ControlGate::with_permissions(true, perms);
+
+        // Opening the denied app is refused, never actuated.
+        let open = gate
+            .submit(&bridge, &ControlAction::OpenApp("Discord".into()))
+            .await
+            .unwrap();
+        match open {
+            Disposition::Refused(msg) => assert!(msg.contains("Discord")),
+            other => panic!("expected refusal, got {other:?}"),
+        }
+        // Quitting it is refused too (case/suffix-insensitive match).
+        let quit = gate
+            .submit(&bridge, &ControlAction::QuitApp("discord.app".into()))
+            .await
+            .unwrap();
+        assert!(matches!(quit, Disposition::Refused(_)));
+        // A non-denied app is unaffected.
+        let other_app = gate
+            .submit(&bridge, &ControlAction::OpenApp("Safari".into()))
+            .await
+            .unwrap();
+        assert_eq!(other_app, Disposition::Executed("opened Safari".into()));
+        assert_eq!(bridge.calls(), vec!["open:Safari"], "only the allowed app ran");
     }
 
     #[tokio::test]
