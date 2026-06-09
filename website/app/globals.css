@@ -321,6 +321,56 @@ html, body {
       radial-gradient(50% 45% at 8% 4%, rgba(224, 255, 79, 0.04) 0%, transparent 60%);
   }
 
+  /* Reusable premium glass — promoted from the hero terminal. Use for focal
+     product surfaces (the floating card, primary mockups). Frosted, with a top
+     refraction edge, a faint inner hairline, a subtle lime ring, deep shadow. */
+  .glass-card {
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    background: linear-gradient(180deg, rgba(22, 22, 25, 0.55) 0%, rgba(10, 10, 12, 0.66) 100%);
+    -webkit-backdrop-filter: blur(28px) saturate(1.5);
+    backdrop-filter: blur(28px) saturate(1.5);
+    border-radius: var(--r-xl);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.10),
+      inset 0 0 0 1px rgba(255, 255, 255, 0.035),
+      0 0 0 1px rgba(224, 255, 79, 0.10),
+      0 50px 100px -32px rgba(0, 0, 0, 0.95);
+  }
+
+  /* Lighter glass for grids/feature cards — translucent surface, hairline, a
+     top highlight; no lime ring or deep shadow so a grid of them stays calm.
+     Pair with .card-lift for hover. */
+  .glass-soft {
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.035) 0%, rgba(255, 255, 255, 0.012) 100%);
+    -webkit-backdrop-filter: blur(12px) saturate(1.2);
+    backdrop-filter: blur(12px) saturate(1.2);
+    border-radius: var(--r-lg);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    transition:
+      border-color var(--dur-base) var(--ease-out),
+      background var(--dur-base) var(--ease-out),
+      transform var(--dur-base) var(--ease-out);
+  }
+
+  .glass-soft:hover {
+    border-color: rgba(255, 255, 255, 0.13);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.055) 0%, rgba(255, 255, 255, 0.02) 100%);
+    transform: translateY(-2px);
+  }
+
+  /* Ambient radial glow placed behind a focal element — Warp's signature depth
+     cue. Parent must be position:relative; this fills it and fades out. Tune
+     position/size per section with inline style overrides. */
+  .section-glow {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    background:
+      radial-gradient(42% 46% at 50% 8%, rgba(224, 255, 79, 0.09) 0%, transparent 72%);
+  }
+
   /* macOS-style window chrome for product mockups. */
   .win-chrome {
     background: var(--bg-card);

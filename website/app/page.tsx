@@ -14,19 +14,30 @@ interface ChapterProps {
 
 function Chapter({ n, title, children }: ChapterProps): React.ReactElement {
   return (
-    <section className="container mb-24 lg:mb-32">
-      <div className="mb-10 border-t border-border pt-10">
-        <span className="inline-block rounded-full border border-border px-3 py-1 font-mono text-[11px] uppercase tracking-[0.18em] text-text-sec mb-5">
-          Chapter {n}
-        </span>
-        <h2
-          className="text-h2 text-balance max-w-2xl text-text"
-          style={{ letterSpacing: "-0.02em", fontWeight: 500 }}
-        >
-          {title}
-        </h2>
+    <section className="relative mb-24 lg:mb-32">
+      {/* Ambient lime glow behind the demo — Warp's floating-on-light depth. */}
+      <div
+        className="section-glow"
+        style={{
+          background:
+            "radial-gradient(42% 46% at 50% 22%, rgba(255,255,255,0.03) 0%, rgba(224,255,79,0.03) 44%, transparent 74%)",
+        }}
+        aria-hidden
+      />
+      <div className="container relative">
+        <div className="mb-10 pt-10">
+          <span className="inline-block rounded-full border border-border px-3 py-1 font-mono text-[11px] uppercase tracking-[0.18em] text-text-sec mb-5">
+            Chapter {n}
+          </span>
+          <h2
+            className="font-display text-h2 text-balance max-w-2xl text-text"
+            style={{ letterSpacing: "-0.02em", fontWeight: 500 }}
+          >
+            {title}
+          </h2>
+        </div>
+        {children}
       </div>
-      {children}
     </section>
   );
 }

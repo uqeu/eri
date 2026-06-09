@@ -2,8 +2,17 @@ import Link from "next/link";
 
 export function CtaFooter(): React.ReactElement {
   return (
-    <section className="border-t border-border bg-bg">
-      <div className="container py-24 lg:py-32">
+    <section className="relative overflow-hidden bg-bg">
+      {/* Ambient glow rising from the base — Warp's closing-statement depth. */}
+      <div
+        className="section-glow"
+        style={{
+          background:
+            "radial-gradient(50% 62% at 50% 100%, rgba(255,255,255,0.04) 0%, rgba(224,255,79,0.05) 38%, transparent 74%)",
+        }}
+        aria-hidden
+      />
+      <div className="container relative py-28 lg:py-36">
         <div className="max-w-3xl">
           <h2
             className="text-display font-normal leading-[0.98] text-balance text-text"

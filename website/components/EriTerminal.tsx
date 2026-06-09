@@ -7,6 +7,7 @@ import {
   Mic,
   Code2,
   Brain,
+  Search,
   ChevronDown,
   Maximize2,
   Minimize2,
@@ -17,7 +18,7 @@ import {
 // no Remotion in the page bundle, so it always runs and can't crash hydration.
 // Drag it by the title bar. Brand: dark glass, lime, Funnel Display.
 
-type Kind = "control" | "eyes" | "voice" | "build" | "memory";
+type Kind = "control" | "eyes" | "research" | "voice" | "build" | "memory";
 
 interface Step {
   readonly label: string; // lime mono status
@@ -30,6 +31,9 @@ interface Scene {
   readonly prompt: string; // the typed command
   readonly steps: ReadonlyArray<Step>;
   readonly chip?: { readonly label: string; readonly value: string };
+  // Body floor in px — how big the card morphs to for this mode. Build expands
+  // to a near-IDE size; eyes stays a compact pill. Mirrors the real app morph.
+  readonly minH?: number;
 }
 
 const ICON = { size: 15, strokeWidth: 1.75 } as const;
@@ -56,6 +60,18 @@ const SCENES: ReadonlyArray<Scene> = [
       { label: "found it", text: "Null deref at Header.tsx:42 — theme is undefined on first paint." },
     ],
     chip: { label: "offer", value: "Want the fix?" },
+    minH: 0, // eyes stays compact
+  },
+  {
+    id: "research",
+    tab: "Research",
+    icon: <Search {...ICON} />,
+    prompt: "what am I looking at?",
+    steps: [
+      { label: "read your screen", text: "A Postgres EXPLAIN — a seq scan on the orders table." },
+      { label: "searched + recalled", text: "Missing an index on customer_id. You hit this in March, too." },
+    ],
+    chip: { label: "offer", value: "Add the index?" },
   },
   {
     id: "voice",
@@ -77,7 +93,8 @@ const SCENES: ReadonlyArray<Scene> = [
       { label: "edited", text: "Added <ThemeToggle/> and a persisted preference." },
       { label: "ran the tests", text: "12 passed." },
     ],
-    chip: { label: "ready", value: "Open the preview" },
+    chip: { label: "ready", value: "Preview open →" },
+    minH: 196, // build expands the card toward a full editor + preview
   },
   {
     id: "memory",
@@ -242,7 +259,7 @@ export function EriTerminal({ className }: { readonly className?: string }): Rea
               className="overflow-hidden"
               style={{ height: bodyH, transition: "height 320ms cubic-bezier(0.22,1,0.36,1)" }}
             >
-              <div ref={bodyRef} className="flex flex-col gap-3 p-4" style={{ minHeight: expanded ? 320 : 0 }}>
+              <div ref={bodyRef} className="flex flex-col gap-3 p-4" style={{ minHeight: expanded ? 320 : scene.minH ?? 0 }}>
               {/* typed command */}
               <div className="flex items-baseline gap-2 font-mono text-[12.5px]">
                 <span className="shrink-0 text-accent">eri&nbsp;›</span>
