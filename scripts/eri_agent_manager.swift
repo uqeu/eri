@@ -12,7 +12,23 @@ import WebKit
 
 struct LaunchArgs {
     var intent: String = ""
-    var workspace: String = FileManager.default.currentDirectoryPath
+    var workspace: String = LaunchArgs.defaultWorkspace()
+
+    /// When launched from Finder/`open`, the process cwd is `/` (system root) —
+    /// not a project. eri would then "work" in /Library, write builds nowhere
+    /// useful, and starve the model of context. Fall back to a dedicated,
+    /// writable workspace so builds land somewhere real and the file tree shows
+    /// the project. A `--workspace` arg (or a real writable cwd) still wins.
+    static func defaultWorkspace() -> String {
+        let cwd = FileManager.default.currentDirectoryPath
+        if cwd != "/" && !cwd.isEmpty && FileManager.default.isWritableFile(atPath: cwd) {
+            return cwd
+        }
+        let dir = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("eri-projects/default", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.path
+    }
 }
 
 func parseLaunchArgs() -> LaunchArgs {
