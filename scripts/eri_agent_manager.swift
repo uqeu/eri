@@ -259,9 +259,47 @@ final class AgentManagerController: NSObject, NSWindowDelegate, WKNavigationDele
             openEditor()
         case "openExternalFiles":
             runDetached(command: command, displayName: "files", executable: "/usr/bin/open", args: [workspaceURL().path])
+
+        // Dynamic morph: the webview asks the native window to resize per mode
+        // (build expands toward a full editor + preview; eyes shrinks to a pill).
+        // Anchored at the top-left so the card grows down/right, then clamped to
+        // the visible screen. Presentation only — never implies an action ran.
+        case "resizeWindow":
+            resizeWindow(payload: payload)
+            reply(command: command, status: "ok", detail: "")
+
         default:
             reply(command: command, status: "ok", detail: "")
         }
+    }
+
+    /// Resize the window toward a mode's target size, animated, keeping the
+    /// top-left corner fixed and clamping the result onto the visible screen.
+    /// Floors at a usable minimum so a bad payload can't collapse the window.
+    private func resizeWindow(payload: [String: Any]) {
+        let minW: CGFloat = 360
+        let minH: CGFloat = 200
+        let frame = window.frame
+        let screen = window.screen?.visibleFrame
+            ?? NSScreen.main?.visibleFrame
+            ?? frame
+        let reqW = CGFloat((payload["width"] as? NSNumber)?.doubleValue ?? Double(frame.width))
+        let reqH = CGFloat((payload["height"] as? NSNumber)?.doubleValue ?? Double(frame.height))
+        let w = min(max(minW, reqW), screen.width)
+        let h = min(max(minH, reqH), screen.height)
+
+        // Anchor the top edge (macOS origin is bottom-left, so top = maxY).
+        let top = frame.maxY
+        var x = frame.minX
+        var y = top - h
+        if x + w > screen.maxX { x = screen.maxX - w }
+        if x < screen.minX { x = screen.minX }
+        if y + h > screen.maxY { y = screen.maxY - h }
+        if y < screen.minY { y = screen.minY }
+
+        let target = NSRect(x: x, y: y, width: w, height: h)
+        let animate = (payload["animate"] as? NSNumber)?.boolValue ?? true
+        window.setFrame(target, display: true, animate: animate)
     }
 
     private func loadManager() {

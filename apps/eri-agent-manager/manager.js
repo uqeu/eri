@@ -17,6 +17,8 @@ const state = {
   account: null,
   voice: false,
   gaze: false,
+  morph: "home",
+  restMode: "home",
   thread: [],
   artifacts: [],
   files: [],
@@ -64,6 +66,34 @@ function jlog(msg) { try { native("log", { msg: String(msg) }); } catch (e) { /*
 window.addEventListener("error", (e) => jlog("JSERR " + (e.message || e) + " @" + (e.lineno || "?")));
 window.addEventListener("unhandledrejection", (e) => jlog("JSREJECT " + (e.reason && e.reason.message ? e.reason.message : e.reason)));
 
+/* ---------------- dynamic morph ---------------- */
+// The window physically reshapes to match the work: build expands toward a full
+// editor + preview; voice/control go compact; eyes shrinks to a glance pill.
+// The native host does the resize (see resizeWindow in eri_agent_manager.swift);
+// CSS keyed on [data-mode] reshapes the in-window layout to match. This is
+// presentation only — resizing never implies an action ran.
+const MORPH = {
+  home:    { width: 1200, height: 820 },
+  build:   { width: 1480, height: 980 },
+  voice:   { width: 720,  height: 520 },
+  control: { width: 880,  height: 560 },
+  eyes:    { width: 460,  height: 280 },
+  memory:  { width: 720,  height: 560 },
+};
+// Transient modes overlay the current resting layout (home/build) and restore
+// it when they end, so toggling voice mid-build returns you to the build size.
+const TRANSIENT = new Set(["voice", "control", "eyes", "memory"]);
+
+function setMorph(mode) {
+  if (!MORPH[mode]) mode = "home";
+  if (!TRANSIENT.has(mode)) state.restMode = mode;
+  if (state.morph === mode) return;
+  state.morph = mode;
+  document.body.dataset.mode = mode;
+  native("resizeWindow", MORPH[mode]);
+}
+function restMorph() { setMorph(state.restMode || "home"); }
+
 /* ---------------- thread ---------------- */
 function addMessage(role, text) {
   state.thread.push({ type: "msg", role, text });
@@ -79,6 +109,7 @@ function addOutput(command, text) {
 function render() {
   document.body.dataset.view = state.view; // CSS drives launcher/workspace visibility
   document.body.dataset.theme = state.theme;
+  document.body.dataset.mode = state.morph; // CSS drives per-mode morph layout
   $("workspaceLabel").textContent = state.workspace;
 
   // voice mic state (both composers) + account
@@ -290,6 +321,9 @@ function submitInput(text) {
       startSignIn();
       return;
     }
+    // Build is the expansive mode: grow toward a full editor + preview.
+    setMorph("build");
+    state.canvas = "preview";
     if (kind === "edit") {
       state.intent = state.intent || "Current build";
       addMessage("eri", pick(["On it.", "Got it — changing that now.", "Say less."]));
@@ -318,6 +352,7 @@ function runCommand(command, data = {}) {
     case "goHome":
       state.view = "launcher";
       state.runState = "idle";
+      setMorph("home");
       break;
     case "setMode":
       state.mode = data.mode || state.mode;
@@ -350,10 +385,13 @@ function runCommand(command, data = {}) {
     case "toggleVoice":
       state.voice = !state.voice;
       native(state.voice ? "startVoice" : "stopVoice");
+      if (state.voice) setMorph("voice");
+      else restMorph();
       break;
     case "calibrateGaze":
       state.gaze = !state.gaze;
-      if (state.gaze) native("startGaze");
+      if (state.gaze) { native("startGaze"); setMorph("eyes"); }
+      else restMorph();
       break;
     case "authAction":
       if (state.account) { native("authStatus"); break; }
@@ -400,6 +438,7 @@ function runCommand(command, data = {}) {
       if (!goal) return;
       state.view = "workspace";
       state.runState = "working";
+      setMorph("control");
       addEvent("control", `eri is taking control: ${goal}`, "");
       native("startControl", { goal });
       if (input) { input.value = ""; autosize(input); }
@@ -408,6 +447,7 @@ function runCommand(command, data = {}) {
     }
     case "panicStop":
       addEvent("control", "Stopping all actuation (⌘⌥⎋).", "");
+      restMorph();
       break; // falls through to native("panicStop")
     default:
       break;
@@ -558,10 +598,10 @@ window.eriSignal = (command, raw) => {
   let m = {};
   try { m = JSON.parse(raw); } catch { m = { type: "status", message: String(raw) }; }
   if (command === "startVoice") {
-    if (m.type === "error") { state.voice = false; addEvent("voice", m.message || "voice error", "", true); render(); return; }
+    if (m.type === "error") { state.voice = false; restMorph(); addEvent("voice", m.message || "voice error", "", true); render(); return; }
     if (m.type === "status") {
       if (m.message === "listening") state.voice = true;
-      if (m.message === "stopped") state.voice = false;
+      if (m.message === "stopped") { state.voice = false; restMorph(); }
       render(); return;
     }
     if (m.type === "partial") {
