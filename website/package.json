@@ -8,10 +8,13 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "demo:studio": "remotion studio remotion/index.ts",
+    "demo:render": "remotion render remotion/index.ts EriLoop public/demos/eri-loop.mp4"
   },
   "dependencies": {
     "@react-email/components": "0.0.31",
+    "@remotion/google-fonts": "^4.0.474",
     "@remotion/player": "^4.0.474",
     "@sentry/node": "8.47.0",
     "@supabase/supabase-js": "2.45.4",
@@ -29,6 +32,7 @@
     "zod": "3.23.8"
   },
   "devDependencies": {
+    "@remotion/cli": "^4.0.474",
     "@types/bcryptjs": "2.4.6",
     "@types/node": "20.16.10",
     "@types/react": "18.3.11",

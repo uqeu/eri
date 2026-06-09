@@ -5,9 +5,15 @@ import {
   spring,
   useCurrentFrame,
   useVideoConfig,
-  Sequence,
   Easing,
 } from "remotion";
+import { loadFont as loadDisplay } from "@remotion/google-fonts/FunnelDisplay";
+import { loadFont as loadMono } from "@remotion/google-fonts/JetBrainsMono";
+
+// Load brand fonts inside the composition so they're correct in the live Player
+// AND in headless MP4/PNG renders (don't depend on the page's <link>).
+const { fontFamily: DISPLAY } = loadDisplay();
+const { fontFamily: MONO } = loadMono();
 
 // ── Brand palette (inline so the composition is self-contained / render-safe) ──
 const C = {
@@ -21,8 +27,6 @@ const C = {
   ter: "rgba(237,237,237,0.4)",
   accent: "#e0ff4f",
 };
-const DISPLAY = "'Funnel Display', system-ui, sans-serif";
-const MONO = "'JetBrains Mono', ui-monospace, monospace";
 
 // Timeline (frames @ 30fps). Each beat owns a window of the 300-frame loop.
 const T = {
@@ -46,7 +50,9 @@ const INBOX = [
   { name: "Priya Nair", t: "9:48" },
   { name: "GitHub", t: "9:31" },
   { name: "Stripe", t: "9:12" },
+  { name: "Linear", t: "9:04" },
   { name: "Calendar", t: "8:55" },
+  { name: "Notion", t: "8:40" },
 ];
 
 // A single animated waveform bar.
@@ -184,16 +190,16 @@ const DesktopWindow: React.FC<{
   const winY = interpolate(enter, [0, 1], [40, 0]);
   const winOpacity = interpolate(enter, [0, 1], [0, 1]);
 
-  const pad = 72;
+  const pad = 64;
   const w = width - pad * 2;
-  const winH = 430;
+  const winH = 676;
 
   return (
     <div
       style={{
         position: "absolute",
         left: pad,
-        top: 70,
+        top: 60,
         width: w,
         opacity: winOpacity,
         transform: `translateY(${winY}px)`,
