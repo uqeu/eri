@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { InstallBlock } from "./InstallBlock";
-import { EriToolsTerminal } from "./EriToolsTerminal";
-import { EriAssistantCard } from "./EriAssistantCard";
+import { EriTerminal } from "./EriTerminal";
 import { DesktopStage } from "./DesktopStage";
 
 export function Hero(): React.ReactElement {
@@ -15,39 +14,24 @@ export function Hero(): React.ReactElement {
       <div className="container relative pt-24 pb-16 lg:pt-32 lg:pb-20">
         {/* Centered pitch */}
         <div className="mx-auto max-w-3xl text-center">
-          <p
-            className="rise mono-cap text-text-ter mb-6"
-            style={{ animationDelay: "0ms" }}
-          >
+          <p className="rise mono-cap text-text-ter mb-6" style={{ animationDelay: "0ms" }}>
             Hands-free computer control
           </p>
-          <h1
-            className="rise text-display font-display text-balance mb-6"
-            style={{ animationDelay: "60ms", fontWeight: 500 }}
-          >
+          <h1 className="rise text-display font-display text-balance mb-6" style={{ animationDelay: "60ms", fontWeight: 500 }}>
             Your computer, hands-free.
           </h1>
-          <p
-            className="rise mx-auto max-w-xl text-text-sec text-[18px] leading-[1.55] mb-9"
-            style={{ animationDelay: "140ms" }}
-          >
+          <p className="rise mx-auto max-w-xl text-text-sec text-[18px] leading-[1.55] mb-9" style={{ animationDelay: "140ms" }}>
             eri sees your screen, hears you, and remembers you — then does the
             work. One local-first agent that controls your computer, writes your
-            code, and learns how you work. Click through what it does.
+            code, and learns how you work.
           </p>
-          <div
-            className="rise flex flex-wrap items-center justify-center gap-3"
-            style={{ animationDelay: "220ms" }}
-          >
+          <div className="rise flex flex-wrap items-center justify-center gap-3" style={{ animationDelay: "220ms" }}>
             <Link
               href="/download"
               className="group inline-flex items-center gap-2 rounded-md bg-text px-5 py-2.5 text-[14px] font-medium text-bg transition-transform duration-200 ease-out-soft hover:-translate-y-0.5 active:translate-y-0"
             >
-              Download eri
-              <span
-                aria-hidden
-                className="transition-transform duration-200 group-hover:translate-x-0.5"
-              >
+              Request access
+              <span aria-hidden className="transition-transform duration-200 group-hover:translate-x-0.5">
                 →
               </span>
             </Link>
@@ -59,21 +43,17 @@ export function Hero(): React.ReactElement {
             </Link>
           </div>
 
-          {/* Nia-style install command block */}
+          {/* Honest pre-launch status (no fake install commands). */}
           <div className="rise mt-10" style={{ animationDelay: "260ms" }}>
             <InstallBlock />
           </div>
         </div>
 
-        {/* eri living on a clean desktop: the interactive glass assistant +
-            the CLI terminal float over the stage with room to breathe. */}
-        <div
-          className="rise relative mx-auto mt-16 max-w-5xl"
-          style={{ animationDelay: "320ms" }}
-        >
+        {/* eri living on a desktop: one interactive, auto-playing terminal that
+            floats over the stage. Drag it; click the tabs to switch the scene. */}
+        <div className="rise relative mx-auto mt-16 max-w-5xl" style={{ animationDelay: "320ms" }}>
           <DesktopStage />
-          <EriToolsTerminal className="relative z-10 mt-4 md:absolute md:bottom-8 md:left-7 md:mt-0 md:w-[300px]" />
-          <EriAssistantCard className="relative z-20 mx-auto mt-4 w-full max-w-[340px] md:absolute md:right-7 md:bottom-10 md:mt-0 md:w-[330px]" />
+          <EriTerminal className="relative z-20 mx-auto mt-4 w-full max-w-[480px] md:absolute md:left-1/2 md:top-1/2 md:mt-0 md:-translate-x-1/2 md:-translate-y-1/2" />
         </div>
       </div>
     </section>

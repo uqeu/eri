@@ -1,5 +1,4 @@
 import { Hero } from "@/components/Hero";
-import { DemoShowcase } from "@/components/DemoShowcase";
 import { CapabilityPillars } from "@/components/CapabilityPillars";
 import { EriWorkbench } from "@/components/EriWorkbench";
 import { HeroBig } from "@/components/HeroBig";
@@ -36,23 +35,6 @@ export default function HomePage(): React.ReactElement {
   return (
     <main>
       <Hero />
-
-      {/* Click-through demo — its own section with room (no longer crammed
-          behind the hero's floating cards). */}
-      <section className="container mb-24 lg:mb-32">
-        <div className="mb-8 text-center">
-          <p className="mono-cap text-text-ter mb-4">See it work</p>
-          <h2
-            className="text-h2 text-balance mx-auto max-w-2xl text-text"
-            style={{ letterSpacing: "-0.02em", fontWeight: 500 }}
-          >
-            Click through everything eri does.
-          </h2>
-        </div>
-        <div className="mx-auto max-w-5xl">
-          <DemoShowcase />
-        </div>
-      </section>
 
       <CapabilityPillars />
 
