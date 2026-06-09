@@ -157,14 +157,20 @@ final class AgentManagerController: NSObject, NSWindowDelegate, WKNavigationDele
     /// Append a line to /tmp/eri_app.log so the app can be debugged without a
     /// visible webview console. Cheap, best-effort, never throws into the UI.
     func logLine(_ s: String) {
+        // Per-user log dir (0700), owner-only file (0600), O_NOFOLLOW so a symlink
+        // planted at the path can't redirect the write. Never a fixed /tmp path.
+        let dir = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Logs/eri", isDirectory: true)
+        try? FileManager.default.createDirectory(
+            at: dir, withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700])
+        let path = dir.appendingPathComponent("app.log").path
         let line = "\(Date()) \(s)\n"
         guard let data = line.data(using: .utf8) else { return }
-        let path = "/tmp/eri_app.log"
-        if let fh = FileHandle(forWritingAtPath: path) {
-            fh.seekToEndOfFile(); fh.write(data); fh.closeFile()
-        } else {
-            try? data.write(to: URL(fileURLWithPath: path))
-        }
+        let fd = open(path, O_WRONLY | O_CREAT | O_APPEND | O_NOFOLLOW, 0o600)
+        guard fd >= 0 else { return }
+        _ = data.withUnsafeBytes { write(fd, $0.baseAddress, data.count) }
+        close(fd)
     }
 
     func handle(command: String, payload: [String: Any]) {
@@ -172,8 +178,8 @@ final class AgentManagerController: NSObject, NSWindowDelegate, WKNavigationDele
             logLine("JS \((payload["msg"] as? String) ?? "")")
             return
         }
-        let pv = payload.map { "\($0.key)=\(String(describing: $0.value).prefix(80))" }.joined(separator: " ")
-        logLine("CMD \(command) \(pv)")
+        // Log only the command name, never raw payload values (may hold prompts).
+        logLine("CMD \(command)")
         switch command {
         // Real agent run: stream `eri ship`/`build` events into the chat.
         case "runEri", "spawnAgent":
@@ -465,7 +471,10 @@ final class AgentManagerController: NSObject, NSWindowDelegate, WKNavigationDele
             for line in text.split(whereSeparator: { $0 == "\n" || $0 == "\r" }) where !line.isEmpty {
                 let s = String(line)
                 DispatchQueue.main.async {
-                    self?.logLine("OUT[\(command)] \(s.prefix(180))")
+                    // Never log auth streams — they carry the device code / token.
+                    if !command.hasPrefix("auth") {
+                        self?.logLine("OUT[\(command)] \(s.prefix(180))")
+                    }
                     self?.forwardStreamLine(command: command, line: s)
                 }
             }
