@@ -58,6 +58,12 @@ function native(command, payload = {}) {
   }
 }
 
+// Debug logging to /tmp/eri_app.log (via the Swift bridge) so the app can be
+// debugged without a visible webview console.
+function jlog(msg) { try { native("log", { msg: String(msg) }); } catch (e) { /* noop */ } }
+window.addEventListener("error", (e) => jlog("JSERR " + (e.message || e) + " @" + (e.lineno || "?")));
+window.addEventListener("unhandledrejection", (e) => jlog("JSREJECT " + (e.reason && e.reason.message ? e.reason.message : e.reason)));
+
 /* ---------------- thread ---------------- */
 function addMessage(role, text) {
   state.thread.push({ type: "msg", role, text });
@@ -255,6 +261,7 @@ function submitInput(text) {
   if (state.view === "launcher") state.view = "workspace";
   addMessage("user", trimmed);
   const kind = classifyIntent(trimmed);
+  jlog("submit kind=" + kind + " text=" + trimmed.slice(0, 50));
 
   if (kind === "cli") {
     addEvent("cli", `eri ${cliBody(trimmed)}`, "");
@@ -679,6 +686,7 @@ function bind() {
     const t = e.target.closest("[data-command]");
     if (!t) return;
     if (t.type === "submit") return; // handled by form submit
+    jlog("click " + t.dataset.command);
     runCommand(t.dataset.command, { ...t.dataset });
   });
 

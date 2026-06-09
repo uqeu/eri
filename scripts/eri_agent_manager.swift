@@ -154,7 +154,26 @@ final class AgentManagerController: NSObject, NSWindowDelegate, WKNavigationDele
         NSApplication.shared.terminate(nil)
     }
 
+    /// Append a line to /tmp/eri_app.log so the app can be debugged without a
+    /// visible webview console. Cheap, best-effort, never throws into the UI.
+    func logLine(_ s: String) {
+        let line = "\(Date()) \(s)\n"
+        guard let data = line.data(using: .utf8) else { return }
+        let path = "/tmp/eri_app.log"
+        if let fh = FileHandle(forWritingAtPath: path) {
+            fh.seekToEndOfFile(); fh.write(data); fh.closeFile()
+        } else {
+            try? data.write(to: URL(fileURLWithPath: path))
+        }
+    }
+
     func handle(command: String, payload: [String: Any]) {
+        if command == "log" {
+            logLine("JS \((payload["msg"] as? String) ?? "")")
+            return
+        }
+        let pv = payload.map { "\($0.key)=\(String(describing: $0.value).prefix(80))" }.joined(separator: " ")
+        logLine("CMD \(command) \(pv)")
         switch command {
         // Real agent run: stream `eri ship`/`build` events into the chat.
         case "runEri", "spawnAgent":
@@ -438,18 +457,23 @@ final class AgentManagerController: NSObject, NSWindowDelegate, WKNavigationDele
         process.currentDirectoryURL = workspaceURL()
         process.standardOutput = pipe
         process.standardError = pipe
+        logLine("RUN \(eri.path) \(subcommand.joined(separator: " ")) cwd=\(workspaceURL().path)")
         let handle = pipe.fileHandleForReading
         handle.readabilityHandler = { [weak self] h in
             let chunk = h.availableData
             guard !chunk.isEmpty, let text = String(data: chunk, encoding: .utf8) else { return }
             for line in text.split(whereSeparator: { $0 == "\n" || $0 == "\r" }) where !line.isEmpty {
                 let s = String(line)
-                DispatchQueue.main.async { self?.forwardStreamLine(command: command, line: s) }
+                DispatchQueue.main.async {
+                    self?.logLine("OUT[\(command)] \(s.prefix(180))")
+                    self?.forwardStreamLine(command: command, line: s)
+                }
             }
         }
         process.terminationHandler = { [weak self] p in
             handle.readabilityHandler = nil
             DispatchQueue.main.async {
+                self?.logLine("EXIT[\(command)] status=\(p.terminationStatus)")
                 self?.reply(command: command, status: p.terminationStatus == 0 ? "done" : "failed", detail: "")
             }
         }
