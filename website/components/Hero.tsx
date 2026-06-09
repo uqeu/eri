@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { DemoShowcase } from "./DemoShowcase";
+import { InstallBlock } from "./InstallBlock";
+import { EriToolsTerminal } from "./EriToolsTerminal";
 
 export function Hero(): React.ReactElement {
   return (
@@ -55,14 +57,21 @@ export function Hero(): React.ReactElement {
               See how it works
             </Link>
           </div>
+
+          {/* Nia-style install command block */}
+          <div className="rise mt-10" style={{ animationDelay: "260ms" }}>
+            <InstallBlock />
+          </div>
         </div>
 
-        {/* The interactive, click-through demo — everything in one view. */}
+        {/* The interactive, click-through demo — with the tools terminal
+            floating over its corner (the "one agent, many tools" proof). */}
         <div
-          className="rise mx-auto mt-14 max-w-5xl"
-          style={{ animationDelay: "300ms" }}
+          className="rise relative mx-auto mt-14 max-w-5xl"
+          style={{ animationDelay: "320ms" }}
         >
           <DemoShowcase />
+          <EriToolsTerminal className="relative z-10 mt-4 md:absolute md:bottom-5 md:left-5 md:mt-0 md:w-[380px] md:max-w-[48%]" />
         </div>
       </div>
     </section>
