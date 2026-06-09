@@ -16,7 +16,6 @@ members = [
     "crates/eri_caveman",
     "crates/eri_cli",
     "crates/eri_control",
-    "crates/eri_control_server",
     "crates/eri_core",
     "crates/eri_coreutils",
     "crates/eri_discord",

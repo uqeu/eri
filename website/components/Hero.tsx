@@ -15,15 +15,16 @@ export function Hero(): React.ReactElement {
         {/* Centered pitch */}
         <div className="mx-auto max-w-3xl text-center">
           <p className="rise mono-cap text-text-ter mb-6" style={{ animationDelay: "0ms" }}>
-            Hands-free computer control
+            A personal assistant that uses your computer
           </p>
           <h1 className="rise text-display font-display text-balance mb-6" style={{ animationDelay: "60ms", fontWeight: 500 }}>
-            Your computer, hands-free.
+            It uses your computer. With you.
           </h1>
           <p className="rise mx-auto max-w-xl text-text-sec text-[18px] leading-[1.55] mb-9" style={{ animationDelay: "140ms" }}>
-            eri sees your screen, hears you, and remembers you — then does the
-            work. One local-first agent that controls your computer, writes your
-            code, and learns how you work.
+            eri lives on your Mac — it sees your screen, hears you, and remembers
+            how you work, then does things for you while you keep working.
+            Summon it over any app, drop into your terminal, or build in your
+            editor. One assistant, everywhere, local.
           </p>
           <div className="rise flex flex-wrap items-center justify-center gap-3" style={{ animationDelay: "220ms" }}>
             <Link
