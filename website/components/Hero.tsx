@@ -1,8 +1,8 @@
 import Link from "next/link";
-import { DemoShowcase } from "./DemoShowcase";
 import { InstallBlock } from "./InstallBlock";
 import { EriToolsTerminal } from "./EriToolsTerminal";
 import { EriAssistantCard } from "./EriAssistantCard";
+import { DesktopStage } from "./DesktopStage";
 
 export function Hero(): React.ReactElement {
   return (
@@ -65,15 +65,15 @@ export function Hero(): React.ReactElement {
           </div>
         </div>
 
-        {/* The interactive, click-through demo — with the tools terminal
-            floating over its corner (the "one agent, many tools" proof). */}
+        {/* eri living on a clean desktop: the interactive glass assistant +
+            the CLI terminal float over the stage with room to breathe. */}
         <div
-          className="rise relative mx-auto mt-14 max-w-5xl"
+          className="rise relative mx-auto mt-16 max-w-5xl"
           style={{ animationDelay: "320ms" }}
         >
-          <DemoShowcase />
-          <EriToolsTerminal className="relative z-10 mt-4 md:absolute md:bottom-5 md:left-5 md:mt-0 md:w-[380px] md:max-w-[46%]" />
-          <EriAssistantCard className="relative z-10 mx-auto mt-4 w-full max-w-[340px] md:absolute md:right-5 md:bottom-8 md:mt-0 md:w-[320px]" />
+          <DesktopStage />
+          <EriToolsTerminal className="relative z-10 mt-4 md:absolute md:bottom-8 md:left-7 md:mt-0 md:w-[300px]" />
+          <EriAssistantCard className="relative z-20 mx-auto mt-4 w-full max-w-[340px] md:absolute md:right-7 md:bottom-10 md:mt-0 md:w-[330px]" />
         </div>
       </div>
     </section>
