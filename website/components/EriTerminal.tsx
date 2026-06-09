@@ -104,6 +104,8 @@ export function EriTerminal({ className }: { readonly className?: string }): Rea
   const [pos, setPos] = useState({ x: 0, y: 0 });
   const [collapsed, setCollapsed] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const [bodyH, setBodyH] = useState<number | undefined>(undefined);
   const hovered = useRef(false);
   const drag = useRef<{ ox: number; oy: number } | null>(null);
 
@@ -123,6 +125,13 @@ export function EriTerminal({ className }: { readonly className?: string }): Rea
     }, 45);
     return () => window.clearInterval(t);
   }, [active, collapsed]);
+
+  // Dynamic morph: measure the current scene's natural height and animate the
+  // panel to it, so the card resizes per request (the Cluely feel) as it cycles.
+  useEffect(() => {
+    const el = bodyRef.current;
+    if (el) setBodyH(el.scrollHeight);
+  }, [active, expanded, collapsed]);
 
   const scene = SCENES[active];
   const typedN = Math.min(scene.prompt.length, Math.floor(frame / TYPE));
@@ -228,11 +237,12 @@ export function EriTerminal({ className }: { readonly className?: string }): Rea
               })}
             </div>
 
-            {/* scene body — grows when expanded */}
+            {/* scene body — height animates to fit each scene (dynamic morph) */}
             <div
-              className="flex flex-col gap-3 p-4 transition-[min-height] duration-300 ease-out"
-              style={{ minHeight: expanded ? 340 : 208 }}
+              className="overflow-hidden"
+              style={{ height: bodyH, transition: "height 320ms cubic-bezier(0.22,1,0.36,1)" }}
             >
+              <div ref={bodyRef} className="flex flex-col gap-3 p-4" style={{ minHeight: expanded ? 320 : 0 }}>
               {/* typed command */}
               <div className="flex items-baseline gap-2 font-mono text-[12.5px]">
                 <span className="shrink-0 text-accent">eri&nbsp;›</span>
@@ -274,6 +284,7 @@ export function EriTerminal({ className }: { readonly className?: string }): Rea
                   <span className="text-[13px] font-medium text-text">{scene.chip.value}</span>
                 </div>
               )}
+              </div>
             </div>
           </>
         )}

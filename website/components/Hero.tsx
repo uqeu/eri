@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { InstallBlock } from "./InstallBlock";
 import { EriTerminal } from "./EriTerminal";
-import { DesktopStage } from "./DesktopStage";
 
 export function Hero(): React.ReactElement {
   return (
@@ -11,7 +10,7 @@ export function Hero(): React.ReactElement {
       <div className="pointer-events-none absolute inset-0 mesh-bg opacity-70" />
       <div className="pointer-events-none absolute inset-0 grain opacity-[0.5] mix-blend-soft-light" />
 
-      <div className="container relative pt-24 pb-16 lg:pt-32 lg:pb-20">
+      <div className="container relative pt-28 pb-20 lg:pt-36 lg:pb-28">
         {/* Centered pitch */}
         <div className="mx-auto max-w-3xl text-center">
           <p className="rise mono-cap text-text-ter mb-6" style={{ animationDelay: "0ms" }}>
@@ -21,7 +20,7 @@ export function Hero(): React.ReactElement {
             It uses your computer. With you.
           </h1>
           <p className="rise mx-auto max-w-xl text-text-sec text-[18px] leading-[1.55] mb-9" style={{ animationDelay: "140ms" }}>
-            eri lives on your Mac — it sees your screen, hears you, and remembers
+            eri lives on your Mac. It sees your screen, hears you, and remembers
             how you work, then does things for you while you keep working.
             Summon it over any app, drop into your terminal, or build in your
             editor. One assistant, everywhere, local.
@@ -38,7 +37,7 @@ export function Hero(): React.ReactElement {
             </Link>
             <Link
               href="/docs"
-              className="inline-flex items-center rounded-md border border-border px-5 py-2.5 text-[14px] text-text transition-colors duration-200 hover:border-border-strong hover:bg-bg-card"
+              className="inline-flex items-center rounded-md px-5 py-2.5 text-[14px] text-text-sec transition-colors duration-200 hover:text-text"
             >
               See how it works
             </Link>
@@ -50,11 +49,27 @@ export function Hero(): React.ReactElement {
           </div>
         </div>
 
-        {/* eri living on a desktop: one interactive, auto-playing terminal that
-            floats over the stage. Drag it; click the tabs to switch the scene. */}
-        <div className="rise relative mx-auto mt-16 max-w-5xl" style={{ animationDelay: "320ms" }}>
-          <DesktopStage />
-          <EriTerminal className="relative z-20 mx-auto mt-4 w-full max-w-[480px] md:absolute md:left-1/2 md:top-1/2 md:mt-0 md:-translate-x-1/2 md:-translate-y-1/2" />
+        {/* The product, Warp-style: the live glass terminal floating on ambient
+            light. No hard frame, just a lime glow and a faint grid that fades
+            out at the edges, so the glass card is the hero. */}
+        <div className="rise relative mx-auto mt-20 max-w-4xl lg:mt-24" style={{ animationDelay: "320ms" }}>
+          <div aria-hidden className="pointer-events-none absolute inset-x-0 -top-16 -bottom-16 -z-10">
+            <div
+              className="absolute inset-0"
+              style={{ background: "radial-gradient(52% 44% at 50% 42%, rgba(224,255,79,0.12), transparent 72%)" }}
+            />
+            <div
+              className="absolute inset-0 opacity-60"
+              style={{
+                backgroundImage:
+                  "linear-gradient(rgba(255,255,255,0.035) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.035) 1px, transparent 1px)",
+                backgroundSize: "44px 44px",
+                maskImage: "radial-gradient(58% 50% at 50% 42%, #000, transparent 82%)",
+                WebkitMaskImage: "radial-gradient(58% 50% at 50% 42%, #000, transparent 82%)",
+              }}
+            />
+          </div>
+          <EriTerminal className="relative mx-auto w-full max-w-[560px]" />
         </div>
       </div>
     </section>
