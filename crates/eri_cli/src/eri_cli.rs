@@ -786,10 +786,10 @@ async fn dispatch(cli: Cli) -> anyhow::Result<()> {
         Command::Agent(AgentCommand::List) => agent_cmd::list(),
         Command::Agent(AgentCommand::Set { name }) => agent_cmd::set(&name),
         Command::Memory(MemoryCommand::Recall { query, limit }) => {
-            memory::recall(&query, limit).await
+            memory::recall(&query, limit)
         }
-        Command::Memory(MemoryCommand::Remember { text }) => memory::remember(&text).await,
-        Command::Memory(MemoryCommand::Forget { target }) => memory::forget(&target).await,
+        Command::Memory(MemoryCommand::Remember { text }) => memory::remember(&text),
+        Command::Memory(MemoryCommand::Forget { target }) => memory::forget(&target),
         Command::Mcp(McpCommand::List) => repl::print_mcp_status(),
         Command::Mcp(McpCommand::Serve) => {
             let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
@@ -1233,6 +1233,7 @@ async fn run_control(goal: &str, live: bool, yes: bool, mode: Option<Mode>) -> a
     } else {
         None
     };
+    let actuated = live_bridge.is_some();
     let summary = if let Some(bridge) = live_bridge {
         println!("[eri] live control: actuating via the eri app.\n");
         control_agent::run_control_agent(goal, model, &bridge, &gate, &mut confirm, 24).await?
@@ -1251,7 +1252,13 @@ async fn run_control(goal: &str, live: bool, yes: bool, mode: Option<Mode>) -> a
         control_agent::run_control_agent(goal, model, &bridge, &gate, &mut confirm, 24).await?
     };
     if !summary.trim().is_empty() {
-        println!("\n[eri] {summary}");
+        if actuated {
+            println!("\n[eri] {summary}");
+        } else {
+            // Dry-run actuated nothing — never present the model's summary as if
+            // the work was done. Frame it as the plan it actually is.
+            println!("\n[eri] dry-run — nothing was actuated. This is what eri would do:\n{summary}");
+        }
     }
     Ok(())
 }

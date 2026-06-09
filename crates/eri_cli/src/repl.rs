@@ -88,9 +88,9 @@ pub async fn run() -> Result<()> {
             }
             ReplAction::AgentList => agent_cmd::list()?,
             ReplAction::AgentSet(name) => agent_cmd::set(&name)?,
-            ReplAction::MemoryRecall { query, limit } => memory::recall(&query, limit).await?,
-            ReplAction::MemoryRemember(text) => memory::remember(&text).await?,
-            ReplAction::MemoryForget(target) => memory::forget(&target).await?,
+            ReplAction::MemoryRecall { query, limit } => memory::recall(&query, limit)?,
+            ReplAction::MemoryRemember(text) => memory::remember(&text)?,
+            ReplAction::MemoryForget(target) => memory::forget(&target)?,
             ReplAction::Status => auth::status().await?,
             ReplAction::Tools => print_tools(),
             ReplAction::Sources => print_sources(),
@@ -234,7 +234,7 @@ pub(crate) fn print_mcp_status() -> Result<()> {
         }
         None => {
             println!("MCP config: not found");
-            println!("  run npx eri-wizard or create .eri/mcp.json");
+            println!("  create .eri/mcp.json to configure local MCP servers");
             println!(
                 "  Eri expects local MCP servers such as filesystem, git, browser, docs, memory, and app connectors."
             );
@@ -301,7 +301,7 @@ pub(crate) fn print_doctor() -> Result<()> {
         &agent_cmd::active_persona().unwrap_or_else(|_| "eri".to_string()),
     );
     println!("next:");
-    println!("  npx eri-wizard");
+    println!("  eri init           # scaffold AGENTS.md for this project");
     println!("  /agent set builder");
     println!("  /plan build the first feature");
     Ok(())
