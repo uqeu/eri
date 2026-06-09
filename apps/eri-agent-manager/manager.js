@@ -429,7 +429,11 @@ window.eriBridgeResult = (result = {}) => {
     if (state._askIdx != null && state.thread[state._askIdx]) {
       const m = state.thread[state._askIdx];
       if (m.text === "…" || !m.text.trim()) {
-        m.text = "I can go deeper on that once you sign in — that's where my full brain lives. For now I'm great at building: just tell me what to make.";
+        // Don't blame sign-in when the user IS signed in — that's the bug that
+        // made eri look broken. Be honest about what actually happened.
+        m.text = state.account
+          ? "Hmm — my brain didn't send anything back just then. Mind trying that again?"
+          : "I can go deeper once you sign in — that's where my full brain lives. For now, tell me what to build.";
       }
     }
     state._askIdx = null;
@@ -459,7 +463,10 @@ window.eriStreamEvent = (command, rawLine) => {
 
   // Conversational `ask` → stream into a single eri chat bubble, not event rows.
   if (command === "askEri") {
-    if (text && state._askIdx != null && state.thread[state._askIdx]) {
+    // The CLI prints meta lines ([tool] …, [eri] …, "done — tokens: …") around
+    // the real answer. Keep those out of the chat bubble.
+    const noise = /^\[tool\]|^\[eri\]|^done\s*—|tokens:\s*\d/i.test(text.trim());
+    if (text && !noise && state._askIdx != null && state.thread[state._askIdx]) {
       const m = state.thread[state._askIdx];
       m.text = (m.text === "…" ? "" : m.text) + text + " ";
     }
