@@ -22,6 +22,7 @@
     "@upstash/redis": "1.34.3",
     "bcryptjs": "2.4.3",
     "jose": "5.9.6",
+    "lucide-react": "^1.17.0",
     "next": "14.2.15",
     "postgres": "3.4.4",
     "react": "18.3.1",

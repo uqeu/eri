@@ -1,6 +1,16 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import {
+  MousePointer2,
+  Eye,
+  Mic,
+  Code2,
+  Brain,
+  ChevronDown,
+  Maximize2,
+  Minimize2,
+} from "lucide-react";
 
 // eri's one interactive surface — a floating glass terminal that AUTO-PLAYS and
 // whose tabs REPLACE the scene (the Nia/Cluely pattern, our way). Pure React/CSS,
@@ -22,17 +32,13 @@ interface Scene {
   readonly chip?: { readonly label: string; readonly value: string };
 }
 
-const ic = (d: React.ReactNode): React.ReactNode => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="h-[14px] w-[14px]">
-    {d}
-  </svg>
-);
+const ICON = { size: 15, strokeWidth: 1.75 } as const;
 
 const SCENES: ReadonlyArray<Scene> = [
   {
     id: "control",
     tab: "Control",
-    icon: ic(<path d="M5 3l14 9-6 1.5 3 6-2.5 1-3-6L5 19V3Z" />),
+    icon: <MousePointer2 {...ICON} />,
     prompt: "open my email and reply to Priya",
     steps: [
       { label: "looked at your screen", text: "Opened Mail and found Priya's thread." },
@@ -43,7 +49,7 @@ const SCENES: ReadonlyArray<Scene> = [
   {
     id: "eyes",
     tab: "Eyes",
-    icon: ic(<><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" /><circle cx="12" cy="12" r="3" /></>),
+    icon: <Eye {...ICON} />,
     prompt: "what's this error?",
     steps: [
       { label: "followed your gaze", text: "Read the stack trace you were looking at." },
@@ -54,7 +60,7 @@ const SCENES: ReadonlyArray<Scene> = [
   {
     id: "voice",
     tab: "Voice",
-    icon: ic(<><path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z" /><path d="M19 11a7 7 0 0 1-14 0" /><path d="M12 18v3" /></>),
+    icon: <Mic {...ICON} />,
     prompt: "reply to priya umm i'll send the deck friday",
     steps: [
       { label: "heard you", text: "Cleaned fillers, added punctuation — on-device." },
@@ -64,7 +70,7 @@ const SCENES: ReadonlyArray<Scene> = [
   {
     id: "build",
     tab: "Build",
-    icon: ic(<><path d="M8 9l-4 3 4 3" /><path d="M16 9l4 3-4 3" /><path d="M13 5l-2 14" /></>),
+    icon: <Code2 {...ICON} />,
     prompt: "add a dark-mode toggle",
     steps: [
       { label: "planned", text: "Across Header.tsx and theme.ts." },
@@ -76,7 +82,7 @@ const SCENES: ReadonlyArray<Scene> = [
   {
     id: "memory",
     tab: "Memory",
-    icon: ic(<><path d="M12 3a7 7 0 0 0-4 12.7V19a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2v-3.3A7 7 0 0 0 12 3Z" /><path d="M9 21h6" /></>),
+    icon: <Brain {...ICON} />,
     prompt: "(noticing how you work)",
     steps: [
       { label: "remembered, on-device", text: "You open this repo and Mail every morning." },
@@ -97,6 +103,7 @@ export function EriTerminal({ className }: { readonly className?: string }): Rea
   const [frame, setFrame] = useState(0);
   const [pos, setPos] = useState({ x: 0, y: 0 });
   const [collapsed, setCollapsed] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const hovered = useRef(false);
   const drag = useRef<{ ox: number; oy: number } | null>(null);
 
@@ -145,13 +152,17 @@ export function EriTerminal({ className }: { readonly className?: string }): Rea
       <div
         onMouseEnter={() => (hovered.current = true)}
         onMouseLeave={() => (hovered.current = false)}
-        className="overflow-hidden rounded-2xl border border-white/15"
+        className="overflow-hidden rounded-[18px] border border-white/[0.10]"
         style={{
           transform: `translate(${pos.x}px, ${pos.y}px)`,
-          background: "linear-gradient(180deg, rgba(18,18,18,0.86) 0%, rgba(12,12,12,0.92) 100%)",
-          backdropFilter: "blur(18px)",
-          WebkitBackdropFilter: "blur(18px)",
-          boxShadow: "0 0 0 1px rgba(224,255,79,0.12), 0 40px 90px -30px rgba(0,0,0,0.95)",
+          background:
+            "linear-gradient(180deg, rgba(22,22,25,0.55) 0%, rgba(10,10,12,0.66) 100%)",
+          backdropFilter: "blur(28px) saturate(1.5)",
+          WebkitBackdropFilter: "blur(28px) saturate(1.5)",
+          // true glass: inset top highlight (edge refraction) + faint inner
+          // hairline + subtle lime ring + deep soft drop shadow.
+          boxShadow:
+            "inset 0 1px 0 rgba(255,255,255,0.10), inset 0 0 0 1px rgba(255,255,255,0.035), 0 0 0 1px rgba(224,255,79,0.10), 0 50px 100px -32px rgba(0,0,0,0.95)",
         }}
       >
         {/* title bar — drag handle */}
@@ -171,17 +182,23 @@ export function EriTerminal({ className }: { readonly className?: string }): Rea
               live
             </span>
           </div>
-          <div className="flex items-center gap-3">
-            <span className="font-mono text-[10px] text-text-ter">⌥␣ to summon</span>
+          <div className="flex items-center gap-1.5">
+            <span className="mr-1 hidden font-mono text-[10px] text-text-ter sm:inline">⌥␣ to summon</span>
+            <button
+              type="button"
+              onClick={() => setExpanded((e) => !e)}
+              className="flex size-6 items-center justify-center rounded-md text-text-ter transition-colors hover:bg-white/[0.06] hover:text-text"
+              aria-label={expanded ? "Restore size" : "Expand"}
+            >
+              {expanded ? <Minimize2 size={13} strokeWidth={2} /> : <Maximize2 size={13} strokeWidth={2} />}
+            </button>
             <button
               type="button"
               onClick={() => setCollapsed((c) => !c)}
-              className="flex size-5 items-center justify-center rounded-full text-text-ter transition-colors hover:text-text"
+              className="flex size-6 items-center justify-center rounded-md text-text-ter transition-colors hover:bg-white/[0.06] hover:text-text"
               aria-label={collapsed ? "Expand" : "Collapse"}
             >
-              <svg viewBox="0 0 24 24" className={`h-3.5 w-3.5 transition-transform ${collapsed ? "" : "rotate-180"}`} fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="m6 9 6 6 6-6" />
-              </svg>
+              <ChevronDown size={15} strokeWidth={2} className={`transition-transform ${collapsed ? "" : "rotate-180"}`} />
             </button>
           </div>
         </div>
@@ -198,8 +215,10 @@ export function EriTerminal({ className }: { readonly className?: string }): Rea
                     type="button"
                     onClick={() => pick(i)}
                     aria-pressed={on}
-                    className={`flex flex-shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12px] transition-colors ${
-                      on ? "bg-white/10 text-text" : "text-text-sec hover:text-text"
+                    className={`flex flex-shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12px] transition-all duration-200 ${
+                      on
+                        ? "bg-white/[0.08] text-text shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]"
+                        : "text-text-sec hover:bg-white/[0.04] hover:text-text"
                     }`}
                   >
                     <span className={on ? "text-accent" : "text-text-ter"}>{s.icon}</span>
@@ -209,8 +228,11 @@ export function EriTerminal({ className }: { readonly className?: string }): Rea
               })}
             </div>
 
-            {/* scene body */}
-            <div className="flex min-h-[208px] flex-col gap-3 p-4">
+            {/* scene body — grows when expanded */}
+            <div
+              className="flex flex-col gap-3 p-4 transition-[min-height] duration-300 ease-out"
+              style={{ minHeight: expanded ? 340 : 208 }}
+            >
               {/* typed command */}
               <div className="flex items-baseline gap-2 font-mono text-[12.5px]">
                 <span className="shrink-0 text-accent">eri&nbsp;›</span>
