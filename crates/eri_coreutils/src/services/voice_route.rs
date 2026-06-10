@@ -27,8 +27,8 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::services::Services;
 use crate::DispatchError;
+use crate::services::Services;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -60,10 +60,7 @@ pub enum RouteReport {
     None { reason: String },
 }
 
-pub async fn route(
-    params: Value,
-    _services: &Arc<Services>,
-) -> Result<Value, DispatchError> {
+pub async fn route(params: Value, services: &Arc<Services>) -> Result<Value, DispatchError> {
     let parsed: RouteParams = serde_json::from_value(params)
         .map_err(|e| DispatchError::BadParams(format!("eri/voice/route: {e}")))?;
     let transcript = parsed.transcript.trim().to_string();
@@ -73,7 +70,7 @@ pub async fn route(
         });
     }
 
-    let provider = match resolve_provider(parsed.model.as_deref()) {
+    let provider = match resolve_provider(services, parsed.model.as_deref()).await {
         Some(p) => p,
         None => {
             // No classifier model wired up (offline tier, no proxy session,
@@ -100,14 +97,15 @@ pub async fn route(
     ok_report(&parsed_report)
 }
 
-fn resolve_provider(
+async fn resolve_provider(
+    services: &Services,
     explicit: Option<&str>,
 ) -> Option<Box<dyn eri_inference::llm_provider::LlmProvider>> {
-    use eri_inference::llm_provider::provider_from_choice;
     // Prefer the cheapest reliable classifier in order of availability.
     // The first slug that resolves wins. Mercury is intentionally not in
     // this list — it's diffusion-only and the wrong tool for one-shot
-    // JSON classification.
+    // JSON classification. Each candidate goes through the shared
+    // provider-acquisition seam, so BYOK + proxy keys are honored (not just env).
     let candidates: Vec<&str> = match explicit {
         Some(slug) => vec![slug],
         None => vec![
@@ -120,7 +118,7 @@ fn resolve_provider(
         ],
     };
     for slug in candidates {
-        if let Some(provider) = provider_from_choice(slug) {
+        if let Ok(provider) = super::iterate::resolve_provider(services, slug).await {
             return Some(provider);
         }
     }
@@ -314,4 +312,3 @@ mod tests {
         assert!(block.contains("\"mode\":\"coder\""));
     }
 }
-

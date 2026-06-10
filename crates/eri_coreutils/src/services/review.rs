@@ -13,7 +13,7 @@ use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::Value;
 
-use eri_inference::llm_provider::{LlmProvider, provider_from_choice};
+use eri_inference::llm_provider::LlmProvider;
 use eri_review::findings::FindingCategory;
 use eri_review::{
     DiffSource, Effort, ReviewBackend, ReviewFinding, ReviewOptions, ReviewReport, Reviewer,
@@ -279,15 +279,13 @@ async fn run_review(
 
 async fn resolve_provider(
     choice: Option<&str>,
-    _services: &Services,
+    services: &Services,
 ) -> Result<Box<dyn LlmProvider>, DispatchError> {
-    // Fall back to a sensible default if the IDE didn't pick one.
+    // Fall back to a sensible default if the IDE didn't pick one, then go
+    // through the shared provider-acquisition seam (BYOK + proxy + env), so
+    // signed-in / power-user keys are honored instead of an env-only guess.
     let pick = choice.unwrap_or("claude-sonnet-4-5");
-    provider_from_choice(pick).ok_or_else(|| {
-        DispatchError::Other(anyhow::anyhow!(
-            "no review provider available for choice {pick:?} — set an API key or pick a different model"
-        ))
-    })
+    super::iterate::resolve_provider(services, pick).await
 }
 
 fn persist_report(workspace: &Path, report: &ReviewReport) -> anyhow::Result<()> {

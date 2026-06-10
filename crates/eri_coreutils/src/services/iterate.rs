@@ -398,8 +398,7 @@ fn build_parts(
     diagnostics: &[DiagnosticWire],
     images: &[ImageWire],
 ) -> Vec<BudgetPart> {
-    let mut parts: Vec<BudgetPart> =
-        Vec::with_capacity(open_files.len() + rules.len() + 5);
+    let mut parts: Vec<BudgetPart> = Vec::with_capacity(open_files.len() + rules.len() + 5);
 
     // Persona system prompt — replaces the previous hard-coded `system:base`.
     let active = eri_inference::personas::read_active(workspace);
@@ -423,9 +422,7 @@ fn build_parts(
     // `user_id` scopes the store to the active signed-in user so two
     // accounts on the same machine don't see each other's patterns.
     if let Some(block) = load_learned_block(workspace, user_id) {
-        parts.push(
-            BudgetPart::new("system:learned", 1, block).with_min_keep(0),
-        );
+        parts.push(BudgetPart::new("system:learned", 1, block).with_min_keep(0));
     }
 
     // Active linter / language-server diagnostics (Phase 16b) — formatted
@@ -433,9 +430,7 @@ fn build_parts(
     // files BEFORE editing. Priority 2 (between learned patterns and
     // user rules); fully droppable when the budget is tight.
     if let Some(block) = format_diagnostics_block(diagnostics) {
-        parts.push(
-            BudgetPart::new("system:diagnostics", 2, block).with_min_keep(0),
-        );
+        parts.push(BudgetPart::new("system:diagnostics", 2, block).with_min_keep(0));
     }
 
     // Multimodal image attachments (Phase 16a). The dispatch layer is
@@ -443,30 +438,21 @@ fn build_parts(
     // model; here we emit a textual `system:images` part so the model has
     // a stable reference to the attachments in the conversation.
     if let Some(block) = format_images_block(images) {
-        parts.push(
-            BudgetPart::new("system:images", 1, block).with_min_keep(0),
-        );
+        parts.push(BudgetPart::new("system:images", 1, block).with_min_keep(0));
     }
 
     // Active theme (Phase 23b) — design tokens injected at priority 1
     // so generated UI matches the user's vibe from the first turn.
     if let Some(theme) = crate::services::themes::active_theme(workspace) {
         let block = crate::services::themes::format_theme_block(&theme);
-        parts.push(
-            BudgetPart::new("system:theme", 1, block).with_min_keep(0),
-        );
+        parts.push(BudgetPart::new("system:theme", 1, block).with_min_keep(0));
     }
 
     // Build preferences (Phase 23c) — the durable per-user "how to
     // build" doc. Priority 1; capped at ~600 tokens by the formatter.
-    let (prefs_merged, _sources) =
-        crate::services::preferences::merge_preferences(workspace);
-    if let Some(block) =
-        crate::services::preferences::format_preferences_block(&prefs_merged)
-    {
-        parts.push(
-            BudgetPart::new("system:preferences", 1, block).with_min_keep(0),
-        );
+    let (prefs_merged, _sources) = crate::services::preferences::merge_preferences(workspace);
+    if let Some(block) = crate::services::preferences::format_preferences_block(&prefs_merged) {
+        parts.push(BudgetPart::new("system:preferences", 1, block).with_min_keep(0));
     }
 
     parts.push(BudgetPart::new("user:prompt", 0, prompt));
@@ -499,9 +485,7 @@ fn format_images_block(images: &[ImageWire]) -> Option<String> {
             .unwrap_or_default();
         out.push_str(&format!("{}. {} ({}{})\n", i + 1, name, img.mime, size));
     }
-    out.push_str(
-        "These are visible to the model as image content blocks in the same turn.\n",
-    );
+    out.push_str("These are visible to the model as image content blocks in the same turn.\n");
     Some(out)
 }
 
@@ -569,10 +553,7 @@ fn format_diagnostics_block(diagnostics: &[DiagnosticWire]) -> Option<String> {
 /// block. Returns `None` when the store doesn't exist yet or has no
 /// observations for this workspace — failure is non-fatal because memory
 /// is enrichment, not a precondition.
-fn load_learned_block(
-    workspace: &std::path::Path,
-    user_id: Option<&str>,
-) -> Option<String> {
+fn load_learned_block(workspace: &std::path::Path, user_id: Option<&str>) -> Option<String> {
     let store = eri_inference::memory::MemoryStore::open_for(user_id).ok()?;
     let patterns = store.top_patterns(workspace, 20);
     if patterns.is_empty() {
@@ -652,6 +633,24 @@ fn load_rules(workspace: &std::path::Path, ctx: &PromptContext) -> Vec<String> {
     }
 }
 
+/// The one seam for "give me a provider for this model choice, using this
+/// user's keys." Resolves BYOK + proxy + env from the secret cache (via
+/// [`collect_provider_keys`]) then constructs the provider — replacing ad-hoc
+/// `provider_from_choice` calls that only ever saw process env vars. Callers
+/// that already hold `&Services` (review, voice routing, …) go through here so
+/// signed-in / BYOK users get the right upstream instead of an env-only guess.
+pub(crate) async fn resolve_provider(
+    services: &Services,
+    choice: &str,
+) -> Result<Box<dyn eri_inference::llm_provider::LlmProvider>, DispatchError> {
+    let keys = collect_provider_keys(services).await;
+    eri_inference::llm_provider::provider_from_choice_with_keys(choice, &keys).ok_or_else(|| {
+        DispatchError::Other(anyhow::anyhow!(
+            "no provider available for {choice:?} — set an API key or sign in"
+        ))
+    })
+}
+
 /// Resolve credentials via the existing secret cache.
 ///
 /// Two parallel lookups:
@@ -663,7 +662,7 @@ fn load_rules(workspace: &std::path::Path, ctx: &PromptContext) -> Vec<String> {
 ///
 /// Missing values are not fatal: the planner falls through to the next
 /// available auth mode or surfaces a [`BrainIterationError::MissingKey`].
-async fn collect_provider_keys(services: &Services) -> ProviderKeys {
+pub(crate) async fn collect_provider_keys(services: &Services) -> ProviderKeys {
     let anthropic = services
         .fetch_secret("anthropic", "anthropic-api-key")
         .await
