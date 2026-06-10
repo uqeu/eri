@@ -935,43 +935,12 @@ pub fn run(command: Command) -> Result<(), CliError> {
         Command::Ship {
             intent: None, dir, ..
         } => run_deploy(dir.as_deref()),
-        Command::Ship {
-            intent: Some(_), ..
-        }
-        | Command::Chat { .. }
-        | Command::Sessions
-        | Command::Recap { .. }
-        | Command::Fork { .. }
-        | Command::Deploy { .. }
-        | Command::Ask { .. }
-        | Command::Plan { .. }
-        | Command::Control { .. }
-        | Command::Apps { .. }
-        | Command::Brief
-        | Command::Research { .. }
-        | Command::Email { .. }
-        | Command::Calendar { .. }
-        | Command::Watch { .. }
-        | Command::Test { .. }
-        | Command::Refactor { .. }
-        | Command::Explain { .. }
-        | Command::Sketch { .. }
-        | Command::Ui { .. }
-        | Command::Auth(_)
-        | Command::Agent(_)
-        | Command::Memory(_)
-        | Command::Mcp(_)
-        | Command::Update(_)
-        | Command::Init
-        | Command::Admin(_)
-        | Command::Config
-        | Command::Skills
-        | Command::Plugins
-        | Command::Worktree(_)
-        | Command::Workflow(_)
-        | Command::Completions { .. }
-        | Command::Doctor
-        | Command::Status => Err(CliError::User(
+        // Everything else is agent-mode and runs on the async `dispatch` path.
+        // A single wildcard (not an exhaustive reject list) so adding a command
+        // no longer forces a third edit site here — the shadow stops taxing the
+        // real dispatcher. (The legacy Mercury arms above are kept as a dev /
+        // BYOK fallback; excising that chain is a separate dead-code sweep.)
+        _ => Err(CliError::User(
             "agent-mode commands require the async dispatcher (`main`)".into(),
         )),
     }
