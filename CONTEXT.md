@@ -1,0 +1,69 @@
+# eri
+
+eri is one local-first agent that *uses your computer with you* and *builds your software*. Its product surface is a single dynamic glass pad that morphs to whatever you ask — the same surface controls your apps, reads your screen, hears you, remembers you, researches, and builds. This file is the ubiquitous language; use these terms exactly so code, docs, and architecture reviews stay in one vocabulary.
+
+## Product surface
+
+**Morph pad**:
+The floating glass panel that is eri's whole product surface — it resizes and reshapes per mode (build expands toward an editor + preview; eyes shrinks to a glance pill; voice/control stay compact). One surface, opens into everything.
+_Avoid_: window, widget, overlay, terminal.
+
+**Mode**:
+What the morph pad is currently doing — one of Control, Eyes, Voice, Memory, Build, Research, Privacy. The mode decides the pad's size and layout and which capability is active.
+_Avoid_: tab, screen, page, view.
+
+**eri user**:
+A person using eri to operate their computer hands-free (control, eyes, voice, memory, research). One half of the audience.
+_Avoid_: end-user, consumer.
+
+**eri builder**:
+A person using eri to build software (the Build mode: plan, edit across files, run tests, ship). The other half — same pad, expanded.
+_Avoid_: developer-mode, IDE-user.
+
+## Capabilities
+
+**Control**:
+Hands-free actuation of real apps (click/type/open/quit) toward a spoken or typed goal, gated by confirmation, panic-stop, and the per-app denylist.
+_Avoid_: automation, RPA, computer-use.
+
+**Eyes**:
+On-device perception of what's on screen (and where you look) so eri never makes you re-explain; faces are redacted before any frame leaves the device.
+_Avoid_: vision, screen-scrape, OCR (those are implementation).
+
+**Voice**:
+On-device dictation + spoken commands; raw transcript is cleaned to punctuated text locally.
+_Avoid_: speech-to-text (implementation), STT.
+
+**Memory**:
+A private, on-device record of how you work that anticipates — only what's actually observed, never fabricated.
+_Avoid_: history, cache, knowledge-base.
+
+**Research**:
+Live web research answered with sources, run through the model's own web search — never a fabricated answer.
+_Avoid_: search, lookup.
+
+**Build**:
+The coding agent: plan, edit across files, run tests, ship. The expanded Build mode of the pad.
+_Avoid_: codegen, IDE.
+
+## Inference path
+
+**eri context window**:
+The per-tier token ceiling the context pipeline compacts a conversation toward before each cloud call. Lower tiers get a smaller window (more compaction, fewer tokens spent); signed-out / bring-your-own-key runs get the full window. This is the *eri* window — distinct from the cloud window it must fit into.
+_Avoid_: token limit, max tokens, budget (those are narrower).
+
+**Cloud window**:
+The model provider's own context limit that the eri context window must fit the prompt into. eri shrinks toward it; the provider enforces it.
+_Avoid_: model window, upstream limit.
+
+**Loop assembly**:
+The single seam (`LoopOpts::from_capabilities` / `for_run`) that decides one agent loop's permission, style, sandbox, and eri context window in one place, instead of being reconstructed per entry path (headless, build, chat).
+_Avoid_: config, options bag, setup.
+
+**Provider acquisition**:
+The single seam (`resolve_provider(services, choice)`) that turns a model choice + the user's keys into a provider, routing BYOK → proxy → env. Callers holding `&Services` go through it so signed-in / power-user keys are honored. (The CLI's `eri research` stays env-BYOK — it has no `Services`.)
+_Avoid_: provider factory, client builder, LLM selection.
+
+**Tier**:
+The user's plan — Free, Starter, Pro, Pro+, Teams — which sizes the eri context window, retention window, token budget, and rate limits.
+_Avoid_: plan-level, subscription (those are billing terms; the agent sizing concept is the tier).
