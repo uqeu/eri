@@ -86,6 +86,12 @@ pub struct LoopOpts {
     /// Run the `bash` tool inside an OS sandbox (writes confined to the
     /// workspace, no network). macOS only; fails closed elsewhere. Default off.
     pub sandbox: bool,
+    /// Token ceiling the context pipeline shapes the conversation toward before
+    /// each model call — the *eri context window*. This is the cloud window the
+    /// prompt must fit into; the compaction pipeline shrinks history to it so a
+    /// big local context still fits the model (and the plan). Sized per tier via
+    /// [`window_for`]; defaults to the full window for signed-out / BYOK runs.
+    pub context_target: usize,
 }
 
 impl Default for LoopOpts {
@@ -97,8 +103,34 @@ impl Default for LoopOpts {
             allow_shell: false,
             style: SystemStyle::default(),
             sandbox: false,
+            context_target: CONTEXT_TARGET_TOKENS,
         }
     }
+}
+
+/// The *eri context window* for a plan tier: the token ceiling the context
+/// pipeline compacts the conversation toward before each cloud call. Lower
+/// tiers get a smaller window (more compaction, fewer tokens spent); `None`
+/// (signed-out / bring-your-own-key) gets the full window, since those runs
+/// aren't metered against the eri proxy. Keep these in sync with the pricing
+/// page's "context window" row — this is the code that makes that claim true.
+pub fn window_for(tier: Option<&str>) -> usize {
+    match tier.map(|t| t.trim().to_ascii_lowercase()).as_deref() {
+        Some("free") => 25_000,
+        Some("starter") => 54_000,
+        Some("pro") => 128_000,
+        Some("pro_plus") | Some("pro+") | Some("proplus") => 256_000,
+        Some("teams") => 256_000,
+        // Unknown / none / enterprise: the full window. Never punish a run we
+        // can't classify — only shrink when we know the plan it belongs to.
+        _ => CONTEXT_TARGET_TOKENS,
+    }
+}
+
+/// The signed-in user's tier from local credentials, if any. Used to size the
+/// eri context window per plan at loop assembly time.
+fn current_tier() -> Option<String> {
+    config::load().ok().and_then(|c| c.tier)
 }
 
 /// The permission posture + output style live in the transport-agnostic
@@ -113,6 +145,41 @@ impl LoopOpts {
     pub fn apply_permission(&mut self, mode: PermissionMode) {
         self.allow_writes = mode.allows_writes();
         self.allow_shell = mode.allows_shell();
+    }
+
+    /// The single seam that assembles loop options from resolved capability
+    /// flags. Every entry path (headless, build, chat) funnels through here so
+    /// permission, style, sandbox, and the per-tier context window are decided
+    /// in one place instead of reconstructed per call site. Pure: the tier is
+    /// passed in (resolve it with [`current_tier`]) so the mapping stays
+    /// testable.
+    pub fn from_capabilities(
+        style: SystemStyle,
+        sandbox: bool,
+        permission: PermissionMode,
+        narrate: bool,
+        tier: Option<&str>,
+    ) -> Self {
+        let mut opts = Self {
+            narrate,
+            style,
+            sandbox,
+            context_target: window_for(tier),
+            ..Default::default()
+        };
+        opts.apply_permission(permission);
+        opts
+    }
+
+    /// Like [`from_capabilities`], but resolves the tier from local credentials.
+    /// The convenience the entry paths actually call.
+    pub fn for_run(
+        style: SystemStyle,
+        sandbox: bool,
+        permission: PermissionMode,
+        narrate: bool,
+    ) -> Self {
+        Self::from_capabilities(style, sandbox, permission, narrate, current_tier().as_deref())
     }
 }
 
@@ -387,7 +454,7 @@ async fn drive_loop(
         // Shape the growing context before the call: cheapest reductions first,
         // only when over budget. Keeps long sessions inside the window without a
         // (metered) summarization round unless the local layers can't cope.
-        let shaped = eri_agent::compaction::shape_context(messages, CONTEXT_TARGET_TOKENS);
+        let shaped = eri_agent::compaction::shape_context(messages, opts.context_target);
         if opts.narrate && shaped.changed() {
             let _ = writeln!(
                 stdout,
@@ -1036,6 +1103,9 @@ async fn run_subagent(
         style: SystemStyle::Builder,
         // Subagents have no shell, so sandbox is moot; carry the flag anyway.
         sandbox: false,
+        // A subagent's context is fresh and short-lived — give it the full
+        // window rather than the parent's per-tier squeeze.
+        context_target: CONTEXT_TARGET_TOKENS,
     };
     // Box the recursive async call so the future stays finite-sized.
     let result = Box::pin(drive_loop(
@@ -1506,6 +1576,57 @@ mod bash_tests {
         assert!(!opts.allow_writes && !opts.allow_shell);
         opts.apply_permission(PermissionMode::WorkspaceWrite);
         assert!(opts.allow_writes && opts.allow_shell);
+    }
+
+    #[test]
+    fn window_for_sizes_the_eri_context_window_per_tier() {
+        assert_eq!(window_for(Some("free")), 25_000);
+        assert_eq!(window_for(Some("Starter")), 54_000); // case-insensitive
+        assert_eq!(window_for(Some("pro")), 128_000);
+        assert_eq!(window_for(Some("pro_plus")), 256_000);
+        assert_eq!(window_for(Some("pro+")), 256_000);
+        assert_eq!(window_for(Some("teams")), 256_000);
+        // Never punish a run we can't classify — full window.
+        assert_eq!(window_for(None), CONTEXT_TARGET_TOKENS);
+        assert_eq!(window_for(Some("enterprise")), CONTEXT_TARGET_TOKENS);
+        assert_eq!(window_for(Some("")), CONTEXT_TARGET_TOKENS);
+    }
+
+    #[test]
+    fn from_capabilities_funnels_flags_and_sizes_window() {
+        // The one assembly seam: style/sandbox/narrate carried, permission
+        // applied, context window sized to the tier.
+        let pro = LoopOpts::from_capabilities(
+            SystemStyle::Builder,
+            true,
+            PermissionMode::WorkspaceWrite,
+            false,
+            Some("pro"),
+        );
+        assert_eq!(pro.context_target, 128_000);
+        assert!(pro.sandbox && !pro.narrate);
+        assert!(pro.allow_writes && pro.allow_shell);
+
+        // Free tier squeezes the window; plan mode refuses writes.
+        let free_plan = LoopOpts::from_capabilities(
+            SystemStyle::Builder,
+            false,
+            PermissionMode::Plan,
+            true,
+            Some("free"),
+        );
+        assert_eq!(free_plan.context_target, 25_000);
+        assert!(!free_plan.allow_writes);
+
+        // Signed-out / BYOK (no tier) keeps the full window.
+        let anon = LoopOpts::from_capabilities(
+            SystemStyle::Builder,
+            false,
+            PermissionMode::WorkspaceWrite,
+            true,
+            None,
+        );
+        assert_eq!(anon.context_target, CONTEXT_TARGET_TOKENS);
     }
 
     #[test]

@@ -710,14 +710,14 @@ async fn dispatch(cli: Cli) -> anyhow::Result<()> {
                 chat::ResumeMode::New
             };
             let m = resolve_mode(mode, &cwd());
-            // chat honors the same loop-capability flags (sandbox/permission/style).
-            let mut opts = build_agent::LoopOpts {
-                narrate: true,
-                style: flags.style,
-                sandbox: flags.sandbox,
-                ..Default::default()
-            };
-            opts.apply_permission(flags.permission);
+            // chat honors the same loop-capability flags (sandbox/permission/style)
+            // and the per-tier context window — all via the one assembly seam.
+            let opts = build_agent::LoopOpts::for_run(
+                flags.style,
+                flags.sandbox,
+                flags.permission,
+                true,
+            );
             chat::run(resume_mode, model_for_mode(m), opts).await
         }
         Command::Sessions => chat::list_sessions(),
@@ -1003,13 +1003,12 @@ async fn run_headless(
 
     let workspace = std::env::current_dir().context("read current directory")?;
 
-    let mut opts = build_agent::LoopOpts {
-        narrate: format == OutputFormat::Text,
+    let mut opts = build_agent::LoopOpts::for_run(
         style,
         sandbox,
-        ..Default::default()
-    };
-    opts.apply_permission(permission);
+        permission,
+        format == OutputFormat::Text,
+    );
     // --max-turns flag wins; else .eri/config.toml; else built-in default.
     if let Some(n) = max_turns.or_else(|| eri_config::load(&workspace).max_turns) {
         opts.max_turns = n.max(1);
@@ -1072,14 +1071,9 @@ async fn run_build_metered(
         .filter(|p| !p.as_os_str().is_empty())
         .map(Path::to_path_buf)
         .unwrap_or_else(|| PathBuf::from("."));
-    // Honor the same loop-capability flags as headless (permission/style/sandbox).
-    let mut opts = build_agent::LoopOpts {
-        narrate: true,
-        style: flags.style,
-        sandbox: flags.sandbox,
-        ..Default::default()
-    };
-    opts.apply_permission(flags.permission);
+    // Honor the same loop-capability flags as headless (permission/style/sandbox)
+    // plus the per-tier context window — assembled in one place.
+    let opts = build_agent::LoopOpts::for_run(flags.style, flags.sandbox, flags.permission, true);
     let outcome = build_agent::run_headless(prompt, &workspace, model, &opts).await?;
     println!(
         "\n[eri] {} file(s) in {} turn(s) -- {} in / {} out tokens (metered)",
