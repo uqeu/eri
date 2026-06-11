@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { TierNumeral } from "@/components/TierNumeral";
 
 type BillingCadence = "monthly" | "yearly";
 
@@ -67,12 +66,8 @@ const PLANS: ReadonlyArray<Plan> = [
     popular: false,
   },
   {
-    name: (
-      <>
-        Individual <TierNumeral n="I" />
-      </>
-    ),
-    shortName: "Individual I",
+    name: "Starter",
+    shortName: "Starter",
     subtitle: "Adaptive",
     slug: "starter",
     priceMonthly: 15,
@@ -91,17 +86,13 @@ const PLANS: ReadonlyArray<Plan> = [
       { glyph: "half", label: "Expanded agent turn quota" },
       { glyph: "ring", label: "Email support" },
     ],
-    cta: { href: "/sign-up?plan=starter", label: "Choose Individual I" },
+    cta: { href: "/sign-up?plan=starter", label: "Choose Starter" },
     ctaVariant: "ghost",
     popular: false,
   },
   {
-    name: (
-      <>
-        Individual <TierNumeral n="II" />
-      </>
-    ),
-    shortName: "Individual II",
+    name: "Pro",
+    shortName: "Pro",
     subtitle: "Frontier",
     slug: "pro",
     priceMonthly: 30,
@@ -110,8 +101,8 @@ const PLANS: ReadonlyArray<Plan> = [
     tagline: "Local workbench first, cloud runners when the task should leave your laptop.",
     blurb:
       "Hand off reviews, deploy prep, server checks, and longer backlog work to cloud runners. Eri keeps the checkpoint trail visible so you can inspect what changed before it ships.",
-    includesHeader: "Everything in Individual I, plus",
-    turns: { monthly: 3254, weekly: 813, daily: 116, hourly: 14 },
+    includesHeader: "Everything in Starter, plus",
+    turns: { monthly: 3961, weekly: 990, daily: 141, hourly: 17 },
     features: [
       { glyph: "full", label: "Cloud runners for review and deploy prep" },
       { glyph: "full", label: "Background agents that work while you idle" },
@@ -120,17 +111,13 @@ const PLANS: ReadonlyArray<Plan> = [
       { glyph: "half", label: "Larger project context" },
       { glyph: "ring", label: "Priority email + Discord" },
     ],
-    cta: { href: "/sign-up?plan=pro", label: "Choose Individual II" },
+    cta: { href: "/sign-up?plan=pro", label: "Choose Pro" },
     ctaVariant: "primary",
     popular: true,
   },
   {
-    name: (
-      <>
-        Individual <TierNumeral n="III" />
-      </>
-    ),
-    shortName: "Individual III",
+    name: "Pro+",
+    shortName: "Pro+",
     subtitle: "Personalized",
     slug: "pro_plus",
     priceMonthly: 60,
@@ -139,17 +126,17 @@ const PLANS: ReadonlyArray<Plan> = [
     tagline: "A private workbench tuned to your repo, team, and release path.",
     blurb:
       "Eri studies your codebase locally: conventions, naming, tests, review habits, and deployment rituals. Keep the private project brain beside your repo while you hand longer work to managed cloud runners.",
-    includesHeader: "Everything in Individual II, plus",
-    turns: { monthly: 6084, weekly: 1521, daily: 217, hourly: 27 },
+    includesHeader: "Everything in Pro, plus",
+    turns: { monthly: 8206, weekly: 2051, daily: 293, hourly: 36 },
     features: [
-      { glyph: "full", label: "Team-ready cloud runner capacity" },
+      { glyph: "full", label: "More cloud runner capacity" },
       { glyph: "full", label: "Learns your codebase patterns locally" },
       { glyph: "full", label: "Private project brain — never pooled" },
       { glyph: "full", label: "Largest project context" },
       { glyph: "full", label: "Priority review and deploy queue" },
       { glyph: "ring", label: "Priority support" },
     ],
-    cta: { href: "/sign-up?plan=pro_plus", label: "Choose Individual III" },
+    cta: { href: "/sign-up?plan=pro_plus", label: "Choose Pro+" },
     ctaVariant: "ghost",
     popular: false,
   },
@@ -193,8 +180,8 @@ const COMPARISON: ReadonlyArray<ComparisonCategory> = [
       { label: "Background cloud runners", values: [no, no, yes, yes] },
       { label: "Review and deploy queue priority", values: [no, no, no, yes] },
       {
-        label: "Project context window",
-        values: [text("27K"), text("54K"), text("128K"), text("256K")],
+        label: "eri context window",
+        values: [text("25K"), text("54K"), text("128K"), text("256K")],
       },
     ],
   },
@@ -261,8 +248,6 @@ const COMPARISON: ReadonlyArray<ComparisonCategory> = [
         values: [no, yes, yes, yes],
         note: "Sign in once via `eri auth login`; the bearer roams across machines.",
       },
-      { label: "TypeScript SDK (`@eri/sdk`)", values: [no, yes, yes, yes] },
-      { label: "Python SDK (`pip install eri`)", values: [no, yes, yes, yes] },
       {
         label: "Drop-in MCP server",
         values: [no, yes, yes, yes],
@@ -311,7 +296,7 @@ const FAQ: ReadonlyArray<FaqItem> = [
   },
   {
     q: "Do I need an API key to use eri?",
-    a: "No external service key is required for normal use. Inside the Eri desktop app you sign in once and we issue a bearer (`eri_sk_...`) you never see; the workbench uses it transparently. Outside the desktop — terminal CLI, npm SDK, Python SDK, and MCP server — that same bearer authenticates Eri calls.",
+    a: "You never bring your own model key — eri runs on your eri credits through the eri proxy. Inside the desktop app you sign in once and we issue a bearer (`eri_sk_...`) you never see; the workbench uses it transparently. Outside the desktop — the terminal CLI and MCP server — that same bearer authenticates Eri calls.",
   },
   {
     q: "Why do paid plans exist at all? eri seems local-first.",
@@ -343,7 +328,7 @@ const FAQ: ReadonlyArray<FaqItem> = [
   },
   {
     q: "Frontier vs Personalized?",
-    a: "Individual II adds managed cloud runners for longer review, verification, deploy, and backlog work. Individual III adds local pattern learning on your codebase plus a private project brain that doesn't pool with other users. II gives you more handoff capacity; III makes Eri fit your repo and release habits.",
+    a: "Pro adds managed cloud runners for longer review, verification, deploy, and backlog work. Pro+ adds local pattern learning on your codebase plus a private project brain that doesn't pool with other users. Pro gives you more handoff capacity; Pro+ makes Eri fit your repo and release habits.",
   },
   {
     q: "Does Personalized train on my code?",
@@ -1094,17 +1079,16 @@ export function PricingContent(): React.ReactElement {
               off-machine work we run on your behalf.
             </p>
             <p>
-              Individual II is built for regular review, verification, deploy,
-              and backlog handoffs. Individual III adds more runner capacity
+              Pro is built for regular review, verification, deploy,
+              and backlog handoffs. Pro+ adds more runner capacity
               plus local project personalization for heavier release
               paths. When you exceed the budget, Eri keeps working locally; we
               never bill above the headline price.
             </p>
             <p>
               Pricing is identical whether you reach Eri through the
-              desktop, the terminal CLI, the npm SDK, the Python SDK, the
-              MCP server, or managed cloud runners. One bearer, one bucket, one
-              bill.
+              desktop, the terminal CLI, the MCP server, or managed cloud
+              runners. One bearer, one bucket, one bill.
             </p>
           </div>
         </div>

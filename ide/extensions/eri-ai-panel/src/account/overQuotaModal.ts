@@ -2,12 +2,13 @@ import * as vscode from "vscode";
 
 /**
  * Shared over-quota modal. Any code path that catches a 402 / JSON-RPC -32402
- * funnels through here so users see the same three options regardless of
- * which feature blew the cap: Upgrade, Use my own keys, Switch to Mercury-only.
+ * funnels through here so users see the same options regardless of which
+ * feature blew the cap: Upgrade, or switch to Eri local (Mercury). There is no
+ * bring-your-own-key option — eri runs on eri credits via the proxy.
  *
- * "Switch to Mercury-only" sets the active agent to `eri.agent.mercury`
- * so iteration keeps working with the diffusion engine (which is `bill: false`
- * and never touches the frontier token bucket).
+ * "Use Eri local" sets the active agent to `eri.agent.mercury` so iteration
+ * keeps working with the diffusion engine (which is `bill: false` and never
+ * touches the eri-credit bucket).
  */
 
 export interface OverQuotaModalOptions {
@@ -19,15 +20,14 @@ export interface OverQuotaModalOptions {
 export async function showOverQuotaModal(
   opts: OverQuotaModalOptions = {},
 ): Promise<void> {
-  const title = opts.title ?? "Token quota reached.";
+  const title = opts.title ?? "You're out of eri credits.";
   const detail = formatDetail(opts);
 
   const action = await vscode.window.showErrorMessage(
     title + (detail ? " " + detail : ""),
     { modal: false },
     "Upgrade",
-    "Use my own keys",
-    "Switch to Mercury-only",
+    "Use Eri local",
   );
 
   if (action === "Upgrade") {
@@ -41,15 +41,13 @@ export async function showOverQuotaModal(
     await vscode.env.openExternal(
       vscode.Uri.parse(`${baseUrl.replace(/\/+$/, "")}/dashboard/billing`),
     );
-  } else if (action === "Use my own keys") {
-    await vscode.commands.executeCommand("eri.byok.setKey");
-  } else if (action === "Switch to Mercury-only") {
+  } else if (action === "Use Eri local") {
     await vscode.commands.executeCommand(
       "eri.agents.setActive",
       "eri.agent.mercury",
     );
     vscode.window.showInformationMessage(
-      "Switched to Mercury — iteration keeps working without frontier tokens.",
+      "Switched to Eri local — fast edits keep working without spending eri credits.",
     );
   }
 }
@@ -102,22 +100,19 @@ export async function showRateLimitToast(
   }
 
   const action = await vscode.window.showWarningMessage(
-    title + detail + " Terminal and Mercury still work.",
+    title + detail + " Terminal and Eri local still work.",
     { modal: false },
-    "Add my key",
-    "Switch to Mercury-only",
+    "Use Eri local",
     "Dismiss",
   );
 
-  if (action === "Add my key") {
-    await vscode.commands.executeCommand("eri.byok.setKey");
-  } else if (action === "Switch to Mercury-only") {
+  if (action === "Use Eri local") {
     await vscode.commands.executeCommand(
       "eri.agents.setActive",
       "eri.agent.mercury",
     );
     vscode.window.showInformationMessage(
-      "Switched to Mercury — iteration keeps working while the cap rolls over.",
+      "Switched to Eri local — iteration keeps working while the cap rolls over.",
     );
   }
 }
@@ -175,7 +170,7 @@ function formatDetail(opts: OverQuotaModalOptions): string {
     parts.push(`tier=${opts.tier}`);
   }
   if (typeof opts.remainingTokens === "number") {
-    parts.push(`remaining=${opts.remainingTokens.toLocaleString()} tokens`);
+    parts.push(`remaining=${opts.remainingTokens.toLocaleString()} credits`);
   }
   return parts.length > 0 ? `(${parts.join(", ")})` : "";
 }
