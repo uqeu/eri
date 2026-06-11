@@ -194,6 +194,11 @@ final class AgentManagerController: NSObject, NSWindowDelegate, WKNavigationDele
             let q = (payload["intent"] as? String) ?? (payload["cmd"] as? String) ?? ""
             streamEriCommand(command: "askEri", subcommand: ["ask", q])
 
+        // Web research: stream `eri research <query>` (Claude web search) into chat.
+        case "research":
+            let query = (payload["query"] as? String) ?? (payload["intent"] as? String) ?? ""
+            streamEriCommand(command: "research", subcommand: ["research", query])
+
         // Read-only CLI commands → text back into the chat.
         case "listAgents":
             runEriRead(command: command, sub: ["agent", "list"])

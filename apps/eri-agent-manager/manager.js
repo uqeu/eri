@@ -72,17 +72,27 @@ window.addEventListener("unhandledrejection", (e) => jlog("JSREJECT " + (e.reaso
 // The native host does the resize (see resizeWindow in eri_agent_manager.swift);
 // CSS keyed on [data-mode] reshapes the in-window layout to match. This is
 // presentation only — resizing never implies an action ran.
-const MORPH = {
-  home:    { width: 1200, height: 820 },
-  build:   { width: 1480, height: 980 },
-  voice:   { width: 720,  height: 520 },
-  control: { width: 880,  height: 560 },
-  eyes:    { width: 460,  height: 280 },
-  memory:  { width: 720,  height: 560 },
+// One declarative table for what the pad can do — the capability seam. Each
+// capability owns its morph size and whether it's transient (overlays the
+// resting layout and restores it when it ends). MORPH and TRANSIENT are DERIVED
+// from this, so a capability's mode name, layout, and lifecycle are decided in
+// one place. Adding or wiring a capability (e.g. research) is one entry here,
+// not edits scattered across the file.
+const CAPABILITIES = {
+  home:     { width: 1200, height: 820, transient: false },
+  build:    { width: 1480, height: 980, transient: false },
+  voice:    { width: 720,  height: 520, transient: true },
+  control:  { width: 880,  height: 560, transient: true },
+  eyes:     { width: 460,  height: 280, transient: true },
+  memory:   { width: 720,  height: 560, transient: true },
+  research: { width: 860,  height: 620, transient: true },
 };
-// Transient modes overlay the current resting layout (home/build) and restore
-// it when they end, so toggling voice mid-build returns you to the build size.
-const TRANSIENT = new Set(["voice", "control", "eyes", "memory"]);
+const MORPH = Object.fromEntries(
+  Object.entries(CAPABILITIES).map(([id, c]) => [id, { width: c.width, height: c.height }]),
+);
+const TRANSIENT = new Set(
+  Object.entries(CAPABILITIES).filter(([, c]) => c.transient).map(([id]) => id),
+);
 
 function setMorph(mode) {
   if (!MORPH[mode]) mode = "home";
@@ -445,6 +455,22 @@ function runCommand(command, data = {}) {
       render();
       return; // already dispatched; don't fall through to native("controlGoal")
     }
+    case "research": {
+      // Web research toward the composer's current text — Claude's web search
+      // via `eri research`. Streams into an eri bubble like askEri.
+      const input = state.view === "workspace" ? $("chatInput") : $("launcherInput");
+      const query = (input && input.value.trim()) || "";
+      if (!query) return;
+      state.view = "workspace";
+      setMorph("research");
+      addMessage("you", query);
+      state._researchIdx = state.thread.push({ type: "msg", role: "eri", text: "Searching the web…" }) - 1;
+      state.runState = "thinking";
+      native("research", { query });
+      if (input) { input.value = ""; autosize(input); }
+      render();
+      return; // already dispatched
+    }
     case "panicStop":
       addEvent("control", "Stopping all actuation (⌘⌥⎋).", "");
       restMorph();
@@ -486,6 +512,19 @@ window.eriBridgeResult = (result = {}) => {
     state._askIdx = null;
     state.runState = "idle";
   }
+  if (command === "research") {
+    if (state._researchIdx != null && state.thread[state._researchIdx]) {
+      const m = state.thread[state._researchIdx];
+      if (m.text === "Searching the web…" || !m.text.trim()) {
+        m.text = state.account
+          ? "I couldn't pull anything back just then — try again, or set ANTHROPIC_API_KEY for web research."
+          : "Web research needs a key for now — set ANTHROPIC_API_KEY, then ask me again.";
+      }
+    }
+    state._researchIdx = null;
+    state.runState = "idle";
+    restMorph();
+  }
   if (command === "runEri" || command === "spawnAgent") {
     if (failed) {
       addMessage("eri", "Hmm, that didn't go through. If you're not signed in yet, that's usually it — say the word and I'll open sign-in.");
@@ -516,6 +555,18 @@ window.eriStreamEvent = (command, rawLine) => {
     if (text && !noise && state._askIdx != null && state.thread[state._askIdx]) {
       const m = state.thread[state._askIdx];
       m.text = (m.text === "…" ? "" : m.text) + text + " ";
+    }
+    state.runState = "thinking";
+    render();
+    return;
+  }
+
+  // Research → stream the cited answer into the research bubble.
+  if (command === "research") {
+    const noise = /^eri is searching/i.test(text.trim());
+    if (text && !noise && state._researchIdx != null && state.thread[state._researchIdx]) {
+      const m = state.thread[state._researchIdx];
+      m.text = (m.text === "Searching the web…" ? "" : m.text) + text + "\n";
     }
     state.runState = "thinking";
     render();
@@ -642,6 +693,7 @@ const SLASH_ITEMS = [
   { label: "Source control", hint: "git status", cmd: "openGit" },
   { label: "Sign in", hint: "device login", cmd: "authAction" },
   { label: "Gaze", hint: "eye tracking", cmd: "calibrateGaze" },
+  { label: "Research", hint: "search the web", cmd: "research" },
   { label: "Theme", hint: "switch dark / light", cmd: "toggleTheme" },
 ];
 const MENTION_ITEMS = [
