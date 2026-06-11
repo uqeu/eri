@@ -1,0 +1,10 @@
+{
+  "_comment": "SINGLE SOURCE OF TRUTH for per-tier numbers. Three consumers stay in sync with this file: scripts/pricing_model.py loads it; crates/eri_cli/src/build_agent.rs window_for() is guard-tested against it; website/lib/tiers.ts is guard-tested against it (lib/__tests__/tiers-json.test.ts). Change a tier here, not in three languages. Mercury turn caps + short-window rate limits live only in website/lib/tiers.ts (single-source, not duplicated, so not here). Teams is intentionally absent — no per-seat plan right now.",
+  "fullContextWindow": 150000,
+  "tiers": [
+    { "name": "Free",    "slug": "free",     "priceMonthly": 0,  "creditsIncluded": 0,       "creditsGhost": 0,      "contextWindow": 25000 },
+    { "name": "Starter", "slug": "starter",  "priceMonthly": 15, "creditsIncluded": 200000,  "creditsGhost": 40000,  "contextWindow": 54000 },
+    { "name": "Pro",     "slug": "pro",      "priceMonthly": 30, "creditsIncluded": 750000,  "creditsGhost": 150000, "contextWindow": 128000 },
+    { "name": "Pro+",    "slug": "pro_plus", "priceMonthly": 60, "creditsIncluded": 2500000, "creditsGhost": 500000, "contextWindow": 256000 }
+  ]
+}

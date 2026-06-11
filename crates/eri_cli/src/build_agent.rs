@@ -1579,6 +1579,29 @@ mod bash_tests {
     }
 
     #[test]
+    fn window_for_matches_tiers_json_source_of_truth() {
+        // tiers.json (repo root) is the single source of truth shared with
+        // tiers.ts + pricing_model.py. window_for() must not drift from it.
+        let raw = include_str!("../../../tiers.json");
+        let v: serde_json::Value = serde_json::from_str(raw).expect("tiers.json parses");
+        for t in v["tiers"].as_array().expect("tiers array") {
+            let slug = t["slug"].as_str().unwrap();
+            let expected = t["contextWindow"].as_u64().unwrap() as usize;
+            assert_eq!(
+                window_for(Some(slug)),
+                expected,
+                "window_for({slug:?}) drifted from tiers.json"
+            );
+        }
+        let full = v["fullContextWindow"].as_u64().unwrap() as usize;
+        assert_eq!(window_for(None), full, "no-tier window drifted from tiers.json");
+        assert_eq!(
+            CONTEXT_TARGET_TOKENS, full,
+            "the full-window const drifted from tiers.json"
+        );
+    }
+
+    #[test]
     fn window_for_sizes_the_eri_context_window_per_tier() {
         assert_eq!(window_for(Some("free")), 25_000);
         assert_eq!(window_for(Some("Starter")), 54_000); // case-insensitive

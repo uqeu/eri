@@ -30,7 +30,9 @@ layer, and this model must all agree.
 from __future__ import annotations
 
 import argparse
+import json
 from dataclasses import dataclass
+from pathlib import Path
 
 
 # ─── Mercury 2 pricing (Inception Labs, USD per token) ──────────────────────
@@ -68,15 +70,34 @@ class Tier:
     infra: float = INFRA_COST_PER_USER_PER_MONTH
 
 
-# Numbers mirror website/lib/tiers.ts (TIER_TOKEN_BUDGETS) and build_agent.rs
-# window_for(). PRICES ARE THE SHIPPED ONES — keep reconciled with stripe.ts.
-TIERS: list[Tier] = [
-    Tier("Free",    0.0,         0,        0,  25_000, free_turns=50,
-         infra=FREE_INFRA_COST_PER_USER_PER_MONTH),
-    Tier("Starter", 15.0,  200_000,   40_000,  54_000),
-    Tier("Pro",     30.0,  750_000,  150_000, 128_000),
-    Tier("Pro+",    60.0, 2_500_000, 500_000, 256_000),
-]
+# The per-tier numbers (price, credits, context window) come from the repo-root
+# tiers.json — the SINGLE SOURCE OF TRUTH shared with the Rust window_for() and
+# the TS tiers.ts. free_turns + infra are pricing-model assumptions, set here.
+def _load_tiers() -> list[Tier]:
+    path = Path(__file__).resolve().parent.parent / "tiers.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    out: list[Tier] = []
+    for t in data["tiers"]:
+        is_free = t["slug"] == "free"
+        out.append(
+            Tier(
+                name=t["name"],
+                price_monthly=float(t["priceMonthly"]),
+                credits_included=int(t["creditsIncluded"]),
+                credits_ghost=int(t["creditsGhost"]),
+                context_window=int(t["contextWindow"]),
+                free_turns=50 if is_free else 0,
+                infra=(
+                    FREE_INFRA_COST_PER_USER_PER_MONTH
+                    if is_free
+                    else INFRA_COST_PER_USER_PER_MONTH
+                ),
+            )
+        )
+    return out
+
+
+TIERS: list[Tier] = _load_tiers()
 
 
 def mercury_cost_per_turn(cache_hit_rate: float) -> float:
