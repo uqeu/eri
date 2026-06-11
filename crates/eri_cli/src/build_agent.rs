@@ -64,6 +64,7 @@ pub struct BuildOutcome {
 }
 
 /// Tunables for one loop run.
+#[derive(Clone)]
 pub struct LoopOpts {
     /// Hard cap on loop iterations.
     pub max_turns: usize,
@@ -92,6 +93,11 @@ pub struct LoopOpts {
     /// big local context still fits the model (and the plan). Sized per tier via
     /// [`window_for`]; defaults to the full window for signed-out / BYOK runs.
     pub context_target: usize,
+    /// Optional per-skill/agent tool allowlist. `None` = every tool is
+    /// available; `Some(list)` = the agent may ONLY call these tools. Set from a
+    /// skill's `allowed-tools:` frontmatter so e.g. a `/research` skill can't
+    /// reach `bash`/`git_commit`. Enforced in the tool gate.
+    pub allowed_tools: Option<Vec<String>>,
 }
 
 impl Default for LoopOpts {
@@ -104,8 +110,25 @@ impl Default for LoopOpts {
             style: SystemStyle::default(),
             sandbox: false,
             context_target: CONTEXT_TARGET_TOKENS,
+            allowed_tools: None,
         }
     }
+}
+
+/// Whether `tool` is permitted under an optional allowlist. `None` allows
+/// everything; otherwise the tool must match a listed name (case-insensitive).
+/// An MCP-qualified name (`server__tool`) also matches a bare `tool` entry, so
+/// a skill needn't know which server provides a tool. Pure + unit-tested.
+pub(crate) fn tool_allowed(tool: &str, allowed: &Option<Vec<String>>) -> bool {
+    let Some(list) = allowed else {
+        return true;
+    };
+    let tool_lc = tool.to_ascii_lowercase();
+    let tail = tool_lc.rsplit("__").next().unwrap_or(&tool_lc);
+    list.iter().any(|a| {
+        let a = a.trim().to_ascii_lowercase();
+        a == tool_lc || a == tail
+    })
 }
 
 /// The *eri context window* for a plan tier: the token ceiling the context
@@ -595,6 +618,20 @@ async fn drive_loop(
                     "type": "tool_result",
                     "tool_use_id": tu.id,
                     "content": "the bash tool is disabled. Re-run with --allow-shell to enable shell access.",
+                    "is_error": true,
+                }));
+                continue;
+            }
+            // Per-skill/agent tool cap: if an allowlist is set, a tool not on it
+            // is refused before it runs (the "/research can't bash" gate).
+            if !tool_allowed(&tu.name, &opts.allowed_tools) {
+                results.push(json!({
+                    "type": "tool_result",
+                    "tool_use_id": tu.id,
+                    "content": format!(
+                        "the {} tool is not permitted for the active skill/agent.",
+                        tu.name
+                    ),
                     "is_error": true,
                 }));
                 continue;
@@ -1112,6 +1149,9 @@ async fn run_subagent(
         // A subagent's context is fresh and short-lived — give it the full
         // window rather than the parent's per-tier squeeze.
         context_target: CONTEXT_TARGET_TOKENS,
+        // Subagents run unconstrained tools by default; a skill cap applies to
+        // the top-level loop where the skill is active.
+        allowed_tools: None,
     };
     // Box the recursive async call so the future stays finite-sized.
     let result = Box::pin(drive_loop(
@@ -1542,6 +1582,24 @@ mod bash_tests {
                 .unwrap()
                 .contains("OUTPUT STYLE: REVIEWER")
         );
+    }
+
+    #[test]
+    fn tool_allowed_caps_to_the_allowlist() {
+        // None = every tool available (no skill cap active).
+        assert!(tool_allowed("bash", &None));
+        assert!(tool_allowed("git_commit", &None));
+        // Some = ONLY the listed tools, matched case-insensitively.
+        let allow = Some(vec!["Read".to_string(), "Grep".to_string()]);
+        assert!(tool_allowed("read", &allow));
+        assert!(tool_allowed("Grep", &allow));
+        assert!(!tool_allowed("bash", &allow), "a capped skill can't bash");
+        assert!(!tool_allowed("git_commit", &allow));
+        // An MCP-qualified name matches a bare allowlist entry by its tail, so a
+        // skill needn't know which server provides a tool.
+        let allow_mcp = Some(vec!["search".to_string()]);
+        assert!(tool_allowed("exa__search", &allow_mcp));
+        assert!(!tool_allowed("exa__fetch", &allow_mcp));
     }
 
     #[test]

@@ -25,6 +25,11 @@ pub struct Skill {
     pub body: String,
     /// Where it came from, for listings (e.g. "project:.claude").
     pub source: String,
+    /// Optional tool allowlist from the `allowed-tools:` (or `tools:`)
+    /// frontmatter. `None` = the skill may use every tool; `Some(list)` = the
+    /// agent is capped to exactly these tools while the skill is active. A
+    /// `/research` skill can thus be barred from `bash`/`git_commit`.
+    pub allowed_tools: Option<Vec<String>>,
 }
 
 /// Skill roots relative to a workspace, with a short source label.
@@ -52,9 +57,10 @@ fn global_roots() -> Vec<(PathBuf, &'static str)> {
 
 /// Split YAML-ish frontmatter (`name`, `description`) from the body. Tolerant:
 /// a file with no frontmatter is all body.
-fn parse(text: &str, fallback_name: &str) -> (String, String, String) {
+fn parse(text: &str, fallback_name: &str) -> (String, String, Option<Vec<String>>, String) {
     let mut name = fallback_name.to_string();
     let mut description = String::new();
+    let mut allowed_tools: Option<Vec<String>> = None;
     let trimmed = text.trim_start_matches('\u{feff}');
     if let Some(rest) = trimmed.strip_prefix("---")
         && let Some(end) = rest.find("\n---")
@@ -70,11 +76,25 @@ fn parse(text: &str, fallback_name: &str) -> (String, String, String) {
                 }
             } else if let Some(v) = line.strip_prefix("description:") {
                 description = v.trim().trim_matches('"').trim_matches('\'').to_string();
+            } else if let Some(v) = line
+                .strip_prefix("allowed-tools:")
+                .or_else(|| line.strip_prefix("tools:"))
+            {
+                // Comma- (or space-) separated tool names. Empty list is
+                // treated as "no override" rather than "no tools".
+                let list: Vec<String> = v
+                    .split([',', ' '])
+                    .map(|t| t.trim().trim_matches('"').trim_matches('\'').to_string())
+                    .filter(|t| !t.is_empty())
+                    .collect();
+                if !list.is_empty() {
+                    allowed_tools = Some(list);
+                }
             }
         }
-        return (name, description, body);
+        return (name, description, allowed_tools, body);
     }
-    (name, description, text.trim().to_string())
+    (name, description, None, text.trim().to_string())
 }
 
 fn load_root(dir: &Path, source: &str, out: &mut BTreeMap<String, Skill>) {
@@ -118,7 +138,7 @@ fn load_root(dir: &Path, source: &str, out: &mut BTreeMap<String, Skill>) {
         if text.trim().is_empty() {
             continue;
         }
-        let (name, description, body) = parse(&text, &dir_name);
+        let (name, description, allowed_tools, body) = parse(&text, &dir_name);
         let key = name.trim().to_lowercase();
         if key.is_empty() || body.trim().is_empty() {
             continue;
@@ -129,6 +149,7 @@ fn load_root(dir: &Path, source: &str, out: &mut BTreeMap<String, Skill>) {
             description,
             body,
             source: source.to_string(),
+            allowed_tools,
         });
     }
 }
@@ -201,19 +222,20 @@ mod tests {
 
     #[test]
     fn parses_frontmatter_and_body() {
-        let text =
-            "---\nname: design-taste\ndescription: anti-slop UI\n---\nUse Geist. Avoid neon.";
-        let (name, desc, body) = parse(text, "fallback");
+        let text = "---\nname: design-taste\ndescription: anti-slop UI\nallowed-tools: Read, Grep\n---\nUse Geist. Avoid neon.";
+        let (name, desc, tools, body) = parse(text, "fallback");
         assert_eq!(name, "design-taste");
         assert_eq!(desc, "anti-slop UI");
+        assert_eq!(tools, Some(vec!["Read".to_string(), "Grep".to_string()]));
         assert_eq!(body, "Use Geist. Avoid neon.");
     }
 
     #[test]
     fn no_frontmatter_is_all_body() {
-        let (name, desc, body) = parse("just instructions", "myskill");
+        let (name, desc, tools, body) = parse("just instructions", "myskill");
         assert_eq!(name, "myskill");
         assert!(desc.is_empty());
+        assert_eq!(tools, None);
         assert_eq!(body, "just instructions");
     }
 

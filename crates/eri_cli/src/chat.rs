@@ -276,8 +276,12 @@ async fn run_skill(
     };
     println!("[eri] applying skill '{}' ({})", skill.name, skill.source);
     let prompt = crate::skills::compose_prompt(&skill, task);
+    // Apply the skill's tool cap (its `allowed-tools:` frontmatter) for this
+    // turn, so a skill can only reach the tools it declares.
+    let mut skill_opts = opts.clone();
+    skill_opts.allowed_tools = skill.allowed_tools.clone();
     snapshot_before_turn(checkpoints, sess);
-    match build_agent::run_session_turn(sess, &prompt, opts).await {
+    match build_agent::run_session_turn(sess, &prompt, &skill_opts).await {
         Ok(o) => println!(
             "\n[eri] skill done -- {} file(s), {} in / {} out tokens",
             o.files_written.len(),
