@@ -141,17 +141,19 @@ impl MemoryStore {
     /// `None` opens the anon path directly with no migration.
     pub fn open_for(user_id: Option<&str>) -> io::Result<Self> {
         let path = memory_path_for(user_id)?;
-        if user_id.is_some() && !path.exists()
+        if user_id.is_some()
+            && !path.exists()
             && let Ok(anon) = memory_path_for(None)
-                && anon.exists() {
-                    if let Some(parent) = path.parent() {
-                        fs::create_dir_all(parent)?;
-                    }
-                    // Best-effort rename. If it fails (e.g. cross-device on
-                    // an unusual setup) we fall through to opening an empty
-                    // store at the per-user path; the anon file stays put.
-                    let _ = fs::rename(&anon, &path);
-                }
+            && anon.exists()
+        {
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            // Best-effort rename. If it fails (e.g. cross-device on
+            // an unusual setup) we fall through to opening an empty
+            // store at the per-user path; the anon file stays put.
+            let _ = fs::rename(&anon, &path);
+        }
         Self::open_at(path)
     }
 
@@ -188,6 +190,14 @@ impl MemoryStore {
         };
         let cloned = observation.clone();
         self.file.observations.push(observation);
+        // Anti-bloat: keep eri lean ("hydrated, not fat"). Bound the store by
+        // count so recall stays fast and the context fed to the local model
+        // stays tight — explicit facts are preserved, churn is trimmed.
+        let capped = cap_observations(
+            std::mem::take(&mut self.file.observations),
+            MAX_OBSERVATIONS,
+        );
+        self.file.observations = capped;
         self.save()?;
         Ok(cloned)
     }
@@ -411,6 +421,30 @@ fn format_observation_line(o: &Observation) -> String {
     format!("{prefix} {body}")
 }
 
+/// Hard ceiling on stored observations — the anti-bloat cap. Keeps recall fast
+/// and the local-model context tight no matter how long a user runs eri.
+const MAX_OBSERVATIONS: usize = 2_000;
+
+/// Bound the observation set to `max`, keeping eri lean. Explicit `fact`s
+/// (the user's `/remember`) are preserved; the churnier kinds are trimmed
+/// oldest-first (the tail is newest, since `insert` pushes chronologically).
+/// If facts alone exceed `max`, the oldest facts are trimmed too. Pure + tested.
+fn cap_observations(obs: Vec<Observation>, max: usize) -> Vec<Observation> {
+    if obs.len() <= max {
+        return obs;
+    }
+    let (facts, rest): (Vec<_>, Vec<_>) = obs.into_iter().partition(|o| o.kind == "fact");
+    let keep_rest = max.saturating_sub(facts.len());
+    let rest_start = rest.len().saturating_sub(keep_rest);
+    let mut kept = facts;
+    kept.extend(rest.into_iter().skip(rest_start));
+    if kept.len() > max {
+        let drop = kept.len() - max;
+        kept = kept.into_iter().skip(drop).collect();
+    }
+    kept
+}
+
 fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -446,6 +480,49 @@ fn workspace_hash(workspace: &Path) -> String {
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    fn obs(kind: &str, ts: u64) -> Observation {
+        Observation {
+            id: format!("{kind}-{ts}"),
+            ts_ms: ts,
+            kind: kind.to_string(),
+            workspace_hash: "w".to_string(),
+            body: "b".to_string(),
+            embedding: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn cap_is_a_noop_under_the_limit() {
+        let v = vec![obs("x", 1), obs("x", 2)];
+        assert_eq!(cap_observations(v, 10).len(), 2);
+    }
+
+    #[test]
+    fn cap_keeps_facts_and_trims_oldest_churn() {
+        // 3 facts + 5 edits, cap to 5 -> keep all 3 facts + the 2 newest edits.
+        let mut v = Vec::new();
+        for ts in 0..3 {
+            v.push(obs("fact", ts));
+        }
+        for ts in 10..15 {
+            v.push(obs("edit_accepted", ts));
+        }
+        let capped = cap_observations(v, 5);
+        assert_eq!(capped.len(), 5);
+        assert_eq!(capped.iter().filter(|o| o.kind == "fact").count(), 3);
+        assert!(capped.iter().any(|o| o.ts_ms == 14), "newest edit kept");
+        assert!(!capped.iter().any(|o| o.ts_ms == 10), "oldest edit trimmed");
+    }
+
+    #[test]
+    fn cap_trims_oldest_facts_only_when_facts_alone_exceed_max() {
+        let v: Vec<_> = (0..6).map(|ts| obs("fact", ts)).collect();
+        let capped = cap_observations(v, 4);
+        assert_eq!(capped.len(), 4);
+        assert!(capped.iter().any(|o| o.ts_ms == 5), "newest fact kept");
+        assert!(!capped.iter().any(|o| o.ts_ms == 0), "oldest fact trimmed");
+    }
 
     fn open_temp() -> (TempDir, MemoryStore) {
         let dir = TempDir::new().unwrap();
