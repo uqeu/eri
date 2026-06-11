@@ -17,7 +17,7 @@ interface CheckoutBody {
   billing: BillingCadence;
 }
 
-const PAID_PLANS: ReadonlyArray<PaidPlan> = ["starter", "pro", "pro_plus", "teams"];
+const PAID_PLANS: ReadonlyArray<PaidPlan> = ["starter", "pro", "pro_plus"];
 const CADENCES: ReadonlyArray<BillingCadence> = ["monthly", "yearly"];
 
 function isPaidPlan(value: unknown): value is PaidPlan {

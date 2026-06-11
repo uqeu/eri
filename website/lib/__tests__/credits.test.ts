@@ -28,8 +28,7 @@ assert.equal(creditCost(Number.POSITIVE_INFINITY, 100), 500);
 const sonnetPerCredit = 3 / 1_000_000; // $/credit at Sonnet input rate
 const maxCost = (tier: keyof typeof TIER_TOKEN_BUDGETS): number =>
   TIER_TOKEN_BUDGETS[tier].included * sonnetPerCredit;
-assert.equal(Math.round(maxCost("Pro+") * 100) / 100, 12); // $12
-assert.equal(Math.round(maxCost("Teams") * 100) / 100, 9); // $9
+assert.equal(Math.round(maxCost("Pro+") * 100) / 100, 7.5); // $7.50 (2.5M credits)
 assert.equal(Math.round(maxCost("Pro") * 100) / 100, 2.25); // $2.25
 assert.equal(Math.round(maxCost("Starter") * 100) / 100, 0.6); // $0.60
 

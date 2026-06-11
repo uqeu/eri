@@ -15,9 +15,11 @@ export function stripe(): Stripe {
   return cached;
 }
 
-export type PaidPlan = "starter" | "pro" | "pro_plus" | "teams";
+// Teams is not offered right now — no per-seat plan. Kept out of PaidPlan so
+// nobody can check out into it.
+export type PaidPlan = "starter" | "pro" | "pro_plus";
 export type BillingCadence = "monthly" | "yearly";
-export type Tier = "free" | "starter" | "pro" | "pro_plus" | "teams" | "enterprise";
+export type Tier = "free" | "starter" | "pro" | "pro_plus" | "enterprise";
 
 // (env var name, customer-facing label) per (plan, cadence).
 const PRICE_ENV: Record<PaidPlan, Record<BillingCadence, string>> = {
@@ -33,15 +35,12 @@ const PRICE_ENV: Record<PaidPlan, Record<BillingCadence, string>> = {
     monthly: "ERI_PRICE_PRO_PLUS",
     yearly: "ERI_PRICE_PRO_PLUS_YEARLY",
   },
-  teams: {
-    monthly: "ERI_PRICE_TEAMS",
-    yearly: "ERI_PRICE_TEAMS_YEARLY",
-  },
 };
 
 // Test-mode (sandbox) price IDs in the eri labs Stripe account
 // (acct_1TYCWf4evv030ZvB). Locked tier prices: $15 Starter / $30 Pro /
-// $60 Pro+ / $30 Teams. Pro + Pro+ migrated 2026-05-25 from $25/$45 →
+// $60 Pro+. (Teams retired — no per-seat plan right now.) Pro + Pro+
+// migrated 2026-05-25 from $25/$45 →
 // $30/$60; the old prices live on but are `active: false` so existing
 // subscriptions keep resolving via `tierForPriceId`. All new prices carry
 // `metadata.tier` so the webhook resolves via `mapStripePriceToTier`
@@ -58,10 +57,6 @@ const TEST_PRICE_IDS: Record<PaidPlan, Record<BillingCadence, string>> = {
   pro_plus: {
     monthly: "price_1TatSk4evv030ZvB7Oavc2Kx", // $60/mo, metadata.tier=pro_plus
     yearly: "price_1TatSm4evv030ZvB3YG2YVZO",  // $576/yr ($48/mo), metadata.tier=pro_plus
-  },
-  teams: {
-    monthly: "price_1TZEe14evv030ZvBTIzgg3bX",
-    yearly: "price_1TZEe54evv030ZvB8Si8Po2S",
   },
 };
 
@@ -105,7 +100,6 @@ export function mapStripePriceToTier(priceMetadataTier: string | null | undefine
     case "starter":
     case "pro":
     case "pro_plus":
-    case "teams":
     case "enterprise":
       return normalized;
     // Tolerate a few common alternate spellings to match the voice layer.
@@ -113,8 +107,7 @@ export function mapStripePriceToTier(priceMetadataTier: string | null | undefine
     case "pro plus":
     case "proplus":
       return "pro_plus";
-    case "team":
-      return "teams";
+    // Legacy `teams`/`team` subscriptions (plan retired) resolve to free.
     default:
       return "free";
   }
@@ -129,9 +122,6 @@ export function monthlyLimitForTier(tier: string): number {
     case "pro_plus":
       // 5x credit allowance vs Pro.
       return 150;
-    case "teams":
-      // Per-seat allowance, matched to Pro until the seat math lands.
-      return 30;
     case "enterprise":
       return 1000;
     default:

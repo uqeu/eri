@@ -138,7 +138,7 @@ const PLANS: ReadonlyArray<Plan> = [
     cadenceNote: "",
     tagline: "A private workbench tuned to your repo, team, and release path.",
     blurb:
-      "Eri studies your codebase locally: conventions, naming, tests, review habits, and deployment rituals. Keep the private project brain beside your repo while teams hand longer work to managed cloud runners.",
+      "Eri studies your codebase locally: conventions, naming, tests, review habits, and deployment rituals. Keep the private project brain beside your repo while you hand longer work to managed cloud runners.",
     includesHeader: "Everything in Individual II, plus",
     turns: { monthly: 6084, weekly: 1521, daily: 217, hourly: 27 },
     features: [
@@ -1096,7 +1096,7 @@ export function PricingContent(): React.ReactElement {
             <p>
               Individual II is built for regular review, verification, deploy,
               and backlog handoffs. Individual III adds more runner capacity
-              plus local project personalization for teams and heavier release
+              plus local project personalization for heavier release
               paths. When you exceed the budget, Eri keeps working locally; we
               never bill above the headline price.
             </p>

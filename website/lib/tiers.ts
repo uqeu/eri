@@ -10,7 +10,7 @@ import {
  * stores lowercase slugs (`free`, `starter`, `pro`, `pro_plus`, `teams`)
  * so the public boundary is `normalizeTier()` below.
  */
-export type TierName = "Free" | "Starter" | "Pro" | "Pro+" | "Teams";
+export type TierName = "Free" | "Starter" | "Pro" | "Pro+";
 
 export interface TierLimits {
   perMonth: number;
@@ -29,7 +29,6 @@ export interface TierLimits {
  *              the proxy returns HTTP 402.
  *
  * Numbers picked to match Cursor-class allowances at our tier prices.
- * Teams numbers are PER SEAT — the billing layer multiplies by seat count.
  */
 export interface TokenBudget {
   included: number;
@@ -45,7 +44,8 @@ export interface TokenBudget {
  * in/out mix — output-heavy traffic can no longer blow past the plan's COGS.
  * The `included`/`ghost` numbers above are therefore denominated in CREDITS,
  * not raw tokens. Worst-case Sonnet COGS per tier = included x $3/M:
- * Pro+ $12, Teams $9, Pro $2.25, Starter $0.60 — all margin-positive.
+ * Pro+ $7.50, Pro $2.25, Starter $0.60 — all margin-positive. See
+ * scripts/pricing_model.py for the full combined-margin model.
  */
 export const OUTPUT_WEIGHT = 5;
 
@@ -64,8 +64,7 @@ export const TIER_TOKEN_BUDGETS: Record<TierName, TokenBudget> = {
   Free:    { included:         0, ghost:         0 },
   Starter: { included:   200_000, ghost:    40_000 },
   Pro:     { included:   750_000, ghost:   150_000 },
-  "Pro+":  { included: 4_000_000, ghost:   800_000 },
-  Teams:   { included: 3_000_000, ghost:   600_000 },
+  "Pro+":  { included: 2_500_000, ghost:   500_000 },
 };
 
 /**
@@ -80,7 +79,6 @@ export const MERCURY_TURN_LIMITS: Record<TierName, number> = {
   Starter: 2_000,
   Pro:     10_000,
   "Pro+":  50_000,
-  Teams:   30_000,
 };
 
 /**
@@ -92,8 +90,7 @@ export const TIER_LIMITS: Record<TierName, TierLimits> = {
   Free:      { perMonth: 50,    perWeek: 20,   perDay: 5,   perHour: 2 },
   Starter:   { perMonth: 1839,  perWeek: 459,  perDay: 65,  perHour: 8 },
   Pro:       { perMonth: 3254,  perWeek: 813,  perDay: 116, perHour: 14 },
-  "Pro+":    { perMonth: 6084,  perWeek: 1521, perDay: 217, perHour: 27 },
-  Teams:     { perMonth: 3961,  perWeek: 990,  perDay: 141, perHour: 17 },
+  "Pro+":    { perMonth: 8206,  perWeek: 2051, perDay: 293, perHour: 36 },
 };
 
 export interface Remaining {
@@ -128,9 +125,9 @@ export function normalizeTier(value: string | null | undefined): TierName {
     case "pro_plus":
     case "proplus":
       return "Pro+";
-    case "teams":
-      return "Teams";
     default:
+      // Anything unrecognized — legacy `teams`, `enterprise`, etc. — is treated
+      // as Free (no published limits). Teams is not offered right now.
       return "Free";
   }
 }

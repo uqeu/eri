@@ -33,7 +33,7 @@ export type Feature =
   | "auditLogs"
   | "scim";
 
-const ALL_TIERS: ReadonlyArray<TierName> = ["Free", "Starter", "Pro", "Pro+", "Teams"];
+const ALL_TIERS: ReadonlyArray<TierName> = ["Free", "Starter", "Pro", "Pro+"];
 
 /**
  * Map of feature → tiers that unlock it. Derived from the pricing page:
@@ -67,18 +67,19 @@ export const FEATURE_GATES: Record<Feature, ReadonlyArray<TierName>> = {
   gaze: ALL_TIERS,
   mentions: ALL_TIERS,
   codebaseIndex: ALL_TIERS,
-  inlineEdit: ["Starter", "Pro", "Pro+", "Teams"],
-  composer: ["Starter", "Pro", "Pro+", "Teams"],
-  multiModel: ["Pro", "Pro+", "Teams"],
-  cloudAgents: ["Pro", "Pro+", "Teams"],
-  agentMode: ["Pro", "Pro+", "Teams"],
-  mcp: ["Pro", "Pro+", "Teams"],
-  exclusiveVoices: ["Pro+", "Teams"],
-  codebaseTrainedBrain: ["Pro+", "Teams"],
-  privateContext: ["Pro+", "Teams"],
-  polishQueue: ["Pro+", "Teams"],
-  sso: ["Teams"],
-  auditLogs: ["Teams"],
+  inlineEdit: ["Starter", "Pro", "Pro+"],
+  composer: ["Starter", "Pro", "Pro+"],
+  multiModel: ["Pro", "Pro+"],
+  cloudAgents: ["Pro", "Pro+"],
+  agentMode: ["Pro", "Pro+"],
+  mcp: ["Pro", "Pro+"],
+  exclusiveVoices: ["Pro+"],
+  codebaseTrainedBrain: ["Pro+"],
+  privateContext: ["Pro+"],
+  polishQueue: ["Pro+"],
+  // Teams retired — these unlock on no current tier (kept for when seats return).
+  sso: [],
+  auditLogs: [],
   scim: [],
 };
 
