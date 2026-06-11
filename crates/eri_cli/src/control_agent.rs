@@ -483,7 +483,8 @@ pub async fn execute_tool_calls(
                 // so it relays the message and waits for the user instead of
                 // retrying. The retracted/blocked intent is NOT recorded as a
                 // goal eri is pursuing.
-                out.log.push(format!("refused: {} — {message}", action.describe()));
+                out.log
+                    .push(format!("refused: {} — {message}", action.describe()));
                 out.results.push(tool_result(
                     id,
                     &format!("REFUSED (hand back to the user): {message}"),
@@ -941,6 +942,60 @@ fn action_signature(calls: &[(String, String, Value)]) -> String {
         .join("|")
 }
 
+/// The deterministic, zero-token prelude to the control loop — pointer.ai's
+/// "gate before you do the work," as composable stages. Returns `Some(message)`
+/// when a stage fully handles the goal (and nothing reaches the model), or
+/// `None` to fall through to the reasoning loop. Each stage is token-free and
+/// independently testable; this is also where a per-tier turn budget would slot.
+async fn control_prelude(
+    goal: &str,
+    bridge: &dyn ControlBridge,
+    gate: &ControlGate,
+    confirm: &mut dyn FnMut(&str, Option<crate::control_safety::Permission>) -> bool,
+) -> Result<Option<String>> {
+    // Cancellation: a retraction ("no, stop, forget it") does nothing — and we
+    // return BEFORE remember_goal / any model call, so it's never recorded as
+    // something eri is pursuing or folded into memory.
+    if crate::control_safety::is_cancellation(goal) {
+        return Ok(Some(
+            "Okay — stopped. Nothing was done. Tell me what you'd like instead.".to_string(),
+        ));
+    }
+    // Feasibility gate: a sensitive GOAL (password, money, CAPTCHA, access
+    // control) is declined here, before any tokens are spent — a boundary, not
+    // a confirmation. eri won't pursue these at all.
+    if let Some(kind) = crate::control_safety::classify_refusal(goal) {
+        return Ok(Some(kind.handback_message().to_string()));
+    }
+    // Tier 0 fast lane: an obvious single-step command ("open Spotify", "quit
+    // Cursor") resolves to a deterministic plan with ZERO model tokens. Still
+    // actuated through the gate, so cancellation / refusal / the per-app
+    // denylist / confirmation all apply to whatever the fast lane produced.
+    if let Some(plan) = fast_route(goal) {
+        let workspace = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        remember_goal(goal, &workspace);
+        let mut done: Vec<String> = Vec::new();
+        for action in &plan {
+            match gate.submit(bridge, action).await? {
+                Disposition::Executed(result) => done.push(result),
+                Disposition::NeedsConfirmation(desc) => {
+                    if confirm(&desc, action.permission()) {
+                        done.push(gate.confirm(bridge, action).await?);
+                    } else {
+                        return Ok(Some(format!("Okay — skipped {desc}. Nothing else to do.")));
+                    }
+                }
+                Disposition::Refused(msg) => return Ok(Some(msg)),
+            }
+        }
+        return Ok(Some(format!(
+            "Done — {} (no model tokens used).",
+            done.join("; ")
+        )));
+    }
+    Ok(None)
+}
+
 pub async fn run_control_agent(
     goal: &str,
     model: &str,
@@ -954,44 +1009,12 @@ pub async fn run_control_agent(
     if goal.trim().is_empty() {
         return Err(anyhow!("control goal is empty"));
     }
-    // Cancellation guard: if the whole utterance is a retraction ("no, stop,
-    // forget it"), there is nothing to do. Critically, we return BEFORE
-    // `remember_goal` / any model call, so the retracted intent is never
-    // recorded as something eri is pursuing or folded into its memory.
-    if crate::control_safety::is_cancellation(goal) {
-        return Ok("Okay — stopped. Nothing was done. Tell me what you'd like instead.".to_string());
-    }
-    // Feasibility gate (deterministic arm) — pointer.ai's "decide it's in bounds
-    // before doing the work," applied to safety. A sensitive GOAL (password,
-    // money, CAPTCHA, access-control) is declined here, before any tokens are
-    // spent, instead of mid-loop when the model first tries to type it. eri
-    // won't pursue these at all — it's a boundary, not a confirmation.
-    if let Some(kind) = crate::control_safety::classify_refusal(goal) {
-        return Ok(kind.handback_message().to_string());
-    }
-    // Tier 0 — token-frugal fast lane. An obvious single-step command ("open
-    // Spotify", "quit Cursor") resolves to a deterministic plan with ZERO model
-    // tokens — eri never pays a cloud call to open an app. Still actuated through
-    // the gate, so cancellation / refusal / the per-app denylist / confirmation
-    // all apply to whatever the fast lane produced.
-    if let Some(plan) = fast_route(goal) {
-        let workspace = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-        remember_goal(goal, &workspace);
-        let mut done: Vec<String> = Vec::new();
-        for action in &plan {
-            match gate.submit(bridge, action).await? {
-                Disposition::Executed(result) => done.push(result),
-                Disposition::NeedsConfirmation(desc) => {
-                    if confirm(&desc, action.permission()) {
-                        done.push(gate.confirm(bridge, action).await?);
-                    } else {
-                        return Ok(format!("Okay — skipped {desc}. Nothing else to do."));
-                    }
-                }
-                Disposition::Refused(msg) => return Ok(msg),
-            }
-        }
-        return Ok(format!("Done — {} (no model tokens used).", done.join("; ")));
+    // The deterministic, zero-token prelude (pointer.ai's gate-before-work):
+    // cancellation → feasibility gate → fast lane. If any stage handles the goal
+    // we return its result and nothing reaches the model; otherwise we fall
+    // through to the reasoning loop below.
+    if let Some(result) = control_prelude(goal, bridge, gate, confirm).await? {
+        return Ok(result);
     }
     let client = crate::build_agent::signed_in_client()?;
     let mut system = vec![json!({
@@ -1369,8 +1392,60 @@ mod tests {
         )
         .await
         .unwrap();
-        assert!(out.to_lowercase().contains("money"), "should hand the goal back");
+        assert!(
+            out.to_lowercase().contains("money"),
+            "should hand the goal back"
+        );
         assert!(bridge.calls().is_empty(), "must not actuate a refused goal");
+    }
+
+    #[tokio::test]
+    async fn control_prelude_routes_the_three_zero_token_stages() {
+        // The prelude resolves cancellation → feasibility → fast lane, and only
+        // returns None (handing off to the reasoning loop) for a goal none of
+        // them claim. No model call on any path; no actuation on fall-through.
+        let bridge = MockBridge::default();
+        let gate = ControlGate::default();
+        let mut yes = |_: &str, _: Option<crate::control_safety::Permission>| true;
+
+        // Cancellation → handled, nothing actuated.
+        let cancelled = control_prelude("no, stop, forget it", &bridge, &gate, &mut yes)
+            .await
+            .unwrap();
+        assert!(
+            cancelled.is_some(),
+            "a retraction is handled in the prelude"
+        );
+        assert!(bridge.calls().is_empty());
+
+        // Sensitive goal → declined in the prelude, nothing actuated.
+        let refused = control_prelude("send money to my landlord", &bridge, &gate, &mut yes)
+            .await
+            .unwrap();
+        assert!(refused.is_some(), "a sensitive goal is declined up front");
+        assert!(
+            bridge.calls().is_empty(),
+            "declined goals never touch the bridge"
+        );
+
+        // Fast-routable command → handled and actuated with zero model tokens.
+        let opened = control_prelude("open Safari", &bridge, &gate, &mut yes)
+            .await
+            .unwrap();
+        assert!(opened.unwrap().contains("no model tokens used"));
+        assert_eq!(bridge.calls(), vec!["open:Safari"]);
+
+        // A goal that needs reasoning → None: it must reach the loop, and the
+        // prelude made no actuation getting there.
+        let bridge2 = MockBridge::default();
+        let through = control_prelude("summarize what's on my screen", &bridge2, &gate, &mut yes)
+            .await
+            .unwrap();
+        assert!(
+            through.is_none(),
+            "an ambiguous goal falls through to the loop"
+        );
+        assert!(bridge2.calls().is_empty());
     }
 
     #[tokio::test]
@@ -1403,7 +1478,11 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(other_app, Disposition::Executed("opened Safari".into()));
-        assert_eq!(bridge.calls(), vec!["open:Safari"], "only the allowed app ran");
+        assert_eq!(
+            bridge.calls(),
+            vec!["open:Safari"],
+            "only the allowed app ran"
+        );
     }
 
     #[tokio::test]
