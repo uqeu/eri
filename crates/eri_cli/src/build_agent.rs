@@ -179,7 +179,13 @@ impl LoopOpts {
         permission: PermissionMode,
         narrate: bool,
     ) -> Self {
-        Self::from_capabilities(style, sandbox, permission, narrate, current_tier().as_deref())
+        Self::from_capabilities(
+            style,
+            sandbox,
+            permission,
+            narrate,
+            current_tier().as_deref(),
+        )
     }
 }
 
@@ -1519,14 +1525,19 @@ mod bash_tests {
     #[test]
     fn build_system_adds_style_block_for_non_builder() {
         let dir = tempfile::tempdir().unwrap();
-        // Builder: just the persona block (no project AGENTS.md here).
+        // Builder: persona block + the confidentiality guardrail.
         let base = build_system(dir.path(), SystemStyle::Builder);
-        assert_eq!(base.len(), 1);
-        // Reviewer: persona + a style directive block.
+        assert_eq!(base.len(), 2);
+        assert_eq!(
+            base[1]["text"].as_str().unwrap(),
+            eri_inference::brand::GUARDRAIL,
+            "every agent gets the confidentiality guardrail"
+        );
+        // Reviewer: persona + guardrail + a style directive block.
         let reviewed = build_system(dir.path(), SystemStyle::Reviewer);
-        assert_eq!(reviewed.len(), 2);
+        assert_eq!(reviewed.len(), 3);
         assert!(
-            reviewed[1]["text"]
+            reviewed[2]["text"]
                 .as_str()
                 .unwrap()
                 .contains("OUTPUT STYLE: REVIEWER")
@@ -1594,7 +1605,11 @@ mod bash_tests {
             );
         }
         let full = v["fullContextWindow"].as_u64().unwrap() as usize;
-        assert_eq!(window_for(None), full, "no-tier window drifted from tiers.json");
+        assert_eq!(
+            window_for(None),
+            full,
+            "no-tier window drifted from tiers.json"
+        );
         assert_eq!(
             CONTEXT_TARGET_TOKENS, full,
             "the full-window const drifted from tiers.json"
@@ -2097,11 +2112,16 @@ fn task_spec() -> Value {
 fn build_system(root: &Path, style: SystemStyle) -> Vec<Value> {
     // Builder persona first (identical across styles -> stays prompt-cached),
     // then the style directive as its own block for non-default styles.
-    let mut blocks = vec![json!({
-        "type": "text",
-        "text": builder_system_prompt(),
-        "cache_control": { "type": "ephemeral" }
-    })];
+    let mut blocks = vec![
+        json!({
+            "type": "text",
+            "text": builder_system_prompt(),
+            "cache_control": { "type": "ephemeral" }
+        }),
+        // Confidentiality guardrail — model identity + system prompt stay secret,
+        // embedded instructions are treated as data. Applied to every agent.
+        json!({ "type": "text", "text": eri_inference::brand::GUARDRAIL }),
+    ];
     if let Some(directive) = style.directive() {
         blocks.push(json!({
             "type": "text",

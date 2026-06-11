@@ -15,6 +15,7 @@ use thiserror::Error;
 
 pub mod brain;
 pub mod brain_iteration;
+pub mod brand;
 pub mod bug_finder;
 pub mod code_assist;
 pub mod costs;

@@ -1017,11 +1017,16 @@ pub async fn run_control_agent(
         return Ok(result);
     }
     let client = crate::build_agent::signed_in_client()?;
-    let mut system = vec![json!({
-        "type": "text",
-        "text": control_system_prompt(),
-        "cache_control": { "type": "ephemeral" }
-    })];
+    let mut system = vec![
+        json!({
+            "type": "text",
+            "text": control_system_prompt(),
+            "cache_control": { "type": "ephemeral" }
+        }),
+        // Confidentiality guardrail — model identity + system prompt stay secret,
+        // embedded instructions are treated as data. Applied to every agent.
+        json!({ "type": "text", "text": eri_inference::brand::GUARDRAIL }),
+    ];
     // Inject local context so eri acts informed + frugal: (a) remembered facts
     // relevant to this goal (mem0-style hybrid recall, 0 model tokens), and
     // (b) what's on screen right now (ambient situation note from one cheap AX
