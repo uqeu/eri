@@ -22,6 +22,7 @@ export type Feature =
   | "agentMode"
   | "mentions"
   | "codebaseIndex"
+  | "cloudSync"
   | "mcp"
   | "multiModel"
   | "cloudAgents"
@@ -67,6 +68,10 @@ export const FEATURE_GATES: Record<Feature, ReadonlyArray<TierName>> = {
   gaze: ALL_TIERS,
   mentions: ALL_TIERS,
   codebaseIndex: ALL_TIERS,
+  // Cloud memory/project sync is paid-only — Free is strictly local (no cloud
+  // storage, so 1000s of free users cost ~nothing). Enforced in the
+  // /api/v1/memory/sync route.
+  cloudSync: ["Starter", "Pro", "Pro+"],
   inlineEdit: ["Starter", "Pro", "Pro+"],
   composer: ["Starter", "Pro", "Pro+"],
   multiModel: ["Pro", "Pro+"],

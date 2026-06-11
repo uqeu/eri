@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { authenticateApiBearer } from "@/lib/auth/api_tokens";
 import { sql } from "@/lib/db";
+import { featureLocked } from "@/lib/feature_gate";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -44,8 +45,10 @@ export async function PUT(request: Request): Promise<Response> {
   if (!auth) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  // Tier gate: Free users get local memory only (24h retention) — no cloud sync.
-  if (auth.user.tier === "free") {
+  // Cloud sync is paid-only — Free is strictly local (no cloud storage, so
+  // 1000s of free users cost ~nothing). Gated via the shared feature system so
+  // the entitlement lives in one place (lib/features.ts: cloudSync).
+  if (featureLocked(auth.user.tier, "cloudSync")) {
     return NextResponse.json(
       { error: "tier_locked", required: "starter" },
       { status: 402 },
