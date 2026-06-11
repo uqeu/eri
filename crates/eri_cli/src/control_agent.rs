@@ -961,6 +961,14 @@ pub async fn run_control_agent(
     if crate::control_safety::is_cancellation(goal) {
         return Ok("Okay — stopped. Nothing was done. Tell me what you'd like instead.".to_string());
     }
+    // Feasibility gate (deterministic arm) — pointer.ai's "decide it's in bounds
+    // before doing the work," applied to safety. A sensitive GOAL (password,
+    // money, CAPTCHA, access-control) is declined here, before any tokens are
+    // spent, instead of mid-loop when the model first tries to type it. eri
+    // won't pursue these at all — it's a boundary, not a confirmation.
+    if let Some(kind) = crate::control_safety::classify_refusal(goal) {
+        return Ok(kind.handback_message().to_string());
+    }
     // Tier 0 — token-frugal fast lane. An obvious single-step command ("open
     // Spotify", "quit Cursor") resolves to a deterministic plan with ZERO model
     // tokens — eri never pays a cloud call to open an app. Still actuated through
@@ -1342,6 +1350,27 @@ mod tests {
         // Not an open/quit command at all.
         assert_eq!(fast_route("what's this error?"), None);
         assert_eq!(fast_route("click the blue button"), None);
+    }
+
+    #[tokio::test]
+    async fn feasibility_gate_declines_sensitive_goal_before_acting() {
+        // A money-transfer goal is refused up front: no actuation, and it
+        // returns before sign-in / any model call (so this test needs neither).
+        let bridge = MockBridge::default();
+        let gate = ControlGate::with_permissions(true, Default::default());
+        let mut confirm = |_: &str, _: Option<crate::control_safety::Permission>| true;
+        let out = run_control_agent(
+            "send money to my landlord",
+            "claude-sonnet-4-6",
+            &bridge,
+            &gate,
+            &mut confirm,
+            8,
+        )
+        .await
+        .unwrap();
+        assert!(out.to_lowercase().contains("money"), "should hand the goal back");
+        assert!(bridge.calls().is_empty(), "must not actuate a refused goal");
     }
 
     #[tokio::test]
