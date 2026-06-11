@@ -904,6 +904,43 @@ fn canonical_app(target: &str) -> Option<String> {
     Some(canonical.to_string())
 }
 
+/// Same action set proposed this many turns running = the executor is stuck.
+const STRIKE_LIMIT: usize = 3;
+
+/// Deterministic anti-spin guard — pointer.ai's "two-strike" idea. If the
+/// executor proposes the exact same action set on consecutive turns, it's
+/// looping; stop rather than burn more turns (and tokens) retrying into the
+/// same wall. Pure + testable; lives in front of the inner loop.
+#[derive(Default)]
+struct StuckGuard {
+    last: Option<String>,
+    repeats: usize,
+}
+
+impl StuckGuard {
+    /// Record this turn's action signature. Returns true once the same
+    /// signature has repeated [`STRIKE_LIMIT`] times in a row.
+    fn record(&mut self, signature: &str) -> bool {
+        if self.last.as_deref() == Some(signature) {
+            self.repeats += 1;
+        } else {
+            self.last = Some(signature.to_string());
+            self.repeats = 1;
+        }
+        self.repeats >= STRIKE_LIMIT
+    }
+}
+
+/// A turn's proposed actions as a stable string (tool name + input, id-free so
+/// it's comparable across turns). Used by [`StuckGuard`].
+fn action_signature(calls: &[(String, String, Value)]) -> String {
+    calls
+        .iter()
+        .map(|(_, name, input)| format!("{name}:{input}"))
+        .collect::<Vec<_>>()
+        .join("|")
+}
+
 pub async fn run_control_agent(
     goal: &str,
     model: &str,
@@ -968,6 +1005,7 @@ pub async fn run_control_agent(
     let mut messages: Vec<Value> = vec![json!({ "role": "user", "content": goal.trim() })];
     let mut stdout = std::io::stdout();
     let mut final_text = String::new();
+    let mut stuck = StuckGuard::default();
 
     for _ in 0..max_turns {
         let cached = eri_agent::request::with_conversation_cache(&messages);
@@ -999,6 +1037,17 @@ pub async fn run_control_agent(
             .iter()
             .map(|t| (t.id.clone(), t.name.clone(), t.input.clone()))
             .collect();
+        // Two-strike anti-spin: if the executor keeps proposing the identical
+        // action set, it's stuck — stop before spending more turns/tokens.
+        if stuck.record(&action_signature(&calls)) {
+            return Ok(if final_text.trim().is_empty() {
+                "I tried the same step a few times without progress, so I stopped \
+                 rather than spin. Tell me how you'd like to proceed."
+                    .to_string()
+            } else {
+                final_text
+            });
+        }
         let step = execute_tool_calls(bridge, gate, confirm, &calls).await;
         for line in &step.log {
             let _ = writeln!(stdout, "[eri] {line}");
@@ -1251,6 +1300,34 @@ mod tests {
             fast_route("close the slack app"),
             Some(vec![ControlAction::QuitApp("Slack".into())])
         );
+    }
+
+    #[test]
+    fn stuck_guard_trips_on_repeated_identical_actions() {
+        let mut g = StuckGuard::default();
+        let a = "click:{\"id\":\"7\"}";
+        let b = "open_app:{\"name\":\"Safari\"}";
+        // Different actions never trip it.
+        assert!(!g.record(b));
+        assert!(!g.record(a));
+        // Same action repeating: trips on the STRIKE_LIMIT-th in a row.
+        assert!(!g.record(a)); // 1 (after the reset above this is 2nd 'a' overall but 1st in-a-row from here is the prior line)
+        assert!(g.record(a)); // 3 in a row -> stuck
+        // A different action resets the streak.
+        assert!(!g.record(b));
+    }
+
+    #[test]
+    fn action_signature_is_id_free_and_stable() {
+        let mk = |id: &str| {
+            vec![(
+                id.to_string(),
+                "open_app".to_string(),
+                serde_json::json!({ "name": "Safari" }),
+            )]
+        };
+        // Same action, different tool-call ids -> identical signature.
+        assert_eq!(action_signature(&mk("a1")), action_signature(&mk("zz")));
     }
 
     #[test]
