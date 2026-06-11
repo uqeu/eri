@@ -303,17 +303,19 @@ fn default_route_for(intent: Intent) -> (ModelChoice, ReasoningLevel, f32) {
     }
 }
 
-/// Whether eri's on-device model is trusted to handle an intent on its own.
-/// **Local-first**: eri runs what it can locally (0 cloud tokens); the heavier,
+/// The intents eri's on-device model is trusted to handle on its own —
+/// **data, not logic**, so the 50-task local eval (`scripts/eval`) can widen it
+/// by editing this list (or regenerating it) without touching control flow.
+/// **Local-first**: eri runs these locally (0 cloud tokens); the heavier,
 /// reasoning- or diffusion-shaped intents (build/edit/refactor/debug) stay on
-/// the bigger engines, and Claude is the escalation. This static capability gate
-/// is widened as the 50-task local eval (`scripts/eval`) proves the model;
-/// runtime low-confidence escalation layers on top.
+/// the bigger engines, and Claude is the escalation. Runtime low-confidence
+/// escalation layers on top.
+pub const LOCAL_CAPABLE_INTENTS: &[Intent] =
+    &[Intent::Chat, Intent::Voice, Intent::Search, Intent::Explain];
+
+/// Whether eri's on-device model is trusted to handle `intent` on its own.
 pub fn intent_is_local_capable(intent: Intent) -> bool {
-    matches!(
-        intent,
-        Intent::Chat | Intent::Voice | Intent::Search | Intent::Explain
-    )
+    LOCAL_CAPABLE_INTENTS.contains(&intent)
 }
 
 /// Local-first model choice: when an on-device model is configured AND the
