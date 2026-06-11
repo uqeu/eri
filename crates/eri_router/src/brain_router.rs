@@ -144,7 +144,22 @@ impl Router {
                 table.set(*intent, choice);
             }
         }
+        // Local-first: `ERI_LOCAL_MODEL=qwen2.5:1.5b` makes the on-device model
+        // the default for local-capable intents (explicit ERI_ROUTE_* overrides
+        // still win). Unset = cloud-only, unchanged behavior.
+        if let Ok(model) = std::env::var("ERI_LOCAL_MODEL") {
+            let model = model.trim();
+            if !model.is_empty() {
+                table.local_model = Some(model.to_string());
+            }
+        }
         Self::new(table)
+    }
+
+    /// Set eri's on-device model (the local-first default for local-capable
+    /// intents). Programmatic alternative to `ERI_LOCAL_MODEL`.
+    pub fn set_local_model(&mut self, model: impl Into<String>) {
+        self.overrides.local_model = Some(model.into());
     }
 
     pub fn classify(&self, prompt: &str, ctx: &PromptContext) -> Intent {
@@ -153,7 +168,14 @@ impl Router {
 
     pub fn route(&self, intent: Intent, _prompt: &str, ctx: &PromptContext) -> Plan {
         let (default_model, default_reasoning, default_temp) = default_route_for(intent);
-        let model = self.overrides.get(intent).cloned().unwrap_or(default_model);
+        // Precedence: explicit override > local-first (on-device model for a
+        // local-capable intent) > the baked-in cloud/Mercury default.
+        let model = match self.overrides.get(intent) {
+            Some(o) => o.clone(),
+            None => {
+                local_first_choice(intent, self.overrides.local_model.as_deref(), default_model)
+            }
+        };
         // If the prompt comes from voice and the user picked a non-Voice
         // intent, prefer Light reasoning to keep latency tight.
         let reasoning = if ctx.voice_input && matches!(intent, Intent::Voice) {
@@ -187,6 +209,9 @@ pub struct RouteTable {
     debug: Option<ModelChoice>,
     voice: Option<ModelChoice>,
     unknown: Option<ModelChoice>,
+    /// eri's configured on-device model id, if any. When set, local-capable
+    /// intents route to it (local-first) unless an explicit override exists.
+    local_model: Option<String>,
 }
 
 impl RouteTable {
@@ -275,6 +300,35 @@ fn default_route_for(intent: Intent) -> (ModelChoice, ReasoningLevel, f32) {
             ReasoningLevel::Light,
             0.4,
         ),
+    }
+}
+
+/// Whether eri's on-device model is trusted to handle an intent on its own.
+/// **Local-first**: eri runs what it can locally (0 cloud tokens); the heavier,
+/// reasoning- or diffusion-shaped intents (build/edit/refactor/debug) stay on
+/// the bigger engines, and Claude is the escalation. This static capability gate
+/// is widened as the 50-task local eval (`scripts/eval`) proves the model;
+/// runtime low-confidence escalation layers on top.
+pub fn intent_is_local_capable(intent: Intent) -> bool {
+    matches!(
+        intent,
+        Intent::Chat | Intent::Voice | Intent::Search | Intent::Explain
+    )
+}
+
+/// Local-first model choice: when an on-device model is configured AND the
+/// intent is local-capable, run it locally; otherwise use `fallback` (the
+/// cloud/Mercury default or an explicit override). Pure + testable.
+pub fn local_first_choice(
+    intent: Intent,
+    local_model: Option<&str>,
+    fallback: ModelChoice,
+) -> ModelChoice {
+    match local_model {
+        Some(m) if !m.trim().is_empty() && intent_is_local_capable(intent) => {
+            ModelChoice::Local(m.to_string())
+        }
+        _ => fallback,
     }
 }
 
@@ -650,5 +704,78 @@ mod tests {
         assert_eq!(plan.intent, Intent::Chat);
         assert!(matches!(plan.model, ModelChoice::Claude(_)));
         assert_eq!(plan.reasoning, ReasoningLevel::Light);
+    }
+
+    #[test]
+    fn intent_capability_gate_is_chat_shaped_only() {
+        for cap in [Intent::Chat, Intent::Voice, Intent::Search, Intent::Explain] {
+            assert!(
+                intent_is_local_capable(cap),
+                "{cap:?} should be local-capable"
+            );
+        }
+        for heavy in [
+            Intent::Edit,
+            Intent::Build,
+            Intent::Refactor,
+            Intent::Debug,
+            Intent::Unknown,
+        ] {
+            assert!(
+                !intent_is_local_capable(heavy),
+                "{heavy:?} stays on a bigger engine"
+            );
+        }
+    }
+
+    #[test]
+    fn local_first_choice_only_redirects_capable_intents_with_a_model() {
+        let cloud = ModelChoice::Claude("claude-haiku-4-5-20251001".into());
+        // No (or blank) local model -> always the fallback.
+        assert!(matches!(
+            local_first_choice(Intent::Chat, None, cloud.clone()),
+            ModelChoice::Claude(_)
+        ));
+        assert!(matches!(
+            local_first_choice(Intent::Chat, Some("  "), cloud.clone()),
+            ModelChoice::Claude(_)
+        ));
+        // Local model + capable intent -> Local.
+        match local_first_choice(Intent::Chat, Some("qwen2.5:1.5b"), cloud.clone()) {
+            ModelChoice::Local(m) => assert_eq!(m, "qwen2.5:1.5b"),
+            other => panic!("expected Local, got {other:?}"),
+        }
+        // Local model + heavy intent -> fallback (escalate to the bigger engine).
+        assert!(matches!(
+            local_first_choice(Intent::Build, Some("qwen2.5:1.5b"), ModelChoice::Mercury),
+            ModelChoice::Mercury
+        ));
+    }
+
+    #[test]
+    fn route_is_local_first_but_explicit_override_wins() {
+        // On-device model set -> Chat (capable) routes local; Build (heavy) doesn't.
+        let mut router = Router::new(RouteTable::defaults());
+        router.set_local_model("qwen2.5:1.5b");
+        assert!(matches!(
+            router.route(Intent::Chat, "hi", &ctx()).model,
+            ModelChoice::Local(_)
+        ));
+        assert!(matches!(
+            router.route(Intent::Build, "make x", &ctx()).model,
+            ModelChoice::Mercury
+        ));
+        // An explicit override beats local-first.
+        let mut table = RouteTable::defaults();
+        table.set(
+            Intent::Chat,
+            ModelChoice::Claude("claude-haiku-4-5-20251001".into()),
+        );
+        table.local_model = Some("qwen2.5:1.5b".into());
+        let r2 = Router::new(table);
+        assert!(matches!(
+            r2.route(Intent::Chat, "hi", &ctx()).model,
+            ModelChoice::Claude(_)
+        ));
     }
 }
