@@ -18,15 +18,9 @@
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::time::Instant;
-
 use anyhow::Context as _;
 use clap::{CommandFactory, Parser, Subcommand};
-use eri_core::{IterEvent, PromptCtx};
-use eri_inference::{
-    InferenceBackend, InferenceError, IterationRequest, MercuryBackend, MercuryConfig, TEMPLATES,
-    costs, deploy_to_vercel, extract_partial_html_body, template_by_slug,
-};
+use eri_inference::{InferenceError, TEMPLATES, deploy_to_vercel, template_by_slug};
 
 mod admin;
 mod agent;
@@ -67,10 +61,6 @@ mod worktree;
 
 const ERI_CLI_VERSION: &str = env!("CARGO_PKG_VERSION");
 const DEFAULT_OUTPUT_FILE: &str = "index.html";
-const DEFAULT_DENOISING_STEPS: u32 = 12;
-/// `iterate` requires a current draft to operate on. `12` mirrors the GUI's
-/// default iteration budget when no explicit budget is set.
-const ITERATE_DENOISING_STEPS: u32 = 12;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -911,41 +901,6 @@ fn run_init() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[allow(dead_code)]
-pub fn run(command: Command) -> Result<(), CliError> {
-    // Legacy sync entry-point kept for tests + back-compat. New async
-    // surface is `dispatch`.
-    match command {
-        Command::Build {
-            prompt,
-            deploy,
-            output,
-            mode: _,
-        } => run_build(&prompt, deploy, &output),
-        Command::Iterate {
-            instruction,
-            file,
-            mode: _,
-        } => run_iterate(&instruction, &file),
-        Command::ListTemplates => {
-            print_templates();
-            Ok(())
-        }
-        Command::Scaffold { slug, output } => run_scaffold(&slug, &output),
-        Command::Ship {
-            intent: None, dir, ..
-        } => run_deploy(dir.as_deref()),
-        // Everything else is agent-mode and runs on the async `dispatch` path.
-        // A single wildcard (not an exhaustive reject list) so adding a command
-        // no longer forces a third edit site here — the shadow stops taxing the
-        // real dispatcher. (The legacy Mercury arms above are kept as a dev /
-        // BYOK fallback; excising that chain is a separate dead-code sweep.)
-        _ => Err(CliError::User(
-            "agent-mode commands require the async dispatcher (`main`)".into(),
-        )),
-    }
-}
-
 /// Headless one-shot (`eri -p "..."`). Runs the agentic loop without the
 /// interactive UI and emits a result in the requested format. Returns the
 /// process exit code (2 when a turn cap is hit before completion).
@@ -1061,43 +1016,6 @@ async fn run_build_metered(
     }
     if deploy {
         let url = deploy_to_vercel(&workspace).map_err(anyhow::Error::from)?;
-        println!("deployed: {url}");
-    }
-    Ok(())
-}
-
-/// Legacy local build via the on-device Mercury backend. Unmetered — kept only
-/// as a dev / BYOK fallback (needs a local `MERCURY_API_KEY`). Not the default
-/// path; `run_build_metered` is.
-#[allow(dead_code)]
-fn run_build(prompt: &str, deploy: bool, output: &Path) -> Result<(), CliError> {
-    let prompt = prompt.trim();
-    if prompt.is_empty() {
-        return Err(CliError::User("build prompt is empty".into()));
-    }
-    let backend = build_backend()?;
-
-    let mut ctx = PromptCtx::default();
-    ctx.commit_transcript_chunk(prompt);
-
-    let request = IterationRequest::new(DEFAULT_DENOISING_STEPS, None);
-    let IterationOutcome { final_html, usage } =
-        stream_iteration(&backend, &ctx, request, "Generating")?;
-
-    let final_html =
-        final_html.ok_or_else(|| CliError::Mercury("Eri returned no HTML body".into()))?;
-
-    write_file(output, &final_html)?;
-    println!("wrote {} ({} bytes)", output.display(), final_html.len());
-    print_usage_line(usage.as_ref());
-
-    if deploy {
-        let deploy_dir = output
-            .parent()
-            .filter(|p| !p.as_os_str().is_empty())
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| PathBuf::from("."));
-        let url = deploy_to_vercel(&deploy_dir).map_err(CliError::from)?;
         println!("deployed: {url}");
     }
     Ok(())
@@ -1366,42 +1284,6 @@ async fn run_watch(seconds: u64) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Legacy local iterate via the on-device Mercury backend. Unmetered dev/BYOK
-/// fallback; `run_iterate_metered` is the default.
-#[allow(dead_code)]
-fn run_iterate(instruction: &str, file: &Path) -> Result<(), CliError> {
-    let instruction = instruction.trim();
-    if instruction.is_empty() {
-        return Err(CliError::User("iterate instruction is empty".into()));
-    }
-    let current_draft = std::fs::read_to_string(file)
-        .map_err(|err| CliError::User(format!("cannot read {}: {err}", file.display())))?;
-    if current_draft.trim().is_empty() {
-        return Err(CliError::User(format!(
-            "{} is empty — run `eri build` or `eri scaffold` first",
-            file.display()
-        )));
-    }
-    let backend = build_backend()?;
-
-    let mut ctx = PromptCtx::default();
-    ctx.commit_transcript_chunk(instruction);
-
-    let request = IterationRequest::new(ITERATE_DENOISING_STEPS, Some(current_draft.clone()));
-    let IterationOutcome { final_html, usage } =
-        stream_iteration(&backend, &ctx, request, "Iterating")?;
-
-    // For surgical iterations, the HTML body emerges from the partial-html
-    // callback (the edit path applies edits to the existing draft). For fall-back
-    // full-rewrites it emerges from the fenced response. If neither produced
-    // anything (the file was already good), keep the original.
-    let final_html = final_html.unwrap_or(current_draft);
-    write_file(file, &final_html)?;
-    println!("updated {} ({} bytes)", file.display(), final_html.len());
-    print_usage_line(usage.as_ref());
-    Ok(())
-}
-
 fn run_scaffold(slug: &str, output: &Path) -> Result<(), CliError> {
     let template = template_by_slug(slug).ok_or_else(|| {
         CliError::User(format!(
@@ -1437,89 +1319,6 @@ fn print_templates() {
     }
 }
 
-fn build_backend() -> Result<MercuryBackend, CliError> {
-    let config = MercuryConfig::from_env().ok_or_else(|| {
-        CliError::User("build key not set — configure Eri inference and retry".into())
-    })?;
-    Ok(MercuryBackend::new(config))
-}
-
-struct IterationOutcome {
-    final_html: Option<String>,
-    usage: Option<UsageSummary>,
-}
-
-struct UsageSummary {
-    model: String,
-    prompt_tokens: u32,
-    completion_tokens: u32,
-    total_tokens: u32,
-}
-
-fn stream_iteration(
-    backend: &MercuryBackend,
-    ctx: &PromptCtx,
-    request: IterationRequest,
-    verb: &str,
-) -> Result<IterationOutcome, CliError> {
-    let mut progress = ProgressLine::new(verb);
-    let mut accumulated_text = String::new();
-    let mut latest_partial_html: Option<String> = None;
-    let mut usage: Option<UsageSummary> = None;
-    let mut error_message: Option<String> = None;
-    let started = Instant::now();
-
-    let result = {
-        let mut on_event = |event: IterEvent| match event {
-            IterEvent::DraftToken { text } => {
-                accumulated_text.push_str(&text);
-                progress.tick(accumulated_text.len(), started);
-            }
-            IterEvent::Usage {
-                model,
-                prompt_tokens,
-                completion_tokens,
-                total_tokens,
-                ..
-            } => {
-                usage = Some(UsageSummary {
-                    model,
-                    prompt_tokens,
-                    completion_tokens,
-                    total_tokens,
-                });
-            }
-            IterEvent::Error { message } => {
-                error_message = Some(message);
-            }
-            IterEvent::Done
-            | IterEvent::DenoisingStep { .. }
-            | IterEvent::TargetClarification { .. }
-            | IterEvent::CandidatePatch { .. }
-            | IterEvent::CandidateAction { .. } => {}
-        };
-        let mut on_partial = |html: &str| {
-            latest_partial_html = Some(html.to_string());
-        };
-        backend.iterate_stream(ctx, request, &mut on_event, &mut on_partial)
-    };
-    progress.finish();
-    result.map_err(CliError::from)?;
-
-    if let Some(message) = error_message {
-        return Err(CliError::Mercury(message));
-    }
-
-    // Prefer the structured partial-html callback (already de-fenced) so the
-    // chat path and the surgical path resolve to the same value. Fall back to
-    // parsing the accumulated raw text for diff fences if the backend never
-    // emitted a partial-html update (rare; happens when the response was a
-    // tool-call-only surgical apply that materialized in one shot).
-    let final_html = latest_partial_html.or_else(|| extract_partial_html_body(&accumulated_text));
-
-    Ok(IterationOutcome { final_html, usage })
-}
-
 fn write_file(path: &Path, content: &str) -> Result<(), CliError> {
     if let Some(parent) = path.parent()
         && !parent.as_os_str().is_empty()
@@ -1530,87 +1329,6 @@ fn write_file(path: &Path, content: &str) -> Result<(), CliError> {
     }
     std::fs::write(path, content)
         .map_err(|err| CliError::User(format!("write {}: {err}", path.display())))
-}
-
-fn print_usage_line(usage: Option<&UsageSummary>) {
-    let Some(usage) = usage else {
-        return;
-    };
-    // The build and edit paths bill at different rates; choose the cost
-    // function by route name so the dollar figure matches the dashboard.
-    let dollars = if usage.model.contains("edit") {
-        costs::mercury_edit_2_cost(usage.prompt_tokens, usage.completion_tokens)
-    } else {
-        costs::mercury_2_cost(usage.prompt_tokens, usage.completion_tokens)
-    };
-    println!(
-        "tokens: prompt={} completion={} total={} ~${:.4}",
-        usage.prompt_tokens, usage.completion_tokens, usage.total_tokens, dollars
-    );
-}
-
-/// Single-line progress display. Uses `\r` to overwrite itself, then a final
-/// newline on completion so subsequent log lines start on a fresh row.
-struct ProgressLine {
-    verb: String,
-    // We only flush every ~5 ticks to keep the terminal from thrashing —
-    // The build stream can emit hundreds of tiny chunks per second.
-    tick_counter: u32,
-    last_chars: usize,
-    enabled: bool,
-}
-
-impl ProgressLine {
-    fn new(verb: &str) -> Self {
-        // Only animate when stderr is a TTY; otherwise (CI logs, pipes) we'd
-        // emit a wall of `\r` garbage. Stderr because that's where the
-        // progress line lives — stdout is reserved for the structured result
-        // so it remains pipe-safe.
-        let enabled = std::io::IsTerminal::is_terminal(&std::io::stderr());
-        let initial = format!("{verb}…");
-        if enabled {
-            let mut stderr = io::stderr().lock();
-            let _ = write!(stderr, "{initial}");
-            let _ = stderr.flush();
-        }
-        Self {
-            verb: verb.to_string(),
-            tick_counter: 0,
-            last_chars: 0,
-            enabled,
-        }
-    }
-
-    fn tick(&mut self, accumulated_chars: usize, started: Instant) {
-        self.last_chars = accumulated_chars;
-        self.tick_counter = self.tick_counter.wrapping_add(1);
-        // Throttle: redraw at most every 5 chunks; hot streams otherwise peg
-        // the terminal.
-        if !self.enabled || !self.tick_counter.is_multiple_of(5) {
-            return;
-        }
-        let elapsed = started.elapsed().as_secs_f32();
-        let mut stderr = io::stderr().lock();
-        let _ = write!(
-            stderr,
-            "\r{}… {} chars  {:.1}s   ",
-            self.verb, accumulated_chars, elapsed
-        );
-        let _ = stderr.flush();
-    }
-
-    fn finish(&mut self) {
-        if !self.enabled {
-            return;
-        }
-        let mut stderr = io::stderr().lock();
-        let _ = writeln!(
-            stderr,
-            "\r{} done — {} chars         ",
-            self.verb, self.last_chars
-        );
-        let _ = stderr.flush();
-    }
 }
 
 /// CLI-facing error wrapper. The `Display` impl is what the user sees on
