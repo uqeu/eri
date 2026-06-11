@@ -196,9 +196,17 @@ fn reasoning_amendment(level: ReasoningLevel) -> Option<&'static str> {
 /// reasonable defaults here.
 fn profile_for(choice: &ModelChoice) -> ModelProfile {
     match choice {
+        // Mercury is a fast diffusion EDITOR, not a long-context reasoner.
+        // A focused inline edit needs the prompt + the target file + diagnostics
+        // (usually well under 16K tokens); handing it ~56K was token spam that
+        // also dilutes edit quality. We deliberately cap the input budget tight
+        // (32K window - 8K output = ~24K input) so the budgeter keeps only the
+        // highest-priority context and drops extra open files — best
+        // quality/token ratio for the edit path. Tune empirically via the eval
+        // harness (scripts/eval) before loosening.
         ModelChoice::Mercury => ModelProfile {
             name: "mercury-2".to_string(),
-            context_window: 64_000,
+            context_window: 32_000,
             max_output: 8_192,
             tokenizer: eri_caveman::TokenizerKind::Cl100k,
         },
