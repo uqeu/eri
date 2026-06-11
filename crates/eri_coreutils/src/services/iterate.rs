@@ -651,53 +651,69 @@ pub(crate) async fn resolve_provider(
     })
 }
 
+/// Parse the BYOK dev flag value. Pure so it's testable without touching env.
+fn parse_byok_flag(value: Option<&str>) -> bool {
+    matches!(value.map(str::trim), Some("1") | Some("true") | Some("yes"))
+}
+
+/// Whether end-user **bring-your-own-key** is honored. OFF by default: eri is a
+/// harness — users spend eri credits through the proxy and do NOT run their own
+/// models. Only a developer build (`ERI_ALLOW_BYOK=1`) may bypass the proxy with
+/// a raw provider key. This is the enforcement point for "no user models."
+pub(crate) fn byok_allowed() -> bool {
+    parse_byok_flag(std::env::var("ERI_ALLOW_BYOK").ok().as_deref())
+}
+
 /// Resolve credentials via the existing secret cache.
 ///
-/// Two parallel lookups:
-/// * Session bearer + base URL → enables the eri.dev inference proxy when
-///   the user is signed in. The bearer is process-cached so cost is one
-///   round-trip per sidecar lifetime.
-/// * BYOK keys per vendor → if a user explicitly configured a power-user
-///   key in `SecretStorage`, that vendor bypasses the proxy.
+/// The **proxy** (session bearer + base URL) is the product path: signed-in
+/// users spend eri credits through the eri.dev inference proxy. Raw per-vendor
+/// BYOK keys are **dev-only** ([`byok_allowed`]) — skipped entirely otherwise,
+/// so an end user can never run on their own model account.
 ///
 /// Missing values are not fatal: the planner falls through to the next
 /// available auth mode or surfaces a [`BrainIterationError::MissingKey`].
 pub(crate) async fn collect_provider_keys(services: &Services) -> ProviderKeys {
-    let anthropic = services
-        .fetch_secret("anthropic", "anthropic-api-key")
-        .await
-        .unwrap_or(None);
-    let openai = services
-        .fetch_secret("openai", "openai-api-key")
-        .await
-        .unwrap_or(None);
-    let google = services
-        .fetch_secret("google", "google-api-key")
-        .await
-        .unwrap_or(None);
-    let inception = services
-        .fetch_secret("inception", "inception-api-key")
-        .await
-        .unwrap_or(None);
+    let mut keys = ProviderKeys::default();
+
+    // BYOK is dev-only. Skip the vendor-key lookups unless explicitly enabled,
+    // so the product always routes through the proxy (eri credits).
+    if byok_allowed() {
+        if let Some(k) = services
+            .fetch_secret("anthropic", "anthropic-api-key")
+            .await
+            .unwrap_or(None)
+        {
+            keys = keys.with_anthropic(k);
+        }
+        if let Some(k) = services
+            .fetch_secret("openai", "openai-api-key")
+            .await
+            .unwrap_or(None)
+        {
+            keys = keys.with_openai(k);
+        }
+        if let Some(k) = services
+            .fetch_secret("google", "google-api-key")
+            .await
+            .unwrap_or(None)
+        {
+            keys = keys.with_google(k);
+        }
+        if let Some(k) = services
+            .fetch_secret("inception", "inception-api-key")
+            .await
+            .unwrap_or(None)
+        {
+            keys = keys.with_inception(k);
+        }
+    }
+
     let session = services
         .secrets
         .eri_session_token(services.host_client.as_deref())
         .await;
     let base_url = services.secrets.eri_base_url();
-
-    let mut keys = ProviderKeys::default();
-    if let Some(k) = anthropic {
-        keys = keys.with_anthropic(k);
-    }
-    if let Some(k) = openai {
-        keys = keys.with_openai(k);
-    }
-    if let Some(k) = google {
-        keys = keys.with_google(k);
-    }
-    if let Some(k) = inception {
-        keys = keys.with_inception(k);
-    }
     if let Some(s) = session {
         keys = keys.with_proxy(s, base_url);
     }
@@ -864,6 +880,20 @@ mod tests {
     use super::*;
     use crate::TierState;
     use std::collections::HashSet;
+
+    #[test]
+    fn byok_is_off_unless_explicitly_enabled() {
+        // eri is a harness: no user models by default. Only an explicit dev
+        // flag value flips BYOK on; anything else (incl. unset) stays off.
+        assert!(!parse_byok_flag(None));
+        assert!(!parse_byok_flag(Some("")));
+        assert!(!parse_byok_flag(Some("0")));
+        assert!(!parse_byok_flag(Some("false")));
+        assert!(!parse_byok_flag(Some("anything")));
+        assert!(parse_byok_flag(Some("1")));
+        assert!(parse_byok_flag(Some(" true ")));
+        assert!(parse_byok_flag(Some("yes")));
+    }
 
     fn tier_with(features: &[&str]) -> SharedTierState {
         let mut set = HashSet::new();
