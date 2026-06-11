@@ -827,6 +827,83 @@ fn remember_goal(goal: &str, workspace: &Path) {
 /// calls `done` or hits the turn cap. Reuses the build loop's streaming
 /// (`consume_turn`) and request shaping so the protocol + prompt-caching are
 /// identical. Returns the model's final summary text.
+/// Token-frugal fast lane (Tier 0). Resolve obvious, single-step control goals
+/// to a deterministic action plan with **zero model tokens** — "open Spotify",
+/// "quit Cursor" must never cost a cloud call. Returns `None` for anything
+/// ambiguous or multi-step (those go to the reasoning loop). Conservative by
+/// design: only matches a known app so it can never actuate a wrong target.
+///
+/// This is the cheapest tier of eri's router; the loop consults it before any
+/// inference. Still actuated through the gate, so cancellation / refusal / the
+/// per-app denylist / confirmation all apply to whatever it produces.
+pub fn fast_route(goal: &str) -> Option<Vec<ControlAction>> {
+    let g = goal
+        .trim()
+        .to_lowercase()
+        .trim_end_matches(['.', '!', '?', ' '])
+        .to_string();
+    // Multi-step / multi-clause goals are not fast-lane material — let the loop
+    // plan them. A single conjunction is enough to bail.
+    if [" and ", " then ", " after ", ", ", " & ", " plus "]
+        .iter()
+        .any(|c| g.contains(c))
+    {
+        return None;
+    }
+    for verb in ["open ", "launch ", "start ", "boot up ", "fire up "] {
+        if let Some(rest) = g.strip_prefix(verb) {
+            return canonical_app(rest).map(|app| vec![ControlAction::OpenApp(app)]);
+        }
+    }
+    for verb in ["quit ", "close ", "force quit ", "force-quit ", "exit "] {
+        if let Some(rest) = g.strip_prefix(verb) {
+            return canonical_app(rest).map(|app| vec![ControlAction::QuitApp(app)]);
+        }
+    }
+    None
+}
+
+/// Map a spoken app target to its canonical macOS application name, if it's one
+/// we recognize. Returning `None` (not a guess) is what keeps the fast lane
+/// safe — an unknown target falls through to the reasoning loop instead of
+/// actuating a wrong `open -a`. Strip a leading article ("the spotify app").
+fn canonical_app(target: &str) -> Option<String> {
+    let t = target
+        .trim()
+        .trim_start_matches("the ")
+        .trim_end_matches(" app")
+        .trim();
+    let canonical = match t {
+        "safari" => "Safari",
+        "chrome" | "google chrome" => "Google Chrome",
+        "arc" => "Arc",
+        "firefox" => "Firefox",
+        "mail" | "apple mail" => "Mail",
+        "messages" | "imessage" => "Messages",
+        "calendar" => "Calendar",
+        "notes" => "Notes",
+        "reminders" => "Reminders",
+        "finder" => "Finder",
+        "terminal" => "Terminal",
+        "music" | "apple music" => "Music",
+        "spotify" => "Spotify",
+        "slack" => "Slack",
+        "discord" => "Discord",
+        "notion" => "Notion",
+        "obsidian" => "Obsidian",
+        "figma" => "Figma",
+        "zoom" => "zoom.us",
+        "preview" => "Preview",
+        "photos" => "Photos",
+        "cursor" => "Cursor",
+        "vscode" | "vs code" | "code" | "visual studio code" => "Visual Studio Code",
+        "xcode" => "Xcode",
+        "settings" | "system settings" | "system preferences" => "System Settings",
+        _ => return None,
+    };
+    Some(canonical.to_string())
+}
+
 pub async fn run_control_agent(
     goal: &str,
     model: &str,
@@ -846,6 +923,30 @@ pub async fn run_control_agent(
     // recorded as something eri is pursuing or folded into its memory.
     if crate::control_safety::is_cancellation(goal) {
         return Ok("Okay — stopped. Nothing was done. Tell me what you'd like instead.".to_string());
+    }
+    // Tier 0 — token-frugal fast lane. An obvious single-step command ("open
+    // Spotify", "quit Cursor") resolves to a deterministic plan with ZERO model
+    // tokens — eri never pays a cloud call to open an app. Still actuated through
+    // the gate, so cancellation / refusal / the per-app denylist / confirmation
+    // all apply to whatever the fast lane produced.
+    if let Some(plan) = fast_route(goal) {
+        let workspace = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        remember_goal(goal, &workspace);
+        let mut done: Vec<String> = Vec::new();
+        for action in &plan {
+            match gate.submit(bridge, action).await? {
+                Disposition::Executed(result) => done.push(result),
+                Disposition::NeedsConfirmation(desc) => {
+                    if confirm(&desc, action.permission()) {
+                        done.push(gate.confirm(bridge, action).await?);
+                    } else {
+                        return Ok(format!("Okay — skipped {desc}. Nothing else to do."));
+                    }
+                }
+                Disposition::Refused(msg) => return Ok(msg),
+            }
+        }
+        return Ok(format!("Done — {} (no model tokens used).", done.join("; ")));
     }
     let client = crate::build_agent::signed_in_client()?;
     let mut system = vec![json!({
@@ -1129,6 +1230,41 @@ mod tests {
             other => panic!("expected refusal, got {other:?}"),
         }
         assert!(bridge.calls().is_empty(), "must never type a secret");
+    }
+
+    #[test]
+    fn fast_route_opens_and_quits_known_apps_with_zero_tokens() {
+        // The whole point: these never reach a model.
+        assert_eq!(
+            fast_route("open Spotify"),
+            Some(vec![ControlAction::OpenApp("Spotify".into())])
+        );
+        assert_eq!(
+            fast_route("launch vs code"),
+            Some(vec![ControlAction::OpenApp("Visual Studio Code".into())])
+        );
+        assert_eq!(
+            fast_route("quit Cursor"),
+            Some(vec![ControlAction::QuitApp("Cursor".into())])
+        );
+        assert_eq!(
+            fast_route("close the slack app"),
+            Some(vec![ControlAction::QuitApp("Slack".into())])
+        );
+    }
+
+    #[test]
+    fn fast_route_declines_ambiguous_or_multistep_goals() {
+        // Multi-clause work goes to the reasoning loop, not the fast lane.
+        assert_eq!(fast_route("open my email and reply to Priya"), None);
+        // A website is not a known app — decline rather than open the wrong thing
+        // (this is what OpenUrl will handle next).
+        assert_eq!(fast_route("open youtube"), None);
+        // Never guess an unknown target.
+        assert_eq!(fast_route("open frobnicator"), None);
+        // Not an open/quit command at all.
+        assert_eq!(fast_route("what's this error?"), None);
+        assert_eq!(fast_route("click the blue button"), None);
     }
 
     #[tokio::test]
