@@ -240,9 +240,14 @@ fn provider_for(
         ModelChoice::Mercury => Err(BrainIterationError::UnsupportedModel(
             "mercury routing requires the in-process Mercury backend, not LlmProvider".into(),
         )),
-        ModelChoice::Local(id) => Err(BrainIterationError::UnsupportedModel(format!(
-            "local backend not wired: {id}"
-        ))),
+        // eri's on-device engine. Executable now via the LocalProvider seam
+        // (Ollama bootstrap backend; the candle in-process engine slots in
+        // behind it next). Empty model id is the only failure.
+        ModelChoice::Local(id) => crate::providers::local::LocalProvider::new(id.as_str())
+            .map(|p| Box::new(p) as Box<dyn LlmProvider>)
+            .ok_or_else(|| {
+                BrainIterationError::UnsupportedModel(format!("local: empty model id ({id:?})"))
+            }),
         ModelChoice::Claude(_) | ModelChoice::OpenAI(_) | ModelChoice::Gemini(_) => {
             let canonical = choice.model_id();
             provider_from_choice_with_keys(canonical, keys)
