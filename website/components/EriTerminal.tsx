@@ -18,7 +18,7 @@ import {
 // no Remotion in the page bundle, so it always runs and can't crash hydration.
 // Drag it by the title bar. Brand: dark glass, lime, Funnel Display.
 
-type Kind = "control" | "eyes" | "research" | "voice" | "build" | "memory";
+export type Kind = "control" | "eyes" | "research" | "voice" | "build" | "memory";
 
 interface Step {
   readonly label: string; // lime mono status
@@ -115,8 +115,17 @@ const STEP = 16; // frames per step reveal
 const HOLD = 30; // frames to hold a finished scene
 const sceneLen = (s: Scene): number => s.prompt.length * TYPE + s.steps.length * STEP + HOLD;
 
-export function EriTerminal({ className }: { readonly className?: string }): React.ReactElement {
-  const [active, setActive] = useState(0);
+export function EriTerminal({
+  className,
+  focus,
+}: {
+  readonly className?: string;
+  // When set, the pad locks to one capability (no tab bar) and loops that
+  // scene — used for the per-capability rows on the homepage.
+  readonly focus?: Kind;
+}): React.ReactElement {
+  const focusIndex = focus ? Math.max(0, SCENES.findIndex((s) => s.id === focus)) : -1;
+  const [active, setActive] = useState(focusIndex >= 0 ? focusIndex : 0);
   const [frame, setFrame] = useState(0);
   const [pos, setPos] = useState({ x: 0, y: 0 });
   const [collapsed, setCollapsed] = useState(false);
@@ -134,6 +143,7 @@ export function EriTerminal({ className }: { readonly className?: string }): Rea
         const scene = SCENES[active];
         if (f >= sceneLen(scene)) {
           if (hovered.current) return f; // hold finished scene while reading
+          if (focusIndex >= 0) return 0; // locked to one capability — loop it
           setActive((a) => (a + 1) % SCENES.length);
           return 0;
         }
@@ -232,8 +242,10 @@ export function EriTerminal({ className }: { readonly className?: string }): Rea
 
         {!collapsed && (
           <>
-            {/* tab bar — clicking REPLACES the scene */}
-            <div className="flex gap-1 overflow-x-auto border-b border-white/10 px-2 py-2">
+            {/* tab bar — clicking REPLACES the scene. Hidden when the pad is
+                focused on one capability (a homepage row demo). */}
+            {focusIndex < 0 && (
+              <div className="flex gap-1 overflow-x-auto border-b border-white/10 px-2 py-2">
               {SCENES.map((s, i) => {
                 const on = i === active;
                 return (
@@ -253,7 +265,8 @@ export function EriTerminal({ className }: { readonly className?: string }): Rea
                   </button>
                 );
               })}
-            </div>
+              </div>
+            )}
 
             {/* scene body — height animates to fit each scene (dynamic morph) */}
             <div
