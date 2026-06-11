@@ -1,10 +1,15 @@
-//! `eri research <query>` — one-shot web research via Claude's server-side web
-//! search. Honest by construction: it needs a real Claude key (BYOK via
-//! `ANTHROPIC_API_KEY`), surfaces real API errors, and never fabricates an
-//! answer. When no key is present it says so plainly instead of pretending.
+//! `eri research <query>` — one-shot web research via the model's built-in web
+//! search, run on the user's **eri token budget through the eri proxy**.
+//!
+//! eri is a harness: end users don't bring their own provider keys — they spend
+//! their eri plan's tokens via the signed-in proxy. So research routes through
+//! the eri session bearer (like build / iterate / control), never a raw provider
+//! key. Not signed in → tell them to sign in. Honest, and never fabricates.
 
 use anyhow::{Context, Result};
 use eri_inference::providers::anthropic::AnthropicProvider;
+
+use crate::config;
 
 /// Anthropic wire model id eri uses for Sonnet (matches the rest of the stack).
 const WIRE_MODEL: &str = "claude-sonnet-4-6";
@@ -15,18 +20,20 @@ pub fn research(query: &str) -> Result<()> {
         anyhow::bail!("research needs a question, e.g. eri research \"what is pgvector?\"");
     }
 
-    let Some(key) = anthropic_key() else {
+    // eri tokens, via the proxy — no bring-your-own-key for end users.
+    let creds = config::load().context("load eri credentials")?;
+    let Some(bearer) = creds.bearer() else {
         println!(
-            "eri research searches the live web, so it needs a provider key.\n\
-             Set it and try again:\n\
-             \n  export ANTHROPIC_API_KEY=sk-ant-...\n  eri research \"{query}\"\n\
-             \n(Cloud research for signed-in users is coming; for now it's bring-your-own-key.)"
+            "eri research runs on your eri tokens, so it needs you signed in:\n\
+             \n  eri auth login\n  eri research \"{query}\"\n"
         );
         return Ok(());
     };
 
-    let provider =
-        AnthropicProvider::for_model_with_key(WIRE_MODEL, key).context("build Claude provider")?;
+    // Route through the eri inference proxy (Bearer = the eri session), so the
+    // web search is billed to the user's eri plan — not a provider key.
+    let provider = AnthropicProvider::for_model_with_proxy(WIRE_MODEL, bearer, &creds.base_url())
+        .context("build eri research provider")?;
 
     println!("eri is searching…\n");
     let answer = provider.search_web(query).context("web search")?;
@@ -37,12 +44,4 @@ pub fn research(query: &str) -> Result<()> {
         println!("{answer}");
     }
     Ok(())
-}
-
-/// BYOK key from the environment. Trimmed; empty is treated as absent.
-fn anthropic_key() -> Option<String> {
-    std::env::var("ANTHROPIC_API_KEY")
-        .ok()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
 }

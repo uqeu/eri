@@ -61,9 +61,13 @@ The single seam (`LoopOpts::from_capabilities` / `for_run`) that decides one age
 _Avoid_: config, options bag, setup.
 
 **Provider acquisition**:
-The single seam (`resolve_provider(services, choice)`) that turns a model choice + the user's keys into a provider, routing BYOK → proxy → env. Callers holding `&Services` go through it so signed-in / power-user keys are honored. (The CLI's `eri research` stays env-BYOK — it has no `Services`.)
-_Avoid_: provider factory, client builder, LLM selection.
+The single seam (`resolve_provider(services, choice)`) that turns a model choice into a provider. End users run on **eri tokens via the eri proxy** (the signed-in `eri_sk_…` bearer) — they do **not** bring their own keys. The seam routes proxy first; raw provider keys (env / BYOK) are a developer fallback only, never the product path. `eri research` routes through the proxy bearer (eri tokens), like build / iterate / control.
+_Avoid_: provider factory, client builder, LLM selection, BYOK (not an end-user concept).
+
+**eri tokens**:
+The unit of a user's plan budget. Everything a signed-in user does (build, control, research, …) spends eri tokens through the proxy; there is no bring-your-own-key. eri is a **harness** — it gives the user a budget and runs work against it.
+_Avoid_: credits (internal billing weight), API usage, BYOK.
 
 **Tier**:
-The user's plan — Free, Starter, Pro, Pro+, Teams — which sizes the eri context window, retention window, token budget, and rate limits.
+The user's plan — Free, Starter, Pro, Pro+, Teams — which sizes the eri context window, retention window, eri-token budget, and rate limits.
 _Avoid_: plan-level, subscription (those are billing terms; the agent sizing concept is the tier).

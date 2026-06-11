@@ -517,8 +517,8 @@ window.eriBridgeResult = (result = {}) => {
       const m = state.thread[state._researchIdx];
       if (m.text === "Searching the web…" || !m.text.trim()) {
         m.text = state.account
-          ? "I couldn't pull anything back just then — try again, or set ANTHROPIC_API_KEY for web research."
-          : "Web research needs a key for now — set ANTHROPIC_API_KEY, then ask me again.";
+          ? "I couldn't pull anything back just then — mind trying that again?"
+          : "Sign in and I'll research it on your eri tokens — that's where my web search runs.";
       }
     }
     state._researchIdx = null;
