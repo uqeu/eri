@@ -58,11 +58,11 @@ export function Hero(): React.ReactElement {
                 the glass reads as "floating on light," not a yellow wash. */}
             <div
               className="absolute inset-0"
-              style={{ background: "radial-gradient(50% 44% at 50% 40%, rgba(255,255,255,0.05), transparent 72%)" }}
+              style={{ background: "radial-gradient(56% 52% at 50% 52%, rgba(255,255,255,0.06), transparent 72%)" }}
             />
             <div
               className="absolute inset-0"
-              style={{ background: "radial-gradient(40% 34% at 50% 46%, rgba(224,255,79,0.05), transparent 70%)" }}
+              style={{ background: "radial-gradient(46% 42% at 50% 56%, rgba(224,255,79,0.07), transparent 68%)" }}
             />
             <div
               className="absolute inset-0 opacity-50"

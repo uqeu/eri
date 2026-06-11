@@ -182,13 +182,14 @@ export function EriTerminal({ className }: { readonly className?: string }): Rea
         style={{
           transform: `translate(${pos.x}px, ${pos.y}px)`,
           background:
-            "linear-gradient(180deg, rgba(22,22,25,0.55) 0%, rgba(10,10,12,0.66) 100%)",
-          backdropFilter: "blur(28px) saturate(1.5)",
-          WebkitBackdropFilter: "blur(28px) saturate(1.5)",
-          // true glass: inset top highlight (edge refraction) + faint inner
-          // hairline + subtle lime ring + deep soft drop shadow.
+            "linear-gradient(180deg, rgba(28,28,32,0.58) 0%, rgba(10,10,12,0.68) 100%)",
+          backdropFilter: "blur(30px) saturate(1.6)",
+          WebkitBackdropFilter: "blur(30px) saturate(1.6)",
+          // true glass: crisp inset top highlight (edge refraction) + faint inner
+          // hairline + lime ring + a soft lime halo so the pad floats on light,
+          // over a deep soft drop shadow for depth.
           boxShadow:
-            "inset 0 1px 0 rgba(255,255,255,0.10), inset 0 0 0 1px rgba(255,255,255,0.035), 0 0 0 1px rgba(224,255,79,0.10), 0 50px 100px -32px rgba(0,0,0,0.95)",
+            "inset 0 1px 0 rgba(255,255,255,0.14), inset 0 0 0 1px rgba(255,255,255,0.04), 0 0 0 1px rgba(224,255,79,0.12), 0 0 64px -12px rgba(224,255,79,0.10), 0 50px 100px -32px rgba(0,0,0,0.95)",
         }}
       >
         {/* title bar — drag handle */}
@@ -243,8 +244,8 @@ export function EriTerminal({ className }: { readonly className?: string }): Rea
                     aria-pressed={on}
                     className={`flex flex-shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12px] transition-all duration-200 ${
                       on
-                        ? "bg-white/[0.08] text-text shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]"
-                        : "text-text-sec hover:bg-white/[0.04] hover:text-text"
+                        ? "bg-[rgba(224,255,79,0.09)] text-text shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] ring-1 ring-inset ring-[rgba(224,255,79,0.22)]"
+                        : "text-text-sec hover:bg-white/[0.05] hover:text-text"
                     }`}
                   >
                     <span className={on ? "text-accent" : "text-text-ter"}>{s.icon}</span>
