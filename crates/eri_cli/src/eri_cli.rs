@@ -52,6 +52,7 @@ mod plan_tui;
 mod plugins;
 mod proactive;
 mod project;
+mod voice_control;
 mod repl;
 mod research;
 mod sandbox;
@@ -360,6 +361,19 @@ pub enum Command {
         suggest: bool,
         /// The goal, e.g. "open YouTube and search lofi".
         goal: Vec<String>,
+    },
+    /// Drive eri hands-free from recognized speech. The macOS app pipes
+    /// transcripts here; eri classifies wake/stop/command/noise and acts,
+    /// speaking a short reply back. e.g. eri voice "hey eri, open Spotify".
+    Voice {
+        /// Actually actuate (same as `eri control --live`).
+        #[arg(long)]
+        live: bool,
+        /// Auto-confirm risky actions.
+        #[arg(long)]
+        yes: bool,
+        /// The recognized speech.
+        transcript: Vec<String>,
     },
     /// Ambient awareness: watch the screen locally and narrate what changes.
     /// Token-frugal (reads the cheap accessibility tree, not pixels). Needs the
@@ -806,7 +820,12 @@ async fn dispatch(cli: Cli) -> anyhow::Result<()> {
             history,
             suggest,
             goal,
-        } => run_control(&goal.join(" "), live, yes, mode, undo, history, suggest).await,
+        } => run_control(&goal.join(" "), live, yes, mode, undo, history, suggest, false).await,
+        Command::Voice {
+            live,
+            yes,
+            transcript,
+        } => run_voice(&transcript.join(" "), live, yes).await,
         Command::Apps { action } => run_apps(&action),
         Command::Brief => memory::brief(),
         Command::Research { query } => research::research(&query.join(" ")),
@@ -1161,6 +1180,7 @@ fn run_apps(action: &[String]) -> anyhow::Result<()> {
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)] // CLI flag handler: each arg is a distinct `eri control` flag.
 async fn run_control(
     goal: &str,
     live: bool,
@@ -1169,6 +1189,7 @@ async fn run_control(
     undo: bool,
     history: bool,
     suggest: bool,
+    spoken: bool,
 ) -> anyhow::Result<()> {
     // Trust layer: "what did eri do?" and undo, both read the persisted trail.
     let log_path = action_log::default_log_path();
@@ -1314,6 +1335,36 @@ async fn run_control(
             println!(
                 "\n[eri] dry-run — nothing was actuated. This is what eri would do:\n{summary}"
             );
+        }
+        // Hands-free: emit a short, TTS-ready line the app speaks back.
+        if spoken {
+            println!("[eri:speak] {}", voice_control::spoken_reply(&summary));
+        }
+    }
+    Ok(())
+}
+
+/// `eri voice "<transcript>"`: drive eri hands-free from recognized speech. The
+/// macOS app's speech recognizer pipes transcripts here; this classifies the
+/// utterance (wake / stop / command / noise) and acts — speaking a short reply
+/// for the Control path.
+async fn run_voice(transcript: &str, live: bool, yes: bool) -> anyhow::Result<()> {
+    match voice_control::classify_utterance(transcript) {
+        voice_control::VoiceIntent::Wake => {
+            println!("[eri] listening — what would you like?");
+            println!("[eri:speak] I'm listening.");
+        }
+        voice_control::VoiceIntent::Stop => {
+            println!("[eri] okay, stopped.");
+            println!("[eri:speak] Okay, stopped.");
+        }
+        voice_control::VoiceIntent::Ignore(reason) => {
+            // Heard noise, not a command — stay quiet (just a log line).
+            println!("[eri] (ignored speech: {reason})");
+        }
+        voice_control::VoiceIntent::Control(goal) => {
+            println!("[eri] heard: {goal:?}");
+            run_control(&goal, live, yes, None, false, false, false, true).await?;
         }
     }
     Ok(())
