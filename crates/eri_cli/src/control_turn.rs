@@ -459,18 +459,26 @@ pub fn control_turn_log(engine: &str, goal: &str, out: &TurnOutput) -> ControlTu
     }
 }
 
-/// Record a control turn to the self-improvement log. Best-effort and never
-/// blocks the loop; skipped under test to keep the engine-agnostic loop free of
-/// filesystem side effects. Sinks to the local learn-do memory today; the richer
-/// `eri_graph` causal log is the future target (Candidate B).
-pub(crate) fn record_control_turn(engine: &str, goal: &str, out: &TurnOutput) {
-    if cfg!(test) {
-        return;
-    }
-    let log = control_turn_log(engine, goal, out);
-    let workspace = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-    if let Ok(mut store) = eri_inference::memory::MemoryStore::open() {
-        let _ = store.insert("control_turn", &workspace, &log.summary());
+/// Where control-turn records go. A real seam (not a `cfg!(test)` branch): prod
+/// uses [`MemorySink`]; tests use a recording double and assert the sequence. So
+/// "did the loop log the right thing on the right turn?" — including across an
+/// escalation — is verifiable, which it wasn't when the sink no-op'd under test.
+pub trait ControlTurnSink: Send + Sync {
+    fn record(&self, log: ControlTurnLog);
+}
+
+/// Production sink: appends each turn to the local learn-do memory so the
+/// routing can later learn where local was enough vs. where it escalated. Best
+/// effort — never blocks the loop. The richer `eri_graph` causal log is the
+/// future target (Candidate B); this is the same seam it plugs into.
+pub struct MemorySink;
+
+impl ControlTurnSink for MemorySink {
+    fn record(&self, log: ControlTurnLog) {
+        let workspace = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        if let Ok(mut store) = eri_inference::memory::MemoryStore::open() {
+            let _ = store.insert("control_turn", &workspace, &log.summary());
+        }
     }
 }
 

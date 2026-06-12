@@ -22,7 +22,7 @@ use serde_json::{Value, json};
 
 use eri_inference::memory::MemoryStore;
 
-use crate::control_turn::record_control_turn;
+use crate::control_turn::{ControlTurnSink, control_turn_log};
 
 /// One node of the accessibility "screen graph" — a thing actually on screen.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -1017,6 +1017,7 @@ pub(crate) async fn drive_control_loop(
     bridge: &dyn ControlBridge,
     gate: &ControlGate,
     confirm: &mut dyn FnMut(&str, Option<crate::control_safety::Permission>) -> bool,
+    sink: &dyn ControlTurnSink,
     system: &[Value],
     tools: &Value,
     goal: &str,
@@ -1056,9 +1057,11 @@ pub(crate) async fn drive_control_loop(
                 return Err(e);
             }
         };
-        // Self-improvement log: every control turn is recorded (engine + outcome)
-        // so the routing can learn where local was enough vs. where it escalated.
-        record_control_turn(turn.engine(), goal, &out);
+        // Self-improvement log: every control turn that produced output is
+        // recorded (engine + outcome) so the routing can learn where local was
+        // enough vs. where it escalated. Through the sink seam, so tests can
+        // assert this sequence.
+        sink.record(control_turn_log(turn.engine(), goal, &out));
         step += 1;
 
         if !out.text.trim().is_empty() {
@@ -1137,7 +1140,15 @@ pub async fn run_control_agent(
     let refs: Vec<&dyn crate::control_turn::ControlTurn> =
         engines.iter().map(|e| e.as_ref()).collect();
     drive_control_loop(
-        &refs, bridge, gate, confirm, &system, &tools, goal, max_turns,
+        &refs,
+        bridge,
+        gate,
+        confirm,
+        &crate::control_turn::MemorySink,
+        &system,
+        &tools,
+        goal,
+        max_turns,
     )
     .await
 }
@@ -1857,6 +1868,21 @@ mod tests {
         }
     }
 
+    /// A recording sink — the test double that makes the self-improvement log
+    /// verifiable. Replaces the old `cfg!(test)` no-op.
+    #[derive(Default)]
+    struct RecordingSink(Mutex<Vec<crate::control_turn::ControlTurnLog>>);
+    impl crate::control_turn::ControlTurnSink for RecordingSink {
+        fn record(&self, log: crate::control_turn::ControlTurnLog) {
+            self.0.lock().unwrap().push(log);
+        }
+    }
+    impl RecordingSink {
+        fn logs(&self) -> Vec<crate::control_turn::ControlTurnLog> {
+            self.0.lock().unwrap().clone()
+        }
+    }
+
     fn tool_call_turn(id: &str, name: &str, input: Value) -> crate::control_turn::TurnOutput {
         crate::control_turn::TurnOutput {
             assistant_content: json!([{ "type": "tool_use", "id": id, "name": name, "input": input }]),
@@ -1889,6 +1915,7 @@ mod tests {
                 Ok(done_turn("Opened Safari.")),
             ],
         );
+        let sink = RecordingSink::default();
         let system = vec![json!({ "type": "text", "text": "sys" })];
         let tools = json!(tool_specs());
         let out = drive_control_loop(
@@ -1896,6 +1923,7 @@ mod tests {
             &bridge,
             &gate,
             &mut confirm,
+            &sink,
             &system,
             &tools,
             "open Safari please",
@@ -1905,6 +1933,50 @@ mod tests {
         .unwrap();
         assert_eq!(out, "Opened Safari.");
         assert_eq!(bridge.calls(), vec!["open:Safari"]);
+        // Both turns were recorded to the self-improvement log, tagged "local".
+        let logs = sink.logs();
+        assert_eq!(logs.len(), 2);
+        assert!(logs.iter().all(|l| l.engine == "local"));
+        assert_eq!(logs[0].tool_names, vec!["open_app"]);
+    }
+
+    #[tokio::test]
+    async fn instrumentation_attributes_each_turn_to_the_engine_that_ran_it() {
+        // The correctness gap the sink seam closes: when local fails and the
+        // loop escalates, the recorded turns must be tagged "claude" (the engine
+        // that actually produced them) — not the engine that was tried first.
+        let bridge = MockBridge::with_snapshot(graph());
+        let gate = ControlGate::default();
+        let mut confirm = |_: &str, _: Option<crate::control_safety::Permission>| true;
+        let local = StubTurn::new("local", vec![Err("unreachable".into())]);
+        let claude = StubTurn::new(
+            "claude",
+            vec![
+                Ok(tool_call_turn("c1", "open_app", json!({ "name": "Safari" }))),
+                Ok(done_turn("done")),
+            ],
+        );
+        let sink = RecordingSink::default();
+        let system = vec![json!({ "type": "text", "text": "sys" })];
+        let tools = json!(tool_specs());
+        drive_control_loop(
+            &[&local, &claude],
+            &bridge,
+            &gate,
+            &mut confirm,
+            &sink,
+            &system,
+            &tools,
+            "open Safari",
+            8,
+        )
+        .await
+        .unwrap();
+        let logs = sink.logs();
+        // The failed local turn produced no output → not recorded; the two cloud
+        // turns are, both tagged "claude".
+        assert_eq!(logs.len(), 2);
+        assert!(logs.iter().all(|l| l.engine == "claude"));
     }
 
     #[tokio::test]
@@ -1924,6 +1996,7 @@ mod tests {
                 Ok(done_turn("Done via cloud.")),
             ],
         );
+        let sink = RecordingSink::default();
         let system = vec![json!({ "type": "text", "text": "sys" })];
         let tools = json!(tool_specs());
         let out = drive_control_loop(
@@ -1931,6 +2004,7 @@ mod tests {
             &bridge,
             &gate,
             &mut confirm,
+            &sink,
             &system,
             &tools,
             "open Safari",
@@ -1950,6 +2024,7 @@ mod tests {
         let gate = ControlGate::default();
         let mut confirm = |_: &str, _: Option<crate::control_safety::Permission>| true;
         let local = StubTurn::new("local", vec![Err("engine unreachable".into())]);
+        let sink = RecordingSink::default();
         let system = vec![json!({ "type": "text", "text": "sys" })];
         let tools = json!(tool_specs());
         let err = drive_control_loop(
@@ -1957,6 +2032,7 @@ mod tests {
             &bridge,
             &gate,
             &mut confirm,
+            &sink,
             &system,
             &tools,
             "open Safari",
@@ -1978,6 +2054,7 @@ mod tests {
             .map(|_| Ok(tool_call_turn("x", "screen_observe", json!({}))))
             .collect();
         let stub = StubTurn::new("local", spin);
+        let sink = RecordingSink::default();
         let system = vec![json!({ "type": "text", "text": "sys" })];
         let tools = json!(tool_specs());
         let out = drive_control_loop(
@@ -1985,6 +2062,7 @@ mod tests {
             &bridge,
             &gate,
             &mut confirm,
+            &sink,
             &system,
             &tools,
             "do the thing",
