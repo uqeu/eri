@@ -286,6 +286,30 @@ mod tests {
         assert_eq!(r.cost_usd, 0.0, "on-device is always free");
     }
 
+    /// A transport that always fails — models the "local-first is on but the
+    /// on-device model isn't running" failure mode (/diagnose loop).
+    struct FailingTransport;
+    impl LocalTransport for FailingTransport {
+        fn chat(&self, _s: &str, _u: &str, _m: u32) -> Result<LocalReply, InferenceError> {
+            Err(InferenceError::Transport("engine unreachable".into()))
+        }
+    }
+
+    #[test]
+    fn local_failure_surfaces_an_error_not_a_silent_empty_reply() {
+        // /diagnose finding (captured): when the local engine is unreachable,
+        // complete() returns an Err — it does NOT silently yield empty text.
+        // NOTE: there is no runtime local->cloud fallback at THIS layer; the
+        // escalation seam is the ControlTurn design (Candidate A). This test
+        // locks in honest failure (no silent success) until that lands.
+        let p = LocalProvider::with_transport("qwen2.5:1.5b", Box::new(FailingTransport))
+            .expect("model id");
+        let err = p
+            .complete("sys", "user", 64)
+            .expect_err("must surface the failure");
+        assert!(matches!(err, InferenceError::Transport(_)));
+    }
+
     #[test]
     fn ollama_transport_builds_a_chat_request() {
         let t = OllamaTransport::new("http://localhost:11434", "qwen2.5:1.5b");
