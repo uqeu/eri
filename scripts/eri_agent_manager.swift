@@ -83,6 +83,12 @@ final class AgentManagerController: NSObject, NSWindowDelegate, WKNavigationDele
     private var controlEndpoint: String?
     private var controlToken: String?
     private var panicMonitor: Any?
+    // Hands-free voice → control. When on, recognized speech routes to
+    // `eri voice` (actuate the computer) instead of the chat composer, and eri
+    // speaks its reply back via native TTS. Off by default → the existing
+    // voice→chat path is untouched.
+    private var voiceControlMode = false
+    private let speechSynth = AVSpeechSynthesizer()
 
     init(args: LaunchArgs) {
         self.args = args
@@ -238,6 +244,12 @@ final class AgentManagerController: NSObject, NSWindowDelegate, WKNavigationDele
             startControl(goal: goal)
         case "panicStop":
             panicStop()
+        // Toggle hands-free voice → control. When on, recognized speech drives
+        // `eri voice` (actuate) instead of the chat composer. The webview calls
+        // this when entering/leaving Control mode.
+        case "setVoiceControl":
+            voiceControlMode = (payload["on"] as? Bool) ?? false
+            reply(command: command, status: "ok", detail: voiceControlMode ? "on" : "off")
 
         // Indexed sources from the graphify knowledge graph.
         case "openSources", "attachContext":
@@ -658,6 +670,65 @@ final class AgentManagerController: NSObject, NSWindowDelegate, WKNavigationDele
         }
     }
 
+    /// Speak a short line via native macOS TTS (the `[eri:speak]` reply line).
+    private func speak(_ text: String) {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty else { return }
+        if speechSynth.isSpeaking { speechSynth.stopSpeaking(at: .immediate) }
+        speechSynth.speak(AVSpeechUtterance(string: t))
+    }
+
+    /// Hands-free voice → control: drive `eri voice <transcript>` (live when the
+    /// control server is up, else dry-run), stream its output to the control
+    /// view, and SPEAK the `[eri:speak]` reply line. Mirrors startControl's spawn
+    /// + env so actuation, redaction, and the token are wired identically.
+    private func runVoiceControl(_ transcript: String) {
+        let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let eri = eriBinaryURL() else { return }
+        ensureControlServer { [weak self] endpoint in
+            guard let self = self else { return }
+            let process = Process()
+            let pipe = Pipe()
+            process.executableURL = eri
+            var arguments = ["voice"]
+            if endpoint != nil { arguments.append("--live") } // actuate only if the bridge is up
+            arguments.append(trimmed)
+            process.arguments = arguments
+            process.currentDirectoryURL = self.workspaceURL()
+            var env = ProcessInfo.processInfo.environment
+            if let endpoint = endpoint { env["ERI_CONTROL_ENDPOINT"] = endpoint }
+            if let token = self.controlToken { env["ERI_CONTROL_TOKEN"] = token }
+            if let redact = self.resolveRepoFile(["scripts", "eri_redact.py"]) {
+                env["ERI_REDACT_SCRIPT"] = redact.path
+            }
+            process.environment = env
+            process.standardOutput = pipe
+            process.standardError = pipe
+            let handle = pipe.fileHandleForReading
+            handle.readabilityHandler = { [weak self] h in
+                let chunk = h.availableData
+                guard !chunk.isEmpty, let text = String(data: chunk, encoding: .utf8) else { return }
+                for line in text.split(whereSeparator: { $0 == "\n" || $0 == "\r" }) where !line.isEmpty {
+                    let s = String(line)
+                    DispatchQueue.main.async {
+                        // The CLI marks its spoken reply with `[eri:speak] …`.
+                        if let r = s.range(of: "[eri:speak]") {
+                            self?.speak(String(s[r.upperBound...]))
+                        }
+                        self?.eval("window.eriStreamEvent && window.eriStreamEvent(\("control".debugDescription), \(self?.jsArg(s) ?? "\"\""));")
+                    }
+                }
+            }
+            process.terminationHandler = { [weak handle] _ in handle?.readabilityHandler = nil }
+            do {
+                try process.run()
+                self.runningProcesses.append(process)
+            } catch {
+                self.emitStream(command: "control", kind: "error", text: "voice control failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
     /// Halt all actuation immediately: kill the control loop processes and the
     /// actuation server. Bound to a global hotkey (⌘⌥⎋) + the panicStop command.
     private func panicStop() {
@@ -855,12 +926,24 @@ final class AgentManagerController: NSObject, NSWindowDelegate, WKNavigationDele
             if let result = result {
                 let text = result.bestTranscription.formattedString
                 let final = result.isFinal
-                let payload = "{\"type\":\"partial\",\"text\":\(self.jsArg(text)),\"final\":\(final)}"
-                self.emitSignal("startVoice", json: payload)
-                if final {
-                    self.teardownAudio()
-                    // hands-free: re-arm for the next utterance unless the user turned voice off
-                    if self.voiceActive { DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in self?.rearm() } }
+                if self.voiceControlMode {
+                    // Control mode: surface the transcript as control input (a
+                    // distinct type so the chat composer does NOT auto-send it),
+                    // and on final, drive `eri voice` instead of chat.
+                    self.emitSignal("startVoice", json: "{\"type\":\"control_partial\",\"text\":\(self.jsArg(text)),\"final\":\(final)}")
+                    if final {
+                        self.teardownAudio()
+                        self.runVoiceControl(text)
+                        if self.voiceActive { DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in self?.rearm() } }
+                    }
+                } else {
+                    let payload = "{\"type\":\"partial\",\"text\":\(self.jsArg(text)),\"final\":\(final)}"
+                    self.emitSignal("startVoice", json: payload)
+                    if final {
+                        self.teardownAudio()
+                        // hands-free: re-arm for the next utterance unless the user turned voice off
+                        if self.voiceActive { DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in self?.rearm() } }
+                    }
                 }
             }
             if error != nil { self.teardownAudio() }

@@ -366,6 +366,9 @@ function runCommand(command, data = {}) {
       break;
     case "setMode":
       state.mode = data.mode || state.mode;
+      // Hands-free: route recognized speech to computer control while in
+      // Control mode, back to the chat composer otherwise.
+      native("setVoiceControl", { on: state.mode === "control" });
       break;
     case "setCanvas":
       state.canvas = data.canvas || state.canvas;
