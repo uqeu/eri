@@ -8,6 +8,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "demo:studio": "remotion studio remotion/index.ts",
     "demo:render": "remotion render remotion/index.ts EriLoop public/demos/eri-loop.mp4"
@@ -42,6 +43,7 @@
     "postcss": "8.4.47",
     "react-email": "3.0.4",
     "tailwindcss": "3.4.13",
-    "typescript": "5.6.2"
+    "typescript": "5.6.2",
+    "vitest": "^2.1.9"
   }
 }
