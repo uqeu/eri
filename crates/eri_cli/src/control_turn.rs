@@ -81,9 +81,52 @@ pub fn parse_local_tool_calls(message: &Value) -> Vec<(String, String, Value)> {
                 Some(obj) => obj.clone(),
                 None => json!({}),
             };
+            // Small models pick the right tool but often the wrong argument KEY;
+            // normalise to the spec's canonical keys before the strict shared
+            // parser sees them.
+            let input = normalise_local_args(&name, &input);
             Some((format!("local-{i}"), name, input))
         })
         .collect()
+}
+
+/// Per-tool alias map: the spec's canonical key, and the keys small models tend
+/// to emit instead. Order = preference; first present alias wins.
+fn local_arg_aliases(tool: &str) -> &'static [(&'static str, &'static [&'static str])] {
+    match tool {
+        "open_app" | "quit_app" => {
+            &[("name", &["app_name", "application", "app", "appname", "app_name"])]
+        }
+        "type" => &[("text", &["string", "value", "content", "input", "txt"])],
+        "key" => &[("combo", &["key", "keys", "shortcut", "combination", "hotkey"])],
+        "click" => &[("element", &["id", "target", "element_id", "elementid"])],
+        "wait" => &[("ms", &["milliseconds", "duration", "time", "millis"])],
+        _ => &[],
+    }
+}
+
+/// Rewrite a local tool call's arguments to the spec's canonical keys. This is
+/// the seam that absorbs small-model sloppiness (`{"app_name":"Safari"}` →
+/// `{"name":"Safari"}`) so the strict, cloud-shared [`crate::control_agent::parse_action`]
+/// stays strict. Pure + table-driven: only renames a canonical key that's
+/// MISSING, taking the first alias present; everything else passes through.
+pub fn normalise_local_args(tool: &str, input: &Value) -> Value {
+    let Some(obj) = input.as_object() else {
+        return input.clone();
+    };
+    let mut out = obj.clone();
+    for (canonical, alts) in local_arg_aliases(tool) {
+        if out.contains_key(*canonical) {
+            continue;
+        }
+        for alias in *alts {
+            if let Some(v) = out.remove(*alias) {
+                out.insert((*canonical).to_string(), v);
+                break;
+            }
+        }
+    }
+    Value::Object(out)
 }
 
 /// Translate eri's Anthropic-style tool specs ([`crate::control_agent::tool_specs`])
@@ -531,6 +574,63 @@ mod tests {
     fn no_tool_calls_is_an_empty_vec_not_an_error() {
         let msg = json!({ "role": "assistant", "content": "all done" });
         assert!(parse_local_tool_calls(&msg).is_empty());
+    }
+
+    #[test]
+    fn normalises_wrong_arg_keys_qwen_actually_emits() {
+        // Live-observed: qwen2.5:1.5b returns `app_name` for open_app. Normalise
+        // it to the spec's `name` so the strict shared parser accepts it.
+        assert_eq!(
+            normalise_local_args("open_app", &json!({ "app_name": "Safari" })),
+            json!({ "name": "Safari" })
+        );
+        assert_eq!(
+            normalise_local_args("quit_app", &json!({ "application": "Cursor" })),
+            json!({ "name": "Cursor" })
+        );
+        assert_eq!(
+            normalise_local_args("type", &json!({ "string": "lofi" })),
+            json!({ "text": "lofi" })
+        );
+        assert_eq!(
+            normalise_local_args("key", &json!({ "shortcut": "cmd+l" })),
+            json!({ "combo": "cmd+l" })
+        );
+        assert_eq!(
+            normalise_local_args("click", &json!({ "id": "e1" })),
+            json!({ "element": "e1" })
+        );
+    }
+
+    #[test]
+    fn normalise_leaves_correct_keys_and_unknown_tools_untouched() {
+        // Canonical key already present → no change (don't clobber).
+        assert_eq!(
+            normalise_local_args("open_app", &json!({ "name": "Safari", "extra": 1 })),
+            json!({ "name": "Safari", "extra": 1 })
+        );
+        // click by coordinates passes through (x/y aren't aliased).
+        assert_eq!(
+            normalise_local_args("click", &json!({ "x": 4.0, "y": 8.0 })),
+            json!({ "x": 4.0, "y": 8.0 })
+        );
+        // Unknown tool → identity.
+        assert_eq!(
+            normalise_local_args("screen_observe", &json!({})),
+            json!({})
+        );
+    }
+
+    #[test]
+    fn parse_local_tool_calls_normalises_inline() {
+        // End-to-end through the local parse: wrong key in, canonical key out.
+        let msg = json!({
+            "tool_calls": [
+                { "function": { "name": "open_app", "arguments": { "app_name": "Safari" } } }
+            ]
+        });
+        let calls = parse_local_tool_calls(&msg);
+        assert_eq!(calls[0].2, json!({ "name": "Safari" }));
     }
 
     #[test]
