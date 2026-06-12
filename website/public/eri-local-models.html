@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>eri · which brain runs on your machine</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Funnel+Display:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <style>
+      :root {
+        --bg:#08080a; --ink:#f4f4f5; --sec:#a1a1aa; --ter:#6b6b73;
+        --accent:#e0ff4f; --line:rgba(255,255,255,0.10);
+        --pass:#86efac; --fail:#fca5a5;
+        --display:"Funnel Display",system-ui,sans-serif;
+        --mono:"JetBrains Mono",ui-monospace,monospace;
+      }
+      * { box-sizing:border-box; margin:0; padding:0; }
+      body {
+        background:var(--bg); color:var(--ink); font-family:var(--display);
+        min-height:100vh; overflow-x:hidden;
+        background-image:
+          radial-gradient(60% 50% at 50% 8%, rgba(224,255,79,0.06), transparent 70%),
+          radial-gradient(50% 40% at 50% 0%, rgba(255,255,255,0.05), transparent 72%);
+      }
+      .wrap { max-width:1080px; margin:0 auto; padding:64px 24px 96px; }
+      .eyebrow { font-family:var(--mono); font-size:11px; letter-spacing:.22em; text-transform:uppercase; color:var(--ter); }
+      h1 { font-size:clamp(34px,6vw,60px); font-weight:600; letter-spacing:-0.03em; line-height:1.02; margin:18px 0 14px; text-wrap:balance; }
+      .lede { color:var(--sec); font-size:16px; max-width:560px; line-height:1.55; }
+      .grid { display:grid; grid-template-columns:1.15fr 0.85fr; gap:28px; margin-top:48px; align-items:start; }
+      @media (max-width:880px){ .grid{ grid-template-columns:1fr; } }
+
+      /* ---- the glass morph pad ---- */
+      .pad {
+        position:relative; border-radius:20px; border:1px solid var(--line);
+        background:linear-gradient(180deg, rgba(28,28,32,0.62), rgba(10,10,12,0.7));
+        backdrop-filter:blur(30px) saturate(1.6); -webkit-backdrop-filter:blur(30px) saturate(1.6);
+        box-shadow:
+          inset 0 1px 0 rgba(255,255,255,0.14), inset 0 0 0 1px rgba(255,255,255,0.04),
+          0 0 0 1px rgba(224,255,79,0.12), 0 0 70px -14px rgba(224,255,79,0.12),
+          0 50px 100px -32px rgba(0,0,0,0.95);
+        overflow:hidden; cursor:grab; user-select:none;
+      }
+      .pad:active { cursor:grabbing; }
+      .pad-bar { display:flex; align-items:center; justify-content:space-between; padding:11px 16px; border-bottom:1px solid var(--line); }
+      .pad-id { display:flex; align-items:center; gap:9px; }
+      .pad-id b { font-size:15px; letter-spacing:-0.05em; }
+      .dot { width:7px; height:7px; border-radius:50%; background:var(--accent); box-shadow:0 0 8px var(--accent); animation:pulse 1.6s infinite; }
+      @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+      .pad-id span { font-family:var(--mono); font-size:10px; color:var(--ter); }
+      .pad-model { font-family:var(--mono); font-size:11px; color:var(--accent); }
+      .pad-body { padding:18px 18px 20px; min-height:240px; }
+      .q { font-family:var(--mono); font-size:12.5px; color:var(--sec); display:flex; gap:8px; line-height:1.5; }
+      .q .pt { color:var(--accent); flex-shrink:0; }
+      .a { margin-top:14px; padding:13px 15px; border-radius:12px; border:1px solid var(--line); background:rgba(255,255,255,0.02); }
+      .a .lab { font-family:var(--mono); font-size:9.5px; letter-spacing:.14em; text-transform:uppercase; color:var(--ter); }
+      .a .txt { margin-top:5px; font-size:14px; color:var(--ink); line-height:1.45; }
+      .meta { margin-top:14px; display:flex; gap:10px; align-items:center; font-family:var(--mono); font-size:11px; }
+      .chip { padding:4px 9px; border-radius:7px; border:1px solid var(--line); }
+      .chip.pass { color:var(--pass); border-color:rgba(134,239,172,0.3); background:rgba(134,239,172,0.07); }
+      .chip.fail { color:var(--fail); border-color:rgba(252,165,165,0.3); background:rgba(252,165,165,0.07); }
+      .chip.spd { color:var(--sec); }
+      .score-line { margin-top:16px; height:5px; border-radius:4px; background:rgba(255,255,255,0.06); overflow:hidden; }
+      .score-fill { height:100%; background:linear-gradient(90deg,var(--accent),#b8e000); transition:width .4s cubic-bezier(.22,1,.36,1); }
+
+      /* ---- leaderboard ---- */
+      .board h3 { font-size:13px; font-family:var(--mono); letter-spacing:.16em; text-transform:uppercase; color:var(--ter); margin-bottom:14px; }
+      .row { display:grid; grid-template-columns:22px 1fr auto; gap:12px; align-items:center; padding:11px 13px; border-radius:11px; border:1px solid transparent; margin-bottom:7px; transition:.25s; }
+      .row.win { border-color:rgba(224,255,79,0.3); background:rgba(224,255,79,0.06); }
+      .row .rk { font-family:var(--mono); font-size:12px; color:var(--ter); }
+      .row.win .rk { color:var(--accent); }
+      .row .nm { font-size:14px; font-weight:500; }
+      .row .nm small { display:block; font-family:var(--mono); font-size:10.5px; color:var(--ter); font-weight:400; margin-top:2px; }
+      .row .sc { text-align:right; font-family:var(--mono); font-size:12px; }
+      .row .sc b { color:var(--ink); }
+      .row .sc span { color:var(--ter); }
+      .pick { margin-top:18px; padding:16px; border-radius:13px; border:1px solid rgba(224,255,79,0.22); background:rgba(224,255,79,0.05); }
+      .pick .lab { font-family:var(--mono); font-size:10px; letter-spacing:.14em; text-transform:uppercase; color:var(--accent); }
+      .pick p { font-size:13.5px; color:var(--sec); line-height:1.5; margin-top:7px; }
+      .pick b { color:var(--ink); }
+      .foot { margin-top:40px; font-family:var(--mono); font-size:11px; color:var(--ter); border-top:1px solid var(--line); padding-top:16px; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <p class="eyebrow">eri · local engine bake-off · real runs, no cloud</p>
+      <h1>The brain that runs<br />on your machine.</h1>
+      <p class="lede">Seven small models, twelve real tasks eri does every minute — app routing, intent, sensitive-action checks, triage, extraction. Run on-device, scored live. The pad plays the actual responses.</p>
+
+      <div class="grid">
+        <div class="pad" id="pad">
+          <div class="pad-bar">
+            <div class="pad-id"><b>eri</b><span class="dot"></span><span>local</span></div>
+            <div class="pad-model" id="model">—</div>
+          </div>
+          <div class="pad-body">
+            <div class="q"><span class="pt">task ›</span><span id="prompt">…</span></div>
+            <div class="a"><div class="lab">on-device answer</div><div class="txt" id="answer">…</div></div>
+            <div class="meta"><span class="chip" id="verdict">…</span><span class="chip spd" id="speed">—</span><span class="chip spd" id="prog">—</span></div>
+            <div class="score-line"><div class="score-fill" id="fill" style="width:0%"></div></div>
+          </div>
+        </div>
+
+        <div class="board">
+          <h3>Leaderboard</h3>
+          <div id="rows"></div>
+          <div class="pick">
+            <div class="lab">eri's pick</div>
+            <p><b>Free → qwen2.5-0.5b</b> (397MB, 0.1s/task): near-best accuracy, blazing, fits the free RAM budget. <b>Pay → qwen2.5-1.5b</b> (11/12): more RAM unlocks the smarter brain.</p>
+          </div>
+        </div>
+      </div>
+      <p class="foot">12 tasks × 7 models · real on-device runs via the eri local engine · drag the pad · the full data lives in scripts/eval/results.json</p>
+    </div>
+
+    <script>
+      // Real measured results (scripts/eval/run_local_scorecard.py).
+      const BOARD = [
+        { m:"qwen2.5:1.5b", note:"best accuracy · fast", p:11, t:12, s:0.7, win:true },
+        { m:"qwen2.5:0.5b", note:"397MB · 0.1s/task ⚡", p:10, t:12, s:0.1, win:true },
+        { m:"llama3.2:3b",  note:"solid", p:10, t:12, s:0.7 },
+        { m:"gemma2:2b",    note:"capable, heavier", p:9, t:12, s:0.8 },
+        { m:"deepseek-r1:7b", note:"accurate but 4.4s/task", p:11, t:12, s:4.4 },
+        { m:"llama3.2:1b",  note:"weak", p:6, t:12, s:1.4 },
+        { m:"moondream:1.6b", note:"vision-tuned, too weak", p:5, t:12, s:0.1 },
+      ];
+      // A real-response reel (model, prompt, answer, pass, secs).
+      const REEL = [
+        ["qwen2.5:1.5b","User: 'open spotify and play jazz'. Which app? One word.","Spotify.",true,0.1],
+        ["qwen2.5:1.5b","A 3-hour report vs a 5-min reply due now — which first?","Reply first, then report.",true,0.1],
+        ["qwen2.5:0.5b","Is 'delete all my files' a destructive action? yes/no.","Yes, it is a destructive action.",true,0.1],
+        ["qwen2.5:0.5b","Extract the email from 'message john@acme.com about the demo'.","john@acme.com",true,0.1],
+        ["llama3.2:3b","Classify 'build me a landing page': chat, edit, build.","Build",true,0.4],
+        ["gemma2:2b","One-word sentiment of 'I absolutely love this!'?","Positive",true,0.6],
+        ["deepseek-r1:7b","Classify 'fix the typo in README': chat, edit, build.","<think> … </think> edit",true,4.1],
+        ["moondream:1.6b","Reply with ONLY the app for 'I want to watch a video'.","iphone",false,0.7],
+      ];
+
+      const rows = document.getElementById("rows");
+      BOARD.forEach((r,i)=>{
+        const d = document.createElement("div");
+        d.className = "row" + (r.win ? " win" : "");
+        d.innerHTML = `<span class="rk">#${i+1}</span>
+          <span class="nm">${r.m}<small>${r.note}</small></span>
+          <span class="sc"><b>${r.p}/${r.t}</b> <span>· ${r.s}s</span></span>`;
+        rows.appendChild(d);
+      });
+
+      let i = 0;
+      const el = id => document.getElementById(id);
+      function play(){
+        const [m,p,a,ok,s] = REEL[i % REEL.length];
+        el("model").textContent = m;
+        el("prompt").textContent = p;
+        el("answer").textContent = a;
+        const v = el("verdict"); v.textContent = ok ? "PASS" : "FAIL"; v.className = "chip " + (ok?"pass":"fail");
+        el("speed").textContent = s + "s";
+        el("prog").textContent = ((i % REEL.length)+1) + "/" + REEL.length;
+        el("fill").style.width = (((i % REEL.length)+1)/REEL.length*100) + "%";
+        i++;
+      }
+      play(); setInterval(play, 2600);
+
+      // drag the pad (Cluely-style)
+      const pad = document.getElementById("pad");
+      let drag=null;
+      pad.addEventListener("pointerdown", e=>{ drag={x:e.clientX,y:e.clientY,ox:pad.offsetLeft,oy:pad.offsetTop}; pad.style.position="relative"; });
+      window.addEventListener("pointermove", e=>{ if(!drag) return; pad.style.left=(e.clientX-drag.x)+"px"; pad.style.top=(e.clientY-drag.y)+"px"; });
+      window.addEventListener("pointerup", ()=> drag=null);
+    </script>
+  </body>
+</html>
