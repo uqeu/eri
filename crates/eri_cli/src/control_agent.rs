@@ -22,6 +22,8 @@ use serde_json::{Value, json};
 
 use eri_inference::memory::MemoryStore;
 
+use crate::control_turn::record_control_turn;
+
 /// One node of the accessibility "screen graph" — a thing actually on screen.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct AxElement {
@@ -996,6 +998,98 @@ async fn control_prelude(
     Ok(None)
 }
 
+/// What eri says when the executor spins on the same action set.
+const STUCK_HANDBACK: &str = "I tried the same step a few times without progress, so I stopped \
+     rather than spin. Tell me how you'd like to proceed.";
+
+/// Drive the computer-control reasoning loop through the provider-agnostic
+/// [`ControlTurn`] seam. `engines` is tried in order *per goal*: the first is
+/// the primary (local-first when configured); the loop escalates to the next on
+/// a turn failure (e.g. the on-device engine is unreachable), carrying the same
+/// transcript forward. Everything that wraps a turn — the gate, the stuck-guard,
+/// tool execution — lives here, unchanged across engines.
+///
+/// This function takes no cloud client and no network: it's the unit-testable
+/// core that the previous welded-to-Claude loop never was.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn drive_control_loop(
+    engines: &[&dyn crate::control_turn::ControlTurn],
+    bridge: &dyn ControlBridge,
+    gate: &ControlGate,
+    confirm: &mut dyn FnMut(&str, Option<crate::control_safety::Permission>) -> bool,
+    system: &[Value],
+    tools: &Value,
+    goal: &str,
+    max_turns: usize,
+) -> Result<String> {
+    use std::io::Write;
+
+    if engines.is_empty() {
+        return Err(anyhow!("no control engine available"));
+    }
+    let mut messages: Vec<Value> = vec![json!({ "role": "user", "content": goal.trim() })];
+    let mut stdout = std::io::stdout();
+    let mut final_text = String::new();
+    let mut stuck = StuckGuard::default();
+    let mut engine_idx = 0usize;
+
+    let mut step = 0usize;
+    while step < max_turns {
+        let turn = engines[engine_idx];
+        let out = match turn.run(system, &messages, tools).await {
+            Ok(o) => o,
+            Err(e) => {
+                // Escalate to the next engine (local → cloud) without consuming a
+                // step; the transcript so far carries forward. No fallback left =
+                // surface the error.
+                if engine_idx + 1 < engines.len() {
+                    let next = engines[engine_idx + 1];
+                    let _ = writeln!(
+                        stdout,
+                        "[eri] {} engine couldn't continue ({e}); escalating to {}.",
+                        turn.engine(),
+                        next.engine()
+                    );
+                    engine_idx += 1;
+                    continue;
+                }
+                return Err(e);
+            }
+        };
+        // Self-improvement log: every control turn is recorded (engine + outcome)
+        // so the routing can learn where local was enough vs. where it escalated.
+        record_control_turn(turn.engine(), goal, &out);
+        step += 1;
+
+        if !out.text.trim().is_empty() {
+            final_text = out.text.clone();
+        }
+        messages.push(json!({ "role": "assistant", "content": out.assistant_content }));
+
+        if !out.wants_tools {
+            return Ok(final_text);
+        }
+        // Two-strike anti-spin: if the executor keeps proposing the identical
+        // action set, it's stuck — stop before spending more turns/tokens.
+        if stuck.record(&action_signature(&out.tool_calls)) {
+            return Ok(if final_text.trim().is_empty() {
+                STUCK_HANDBACK.to_string()
+            } else {
+                final_text
+            });
+        }
+        let executed = execute_tool_calls(bridge, gate, confirm, &out.tool_calls).await;
+        for line in &executed.log {
+            let _ = writeln!(stdout, "[eri] {line}");
+        }
+        messages.push(json!({ "role": "user", "content": executed.results }));
+        if executed.done {
+            return Ok(final_text);
+        }
+    }
+    Ok(final_text)
+}
+
 pub async fn run_control_agent(
     goal: &str,
     model: &str,
@@ -1004,8 +1098,6 @@ pub async fn run_control_agent(
     confirm: &mut dyn FnMut(&str, Option<crate::control_safety::Permission>) -> bool,
     max_turns: usize,
 ) -> Result<String> {
-    use std::io::Write;
-
     if goal.trim().is_empty() {
         return Err(anyhow!("control goal is empty"));
     }
@@ -1016,7 +1108,6 @@ pub async fn run_control_agent(
     if let Some(result) = control_prelude(goal, bridge, gate, confirm).await? {
         return Ok(result);
     }
-    let client = crate::build_agent::signed_in_client()?;
     let mut system = vec![
         json!({
             "type": "text",
@@ -1038,62 +1129,17 @@ pub async fn run_control_agent(
     // Learn-do loop: record what the user asked so future sessions anticipate.
     remember_goal(goal, &workspace);
     let tools: Value = json!(tool_specs());
-    let mut messages: Vec<Value> = vec![json!({ "role": "user", "content": goal.trim() })];
-    let mut stdout = std::io::stdout();
-    let mut final_text = String::new();
-    let mut stuck = StuckGuard::default();
 
-    for _ in 0..max_turns {
-        let cached = eri_agent::request::with_conversation_cache(&messages);
-        let body = eri_agent::request::messages_body(
-            model,
-            crate::build_agent::MAX_TOKENS,
-            &system,
-            &tools,
-            &cached,
-        );
-        let response = client
-            .post_stream("/api/v1/inference/messages", &body)
-            .await
-            .map_err(crate::build_agent::friendly_proxy_error)?;
-        let turn = crate::build_agent::consume_turn(response, &mut stdout, true).await?;
-
-        let text = eri_agent::stream::assistant_text(&turn.content);
-        if !text.trim().is_empty() {
-            final_text = text;
-        }
-        messages.push(json!({ "role": "assistant", "content": turn.content }));
-
-        if turn.stop_reason.as_deref() != Some("tool_use") {
-            return Ok(final_text);
-        }
-
-        let calls: Vec<(String, String, Value)> = turn
-            .tool_uses
-            .iter()
-            .map(|t| (t.id.clone(), t.name.clone(), t.input.clone()))
-            .collect();
-        // Two-strike anti-spin: if the executor keeps proposing the identical
-        // action set, it's stuck — stop before spending more turns/tokens.
-        if stuck.record(&action_signature(&calls)) {
-            return Ok(if final_text.trim().is_empty() {
-                "I tried the same step a few times without progress, so I stopped \
-                 rather than spin. Tell me how you'd like to proceed."
-                    .to_string()
-            } else {
-                final_text
-            });
-        }
-        let step = execute_tool_calls(bridge, gate, confirm, &calls).await;
-        for line in &step.log {
-            let _ = writeln!(stdout, "[eri] {line}");
-        }
-        messages.push(json!({ "role": "user", "content": step.results }));
-        if step.done {
-            return Ok(final_text);
-        }
-    }
-    Ok(final_text)
+    // Local-first per goal: eri's on-device engine answers first (when
+    // configured + reachable); Claude is the escalation. Selection is a seam
+    // (`select_control_turn`) so the loop stays engine-agnostic.
+    let engines = crate::control_turn::select_control_turn(model)?;
+    let refs: Vec<&dyn crate::control_turn::ControlTurn> =
+        engines.iter().map(|e| e.as_ref()).collect();
+    drive_control_loop(
+        &refs, bridge, gate, confirm, &system, &tools, goal, max_turns,
+    )
+    .await
 }
 
 #[cfg(test)]
@@ -1772,6 +1818,181 @@ mod tests {
         let out = bridge.open_app("Safari").await.unwrap();
         assert!(out.starts_with("DRY RUN"));
         assert!(bridge.snapshot().await.unwrap().elements.is_empty());
+    }
+
+    /// A scripted [`ControlTurn`] — pops a pre-set sequence of turn outputs (or
+    /// errors). This is what makes the reasoning loop unit-testable at all: no
+    /// signed-in cloud client, no network, deterministic.
+    struct StubTurn {
+        engine: &'static str,
+        outs: Mutex<std::collections::VecDeque<std::result::Result<crate::control_turn::TurnOutput, String>>>,
+    }
+    impl StubTurn {
+        fn new(
+            engine: &'static str,
+            outs: Vec<std::result::Result<crate::control_turn::TurnOutput, String>>,
+        ) -> Self {
+            Self {
+                engine,
+                outs: Mutex::new(outs.into()),
+            }
+        }
+    }
+    #[async_trait::async_trait]
+    impl crate::control_turn::ControlTurn for StubTurn {
+        fn engine(&self) -> &'static str {
+            self.engine
+        }
+        async fn run(
+            &self,
+            _system: &[Value],
+            _messages: &[Value],
+            _tools: &Value,
+        ) -> Result<crate::control_turn::TurnOutput> {
+            match self.outs.lock().unwrap().pop_front() {
+                Some(Ok(o)) => Ok(o),
+                Some(Err(e)) => Err(anyhow!(e)),
+                None => Err(anyhow!("stub turn exhausted")),
+            }
+        }
+    }
+
+    fn tool_call_turn(id: &str, name: &str, input: Value) -> crate::control_turn::TurnOutput {
+        crate::control_turn::TurnOutput {
+            assistant_content: json!([{ "type": "tool_use", "id": id, "name": name, "input": input }]),
+            text: String::new(),
+            tool_calls: vec![(id.into(), name.into(), input)],
+            wants_tools: true,
+        }
+    }
+    fn done_turn(text: &str) -> crate::control_turn::TurnOutput {
+        crate::control_turn::TurnOutput {
+            assistant_content: json!([{ "type": "text", "text": text }]),
+            text: text.into(),
+            tool_calls: vec![],
+            wants_tools: false,
+        }
+    }
+
+    #[tokio::test]
+    async fn loop_drives_an_engine_open_then_done_with_no_cloud_client() {
+        // The keystone: the reasoning loop runs entirely through the ControlTurn
+        // seam — no signed_in_client, no network. A "local" stub opens Safari
+        // then finishes; the bridge actuates and the summary comes back.
+        let bridge = MockBridge::with_snapshot(graph());
+        let gate = ControlGate::default();
+        let mut confirm = |_: &str, _: Option<crate::control_safety::Permission>| true;
+        let stub = StubTurn::new(
+            "local",
+            vec![
+                Ok(tool_call_turn("t1", "open_app", json!({ "name": "Safari" }))),
+                Ok(done_turn("Opened Safari.")),
+            ],
+        );
+        let system = vec![json!({ "type": "text", "text": "sys" })];
+        let tools = json!(tool_specs());
+        let out = drive_control_loop(
+            &[&stub],
+            &bridge,
+            &gate,
+            &mut confirm,
+            &system,
+            &tools,
+            "open Safari please",
+            8,
+        )
+        .await
+        .unwrap();
+        assert_eq!(out, "Opened Safari.");
+        assert_eq!(bridge.calls(), vec!["open:Safari"]);
+    }
+
+    #[tokio::test]
+    async fn loop_escalates_to_the_next_engine_when_the_primary_fails() {
+        // Local-first with escalation: the local stub errors on its first turn
+        // (e.g. the on-device model is unreachable); the loop carries the
+        // transcript to Claude, which finishes the goal. The failed local turn
+        // does NOT consume the step budget.
+        let bridge = MockBridge::with_snapshot(graph());
+        let gate = ControlGate::default();
+        let mut confirm = |_: &str, _: Option<crate::control_safety::Permission>| true;
+        let local = StubTurn::new("local", vec![Err("engine unreachable".into())]);
+        let claude = StubTurn::new(
+            "claude",
+            vec![
+                Ok(tool_call_turn("c1", "open_app", json!({ "name": "Safari" }))),
+                Ok(done_turn("Done via cloud.")),
+            ],
+        );
+        let system = vec![json!({ "type": "text", "text": "sys" })];
+        let tools = json!(tool_specs());
+        let out = drive_control_loop(
+            &[&local, &claude],
+            &bridge,
+            &gate,
+            &mut confirm,
+            &system,
+            &tools,
+            "open Safari",
+            8,
+        )
+        .await
+        .unwrap();
+        assert_eq!(out, "Done via cloud.");
+        assert_eq!(bridge.calls(), vec!["open:Safari"]);
+    }
+
+    #[tokio::test]
+    async fn loop_surfaces_the_error_when_no_engine_can_continue() {
+        // No fallback left: a failing sole engine surfaces its error rather than
+        // hanging or silently succeeding.
+        let bridge = MockBridge::default();
+        let gate = ControlGate::default();
+        let mut confirm = |_: &str, _: Option<crate::control_safety::Permission>| true;
+        let local = StubTurn::new("local", vec![Err("engine unreachable".into())]);
+        let system = vec![json!({ "type": "text", "text": "sys" })];
+        let tools = json!(tool_specs());
+        let err = drive_control_loop(
+            &[&local],
+            &bridge,
+            &gate,
+            &mut confirm,
+            &system,
+            &tools,
+            "open Safari",
+            8,
+        )
+        .await
+        .expect_err("a sole failing engine surfaces the error");
+        assert!(err.to_string().contains("unreachable"));
+    }
+
+    #[tokio::test]
+    async fn loop_stops_when_the_executor_spins_on_the_same_action() {
+        // The stuck-guard wraps the seam: an engine that proposes the identical
+        // action every turn is stopped rather than burning the whole budget.
+        let bridge = MockBridge::with_snapshot(graph());
+        let gate = ControlGate::default();
+        let mut confirm = |_: &str, _: Option<crate::control_safety::Permission>| true;
+        let spin: Vec<_> = (0..6)
+            .map(|_| Ok(tool_call_turn("x", "screen_observe", json!({}))))
+            .collect();
+        let stub = StubTurn::new("local", spin);
+        let system = vec![json!({ "type": "text", "text": "sys" })];
+        let tools = json!(tool_specs());
+        let out = drive_control_loop(
+            &[&stub],
+            &bridge,
+            &gate,
+            &mut confirm,
+            &system,
+            &tools,
+            "do the thing",
+            24,
+        )
+        .await
+        .unwrap();
+        assert!(out.contains("same step"), "should hand back the stuck message");
     }
 
     #[test]
