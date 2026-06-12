@@ -15,6 +15,7 @@
 //! silently does something destructive.
 
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
@@ -22,6 +23,7 @@ use serde_json::{Value, json};
 
 use eri_inference::memory::MemoryStore;
 
+use crate::action_log::ActionLog;
 use crate::control_turn::{ControlTurnSink, control_turn_log};
 
 /// One node of the accessibility "screen graph" — a thing actually on screen.
@@ -62,14 +64,15 @@ impl ScreenGraph {
 }
 
 /// Where a click lands: a named AX element (preferred) or raw coordinates.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum ClickTarget {
     Element(String),
     Coord(f32, f32),
 }
 
-/// One concrete actuation the agent can request.
-#[derive(Clone, Debug, PartialEq)]
+/// One concrete actuation the agent can request. Serializable so the trust
+/// layer ([`crate::action_log`]) can persist what eri did + replay an undo.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum ControlAction {
     Observe,
     Click(ClickTarget),
@@ -702,6 +705,63 @@ pub fn parse_wire_capture(reply: &Value) -> Result<String> {
         .and_then(Value::as_str)
         .map(str::to_string)
         .ok_or_else(|| anyhow!("capture reply missing `image`: {reply}"))
+}
+
+/// A [`ControlBridge`] that records every successful MUTATING action eri
+/// performs to a shared [`ActionLog`] — the trust layer's capture seam. It wraps
+/// any inner bridge (Http/DryRun/Mock), so recording is uniform across BOTH the
+/// zero-token fast lane and the reasoning loop without touching the gate, the
+/// executor, or the prelude. Read-only calls (snapshot/capture) aren't recorded;
+/// an action is logged only AFTER the inner bridge confirms it ran.
+pub struct LoggingBridge<'a> {
+    inner: &'a dyn ControlBridge,
+    log: Arc<Mutex<ActionLog>>,
+}
+
+impl<'a> LoggingBridge<'a> {
+    pub fn new(inner: &'a dyn ControlBridge, log: Arc<Mutex<ActionLog>>) -> Self {
+        Self { inner, log }
+    }
+    fn record(&self, action: ControlAction) {
+        if let Ok(mut log) = self.log.lock() {
+            log.record(&action);
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl ControlBridge for LoggingBridge<'_> {
+    async fn snapshot(&self) -> Result<ScreenGraph> {
+        self.inner.snapshot().await
+    }
+    async fn capture(&self) -> Result<String> {
+        self.inner.capture().await
+    }
+    async fn click(&self, target: &ClickTarget) -> Result<String> {
+        let result = self.inner.click(target).await?;
+        self.record(ControlAction::Click(target.clone()));
+        Ok(result)
+    }
+    async fn type_text(&self, text: &str) -> Result<String> {
+        let result = self.inner.type_text(text).await?;
+        self.record(ControlAction::Type(text.to_string()));
+        Ok(result)
+    }
+    async fn key(&self, combo: &str) -> Result<String> {
+        let result = self.inner.key(combo).await?;
+        self.record(ControlAction::Key(combo.to_string()));
+        Ok(result)
+    }
+    async fn open_app(&self, name: &str) -> Result<String> {
+        let result = self.inner.open_app(name).await?;
+        self.record(ControlAction::OpenApp(name.to_string()));
+        Ok(result)
+    }
+    async fn quit_app(&self, name: &str) -> Result<String> {
+        let result = self.inner.quit_app(name).await?;
+        self.record(ControlAction::QuitApp(name.to_string()));
+        Ok(result)
+    }
 }
 
 /// The real actuation bridge: POSTs each action to a loopback endpoint hosted
@@ -1829,6 +1889,28 @@ mod tests {
         let out = bridge.open_app("Safari").await.unwrap();
         assert!(out.starts_with("DRY RUN"));
         assert!(bridge.snapshot().await.unwrap().elements.is_empty());
+    }
+
+    #[tokio::test]
+    async fn logging_bridge_records_mutations_but_not_reads() {
+        // The trust-layer capture seam: wrapping any bridge records the mutating
+        // actions eri actually performed (for the trail + undo), while read-only
+        // snapshot/capture leave no trace.
+        let inner = MockBridge::with_snapshot(graph());
+        let log = Arc::new(Mutex::new(ActionLog::default()));
+        let bridge = LoggingBridge::new(&inner, Arc::clone(&log));
+        bridge.snapshot().await.unwrap(); // read — not recorded
+        bridge.open_app("Safari").await.unwrap();
+        bridge.type_text("lofi").await.unwrap();
+        let trail = log.lock().unwrap().trail();
+        assert_eq!(trail.len(), 2, "only the two mutations are recorded");
+        assert!(trail[0].contains("open Safari"));
+        assert!(trail[1].contains("type"));
+        // And undo of the last real action (typing) is handed back, not faked.
+        assert!(matches!(
+            log.lock().unwrap().undo_last(),
+            crate::action_log::UndoOutcome::CantUndo(_)
+        ));
     }
 
     /// A scripted [`ControlTurn`] — pops a pre-set sequence of turn outputs (or

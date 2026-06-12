@@ -344,6 +344,15 @@ pub enum Command {
         /// Speed/quality tier for the control loop's reasoning model.
         #[arg(long, value_enum)]
         mode: Option<Mode>,
+        /// Reverse eri's most recent reversible action (e.g. re-quit an app it
+        /// opened). Pair with --live to actuate the undo; without it, shows what
+        /// it would reverse. No goal needed.
+        #[arg(long)]
+        undo: bool,
+        /// Show the trail of what eri has done ("what did eri just do?") and
+        /// exit. No goal needed.
+        #[arg(long)]
+        history: bool,
         /// The goal, e.g. "open YouTube and search lofi".
         goal: Vec<String>,
     },
@@ -788,8 +797,10 @@ async fn dispatch(cli: Cli) -> anyhow::Result<()> {
             live,
             yes,
             mode,
+            undo,
+            history,
             goal,
-        } => run_control(&goal.join(" "), live, yes, mode).await,
+        } => run_control(&goal.join(" "), live, yes, mode, undo, history).await,
         Command::Apps { action } => run_apps(&action),
         Command::Brief => memory::brief(),
         Command::Research { query } => research::research(&query.join(" ")),
@@ -1144,7 +1155,34 @@ fn run_apps(action: &[String]) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn run_control(goal: &str, live: bool, yes: bool, mode: Option<Mode>) -> anyhow::Result<()> {
+async fn run_control(
+    goal: &str,
+    live: bool,
+    yes: bool,
+    mode: Option<Mode>,
+    undo: bool,
+    history: bool,
+) -> anyhow::Result<()> {
+    // Trust layer: "what did eri do?" and undo, both read the persisted trail.
+    let log_path = action_log::default_log_path();
+    if history {
+        let log = log_path
+            .as_ref()
+            .map(|p| action_log::ActionLog::load(p))
+            .unwrap_or_default();
+        if log.is_empty() {
+            println!("[eri] no recorded actions yet.");
+        } else {
+            println!("[eri] what eri did:");
+            for line in log.trail() {
+                println!("  {line}");
+            }
+        }
+        return Ok(());
+    }
+    if undo {
+        return run_control_undo(live, log_path.as_deref()).await;
+    }
     if goal.trim().is_empty() {
         anyhow::bail!("control needs a goal, e.g. eri control \"open YouTube and search lofi\"");
     }
@@ -1199,14 +1237,23 @@ async fn run_control(goal: &str, live: bool, yes: bool, mode: Option<Mode>) -> a
     // Live actuation needs the macOS app's control endpoint (it does the real
     // AX/CGEvent work). Standalone `--live` can't actuate, so it falls back to
     // dry-run with a clear note rather than silently doing nothing.
+    // Trust layer: load the running trail and wrap whatever bridge we use in a
+    // LoggingBridge so every actuation is recorded for --history / --undo.
+    let log = std::sync::Arc::new(std::sync::Mutex::new(
+        log_path
+            .as_ref()
+            .map(|p| action_log::ActionLog::load(p))
+            .unwrap_or_default(),
+    ));
     let live_bridge = if live {
         control_agent::HttpBridge::from_env()
     } else {
         None
     };
     let actuated = live_bridge.is_some();
-    let summary = if let Some(bridge) = live_bridge {
+    let summary = if let Some(inner) = live_bridge {
         println!("[eri] live control: actuating via the eri app.\n");
+        let bridge = control_agent::LoggingBridge::new(&inner, std::sync::Arc::clone(&log));
         control_agent::run_control_agent(goal, model, &bridge, &gate, &mut confirm, 24).await?
     } else {
         if live {
@@ -1219,9 +1266,20 @@ async fn run_control(goal: &str, live: bool, yes: bool, mode: Option<Mode>) -> a
                 "[eri] dry-run: planning actions only (no actuation). Use --live from the eri app to actuate.\n"
             );
         }
-        let bridge = control_agent::DryRunBridge;
+        let inner = control_agent::DryRunBridge;
+        let bridge = control_agent::LoggingBridge::new(&inner, std::sync::Arc::clone(&log));
         control_agent::run_control_agent(goal, model, &bridge, &gate, &mut confirm, 24).await?
     };
+    // Persist only REAL actions (dry-run "would do" must not become undoable).
+    if actuated && let Some(p) = &log_path {
+        let recorded = log.lock().map(|l| l.len()).unwrap_or(0);
+        if let Ok(l) = log.lock() {
+            let _ = l.save(p);
+        }
+        if recorded > 0 {
+            println!("[eri] (recorded {recorded} action(s) — `eri control --history` to review, `--undo` to reverse)");
+        }
+    }
     if !summary.trim().is_empty() {
         if actuated {
             println!("\n[eri] {summary}");
@@ -1231,6 +1289,54 @@ async fn run_control(goal: &str, live: bool, yes: bool, mode: Option<Mode>) -> a
             println!(
                 "\n[eri] dry-run — nothing was actuated. This is what eri would do:\n{summary}"
             );
+        }
+    }
+    Ok(())
+}
+
+/// `eri control --undo`: reverse eri's most recent reversible action. Honest by
+/// design — typing/clicking can't be auto-undone, so eri hands those back rather
+/// than faking it. The undone mark is only persisted if the inverse actually
+/// actuates (live), so a dry-run preview leaves the trail intact.
+async fn run_control_undo(live: bool, log_path: Option<&std::path::Path>) -> anyhow::Result<()> {
+    let Some(path) = log_path else {
+        anyhow::bail!("no data directory for the action log");
+    };
+    let mut log = action_log::ActionLog::load(path);
+    match log.undo_last() {
+        action_log::UndoOutcome::Nothing => {
+            println!("[eri] nothing to undo.");
+        }
+        action_log::UndoOutcome::CantUndo(msg) => {
+            println!("[eri] {msg}");
+        }
+        action_log::UndoOutcome::Undo(inverse, desc) => {
+            let bridge = if live {
+                control_agent::HttpBridge::from_env()
+            } else {
+                None
+            };
+            if let Some(bridge) = bridge {
+                // The user typed --undo, so auto-confirm the inverse (it may be a
+                // gated action like quitting an app eri opened).
+                let gate = control_agent::ControlGate::with_permissions(true, Default::default());
+                match gate.submit(&bridge, &inverse).await? {
+                    control_agent::Disposition::Executed(result) => {
+                        println!("[eri] undid: {desc} → {result}");
+                        let _ = log.save(path); // persist the undone mark
+                    }
+                    other => {
+                        println!("[eri] couldn't complete the undo ({other:?}); trail unchanged.");
+                    }
+                }
+            } else {
+                // Dry-run: show what we'd reverse, but DON'T save → trail intact.
+                println!(
+                    "[eri] would undo: {desc} (the inverse is {}). Run `eri control --undo --live` \
+                     from the eri app to actuate.",
+                    inverse.describe()
+                );
+            }
         }
     }
     Ok(())

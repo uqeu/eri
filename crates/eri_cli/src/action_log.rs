@@ -11,11 +11,15 @@
 //! the live control loop records into, and the future "activity feed + undo"
 //! surface reads from.
 
+use std::path::{Path, PathBuf};
+
+use serde::{Deserialize, Serialize};
+
 use crate::control_agent::ControlAction;
 
 /// How (if at all) an action eri performed can be reversed. Total over
 /// [`ControlAction`] so every action eri can take has a defined undo story.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum UndoPlan {
     /// Reversible by performing this inverse action (e.g. open → quit).
     Inverse(ControlAction),
@@ -41,7 +45,7 @@ pub fn undo_plan_for(action: &ControlAction) -> UndoPlan {
 }
 
 /// One entry in the trail: what eri did, and whether/how it can be undone.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ActionRecord {
     pub seq: u64,
     /// Human-readable, e.g. "open Safari" (from [`ControlAction::describe`]).
@@ -66,7 +70,7 @@ pub enum UndoOutcome {
 /// [`record`] for each executed action; [`undo_last`] resolves the most recent
 /// reversible one. Pure (no I/O) so it's fully unit-testable; persistence and
 /// the visible feed are layered on top.
-#[derive(Default)]
+#[derive(Default, Serialize, Deserialize)]
 pub struct ActionLog {
     records: Vec<ActionRecord>,
     next_seq: u64,
@@ -133,6 +137,36 @@ impl ActionLog {
     pub fn is_empty(&self) -> bool {
         self.records.is_empty()
     }
+
+    /// Persist the trail to `path` (pretty JSON) so `eri control --undo` in a
+    /// later invocation can reverse what this run did. Creates parent dirs.
+    pub fn save(&self, path: &Path) -> std::io::Result<()> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let json = serde_json::to_string_pretty(self)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        std::fs::write(path, json)
+    }
+
+    /// Load a persisted trail, or an empty log if the file is absent/unreadable
+    /// (so undo/history never error on a fresh machine).
+    pub fn load(path: &Path) -> Self {
+        std::fs::read_to_string(path)
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default()
+    }
+}
+
+/// Default on-disk location for the persisted session action log:
+/// `$XDG_DATA_HOME/eri/control-actions.json` (falling back to
+/// `~/.local/share/eri/...`). `None` only if neither var is set.
+pub fn default_log_path() -> Option<PathBuf> {
+    let base = std::env::var_os("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local").join("share")))?;
+    Some(base.join("eri").join("control-actions.json"))
 }
 
 #[cfg(test)]
@@ -240,5 +274,28 @@ mod tests {
         let mut log = ActionLog::default();
         assert!(log.is_empty());
         assert_eq!(log.undo_last(), UndoOutcome::Nothing);
+    }
+
+    #[test]
+    fn save_then_load_round_trips_the_trail_and_undo_state() {
+        let dir = std::env::temp_dir().join(format!("eri-actionlog-{}", std::process::id()));
+        let path = dir.join("control-actions.json");
+        let mut log = ActionLog::default();
+        log.record(&ControlAction::OpenApp("Safari".into()));
+        log.record(&ControlAction::Type("hi".into()));
+        log.save(&path).expect("save");
+
+        // A later invocation loads the same trail and can still undo the open.
+        let mut reloaded = ActionLog::load(&path);
+        assert_eq!(reloaded.trail().len(), 2);
+        // Last real action was typing → CantUndo (state survived the round-trip).
+        assert!(matches!(reloaded.undo_last(), UndoOutcome::CantUndo(_)));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_missing_file_is_an_empty_log_not_an_error() {
+        let log = ActionLog::load(Path::new("/nonexistent/eri/control-actions.json"));
+        assert!(log.is_empty());
     }
 }
