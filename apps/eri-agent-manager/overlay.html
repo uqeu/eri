@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>eri overlay</title>
+<link rel="stylesheet" href="overlay.css" />
+</head>
+<body>
+  <div class="dock" id="dock">
+
+    <!-- Always-on pill: brand + Ask + listen/stop. Drag handle for the window. -->
+    <div class="pill" id="pill">
+      <span class="mark" id="mark">eri</span>
+      <button class="ask" id="askBtn">
+        <span class="spark">✦</span><span>Ask</span>
+      </button>
+      <span class="divider"></span>
+      <button class="icon-btn" id="listenBtn" title="Hold to talk (⌥ Space)" aria-label="Listen">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v1a7 7 0 0 1-14 0v-1"/><line x1="12" y1="19" x2="12" y2="22"/></svg>
+      </button>
+      <button class="icon-btn" id="hideBtn" title="Hide (⌥ \)" aria-label="Hide">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="2.4" rx="1.2"/></svg>
+      </button>
+    </div>
+
+    <!-- The panel: opens below the pill. Light frost so the screen reads through. -->
+    <section class="panel enter" id="panel" aria-live="polite">
+      <div class="panel-body">
+        <p class="answer" id="answer">
+          A discounted cash flow model values a company by projecting its future free cash flows and discounting them to present value at the weighted average cost of capital.
+          <span class="quiet"> From the slide on your screen.</span>
+        </p>
+
+        <div class="chips">
+          <button class="chip" data-act="assist"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v3m0 12v3M5.6 5.6l2.1 2.1m8.6 8.6l2.1 2.1M3 12h3m12 0h3"/><circle cx="12" cy="12" r="3"/></svg>Assist</button>
+          <span class="chip-dot">·</span>
+          <button class="chip" data-act="say"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21l3-1 11-11-2-2L4 18l-1 3z"/><path d="M15 5l2 2"/></svg>What to say</button>
+          <span class="chip-dot">·</span>
+          <button class="chip" data-act="followup"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H8l-5 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>Follow-ups</button>
+          <span class="chip-dot">·</span>
+          <button class="chip" data-act="recap"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>Recap</button>
+        </div>
+
+        <div class="askbar">
+          <input id="ask" placeholder="Ask eri about your screen, or just talk" autocomplete="off" />
+          <span class="kbd"><kbd>⌘</kbd><kbd>↵</kbd></span>
+          <button class="send" id="sendBtn" aria-label="Send">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+          </button>
+        </div>
+        <div class="askbar-foot">
+          <button class="tag" id="modelTag"><span class="bolt">⚡</span>Local · fast</button>
+          <button class="tag">···</button>
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+<script>
+  // Bridge to the native host (no-op in a plain browser preview).
+  function native(command, payload = {}) {
+    if (window.webkit?.messageHandlers?.eri) {
+      window.webkit.messageHandlers.eri.postMessage({ command, ...payload });
+    }
+  }
+  const $ = (id) => document.getElementById(id);
+  let open = true;
+
+  // Report the content's real size so the native window stays SNUG (top-anchored,
+  // never covering more of the screen than the UI itself occupies).
+  const dock = $("dock");
+  function reportSize() {
+    const r = dock.getBoundingClientRect();
+    native("overlaySize", { width: Math.ceil(r.width), height: Math.ceil(r.height) });
+  }
+  if (window.ResizeObserver) new ResizeObserver(reportSize).observe(dock);
+  window.addEventListener("load", reportSize);
+
+  function setPanel(show) {
+    open = show;
+    const panel = $("panel");
+    if (show) {
+      panel.style.display = "";
+      panel.classList.remove("enter");
+      void panel.offsetWidth;        // restart the entrance animation
+      panel.classList.add("enter");
+      $("ask").focus();
+    } else {
+      panel.style.display = "none";
+    }
+    native("overlayPanel", { open: show });
+  }
+
+  $("askBtn").addEventListener("click", () => setPanel(!open));
+  $("hideBtn").addEventListener("click", () => setPanel(false));
+
+  // Listening state: toggle the breathing ring + tell the host to start voice.
+  let listening = false;
+  $("listenBtn").addEventListener("click", () => {
+    listening = !listening;
+    $("mark").classList.toggle("listening", listening);
+    native(listening ? "startVoice" : "stopVoice");
+  });
+
+  function submit() {
+    const text = $("ask").value.trim();
+    if (!text) return;
+    native("overlayAsk", { text });
+    $("ask").value = "";
+  }
+  $("sendBtn").addEventListener("click", submit);
+  $("ask").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); submit(); }
+    if (e.key === "Escape") setPanel(false);
+  });
+
+  // Host pushes results in: window.eriOverlay({answer, listening})
+  window.eriOverlay = (data = {}) => {
+    if (typeof data.answer === "string") $("answer").textContent = data.answer;
+    if (typeof data.listening === "boolean") {
+      listening = data.listening;
+      $("mark").classList.toggle("listening", listening);
+    }
+    if (data.open === true) setPanel(true);
+  };
+</script>
+</body>
+</html>

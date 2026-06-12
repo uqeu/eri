@@ -89,6 +89,11 @@ final class AgentManagerController: NSObject, NSWindowDelegate, WKNavigationDele
     // voice→chat path is untouched.
     private var voiceControlMode = false
     private let speechSynth = AVSpeechSynthesizer()
+    // Always-on overlay: a transparent, top-anchored floating companion that
+    // sits OVER the screen without covering it (auto-sized to its content).
+    private var overlayPanel: NSPanel?
+    private var overlayWeb: WKWebView?
+    private var overlayHotkey: Any?
 
     init(args: LaunchArgs) {
         self.args = args
@@ -153,6 +158,7 @@ final class AgentManagerController: NSObject, NSWindowDelegate, WKNavigationDele
 
     func windowWillClose(_ notification: Notification) {
         if let m = panicMonitor { NSEvent.removeMonitor(m); panicMonitor = nil }
+        if let m = overlayHotkey { NSEvent.removeMonitor(m); overlayHotkey = nil }
         controlServer?.terminate()
         runningProcesses.forEach { process in
             if process.isRunning { process.terminate() }
@@ -250,6 +256,17 @@ final class AgentManagerController: NSObject, NSWindowDelegate, WKNavigationDele
         case "setVoiceControl":
             voiceControlMode = (payload["on"] as? Bool) ?? false
             reply(command: command, status: "ok", detail: voiceControlMode ? "on" : "off")
+        // Always-on overlay companion.
+        case "toggleOverlay":
+            toggleOverlay()
+        case "overlaySize":
+            if let w = payload["width"] as? Double, let h = payload["height"] as? Double {
+                resizeOverlay(width: w, height: h)
+            }
+        case "overlayAsk":
+            if let text = payload["text"] as? String, !text.isEmpty { startControl(goal: text) }
+        case "overlayPanel":
+            break // size is driven by overlaySize; nothing else to do
 
         // Indexed sources from the graphify knowledge graph.
         case "openSources", "attachContext":
@@ -670,6 +687,65 @@ final class AgentManagerController: NSObject, NSWindowDelegate, WKNavigationDele
         }
     }
 
+    // MARK: - Always-on overlay
+
+    /// Toggle eri's floating companion. It's a borderless, non-activating panel
+    /// (never steals focus) at `.floating` level on all spaces, transparent so
+    /// only the glass UI shows, and resized to fit its content so it covers no
+    /// more of the screen than the UI itself. Showing it puts eri in voice→
+    /// control mode (the overlay is a control surface); hiding restores chat.
+    private func toggleOverlay() {
+        if overlayPanel?.isVisible == true {
+            overlayPanel?.orderOut(nil)
+            voiceControlMode = false
+            return
+        }
+        if overlayPanel == nil { buildOverlay() }
+        voiceControlMode = true
+        positionOverlay()
+        overlayPanel?.orderFrontRegardless()
+    }
+
+    private func buildOverlay() {
+        let config = WKWebViewConfiguration()
+        config.userContentController.add(bridge, name: "eri") // same bridge → controller dispatch
+        let web = WKWebView(frame: NSRect(x: 0, y: 0, width: 600, height: 120), configuration: config)
+        web.setValue(false, forKey: "drawsBackground") // transparent — glass is in the CSS
+        if #available(macOS 12.0, *) { web.underPageBackgroundColor = .clear }
+        if let html = resolveRepoFile(["apps", "eri-agent-manager", "overlay.html"]) {
+            web.loadFileURL(html, allowingReadAccessTo: html.deletingLastPathComponent())
+        }
+        let panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 600, height: 120),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered, defer: false)
+        panel.level = .floating
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = false // the CSS panel draws its own float shadow
+        panel.isMovableByWindowBackground = true
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+        panel.contentView = web
+        overlayWeb = web
+        overlayPanel = panel
+    }
+
+    /// Snug-fit the panel to the web content and re-anchor it top-center, so the
+    /// window's footprint == the UI's footprint (the non-covering guarantee).
+    private func resizeOverlay(width: Double, height: Double) {
+        guard let panel = overlayPanel else { return }
+        let w = max(120, width), h = max(48, height)
+        panel.setContentSize(NSSize(width: w, height: h))
+        positionOverlay()
+    }
+
+    private func positionOverlay() {
+        guard let panel = overlayPanel, let screen = NSScreen.main else { return }
+        let vis = screen.visibleFrame
+        let size = panel.frame.size
+        panel.setFrameOrigin(NSPoint(x: vis.midX - size.width / 2, y: vis.maxY - size.height - 8))
+    }
+
     /// Speak a short line via native macOS TTS (the `[eri:speak]` reply line).
     private func speak(_ text: String) {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -746,8 +822,16 @@ final class AgentManagerController: NSObject, NSWindowDelegate, WKNavigationDele
     private func installPanicHotkey() {
         panicMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
             let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            // ⌘⌥⎋ — panic-stop all actuation.
             if event.keyCode == 53 && mods.contains(.command) && mods.contains(.option) {
                 DispatchQueue.main.async { self?.panicStop() }
+            }
+        }
+        // ⌥Space — summon/dismiss the always-on overlay companion.
+        overlayHotkey = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            if event.keyCode == 49 && mods == .option {
+                DispatchQueue.main.async { self?.toggleOverlay() }
             }
         }
     }
@@ -1083,7 +1167,7 @@ final class AgentManagerController: NSObject, NSWindowDelegate, WKNavigationDele
         // are the minified+mangled ones, not the source. The repo-walking
         // fallbacks below are dev-only (they hit when running from the tree).
         if let last = components.last,
-            ["index.html", "manager.js", "manager.css"].contains(last),
+            ["index.html", "manager.js", "manager.css", "overlay.html", "overlay.css"].contains(last),
             let res = Bundle.main.resourceURL {
             let bundled = res.appendingPathComponent("web").appendingPathComponent(last)
             if FileManager.default.fileExists(atPath: bundled.path) {

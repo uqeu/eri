@@ -75,6 +75,13 @@ else
   cp "$WEB_SRC/index.html" "$RES/index.html"; ok "index.html copied (html-minifier unavailable)"
 fi
 
+# Overlay companion (overlay.html + overlay.css) — same treatment.
+if [ -f "$WEB_SRC/overlay.css" ]; then
+  npx --yes clean-css-cli@5 "$WEB_SRC/overlay.css" -o "$RES/overlay.css" 2>/dev/null || cp "$WEB_SRC/overlay.css" "$RES/overlay.css"
+  if npx --yes html-minifier-terser@7 --collapse-whitespace --remove-comments --minify-css true --minify-js true "$WEB_SRC/overlay.html" -o "$RES/overlay.html" 2>/dev/null && [ -s "$RES/overlay.html" ]; then :; else cp "$WEB_SRC/overlay.html" "$RES/overlay.html"; fi
+  ok "overlay.{html,css} bundled"
+fi
+
 # --- 3. Strip native binaries ----------------------------------------------
 step "3/5  Strip local symbols from native binaries"
 for b in "$APP/Contents/MacOS/eri_agent_manager" "$ROOT/target/eri_control_server" "$ROOT/target/release/eri"; do

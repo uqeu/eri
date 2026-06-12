@@ -1,0 +1,310 @@
+/* eri — always-on overlay.
+ *
+ * A floating, see-through companion that sits over your screen without covering
+ * it: a compact top pill (always there) and a light-frosted panel that opens
+ * below on demand. Built in eri's language (warm near-black, lime accent, the
+ * "eri" wordmark) — NOT a Cluely clone; the interaction pattern, eri's skin.
+ *
+ * Two hard constraints from the brief drive every value here:
+ *  1. LIGHT frost — you must still read your screen behind it. The panel is a
+ *     dark translucent (~0.56) with a modest blur, not an opaque card.
+ *  2. NON-COVERING — narrow, top-anchored, and the host window is click-through
+ *     everywhere this UI isn't, so eri never sits on top of what you're doing.
+ */
+
+:root {
+  --ink: #f5f5f3;          /* primary text — high contrast on the dark glass */
+  --muted: #c2c2bd;        /* secondary — still ≥4.5:1 on the panel */
+  --faint: #8e8e87;        /* tertiary labels */
+  --accent: #d9ff57;       /* eri lime — the single accent */
+  --accent-ink: #14180a;
+
+  /* Tinted glass: dark enough that eri's OWN text stays crisp over a bright
+     desktop (readability is non-negotiable), translucent enough that you still
+     sense the colour + motion behind it. Cluely's panel sits about here. */
+  --glass: rgba(11, 12, 15, 0.82);
+  --glass-pill: rgba(15, 16, 19, 0.78);
+  --rim: rgba(255, 255, 255, 0.14);   /* top glass-edge highlight */
+  --line: rgba(255, 255, 255, 0.09);
+  --blur: 16px;
+
+  --shadow: 0 26px 70px -22px rgba(0, 0, 0, 0.66), 0 6px 18px -8px rgba(0, 0, 0, 0.5);
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);   /* ease-out-expo: quick in, soft land */
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  background: transparent;          /* the NSPanel is transparent; glass comes from the elements */
+  font-family: var(--font);
+  -webkit-font-smoothing: antialiased;
+  color: var(--ink);
+  overflow: hidden;
+  user-select: none;
+}
+
+/* The stack: pill on top, panel below, centered, top-anchored. The empty
+   margins around it stay click-through (the host window handles that). */
+.dock {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px 0;
+}
+
+/* ---------------- the always-on pill ---------------- */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 7px;
+  border-radius: 999px;
+  background: var(--glass-pill);
+  border: 1px solid var(--rim);
+  -webkit-backdrop-filter: blur(var(--blur)) saturate(1.35);
+  backdrop-filter: blur(var(--blur)) saturate(1.35);
+  box-shadow: var(--shadow);
+  -webkit-app-region: drag;          /* the pill is the drag handle */
+}
+.pill > * { -webkit-app-region: no-drag; }
+
+/* eri wordmark in a soft lime disc — the brand anchor + the listening light. */
+.mark {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--accent-soft, rgba(217, 255, 87, 0.14));
+  color: var(--accent);
+  font-weight: 800;
+  font-size: 13px;
+  letter-spacing: -0.05em;
+  position: relative;
+}
+/* "Listening" — a calm breathing ring, never a frantic blink. */
+.mark.listening::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  border: 1.5px solid var(--accent);
+  animation: breathe 1.8s var(--ease) infinite;
+}
+@keyframes breathe {
+  0%   { transform: scale(0.92); opacity: 0.9; }
+  70%  { transform: scale(1.18); opacity: 0; }
+  100% { transform: scale(1.18); opacity: 0; }
+}
+
+.ask {
+  height: 32px;
+  padding: 0 16px;
+  border: none;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font: 600 13px/1 var(--font);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  transition: filter 0.15s var(--ease), transform 0.15s var(--ease);
+}
+.ask:hover { filter: brightness(1.06); }
+.ask:active { transform: scale(0.97); }
+.ask .spark { font-size: 13px; }
+
+.icon-btn {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 0.15s var(--ease), color 0.15s var(--ease);
+}
+.icon-btn:hover { background: rgba(255, 255, 255, 0.12); color: var(--ink); }
+.icon-btn svg { width: 13px; height: 13px; }
+
+.divider { width: 1px; height: 18px; background: var(--line); }
+
+/* ---------------- the panel ---------------- */
+.panel {
+  width: 560px;
+  max-width: calc(100vw - 32px);
+  border-radius: 20px;
+  background: var(--glass);
+  border: 1px solid var(--line);
+  -webkit-backdrop-filter: blur(var(--blur)) saturate(1.25);
+  backdrop-filter: blur(var(--blur)) saturate(1.25);
+  box-shadow: var(--shadow);
+  position: relative;
+  overflow: hidden;
+  transform-origin: top center;
+}
+/* The glass rim: a 1px gradient highlight along the top edge — the detail that
+   sells "pane of glass" over "dark box". */
+.panel::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0) 40%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+.panel-body { padding: 18px 20px 16px; }
+
+/* eri's answer about what's on screen. */
+.answer {
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--ink);
+  text-wrap: pretty;
+  max-width: 62ch;
+}
+.answer .quiet { color: var(--faint); }
+
+/* action chips — eri's verbs over the moment, not a button grid. */
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 18px;
+  margin: 16px 0 4px;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font: 500 13px/1 var(--font);
+  cursor: pointer;
+  padding: 4px 0;
+  transition: color 0.15s var(--ease);
+}
+.chip:hover { color: var(--ink); }
+.chip svg { width: 14px; height: 14px; color: var(--accent); opacity: 0.9; }
+.chip-dot { color: var(--faint); opacity: 0.5; }
+
+/* the ask bar */
+.askbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 11px 12px 11px 14px;
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--line);
+  transition: border-color 0.18s var(--ease), background 0.18s var(--ease);
+}
+.askbar:focus-within {
+  border-color: color-mix(in oklab, var(--accent) 45%, var(--line));
+  background: rgba(255, 255, 255, 0.07);
+}
+.askbar input {
+  flex: 1;
+  border: none;
+  background: none;
+  outline: none;
+  color: var(--ink);
+  font: 400 14px/1.4 var(--font);
+}
+.askbar input::placeholder { color: var(--faint); }
+
+.kbd {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--faint);
+  font-size: 11px;
+}
+.kbd kbd {
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.04);
+  font: 500 11px/1 var(--font);
+  color: var(--muted);
+}
+.send {
+  width: 34px;
+  height: 34px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-ink);
+  cursor: pointer;
+  transition: filter 0.15s var(--ease), transform 0.15s var(--ease);
+}
+.send:hover { filter: brightness(1.06); }
+.send:active { transform: scale(0.94); }
+.send svg { width: 14px; height: 14px; }
+
+/* a row under the input: the model toggle + overflow, kept whisper-quiet */
+.askbar-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 9px;
+  padding-left: 2px;
+}
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font: 500 11.5px/1 var(--font);
+  cursor: pointer;
+}
+.tag .bolt { color: var(--accent); }
+
+/* ---------------- motion: the panel opening ---------------- */
+.panel.enter {
+  animation: panel-in 0.34s var(--ease) both;
+}
+@keyframes panel-in {
+  from { opacity: 0; transform: translateY(-8px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+.chips .chip { animation: chip-in 0.4s var(--ease) both; }
+.chips .chip:nth-child(1) { animation-delay: 0.06s; }
+.chips .chip:nth-child(3) { animation-delay: 0.10s; }
+.chips .chip:nth-child(5) { animation-delay: 0.14s; }
+.chips .chip:nth-child(7) { animation-delay: 0.18s; }
+@keyframes chip-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .panel.enter { animation: fade-in 0.2s ease both; }
+  .chips .chip { animation: fade-in 0.2s ease both; animation-delay: 0 !important; }
+  .mark.listening::after { animation: none; opacity: 0.6; }
+  @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+}
