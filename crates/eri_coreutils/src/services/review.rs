@@ -284,6 +284,10 @@ async fn resolve_provider(
     // Fall back to a sensible default if the IDE didn't pick one, then go
     // through the shared provider-acquisition seam (BYOK + proxy + env), so
     // signed-in / power-user keys are honored instead of an env-only guess.
+    // `claude-sonnet-4-5` is the internal canonical alias, NOT a wire id — the
+    // provider seam upgrades it to the valid `claude-sonnet-4-6` before any
+    // Anthropic call (see llm_provider::wire_model_id_for_canonical + its
+    // regression tests). Don't "fix" this to a dashed/dotted literal.
     let pick = choice.unwrap_or("claude-sonnet-4-5");
     super::iterate::resolve_provider(services, pick).await
 }

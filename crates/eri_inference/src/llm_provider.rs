@@ -492,6 +492,60 @@ mod tests {
         assert_eq!(canonical_model_id("claude opus"), Some("claude-opus-4-5"));
     }
 
+    // ── wire-id invariants: the canonical `claude-sonnet-4-5` is a known 404 at
+    // Anthropic (see brain_router::CLAUDE_SONNET_DEFAULT). It survives ONLY as an
+    // internal alias; the wire layer must always upgrade it. These lock that so a
+    // future edit can't leak a 404 to the provider. ──
+
+    #[test]
+    fn no_canonical_id_maps_to_the_404_sonnet_wire_id() {
+        let canonical = [
+            "gpt-4o",
+            "gpt-4o-mini",
+            "o1-mini",
+            "o3-mini",
+            "o4",
+            "claude-sonnet-4-5",
+            "claude-haiku-4-5",
+            "claude-opus-4-5",
+            "gemini-flash-2",
+            "gemini-thinking-2",
+        ];
+        for id in canonical {
+            let wire = wire_model_id_for_canonical(id);
+            assert!(wire.is_some(), "{id} has no wire mapping");
+            assert_ne!(
+                wire,
+                Some("claude-sonnet-4-5"),
+                "{id} resolves to the documented-404 sonnet wire id"
+            );
+        }
+        // the explicit upgrade contract
+        assert_eq!(
+            wire_model_id_for_canonical("claude-sonnet-4-5"),
+            Some("claude-sonnet-4-6")
+        );
+    }
+
+    #[test]
+    fn sidecar_default_model_slugs_resolve_to_valid_wire_ids() {
+        // Slugs hard-wired as production defaults / classifier candidates in the
+        // sidecar (services/review.rs default, services/voice_route.rs candidates)
+        // must resolve to a real, correctly-shaped wire id — never None (which
+        // surfaces "no provider available") and never a dotted/404 string.
+        for slug in ["claude-sonnet-4-5", "claude-haiku-4-5"] {
+            let canonical =
+                canonical_model_id(slug).unwrap_or_else(|| panic!("{slug} not recognized"));
+            let wire = wire_model_id_for_canonical(canonical)
+                .unwrap_or_else(|| panic!("{slug} -> {canonical} has no wire id"));
+            assert!(
+                !wire.contains('.'),
+                "{slug} -> wire {wire} uses dotted version (404 shape at Anthropic)"
+            );
+            assert_ne!(wire, "claude-sonnet-4-5", "{slug} leaks the 404 sonnet id");
+        }
+    }
+
     #[test]
     fn canonical_model_id_recognizes_gemini() {
         assert_eq!(canonical_model_id("use gemini"), Some("gemini-flash-2"));

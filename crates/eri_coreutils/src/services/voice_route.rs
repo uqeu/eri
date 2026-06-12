@@ -108,6 +108,9 @@ async fn resolve_provider(
     // provider-acquisition seam, so BYOK + proxy keys are honored (not just env).
     let candidates: Vec<&str> = match explicit {
         Some(slug) => vec![slug],
+        // These are internal canonical aliases, not wire ids — the provider seam
+        // upgrades `claude-*-4-5` to valid wire ids (4-6 / dated haiku) before any
+        // call. See llm_provider::wire_model_id_for_canonical + its regression tests.
         None => vec![
             "claude-haiku-4-5",
             "claude-sonnet-4-5",
