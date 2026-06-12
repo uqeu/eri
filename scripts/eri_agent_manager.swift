@@ -267,6 +267,19 @@ final class AgentManagerController: NSObject, NSWindowDelegate, WKNavigationDele
             if let text = payload["text"] as? String, !text.isEmpty { startControl(goal: text) }
         case "overlayPanel":
             break // size is driven by overlaySize; nothing else to do
+        // Rebind the summon hotkey. payload: {keyCode, command, option, shift,
+        // control}. Takes effect immediately (read live per keypress).
+        case "setOverlayHotkey":
+            let d = UserDefaults.standard
+            if let kc = payload["keyCode"] as? Int { d.set(kc, forKey: "overlayHotkeyKeyCode") }
+            d.set((payload["command"] as? Bool) ?? false, forKey: "overlayHotkeyCmd")
+            d.set((payload["option"] as? Bool) ?? false, forKey: "overlayHotkeyOpt")
+            d.set((payload["shift"] as? Bool) ?? false, forKey: "overlayHotkeyShift")
+            d.set((payload["control"] as? Bool) ?? false, forKey: "overlayHotkeyCtrl")
+            eval("window.eriOverlayHotkey && window.eriOverlayHotkey(\(jsArg(overlayHotkeyLabel())));")
+            reply(command: command, status: "ok", detail: overlayHotkeyLabel())
+        case "getOverlayHotkey":
+            eval("window.eriOverlayHotkey && window.eriOverlayHotkey(\(jsArg(overlayHotkeyLabel())));")
 
         // Indexed sources from the graphify knowledge graph.
         case "openSources", "attachContext":
@@ -827,13 +840,57 @@ final class AgentManagerController: NSObject, NSWindowDelegate, WKNavigationDele
                 DispatchQueue.main.async { self?.panicStop() }
             }
         }
-        // ⌥Space — summon/dismiss the always-on overlay companion.
+        // Summon/dismiss the overlay. Default ⌘⌥E ("E" for eri — not a macOS
+        // system shortcut, and in the same ⌘⌥ family as panic-stop). The user
+        // can rebind it (setOverlayHotkey); the config is read per-event so a
+        // change takes effect immediately without re-registering.
         overlayHotkey = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-            if event.keyCode == 49 && mods == .option {
-                DispatchQueue.main.async { self?.toggleOverlay() }
+            guard let self = self else { return }
+            let (keyCode, mods) = self.overlayHotkeyConfig()
+            let pressed = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            if event.keyCode == keyCode && pressed == mods {
+                DispatchQueue.main.async { self.toggleOverlay() }
             }
         }
+    }
+
+    /// The configured overlay summon hotkey: the user's saved binding, or the
+    /// ⌘⌥E default. Read live from UserDefaults so a rebind applies at once.
+    private func overlayHotkeyConfig() -> (UInt16, NSEvent.ModifierFlags) {
+        let d = UserDefaults.standard
+        guard d.object(forKey: "overlayHotkeyKeyCode") != nil else {
+            return (14, [.command, .option]) // 14 = 'e'
+        }
+        var mods: NSEvent.ModifierFlags = []
+        if d.bool(forKey: "overlayHotkeyCmd") { mods.insert(.command) }
+        if d.bool(forKey: "overlayHotkeyOpt") { mods.insert(.option) }
+        if d.bool(forKey: "overlayHotkeyShift") { mods.insert(.shift) }
+        if d.bool(forKey: "overlayHotkeyCtrl") { mods.insert(.control) }
+        // Refuse an empty/modifier-less binding (would fire on every keypress).
+        if mods.isEmpty { return (14, [.command, .option]) }
+        return (UInt16(d.integer(forKey: "overlayHotkeyKeyCode")), mods)
+    }
+
+    /// A human label for the current binding, e.g. "⌘⌥E", for the settings UI.
+    private func overlayHotkeyLabel() -> String {
+        let (keyCode, mods) = overlayHotkeyConfig()
+        var s = ""
+        if mods.contains(.control) { s += "⌃" }
+        if mods.contains(.option) { s += "⌥" }
+        if mods.contains(.shift) { s += "⇧" }
+        if mods.contains(.command) { s += "⌘" }
+        return s + Self.keyName(keyCode)
+    }
+
+    private static func keyName(_ code: UInt16) -> String {
+        // Common letters/keys; falls back to the raw code for anything exotic.
+        let map: [UInt16: String] = [
+            0: "A", 1: "S", 2: "D", 3: "F", 5: "G", 4: "H", 38: "J", 40: "K", 37: "L",
+            13: "W", 14: "E", 15: "R", 17: "T", 16: "Y", 32: "U", 34: "I", 31: "O", 35: "P",
+            12: "Q", 6: "Z", 7: "X", 8: "C", 9: "V", 11: "B", 45: "N", 46: "M",
+            49: "Space", 36: "↩", 53: "⎋",
+        ]
+        return map[code] ?? "key\(code)"
     }
 
     private func forwardStreamLine(command: String, line: String) {
