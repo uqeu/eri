@@ -144,14 +144,14 @@ impl Router {
                 table.set(*intent, choice);
             }
         }
-        // Local-first: `ERI_LOCAL_MODEL=qwen2.5:1.5b` makes the on-device model
-        // the default for local-capable intents (explicit ERI_ROUTE_* overrides
-        // still win). Unset = cloud-only, unchanged behavior.
-        if let Ok(model) = std::env::var("ERI_LOCAL_MODEL") {
-            let model = model.trim();
-            if !model.is_empty() {
-                table.local_model = Some(model.to_string());
-            }
+        // Local-first: `ERI_LOCAL_MODEL` makes the on-device model the default for
+        // local-capable intents (explicit ERI_ROUTE_* overrides still win). Set it
+        // to `auto`/`default` to let eri pick by RAM budget (free 0.5B / paid 1.5B),
+        // or to an explicit id. Unset = cloud-only, unchanged behavior.
+        if let Ok(model) = std::env::var("ERI_LOCAL_MODEL")
+            && let Some(resolved) = resolve_local_model(&model, local_ram_budget_gb())
+        {
+            table.local_model = Some(resolved);
         }
         Self::new(table)
     }
@@ -257,6 +257,52 @@ impl RouteTable {
 // `claude-sonnet-4-5*` is a 404 at Anthropic — never use it.
 const CLAUDE_SONNET_DEFAULT: &str = "claude-sonnet-4-6";
 const CLAUDE_HAIKU_DEFAULT: &str = "claude-haiku-4-5-20251001";
+
+// eri's on-device model picks from the 50-task local bake-off
+// (scripts/eval/run_local_scorecard.py). Free tier runs the 0.5B — 397 MB, fits
+// the 1.5 GB budget, within two tasks of the best; paying for more RAM unlocks
+// the smarter 1.5B. Selecting by RAM budget makes the model track the paid
+// lever, and these exact ids are what the website's model claim rests on.
+pub const FREE_LOCAL_MODEL: &str = "qwen2.5:0.5b";
+pub const PAID_LOCAL_MODEL: &str = "qwen2.5:1.5b";
+
+/// Default on-device model for a RAM budget (GB). Free (≤ ~1.5 GB) → 0.5B;
+/// more RAM → 1.5B. Pure + tested.
+pub fn default_local_model(ram_budget_gb: f64) -> &'static str {
+    if ram_budget_gb >= 2.0 {
+        PAID_LOCAL_MODEL
+    } else {
+        FREE_LOCAL_MODEL
+    }
+}
+
+/// Resolve the configured local-model string against a RAM budget:
+/// `auto`/`default` → the tier pick for `ram_gb`; any other non-empty value is
+/// honored verbatim; empty/blank → `None` (cloud-only, activation gate intact).
+/// Pure so the precedence is unit-tested without touching env.
+pub fn resolve_local_model(raw: &str, ram_gb: f64) -> Option<String> {
+    let m = raw.trim();
+    if m.is_empty() {
+        return None;
+    }
+    if m.eq_ignore_ascii_case("auto") || m.eq_ignore_ascii_case("default") {
+        Some(default_local_model(ram_gb).to_string())
+    } else {
+        Some(m.to_string())
+    }
+}
+
+/// The RAM budget (GB) eri's local engine may use, from `ERI_LOCAL_RAM_BUDGET`
+/// (free 1.5 GB; the paid lever raises it). Mirrors the reader in
+/// `eri_inference::providers::local`, kept here to avoid a crate cycle.
+fn local_ram_budget_gb() -> f64 {
+    std::env::var("ERI_LOCAL_RAM_BUDGET")
+        .ok()
+        .and_then(|v| v.trim().parse::<f64>().ok())
+        .filter(|v| v.is_finite() && *v > 0.0)
+        .unwrap_or(1.5)
+        .max(0.5)
+}
 
 fn default_route_for(intent: Intent) -> (ModelChoice, ReasoningLevel, f32) {
     match intent {
@@ -779,5 +825,33 @@ mod tests {
             r2.route(Intent::Chat, "hi", &ctx()).model,
             ModelChoice::Claude(_)
         ));
+    }
+
+    #[test]
+    fn default_local_model_tracks_the_ram_budget_paid_lever() {
+        // The bake-off picks: free (1.5 GB budget) runs the 0.5B; paying for more
+        // RAM unlocks the 1.5B. These exact ids back the website's model claim.
+        assert_eq!(default_local_model(1.5), FREE_LOCAL_MODEL);
+        assert_eq!(default_local_model(0.5), FREE_LOCAL_MODEL);
+        assert_eq!(default_local_model(3.0), PAID_LOCAL_MODEL);
+        assert_eq!(default_local_model(6.0), PAID_LOCAL_MODEL);
+        assert_eq!(FREE_LOCAL_MODEL, "qwen2.5:0.5b");
+        assert_eq!(PAID_LOCAL_MODEL, "qwen2.5:1.5b");
+    }
+
+    #[test]
+    fn resolve_local_model_handles_auto_explicit_and_empty() {
+        // "auto"/"default" -> the tier pick for the budget.
+        assert_eq!(resolve_local_model("auto", 1.5).as_deref(), Some(FREE_LOCAL_MODEL));
+        assert_eq!(resolve_local_model("AUTO", 3.0).as_deref(), Some(PAID_LOCAL_MODEL));
+        assert_eq!(resolve_local_model("default", 1.5).as_deref(), Some(FREE_LOCAL_MODEL));
+        // An explicit model is honored verbatim, regardless of budget.
+        assert_eq!(
+            resolve_local_model("qwen2.5:1.5b", 1.5).as_deref(),
+            Some("qwen2.5:1.5b")
+        );
+        // Empty/blank -> None (cloud-only; the activation gate is preserved).
+        assert_eq!(resolve_local_model("", 1.5), None);
+        assert_eq!(resolve_local_model("   ", 9.0), None);
     }
 }

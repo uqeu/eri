@@ -704,6 +704,25 @@ mod tests {
     }
 
     #[test]
+    fn local_system_message_carries_the_brand_guardrail() {
+        // The on-device model must get the same confidentiality guardrail as the
+        // cloud path (it must never reveal which model it is). control_agent puts
+        // brand::GUARDRAIL into the shared system blocks; lock that it survives
+        // the lowering into the Ollama system message so a refactor can't drop it.
+        let system = vec![
+            json!({ "type": "text", "text": "you are eri" }),
+            json!({ "type": "text", "text": eri_inference::brand::GUARDRAIL }),
+        ];
+        let local = to_local_messages(&system, &[]);
+        assert_eq!(local[0]["role"], "system");
+        let sys = local[0]["content"].as_str().unwrap();
+        assert!(
+            sys.contains(eri_inference::brand::GUARDRAIL),
+            "the local system message dropped the confidentiality guardrail"
+        );
+    }
+
+    #[test]
     fn tool_result_block_array_content_is_flattened() {
         let messages = vec![json!({ "role": "user", "content": [
             { "type": "tool_result", "tool_use_id": "t1", "content": [ { "type": "text", "text": "clicked" } ] }
