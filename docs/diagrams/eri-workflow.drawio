@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="drawio" version="30.0.4">
+  <diagram name="eri-workflow" id="eri-workflow">
+    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1180" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- Title -->
+        <mxCell id="title" value="How eri works  ·  surfaces, user flow &amp; the local-first routing brain" style="text;html=1;fontSize=22;fontStyle=1;align=left;verticalAlign=middle;fontColor=#222222;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="900" height="36" as="geometry" />
+        </mxCell>
+
+        <!-- ===== Band labels ===== -->
+        <mxCell id="lblA" value="1 · ONBOARDING" style="text;html=1;fontSize=11;fontStyle=1;fontColor=#6c8ebf;align=left;" vertex="1" parent="1"><mxGeometry x="40" y="70" width="200" height="20" as="geometry" /></mxCell>
+        <mxCell id="lblB" value="2 · SURFACES" style="text;html=1;fontSize=11;fontStyle=1;fontColor=#9673a6;align=left;" vertex="1" parent="1"><mxGeometry x="40" y="300" width="200" height="20" as="geometry" /></mxCell>
+        <mxCell id="lblC" value="3 · THE BRAIN (runs on your Mac)" style="text;html=1;fontSize=11;fontStyle=1;fontColor=#d79b00;align=left;" vertex="1" parent="1"><mxGeometry x="40" y="470" width="280" height="20" as="geometry" /></mxCell>
+        <mxCell id="lblD" value="4 · ENGINES (cheap → expensive)" style="text;html=1;fontSize=11;fontStyle=1;fontColor=#82b366;align=left;" vertex="1" parent="1"><mxGeometry x="40" y="710" width="280" height="20" as="geometry" /></mxCell>
+        <mxCell id="lblE" value="5 · ACT" style="text;html=1;fontSize=11;fontStyle=1;fontColor=#d79b00;align=left;" vertex="1" parent="1"><mxGeometry x="40" y="950" width="200" height="20" as="geometry" /></mxCell>
+
+        <!-- ===== Band A: Onboarding ===== -->
+        <mxCell id="a1" value="eri website&#xa;(eri.dev)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1"><mxGeometry x="40" y="100" width="170" height="60" as="geometry" /></mxCell>
+        <mxCell id="a2" value="Download&#xa;macOS .dmg" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1"><mxGeometry x="280" y="100" width="170" height="60" as="geometry" /></mxCell>
+        <mxCell id="a3" value="Install →&#xa;Gatekeeper check" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1"><mxGeometry x="520" y="92" width="180" height="76" as="geometry" /></mxCell>
+        <mxCell id="a4" value="Sign in&#xa;(device auth → token)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1"><mxGeometry x="770" y="100" width="180" height="60" as="geometry" /></mxCell>
+        <mxCell id="a5" value="Grant permissions&#xa;Accessibility · Mic · Camera" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1"><mxGeometry x="1010" y="100" width="220" height="60" as="geometry" /></mxCell>
+        <mxCell id="a6" value="Ready to use" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="1300" y="100" width="150" height="60" as="geometry" /></mxCell>
+        <mxCell id="aFail" value="⚠ SHIP BLOCKER: app is unsigned today →&#xa;macOS says &quot;unidentified developer&quot; and blocks it.&#xa;Needs Developer-ID signing + notarization + a real .dmg." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;dashed=1;fontColor=#a02020;" vertex="1" parent="1"><mxGeometry x="470" y="200" width="290" height="70" as="geometry" /></mxCell>
+
+        <!-- Band A edges -->
+        <mxCell id="ea1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="a1" target="a2"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ea2" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="a2" target="a3"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ea3" value="pass" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;fontSize=10;" edge="1" parent="1" source="a3" target="a4"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ea4" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="a4" target="a5"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ea5" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="a5" target="a6"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="eaFail" value="blocked" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;dashed=1;strokeColor=#b85450;fontColor=#b85450;fontSize=10;" edge="1" parent="1" source="a3" target="aFail"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <!-- ===== Band B: Surfaces ===== -->
+        <mxCell id="b1" value="eri app&#xa;(Agent Manager)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1"><mxGeometry x="300" y="330" width="190" height="60" as="geometry" /></mxCell>
+        <mxCell id="b2" value="eri IDE&#xa;(VSCodium fork + panel)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1"><mxGeometry x="560" y="330" width="200" height="60" as="geometry" /></mxCell>
+        <mxCell id="b3" value="eri CLI + sidecar  (Rust)&#xa;the engine that hosts the brain" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="850" y="330" width="240" height="60" as="geometry" /></mxCell>
+
+        <mxCell id="eb0" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="a6" target="b3"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="eb1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="b1" target="b2"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="eb2" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="b2" target="b3"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <!-- ===== Band C: The Brain ===== -->
+        <mxCell id="c1" value="PERCEIVE&#xa;screen = accessibility tree (free, structured)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1"><mxGeometry x="120" y="500" width="260" height="60" as="geometry" /></mxCell>
+        <mxCell id="c2" value="ROUTE&#xa;local-first router" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="700" y="490" width="200" height="90" as="geometry" /></mxCell>
+        <mxCell id="c3" value="GATE&#xa;refuse · confirm · panic-stop" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1"><mxGeometry x="440" y="500" width="200" height="60" as="geometry" /></mxCell>
+        <mxCell id="c4" value="MEMORY&#xa;learn-do (remembers you)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;" vertex="1" parent="1"><mxGeometry x="1000" y="500" width="220" height="60" as="geometry" /></mxCell>
+
+        <mxCell id="ec0" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;exitX=0.25;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="b3" target="c1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ec1" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="c1" target="c2"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ec2" value="wraps every action" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;exitX=0;exitY=0.5;entryX=1;entryY=0.5;dashed=1;fontSize=10;strokeColor=#b85450;" edge="1" parent="1" source="c2" target="c3"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ec3" value="reads + writes" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;dashed=1;fontSize=10;" edge="1" parent="1" source="c2" target="c4"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <!-- ===== Band D: Engines ===== -->
+        <mxCell id="d1" value="Fast-lane&#xa;0 tokens · 1-step commands" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1"><mxGeometry x="120" y="740" width="220" height="60" as="geometry" /></mxCell>
+        <mxCell id="d2" value="Local model&#xa;Ollama · qwen2.5 · $0" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="430" y="740" width="220" height="60" as="geometry" /></mxCell>
+        <mxCell id="d3" value="Cloud proxy&#xa;(metered · website API)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1"><mxGeometry x="740" y="740" width="200" height="60" as="geometry" /></mxCell>
+        <mxCell id="d4" value="Claude&#xa;hard reasoning + control" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1"><mxGeometry x="1010" y="710" width="190" height="56" as="geometry" /></mxCell>
+        <mxCell id="d5" value="Mercury&#xa;diffusion code edits" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1"><mxGeometry x="1010" y="780" width="190" height="56" as="geometry" /></mxCell>
+        <mxCell id="d6" value="Billing / quota&#xa;free → Pro → Teams" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;" vertex="1" parent="1"><mxGeometry x="740" y="850" width="200" height="56" as="geometry" /></mxCell>
+
+        <mxCell id="ed1" value="known cmd" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;exitX=0.2;exitY=1;entryX=0.5;entryY=0;fontSize=10;" edge="1" parent="1" source="c2" target="d1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ed2" value="cheap / decisive" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;fontSize=10;" edge="1" parent="1" source="c2" target="d2"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ed3" value="hard" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;exitX=0.8;exitY=1;entryX=0.5;entryY=0;fontSize=10;" edge="1" parent="1" source="c2" target="d3"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ed4" value="escalate when local can't" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;dashed=1;fontSize=10;strokeColor=#d79b00;" edge="1" parent="1" source="d2" target="d3"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ed5" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;exitX=1;exitY=0.4;entryX=0;entryY=0.5;" edge="1" parent="1" source="d3" target="d4"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ed6" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;exitX=1;exitY=0.6;entryX=0;entryY=0.5;" edge="1" parent="1" source="d3" target="d5"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ed7" value="counts tokens" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;dashed=1;fontSize=10;" edge="1" parent="1" source="d3" target="d6"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <!-- ===== Band E: Act ===== -->
+        <mxCell id="e1" value="ACT — control bridge&#xa;AX / CGEvent → your Mac (open · click · type)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1"><mxGeometry x="150" y="980" width="320" height="60" as="geometry" /></mxCell>
+        <mxCell id="e2" value="BUILD — write code&#xa;→ files · git · tests" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1"><mxGeometry x="560" y="980" width="240" height="60" as="geometry" /></mxCell>
+
+        <mxCell id="ee1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;exitX=0.5;exitY=1;entryX=0.3;entryY=0;" edge="1" parent="1" source="d1" target="e1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ee2" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;exitX=0.5;exitY=1;entryX=0.7;entryY=0;" edge="1" parent="1" source="d2" target="e1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ee3" value="control" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;exitX=0.3;exitY=1;entryX=0.5;entryY=0;fontSize=10;" edge="1" parent="1" source="d4" target="e1"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="310" y="930" /></Array></mxGeometry></mxCell>
+        <mxCell id="ee4" value="code" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;fontSize=10;" edge="1" parent="1" source="d5" target="e2"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="680" y="930" /></Array></mxGeometry></mxCell>
+        <mxCell id="ee5" value="gated" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;exitX=0.5;exitY=1;entryX=0;entryY=0.5;dashed=1;strokeColor=#b85450;fontSize=10;" edge="1" parent="1" source="c3" target="e1"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

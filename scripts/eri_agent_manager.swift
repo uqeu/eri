@@ -994,6 +994,19 @@ final class AgentManagerController: NSObject, NSWindowDelegate, WKNavigationDele
     }
 
     private func resolveRepoFile(_ components: [String]) -> URL? {
+        // Distribution path: prefer the obfuscated frontend bundled INSIDE the
+        // .app (Contents/Resources/web/). This makes a shipped copy
+        // self-contained (no repo on disk) and means the only readable assets
+        // are the minified+mangled ones, not the source. The repo-walking
+        // fallbacks below are dev-only (they hit when running from the tree).
+        if let last = components.last,
+            ["index.html", "manager.js", "manager.css"].contains(last),
+            let res = Bundle.main.resourceURL {
+            let bundled = res.appendingPathComponent("web").appendingPathComponent(last)
+            if FileManager.default.fileExists(atPath: bundled.path) {
+                return bundled
+            }
+        }
         if let root = Bundle.main.environmentRepoRoot {
             let candidate = components.reduce(root) { $0.appendingPathComponent($1) }
             if FileManager.default.fileExists(atPath: candidate.path) {
