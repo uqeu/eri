@@ -50,6 +50,7 @@ mod memory;
 mod memory_tools;
 mod plan_tui;
 mod plugins;
+mod proactive;
 mod project;
 mod repl;
 mod research;
@@ -353,6 +354,10 @@ pub enum Command {
         /// exit. No goal needed.
         #[arg(long)]
         history: bool,
+        /// Proactively suggest what you'll likely want next, learned from what
+        /// you've done before. No goal needed.
+        #[arg(long)]
+        suggest: bool,
         /// The goal, e.g. "open YouTube and search lofi".
         goal: Vec<String>,
     },
@@ -799,8 +804,9 @@ async fn dispatch(cli: Cli) -> anyhow::Result<()> {
             mode,
             undo,
             history,
+            suggest,
             goal,
-        } => run_control(&goal.join(" "), live, yes, mode, undo, history).await,
+        } => run_control(&goal.join(" "), live, yes, mode, undo, history, suggest).await,
         Command::Apps { action } => run_apps(&action),
         Command::Brief => memory::brief(),
         Command::Research { query } => research::research(&query.join(" ")),
@@ -1162,9 +1168,28 @@ async fn run_control(
     mode: Option<Mode>,
     undo: bool,
     history: bool,
+    suggest: bool,
 ) -> anyhow::Result<()> {
     // Trust layer: "what did eri do?" and undo, both read the persisted trail.
     let log_path = action_log::default_log_path();
+    if suggest {
+        let log = log_path
+            .as_ref()
+            .map(|p| action_log::ActionLog::load(p))
+            .unwrap_or_default();
+        let history = log.descriptions();
+        let current = history.last().map(String::as_str);
+        match proactive::proactive_suggestion(&history, current) {
+            Some(s) => println!(
+                "[eri] want me to {}? ({} — {:.0}% sure)",
+                s.action,
+                s.reason,
+                s.confidence * 100.0
+            ),
+            None => println!("[eri] nothing to suggest yet — I learn your patterns as you go."),
+        }
+        return Ok(());
+    }
     if history {
         let log = log_path
             .as_ref()

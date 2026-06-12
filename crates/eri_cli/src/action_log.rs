@@ -130,6 +130,12 @@ impl ActionLog {
         UndoOutcome::Nothing
     }
 
+    /// The raw ordered action descriptions — the history the proactive layer
+    /// ([`crate::proactive`]) learns "after X you usually Y" patterns from.
+    pub fn descriptions(&self) -> Vec<String> {
+        self.records.iter().map(|r| r.description.clone()).collect()
+    }
+
     pub fn len(&self) -> usize {
         self.records.len()
     }
