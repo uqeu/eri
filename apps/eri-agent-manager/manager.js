@@ -4,6 +4,7 @@ const boot = window.ERI_BOOTSTRAP || {};
 const LOCAL_ONLY = new Set([
   "setMode", "goHome", "openArtifact", "useSuggestion", "closeSources", "toggleTheme",
   "calibrateGaze", "authAction", "closeAuth", "openAuthUrl", "onboardSignIn", "onboardSkip",
+  "openSettings", "closeSettings", "recordHotkey",
 ]);
 
 const state = {
@@ -429,6 +430,16 @@ function runCommand(command, data = {}) {
     case "toggleTheme":
       state.theme = state.theme === "dark" ? "light" : "dark";
       break;
+    case "openSettings":
+      $("settingsSheet").showModal();
+      native("getOverlayHotkey"); // populate the recorder with the current binding
+      break;
+    case "closeSettings":
+      $("settingsSheet").close();
+      break;
+    case "recordHotkey":
+      startHotkeyRecording();
+      break;
     case "openSources":
       native("openSources");
       $("sourcesSheet").showModal();
@@ -486,6 +497,43 @@ function runCommand(command, data = {}) {
 }
 
 /* ---------------- host callbacks ---------------- */
+/* ---------------- overlay summon hotkey recorder ---------------- */
+// JS KeyboardEvent.code → macOS virtual keycode (matches the Swift keyName map).
+const MAC_KEYCODES = {
+  KeyA: 0, KeyS: 1, KeyD: 2, KeyF: 3, KeyH: 4, KeyG: 5, KeyZ: 6, KeyX: 7, KeyC: 8, KeyV: 9,
+  KeyB: 11, KeyQ: 12, KeyW: 13, KeyE: 14, KeyR: 15, KeyY: 16, KeyT: 17, KeyO: 31, KeyU: 32,
+  KeyI: 34, KeyP: 35, KeyL: 37, KeyJ: 38, KeyK: 40, KeyN: 45, KeyM: 46, Space: 49,
+  Digit1: 18, Digit2: 19, Digit3: 20, Digit4: 21, Digit5: 23, Digit6: 22, Digit7: 26,
+  Digit8: 28, Digit9: 25, Digit0: 29,
+};
+let recordingHotkey = false;
+function startHotkeyRecording() {
+  recordingHotkey = true;
+  const b = document.getElementById("hotkeyRec");
+  if (b) { b.textContent = "Press shortcut…"; b.classList.add("recording"); }
+}
+window.addEventListener("keydown", (e) => {
+  if (!recordingHotkey) return;
+  if (["Meta", "Alt", "Shift", "Control"].includes(e.key)) return; // wait for a real key
+  e.preventDefault();
+  const b = document.getElementById("hotkeyRec");
+  if (e.key === "Escape") { recordingHotkey = false; b?.classList.remove("recording"); native("getOverlayHotkey"); return; }
+  const keyCode = MAC_KEYCODES[e.code];
+  const mods = { command: e.metaKey, option: e.altKey, shift: e.shiftKey, control: e.ctrlKey };
+  if (keyCode === undefined || (!mods.command && !mods.option && !mods.control)) {
+    if (b) b.textContent = "needs ⌘/⌥/⌃ + a key";
+    return; // keep recording until they give a valid combo
+  }
+  recordingHotkey = false;
+  b?.classList.remove("recording");
+  native("setOverlayHotkey", { keyCode, ...mods }); // label comes back via eriOverlayHotkey
+}, true);
+// Host pushes the current binding's label back ("⌘⌥E").
+window.eriOverlayHotkey = (label = "") => {
+  const b = document.getElementById("hotkeyRec");
+  if (b && label) b.textContent = label;
+};
+
 window.eriBridgeResult = (result = {}) => {
   const command = result.command || "bridge";
   const detail = result.detail || result.status || "done";

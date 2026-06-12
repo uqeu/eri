@@ -21,6 +21,7 @@
           <button class="tool theme-toggle" type="button" data-command="toggleTheme" id="themeToggle" aria-label="Toggle theme" title="Theme">
             <span class="ico-moon">☾</span><span class="ico-sun">☀</span>
           </button>
+          <button class="tool" type="button" data-command="openSettings" id="settingsBtn" aria-label="Settings" title="Settings">⚙</button>
           <button class="tool account" type="button" data-command="authAction" id="accountBtn">Sign in</button>
         </div>
       </header>
@@ -158,6 +159,22 @@
         <button class="ghost" type="button" data-command="closeSources">Close</button>
       </div>
       <div class="sheet-body" id="sourcesBody"></div>
+    </dialog>
+
+    <dialog class="sheet" id="settingsSheet">
+      <div class="sheet-head">
+        <strong>Settings</strong>
+        <button class="ghost" type="button" data-command="closeSettings">Close</button>
+      </div>
+      <div class="sheet-body">
+        <div class="setting-row">
+          <div class="setting-text">
+            <div class="setting-name">Summon eri</div>
+            <div class="setting-hint">Opens the always-on overlay from anywhere.</div>
+          </div>
+          <button class="hotkey-rec" type="button" id="hotkeyRec" data-command="recordHotkey">⌘⌥E</button>
+        </div>
+      </div>
     </dialog>
 
     <!-- Slash / mention combobox -->

@@ -333,6 +333,14 @@ body[data-theme="light"] .browser-view { background: #fff; }
 .sheet-body { padding: 6px 16px 16px; display: grid; gap: 0; }
 .source-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 11px 4px; border-bottom: 1px solid var(--line-soft); }
 .source-row:last-child { border-bottom: 0; }
+
+/* settings sheet */
+.setting-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 2px; }
+.setting-name { font-size: 13.5px; font-weight: 500; color: var(--text); }
+.setting-hint { margin-top: 3px; font-size: 12px; color: var(--muted); }
+.hotkey-rec { min-width: 92px; height: 32px; padding: 0 14px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface); color: var(--text); font: 600 13px/1 var(--mono); letter-spacing: 0.02em; cursor: pointer; transition: border-color 0.15s, color 0.15s; }
+.hotkey-rec:hover { border-color: color-mix(in oklab, var(--accent) 40%, var(--line)); }
+.hotkey-rec.recording { border-color: var(--accent); color: var(--accent); }
 .source-row .s-name { font-size: 12.5px; }
 .source-row .s-detail { color: var(--dim); font-size: 11.5px; }
 .source-row .s-stat { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
