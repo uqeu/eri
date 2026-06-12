@@ -415,6 +415,13 @@ mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
     use tempfile::TempDir;
 
+    // Tests in this binary run in parallel threads but share one process env.
+    // Any test that mutates `ERI_ROUTE_*` (router_for_byok, the budget test)
+    // must hold this lock across its set -> from_env -> restore window, or the
+    // mutations clobber each other and a route-dependent assertion flakes. The
+    // "tests are serialised" comments below are only true because of this lock.
+    static ROUTE_ENV_LOCK: Mutex<()> = Mutex::new(());
+
     #[test]
     fn compress_context_parts_preserves_system_and_code_but_shrinks_prose() {
         let prose = "Please could you go ahead and make the header sticky so that \
@@ -566,6 +573,8 @@ mod tests {
         // Force every intent we test to route to a BYOK provider so the
         // canned provider's key path is exercised — Mercury can't be
         // constructed via LlmProvider, so we'd error on UnsupportedModel.
+        // Hold the env lock across set -> from_env -> restore (see ROUTE_ENV_LOCK).
+        let _env = ROUTE_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let prev_edit = std::env::var("ERI_ROUTE_EDIT").ok();
         let prev_chat = std::env::var("ERI_ROUTE_CHAT").ok();
         let prev_explain = std::env::var("ERI_ROUTE_EXPLAIN").ok();
@@ -869,6 +878,9 @@ mod tests {
     #[test]
     fn budget_overflow_reports_dropped_parts() {
         let dir = TempDir::new().unwrap();
+        // Hold the env lock across set -> from_env -> restore (see ROUTE_ENV_LOCK)
+        // so a parallel router_for_byok can't clobber ERI_ROUTE_EDIT mid-test.
+        let _env = ROUTE_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let prev = std::env::var("ERI_ROUTE_EDIT").ok();
         unsafe {
             std::env::set_var("ERI_ROUTE_EDIT", "local:tiny-test");
