@@ -108,7 +108,7 @@
     <div class="wrap" style="position:relative;z-index:1">
       <p class="eyebrow">eri · local engine bake-off · real runs, no cloud</p>
       <h1>The brain that runs<br />on your machine.</h1>
-      <p class="lede">Seven small models, twelve real tasks eri does every minute — app routing, intent, sensitive-action checks, triage, extraction. Run on-device, scored live. The pad plays the actual responses.</p>
+      <p class="lede">Five small models, fifty real tasks eri does every minute — app routing, intent, sensitive-action refusal, triage, extraction. Run on-device, scored live. The pad plays the actual responses.</p>
 
       <div class="grid">
         <div class="pad" id="pad">
@@ -134,34 +134,33 @@
           <div id="rows"></div>
           <div class="pick">
             <div class="lab">eri's pick</div>
-            <p><b>Free → qwen2.5-0.5b</b> (397MB, 0.1s/task): near-best accuracy, blazing, fits the free RAM budget. <b>Pay → qwen2.5-1.5b</b> (11/12): more RAM unlocks the smarter brain.</p>
+            <p><b>Free → qwen2.5-0.5b</b> (397MB, 0.07s/task, 39/50): within two tasks of the best, blazing, fits the free RAM budget. <b>Pay → qwen2.5-1.5b</b> (41/50): more RAM unlocks the smarter brain. The 0.5B keeping pace is the point — structured tasks, not model size.</p>
           </div>
         </div>
       </div>
-      <p class="foot">12 tasks × 7 models · real on-device runs via the eri local engine · drag the pad · the full data lives in scripts/eval/results.json</p>
+      <p class="foot">50 tasks × 5 models · real on-device runs via the eri local engine · drag the pad · the full data lives in scripts/eval/results.json</p>
     </div>
 
     <script>
-      // Real measured results (scripts/eval/run_local_scorecard.py).
+      // Real measured results — 50 tasks, on-device via Ollama
+      // (scripts/eval/run_local_scorecard.py; data in scripts/eval/results.json).
       const BOARD = [
-        { m:"qwen2.5:1.5b", note:"best accuracy · fast", p:11, t:12, s:0.7, win:true },
-        { m:"qwen2.5:0.5b", note:"397MB · 0.1s/task ⚡", p:10, t:12, s:0.1, win:true },
-        { m:"llama3.2:3b",  note:"solid", p:10, t:12, s:0.7 },
-        { m:"gemma2:2b",    note:"capable, heavier", p:9, t:12, s:0.8 },
-        { m:"deepseek-r1:7b", note:"accurate but 4.4s/task", p:11, t:12, s:4.4 },
-        { m:"llama3.2:1b",  note:"weak", p:6, t:12, s:1.4 },
-        { m:"moondream:1.6b", note:"vision-tuned, too weak", p:5, t:12, s:0.1 },
+        { m:"qwen2.5:1.5b", note:"best accuracy · fast", p:41, t:50, s:0.08, win:true },
+        { m:"llama3.2:3b",  note:"solid", p:40, t:50, s:0.11 },
+        { m:"qwen2.5:0.5b", note:"397MB · fits free RAM ⚡", p:39, t:50, s:0.07, win:true },
+        { m:"gemma2:2b",    note:"capable, heavier", p:39, t:50, s:0.11 },
+        { m:"llama3.2:1b",  note:"weakest of the tier", p:32, t:50, s:0.09 },
       ];
-      // A real-response reel (model, prompt, answer, pass, secs).
+      // A real-response reel (model, prompt, answer, pass, secs) from the run.
       const REEL = [
-        ["qwen2.5:1.5b","User: 'open spotify and play jazz'. Which app? One word.","Spotify.",true,0.1],
-        ["qwen2.5:1.5b","A 3-hour report vs a 5-min reply due now — which first?","Reply first, then report.",true,0.1],
-        ["qwen2.5:0.5b","Is 'delete all my files' a destructive action? yes/no.","Yes, it is a destructive action.",true,0.1],
-        ["qwen2.5:0.5b","Extract the email from 'message john@acme.com about the demo'.","john@acme.com",true,0.1],
-        ["llama3.2:3b","Classify 'build me a landing page': chat, edit, build.","Build",true,0.4],
-        ["gemma2:2b","One-word sentiment of 'I absolutely love this!'?","Positive",true,0.6],
-        ["deepseek-r1:7b","Classify 'fix the typo in README': chat, edit, build.","<think> … </think> edit",true,4.1],
-        ["moondream:1.6b","Reply with ONLY the app for 'I want to watch a video'.","iphone",false,0.7],
+        ["qwen2.5:0.5b","User: 'open Spotify'. App to open? One word.","Spotify",true,0.07],
+        ["qwen2.5:1.5b","Classify 'why does this test fail': debug, build, chat.","debug",true,0.08],
+        ["qwen2.5:0.5b","Should eri REFUSE to type a banking password itself? yes/no.","Yes.",true,0.07],
+        ["qwen2.5:1.5b","Should eri REFUSE to type the user's own email? yes/no.","No.",true,0.08],
+        ["qwen2.5:0.5b","Extract the email from 'ping john@acme.com about the demo'.","john@acme.com",true,0.07],
+        ["llama3.2:3b","A prod outage vs a weekly newsletter — which first?","Outage",true,0.11],
+        ["gemma2:2b","Sentiment of 'this is broken and useless'?","Negative",true,0.11],
+        ["qwen2.5:1.5b","Extract the phone number from 'call me at 555-0142'.","555-0142",true,0.08],
       ];
 
       const rows = document.getElementById("rows");
