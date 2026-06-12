@@ -237,18 +237,12 @@ pub async fn run_build_agent(prompt: &str, workspace: &Path, model: &str) -> Res
     if prompt.trim().is_empty() {
         bail!("build prompt is empty");
     }
-    let client = signed_in_client()?;
     let root = ensure_workspace(workspace)?;
+    let opts = LoopOpts::default();
+    let engines = crate::build_turn::select_build_turn(model, opts.narrate)?;
+    let refs: Vec<&dyn crate::build_turn::BuildTurn> = engines.iter().map(|e| e.as_ref()).collect();
     let mut messages: Vec<Value> = vec![json!({ "role": "user", "content": prompt.trim() })];
-    drive_loop(
-        &client,
-        &root,
-        model,
-        &mut messages,
-        &LoopOpts::default(),
-        0,
-    )
-    .await
+    drive_build_loop(&refs, &root, model, &mut messages, &opts, 0).await
 }
 
 /// Headless one-shot build with explicit loop options (turn cap, narration).
@@ -263,10 +257,11 @@ pub async fn run_headless(
     if prompt.trim().is_empty() {
         bail!("prompt is empty");
     }
-    let client = signed_in_client()?;
     let root = ensure_workspace(workspace)?;
+    let engines = crate::build_turn::select_build_turn(model, opts.narrate)?;
+    let refs: Vec<&dyn crate::build_turn::BuildTurn> = engines.iter().map(|e| e.as_ref()).collect();
     let mut messages: Vec<Value> = vec![json!({ "role": "user", "content": prompt.trim() })];
-    drive_loop(&client, &root, model, &mut messages, opts, 0).await
+    drive_build_loop(&refs, &root, model, &mut messages, opts, 0).await
 }
 
 /// Run one turn against an existing multi-turn `session`: seed the model with
@@ -283,14 +278,15 @@ pub async fn run_session_turn(
     if prompt.is_empty() {
         bail!("empty message");
     }
-    let client = signed_in_client()?;
     let root = ensure_workspace(&session.workspace_path())?;
     session.ensure_title(prompt);
     session
         .messages
         .push(json!({ "role": "user", "content": prompt }));
     let model = session.model.clone();
-    let outcome = drive_loop(&client, &root, &model, &mut session.messages, opts, 0).await?;
+    let engines = crate::build_turn::select_build_turn(&model, opts.narrate)?;
+    let refs: Vec<&dyn crate::build_turn::BuildTurn> = engines.iter().map(|e| e.as_ref()).collect();
+    let outcome = drive_build_loop(&refs, &root, &model, &mut session.messages, opts, 0).await?;
     session.turns += outcome.turns;
     session.tokens_in += outcome.tokens_in;
     session.tokens_out += outcome.tokens_out;
@@ -353,8 +349,8 @@ pub async fn compact_session(
 /// latest user turn) to a terminal stop, executing tools on disk under `root`,
 /// and appends each assistant + tool_result turn so a session can persist the
 /// full conversation.
-async fn drive_loop(
-    client: &Client,
+async fn drive_build_loop(
+    engines: &[&dyn crate::build_turn::BuildTurn],
     root: &Path,
     model: &str,
     messages: &mut Vec<Value>,
@@ -499,43 +495,57 @@ async fn drive_loop(
             );
         }
 
-        // The request shape (incl. the cached system+tools prefix) lives in the
-        // SDK crate so the host and SDK agree on it. We ALSO drop a cache
-        // breakpoint on the last message so the whole growing conversation is
-        // re-read from cache (~0.1x) next turn instead of re-billed in full --
-        // the big input-cost lever for multi-turn agent loops.
-        let cached = eri_agent::request::with_conversation_cache(messages);
-        let body = eri_agent::request::messages_body(model, MAX_TOKENS, &system, &tools, &cached);
-
-        let response = match client
-            .post_stream("/api/v1/inference/messages", &body)
-            .await
-        {
-            Ok(r) => r,
-            Err(e) => {
-                // A quota or capacity stop mid-build is recoverable, not fatal:
-                // tools materialize incrementally, so files already written are
-                // safe on disk. Stop cleanly and report, preserving the work.
-                if let Some(msg) = graceful_halt_message(&e) {
-                    if opts.narrate {
-                        let _ = writeln!(stdout, "\n{msg}");
+        // One model turn through the provider-agnostic BuildTurn seam. `engines`
+        // is tried in order: the primary (local-first when configured), escalating
+        // to the next on a hard failure. Request shaping, prompt-caching, and the
+        // streamed consume_turn all live inside the Claude adapter, byte-for-byte
+        // with the old welded loop.
+        let turn_result = {
+            let mut chosen: Option<TurnResult> = None;
+            for (i, engine) in engines.iter().enumerate() {
+                match engine.run(&system, messages.as_slice(), &tools).await {
+                    Ok(t) => {
+                        chosen = Some(t);
+                        break;
                     }
-                    emit_run_end(turn, tokens_in, tokens_out, files_written.len(), "halted");
-                    return Ok(BuildOutcome {
-                        files_written,
-                        turns: turn,
-                        tokens_in,
-                        tokens_out,
-                        final_text,
-                        halted: Some(msg),
-                        hit_turn_cap: false,
-                    });
+                    // A quota or capacity stop mid-build is recoverable, not fatal:
+                    // tools materialize incrementally, so files already written are
+                    // safe on disk. Stop cleanly and report, preserving the work.
+                    Err(crate::build_turn::BuildTurnError::Halt(msg)) => {
+                        if opts.narrate {
+                            let _ = writeln!(stdout, "\n{msg}");
+                        }
+                        emit_run_end(turn, tokens_in, tokens_out, files_written.len(), "halted");
+                        return Ok(BuildOutcome {
+                            files_written,
+                            turns: turn,
+                            tokens_in,
+                            tokens_out,
+                            final_text,
+                            halted: Some(msg),
+                            hit_turn_cap: false,
+                        });
+                    }
+                    Err(crate::build_turn::BuildTurnError::Hard(e)) => {
+                        if i + 1 < engines.len() {
+                            if opts.narrate {
+                                let _ = writeln!(
+                                    stdout,
+                                    "[eri] {} engine couldn't continue ({e}); escalating to {}.",
+                                    engine.engine(),
+                                    engines[i + 1].engine()
+                                );
+                            }
+                            continue;
+                        }
+                        return Err(e);
+                    }
                 }
-                return Err(friendly_proxy_error(e));
             }
+            // The loop above either breaks with a turn, returns, or exhausts all
+            // engines via the last-engine `return Err`. So `chosen` is always set.
+            chosen.expect("an engine produced a turn")
         };
-
-        let turn_result = consume_turn(response, &mut stdout, opts.narrate).await?;
         tokens_in += turn_result.usage_in;
         tokens_out += turn_result.usage_out;
         let turn_text = assistant_text(&turn_result.content);
@@ -669,7 +679,6 @@ async fn drive_loop(
                     }
                 } else {
                     execute_tool(
-                        client,
                         root,
                         model,
                         depth,
@@ -882,7 +891,6 @@ pub(crate) struct ToolExec {
 
 #[allow(clippy::too_many_arguments)]
 async fn execute_tool(
-    client: &Client,
     root: &Path,
     model: &str,
     depth: u8,
@@ -967,7 +975,7 @@ async fn execute_tool(
                 written: Vec::new(),
             }
         }
-        "task" => run_subagent(client, root, model, depth, input).await,
+        "task" => run_subagent(root, model, depth, input).await,
         "todo_write" => write_todos(todos, input),
         "todo_read" => ToolExec {
             content: render_todos(&todos.borrow()),
@@ -1117,13 +1125,7 @@ async fn execute_tool(
 /// and a lower turn cap. Returns only the subagent's summary text + the files
 /// it wrote, so the parent's context stays small. This is the "delegate a
 /// focused task" capability (Claude Code's Agent / Devin's Planner).
-async fn run_subagent(
-    client: &Client,
-    root: &Path,
-    model: &str,
-    depth: u8,
-    input: &Value,
-) -> ToolExec {
+async fn run_subagent(root: &Path, model: &str, depth: u8, input: &Value) -> ToolExec {
     if depth >= 1 {
         return err("task: subagents cannot spawn further subagents.".to_string());
     }
@@ -1153,9 +1155,16 @@ async fn run_subagent(
         // the top-level loop where the skill is active.
         allowed_tools: None,
     };
+    // Rebuild the engines for the subagent (narrate off): local-first when
+    // configured, Claude otherwise — same seam as the parent loop.
+    let engines = match crate::build_turn::select_build_turn(model, opts.narrate) {
+        Ok(e) => e,
+        Err(e) => return err(format!("task: subagent couldn't start: {e}")),
+    };
+    let refs: Vec<&dyn crate::build_turn::BuildTurn> = engines.iter().map(|e| e.as_ref()).collect();
     // Box the recursive async call so the future stays finite-sized.
-    let result = Box::pin(drive_loop(
-        client,
+    let result = Box::pin(drive_build_loop(
+        &refs,
         root,
         model,
         &mut messages,
@@ -1384,7 +1393,7 @@ fn truncate_bytes(s: &str, max: usize) -> String {
 /// written -- plan quota exhausted (402) or the provider at capacity / rate-
 /// limited (429). Returns `None` for everything else (let it propagate as an
 /// error). Branding stays "eri"; no upstream vendor names leak.
-fn graceful_halt_message(e: &anyhow::Error) -> Option<String> {
+pub(crate) fn graceful_halt_message(e: &anyhow::Error) -> Option<String> {
     let msg = e.to_string();
     if msg.contains("HTTP 402") {
         Some(
@@ -2285,4 +2294,103 @@ lucide-style icons -- never emoji as UI icons.\n\
 states, responsive at mobile/tablet/desktop. The first screen should look \
 intentional and premium.\n\n\
 Be efficient: read only what you need, write decisively, then call done."
+}
+
+#[cfg(test)]
+mod build_loop_tests {
+    use super::*;
+    use crate::build_turn::{BuildTurn, BuildTurnError};
+
+    /// A scripted engine — proves `drive_build_loop` is driveable without a
+    /// network (the whole point of the seam: the loop is now unit-testable).
+    enum Behavior {
+        /// Always return a text-only `end_turn` turn carrying this text.
+        Text(&'static str),
+        /// Always hard-fail (models "local couldn't continue" -> escalate).
+        AlwaysHard,
+    }
+    struct StubEngine {
+        label: &'static str,
+        behavior: Behavior,
+    }
+
+    #[async_trait::async_trait]
+    impl BuildTurn for StubEngine {
+        fn engine(&self) -> &'static str {
+            self.label
+        }
+        async fn run(
+            &self,
+            _system: &[Value],
+            _messages: &[Value],
+            _tools: &Value,
+        ) -> std::result::Result<TurnResult, BuildTurnError> {
+            match &self.behavior {
+                Behavior::Text(t) => Ok(TurnResult {
+                    content: vec![json!({ "type": "text", "text": t })],
+                    tool_uses: vec![],
+                    stop_reason: Some("end_turn".into()),
+                    usage_in: 7,
+                    usage_out: 3,
+                }),
+                Behavior::AlwaysHard => {
+                    Err(BuildTurnError::Hard(anyhow!("engine couldn't continue")))
+                }
+            }
+        }
+    }
+
+    fn quiet_opts() -> LoopOpts {
+        LoopOpts {
+            max_turns: 4,
+            narrate: false,
+            allow_shell: false,
+            ..LoopOpts::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn drive_build_loop_returns_a_text_turn_with_no_network() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let engine = StubEngine { label: "stub", behavior: Behavior::Text("built it, 12 tests pass") };
+        let refs: Vec<&dyn BuildTurn> = vec![&engine];
+        let mut messages = vec![json!({ "role": "user", "content": "build x" })];
+        let out = drive_build_loop(&refs, dir.path(), "test-model", &mut messages, &quiet_opts(), 0)
+            .await
+            .expect("loop runs");
+        assert_eq!(out.final_text, "built it, 12 tests pass");
+        assert_eq!(out.turns, 1);
+        assert_eq!(out.tokens_in, 7);
+        assert!(out.halted.is_none());
+    }
+
+    #[tokio::test]
+    async fn drive_build_loop_escalates_past_a_failing_primary() {
+        // local-first shape: the first engine hard-fails, the loop escalates to
+        // the second, which answers. This is the seam's payoff.
+        let dir = tempfile::TempDir::new().unwrap();
+        let local = StubEngine { label: "local", behavior: Behavior::AlwaysHard };
+        let claude = StubEngine { label: "claude", behavior: Behavior::Text("done via fallback") };
+        let refs: Vec<&dyn BuildTurn> = vec![&local, &claude];
+        let mut messages = vec![json!({ "role": "user", "content": "build x" })];
+        let out = drive_build_loop(&refs, dir.path(), "test-model", &mut messages, &quiet_opts(), 0)
+            .await
+            .expect("loop escalates and runs");
+        assert_eq!(out.final_text, "done via fallback");
+        assert_eq!(out.turns, 1);
+    }
+
+    #[tokio::test]
+    async fn drive_build_loop_propagates_when_all_engines_fail() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let a = StubEngine { label: "local", behavior: Behavior::AlwaysHard };
+        let refs: Vec<&dyn BuildTurn> = vec![&a];
+        let mut messages = vec![json!({ "role": "user", "content": "build x" })];
+        let result =
+            drive_build_loop(&refs, dir.path(), "test-model", &mut messages, &quiet_opts(), 0).await;
+        match result {
+            Ok(_) => panic!("expected the loop to propagate the failure"),
+            Err(e) => assert!(e.to_string().contains("couldn't continue")),
+        }
+    }
 }
