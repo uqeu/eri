@@ -1,3 +1,7 @@
+// The scorecard's consumer is the candle session (it runs the models, then
+// calls score_all); these are intentionally ahead of their live caller.
+#![allow(dead_code)]
+
 //! Local-engine eval scorer — the 50-task scorecard's pass/fail engine.
 //!
 //! Each [`Task`] pairs a prompt with the substrings a correct answer must
@@ -15,9 +19,22 @@ pub struct Task {
 
 /// Score a model's `answer` against `task`: passes only when every expected
 /// substring is present (case-insensitive).
-pub fn score_task(_answer: &str, _task: &Task) -> bool {
-    // RED stub — replaced once the failing test pins the behavior.
-    false
+pub fn score_task(answer: &str, task: &Task) -> bool {
+    let lower = answer.to_lowercase();
+    task.expect
+        .iter()
+        .all(|e| lower.contains(&e.to_lowercase()))
+}
+
+/// Run a model's answers over a task set, returning (passed, total). The candle
+/// session calls this per candidate model to build the 50-task scorecard.
+pub fn score_all(answers: &[String], tasks: &[Task]) -> (usize, usize) {
+    let passed = tasks
+        .iter()
+        .zip(answers)
+        .filter(|(t, a)| score_task(a, t))
+        .count();
+    (passed, tasks.len())
 }
 
 #[cfg(test)]
@@ -49,5 +66,21 @@ mod tests {
             expect: &[],
         };
         assert!(score_task("anything", &t));
+    }
+
+    #[test]
+    fn score_all_counts_passes_over_a_task_set() {
+        let tasks = [
+            Task {
+                prompt: "open YouTube",
+                expect: &["youtube"],
+            },
+            Task {
+                prompt: "open Spotify",
+                expect: &["spotify"],
+            },
+        ];
+        let answers = vec!["opening youtube".to_string(), "I can't".to_string()];
+        assert_eq!(score_all(&answers, &tasks), (1, 2));
     }
 }
