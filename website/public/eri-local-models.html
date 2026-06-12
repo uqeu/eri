@@ -98,6 +98,11 @@
             <div class="a"><div class="lab">on-device answer</div><div class="txt" id="answer">…</div></div>
             <div class="meta"><span class="chip" id="verdict">…</span><span class="chip spd" id="speed">—</span><span class="chip spd" id="prog">—</span></div>
             <div class="score-line"><div class="score-fill" id="fill" style="width:0%"></div></div>
+            <form id="live" style="margin-top:16px;display:flex;gap:8px">
+              <input id="ask" placeholder="ask eri's local brain live (qwen2.5-0.5b)…" autocomplete="off"
+                style="flex:1;background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:9px;padding:9px 12px;color:var(--ink);font-family:var(--mono);font-size:12px;outline:none" />
+              <button style="background:var(--accent);color:#0a0a0a;border:none;border-radius:9px;padding:0 16px;font-weight:600;font-family:var(--display);cursor:pointer">run</button>
+            </form>
           </div>
         </div>
 
@@ -159,7 +164,37 @@
         el("fill").style.width = (((i % REEL.length)+1)/REEL.length*100) + "%";
         i++;
       }
-      play(); setInterval(play, 2600);
+      play(); const reel = setInterval(play, 2600);
+
+      // LIVE: actually run eri's local brain (qwen2.5-0.5b) via Ollama. Serve
+      // this page from localhost (the dev server / `python3 -m http.server`) so
+      // Ollama accepts the request, and `ollama serve` is running.
+      document.getElementById("live").addEventListener("submit", async e => {
+        e.preventDefault();
+        const q = el("ask").value.trim(); if(!q) return;
+        clearInterval(reel);
+        el("model").textContent = "qwen2.5:0.5b · live";
+        el("prompt").textContent = q;
+        el("answer").textContent = "…thinking on-device…";
+        const v = el("verdict"); v.textContent = "LIVE"; v.className = "chip spd";
+        el("speed").textContent = "—"; el("prog").textContent = "live";
+        const t0 = performance.now();
+        try {
+          const r = await fetch("http://localhost:11434/api/chat", {
+            method:"POST", headers:{"content-type":"application/json"},
+            body: JSON.stringify({ model:"qwen2.5:0.5b", stream:false,
+              options:{temperature:0},
+              messages:[{role:"system",content:"You are eri. Answer in as few words as possible."},
+                        {role:"user",content:q}] }) });
+          const d = await r.json();
+          el("answer").textContent = ((d.message && d.message.content) || "(no reply)").trim();
+          el("speed").textContent = ((performance.now()-t0)/1000).toFixed(1)+"s";
+          v.textContent = "ON-DEVICE"; v.className = "chip pass";
+        } catch(err) {
+          el("answer").textContent = "couldn't reach eri's local engine — serve this page from localhost (the dev server) and run `ollama serve`.";
+          v.textContent = "OFFLINE"; v.className = "chip fail";
+        }
+      });
 
       // drag the pad (Cluely-style)
       const pad = document.getElementById("pad");
