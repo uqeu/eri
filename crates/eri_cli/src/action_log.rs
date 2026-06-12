@@ -76,8 +76,15 @@ pub struct ActionLog {
     next_seq: u64,
 }
 
+/// eri remembers RECENT actions, not all of history. Past this many, the oldest
+/// are trimmed on every record — undo only ever reaches the latest action anyway,
+/// and this keeps `control-actions.json` (and the undo/history scan) bounded.
+/// Mirrors the memory store's `cap_observations`.
+pub const MAX_ACTIONS: usize = 500;
+
 impl ActionLog {
-    /// Record an action eri just performed. Returns its sequence number.
+    /// Record an action eri just performed. Returns its sequence number. Trims
+    /// the oldest entries past [`MAX_ACTIONS`] so the trail never grows unbounded.
     pub fn record(&mut self, action: &ControlAction) -> u64 {
         let seq = self.next_seq;
         self.next_seq += 1;
@@ -87,6 +94,10 @@ impl ActionLog {
             undo: undo_plan_for(action),
             undone: false,
         });
+        if self.records.len() > MAX_ACTIONS {
+            let excess = self.records.len() - MAX_ACTIONS;
+            self.records.drain(0..excess); // oldest-first
+        }
         seq
     }
 
@@ -303,5 +314,22 @@ mod tests {
     fn load_missing_file_is_an_empty_log_not_an_error() {
         let log = ActionLog::load(Path::new("/nonexistent/eri/control-actions.json"));
         assert!(log.is_empty());
+    }
+
+    #[test]
+    fn the_trail_is_capped_oldest_first() {
+        // Recording past the cap keeps only the most recent MAX_ACTIONS; the
+        // oldest fall off, and seq numbers keep climbing (monotonic).
+        let mut log = ActionLog::default();
+        for i in 0..(MAX_ACTIONS + 25) {
+            log.record(&ControlAction::OpenApp(format!("App{i}")));
+        }
+        assert_eq!(log.len(), MAX_ACTIONS, "capped at MAX_ACTIONS");
+        let trail = log.trail();
+        // The earliest surviving action is #25 (the first 25 were trimmed).
+        assert!(trail.first().unwrap().contains("App25"));
+        assert!(trail.last().unwrap().contains(&format!("App{}", MAX_ACTIONS + 24)));
+        // Undo still reaches the most recent action.
+        assert!(matches!(log.undo_last(), UndoOutcome::Undo(_, _)));
     }
 }

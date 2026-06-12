@@ -64,6 +64,121 @@ final class Bridge: NSObject, WKScriptMessageHandler {
     }
 }
 
+/// eri's always-on overlay companion — a transparent, non-activating floating
+/// panel that sits over the screen without covering it (auto-sized to its
+/// content). Extracted from the main controller so the overlay is its own deep
+/// module: it owns its panel + summon hotkey and needs only the shared message
+/// bridge and a way to resolve its HTML asset. `toggle()` returns the new
+/// visibility so the caller can enter/leave voice→control mode.
+final class OverlayController {
+    private var panel: NSPanel?
+    private var web: WKWebView?
+    private let bridge: Bridge
+    private let resolveAsset: ([String]) -> URL?
+
+    init(bridge: Bridge, resolveAsset: @escaping ([String]) -> URL?) {
+        self.bridge = bridge
+        self.resolveAsset = resolveAsset
+    }
+
+    @discardableResult func toggle() -> Bool {
+        if panel?.isVisible == true { panel?.orderOut(nil); return false }
+        if panel == nil { build() }
+        position()
+        panel?.orderFrontRegardless()
+        return true
+    }
+
+    private func build() {
+        let config = WKWebViewConfiguration()
+        config.userContentController.add(bridge, name: "eri") // same bridge → controller dispatch
+        let web = WKWebView(frame: NSRect(x: 0, y: 0, width: 600, height: 120), configuration: config)
+        web.setValue(false, forKey: "drawsBackground") // transparent — glass is in the CSS
+        if #available(macOS 12.0, *) { web.underPageBackgroundColor = .clear }
+        if let html = resolveAsset(["apps", "eri-agent-manager", "overlay.html"]) {
+            web.loadFileURL(html, allowingReadAccessTo: html.deletingLastPathComponent())
+        }
+        let panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 600, height: 120),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered, defer: false)
+        panel.level = .floating
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = false // the CSS panel draws its own float shadow
+        panel.isMovableByWindowBackground = true
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+        panel.contentView = web
+        self.web = web
+        self.panel = panel
+    }
+
+    /// Snug-fit to the web content + re-anchor top-center (footprint == UI).
+    func resize(width: Double, height: Double) {
+        guard let panel = panel else { return }
+        panel.setContentSize(NSSize(width: max(120, width), height: max(48, height)))
+        position()
+    }
+
+    private func position() {
+        guard let panel = panel, let screen = NSScreen.main else { return }
+        let vis = screen.visibleFrame
+        let size = panel.frame.size
+        panel.setFrameOrigin(NSPoint(x: vis.midX - size.width / 2, y: vis.maxY - size.height - 8))
+    }
+
+    // MARK: - summon hotkey (default ⌘⌥E, user-rebindable, read live per keypress)
+
+    func hotkeyMatches(_ event: NSEvent) -> Bool {
+        let (keyCode, mods) = config()
+        let pressed = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        return event.keyCode == keyCode && pressed == mods
+    }
+
+    func setHotkey(keyCode: Int?, command: Bool, option: Bool, shift: Bool, control: Bool) {
+        let d = UserDefaults.standard
+        if let kc = keyCode { d.set(kc, forKey: "overlayHotkeyKeyCode") }
+        d.set(command, forKey: "overlayHotkeyCmd")
+        d.set(option, forKey: "overlayHotkeyOpt")
+        d.set(shift, forKey: "overlayHotkeyShift")
+        d.set(control, forKey: "overlayHotkeyCtrl")
+    }
+
+    func label() -> String {
+        let (keyCode, mods) = config()
+        var s = ""
+        if mods.contains(.control) { s += "⌃" }
+        if mods.contains(.option) { s += "⌥" }
+        if mods.contains(.shift) { s += "⇧" }
+        if mods.contains(.command) { s += "⌘" }
+        return s + Self.keyName(keyCode)
+    }
+
+    private func config() -> (UInt16, NSEvent.ModifierFlags) {
+        let d = UserDefaults.standard
+        guard d.object(forKey: "overlayHotkeyKeyCode") != nil else {
+            return (14, [.command, .option]) // 14 = 'e'
+        }
+        var mods: NSEvent.ModifierFlags = []
+        if d.bool(forKey: "overlayHotkeyCmd") { mods.insert(.command) }
+        if d.bool(forKey: "overlayHotkeyOpt") { mods.insert(.option) }
+        if d.bool(forKey: "overlayHotkeyShift") { mods.insert(.shift) }
+        if d.bool(forKey: "overlayHotkeyCtrl") { mods.insert(.control) }
+        if mods.isEmpty { return (14, [.command, .option]) } // refuse modifier-less
+        return (UInt16(d.integer(forKey: "overlayHotkeyKeyCode")), mods)
+    }
+
+    private static func keyName(_ code: UInt16) -> String {
+        let map: [UInt16: String] = [
+            0: "A", 1: "S", 2: "D", 3: "F", 5: "G", 4: "H", 38: "J", 40: "K", 37: "L",
+            13: "W", 14: "E", 15: "R", 17: "T", 16: "Y", 32: "U", 34: "I", 31: "O", 35: "P",
+            12: "Q", 6: "Z", 7: "X", 8: "C", 9: "V", 11: "B", 45: "N", 46: "M",
+            49: "Space", 36: "↩", 53: "⎋",
+        ]
+        return map[code] ?? "key\(code)"
+    }
+}
+
 final class AgentManagerController: NSObject, NSWindowDelegate, WKNavigationDelegate {
     private let args: LaunchArgs
     private let bridge = Bridge()
@@ -89,10 +204,12 @@ final class AgentManagerController: NSObject, NSWindowDelegate, WKNavigationDele
     // voice→chat path is untouched.
     private var voiceControlMode = false
     private let speechSynth = AVSpeechSynthesizer()
-    // Always-on overlay: a transparent, top-anchored floating companion that
-    // sits OVER the screen without covering it (auto-sized to its content).
-    private var overlayPanel: NSPanel?
-    private var overlayWeb: WKWebView?
+    // Always-on overlay companion — its own module (OverlayController). The
+    // controller just routes commands to it + owns the global summon-hotkey
+    // monitor token.
+    private lazy var overlay = OverlayController(
+        bridge: bridge,
+        resolveAsset: { [weak self] in self?.resolveRepoFile($0) })
     private var overlayHotkey: Any?
 
     init(args: LaunchArgs) {
@@ -256,12 +373,12 @@ final class AgentManagerController: NSObject, NSWindowDelegate, WKNavigationDele
         case "setVoiceControl":
             voiceControlMode = (payload["on"] as? Bool) ?? false
             reply(command: command, status: "ok", detail: voiceControlMode ? "on" : "off")
-        // Always-on overlay companion.
+        // Always-on overlay companion (OverlayController owns the panel/hotkey).
         case "toggleOverlay":
-            toggleOverlay()
+            voiceControlMode = overlay.toggle() // visible → voice routes to control
         case "overlaySize":
             if let w = payload["width"] as? Double, let h = payload["height"] as? Double {
-                resizeOverlay(width: w, height: h)
+                overlay.resize(width: w, height: h)
             }
         case "overlayAsk":
             if let text = payload["text"] as? String, !text.isEmpty { startControl(goal: text) }
@@ -270,16 +387,16 @@ final class AgentManagerController: NSObject, NSWindowDelegate, WKNavigationDele
         // Rebind the summon hotkey. payload: {keyCode, command, option, shift,
         // control}. Takes effect immediately (read live per keypress).
         case "setOverlayHotkey":
-            let d = UserDefaults.standard
-            if let kc = payload["keyCode"] as? Int { d.set(kc, forKey: "overlayHotkeyKeyCode") }
-            d.set((payload["command"] as? Bool) ?? false, forKey: "overlayHotkeyCmd")
-            d.set((payload["option"] as? Bool) ?? false, forKey: "overlayHotkeyOpt")
-            d.set((payload["shift"] as? Bool) ?? false, forKey: "overlayHotkeyShift")
-            d.set((payload["control"] as? Bool) ?? false, forKey: "overlayHotkeyCtrl")
-            eval("window.eriOverlayHotkey && window.eriOverlayHotkey(\(jsArg(overlayHotkeyLabel())));")
-            reply(command: command, status: "ok", detail: overlayHotkeyLabel())
+            overlay.setHotkey(
+                keyCode: payload["keyCode"] as? Int,
+                command: (payload["command"] as? Bool) ?? false,
+                option: (payload["option"] as? Bool) ?? false,
+                shift: (payload["shift"] as? Bool) ?? false,
+                control: (payload["control"] as? Bool) ?? false)
+            eval("window.eriOverlayHotkey && window.eriOverlayHotkey(\(jsArg(overlay.label())));")
+            reply(command: command, status: "ok", detail: overlay.label())
         case "getOverlayHotkey":
-            eval("window.eriOverlayHotkey && window.eriOverlayHotkey(\(jsArg(overlayHotkeyLabel())));")
+            eval("window.eriOverlayHotkey && window.eriOverlayHotkey(\(jsArg(overlay.label())));")
 
         // Indexed sources from the graphify knowledge graph.
         case "openSources", "attachContext":
@@ -702,63 +819,6 @@ final class AgentManagerController: NSObject, NSWindowDelegate, WKNavigationDele
 
     // MARK: - Always-on overlay
 
-    /// Toggle eri's floating companion. It's a borderless, non-activating panel
-    /// (never steals focus) at `.floating` level on all spaces, transparent so
-    /// only the glass UI shows, and resized to fit its content so it covers no
-    /// more of the screen than the UI itself. Showing it puts eri in voice→
-    /// control mode (the overlay is a control surface); hiding restores chat.
-    private func toggleOverlay() {
-        if overlayPanel?.isVisible == true {
-            overlayPanel?.orderOut(nil)
-            voiceControlMode = false
-            return
-        }
-        if overlayPanel == nil { buildOverlay() }
-        voiceControlMode = true
-        positionOverlay()
-        overlayPanel?.orderFrontRegardless()
-    }
-
-    private func buildOverlay() {
-        let config = WKWebViewConfiguration()
-        config.userContentController.add(bridge, name: "eri") // same bridge → controller dispatch
-        let web = WKWebView(frame: NSRect(x: 0, y: 0, width: 600, height: 120), configuration: config)
-        web.setValue(false, forKey: "drawsBackground") // transparent — glass is in the CSS
-        if #available(macOS 12.0, *) { web.underPageBackgroundColor = .clear }
-        if let html = resolveRepoFile(["apps", "eri-agent-manager", "overlay.html"]) {
-            web.loadFileURL(html, allowingReadAccessTo: html.deletingLastPathComponent())
-        }
-        let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 600, height: 120),
-            styleMask: [.borderless, .nonactivatingPanel],
-            backing: .buffered, defer: false)
-        panel.level = .floating
-        panel.isOpaque = false
-        panel.backgroundColor = .clear
-        panel.hasShadow = false // the CSS panel draws its own float shadow
-        panel.isMovableByWindowBackground = true
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
-        panel.contentView = web
-        overlayWeb = web
-        overlayPanel = panel
-    }
-
-    /// Snug-fit the panel to the web content and re-anchor it top-center, so the
-    /// window's footprint == the UI's footprint (the non-covering guarantee).
-    private func resizeOverlay(width: Double, height: Double) {
-        guard let panel = overlayPanel else { return }
-        let w = max(120, width), h = max(48, height)
-        panel.setContentSize(NSSize(width: w, height: h))
-        positionOverlay()
-    }
-
-    private func positionOverlay() {
-        guard let panel = overlayPanel, let screen = NSScreen.main else { return }
-        let vis = screen.visibleFrame
-        let size = panel.frame.size
-        panel.setFrameOrigin(NSPoint(x: vis.midX - size.width / 2, y: vis.maxY - size.height - 8))
-    }
-
     /// Speak a short line via native macOS TTS (the `[eri:speak]` reply line).
     private func speak(_ text: String) {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -845,52 +905,9 @@ final class AgentManagerController: NSObject, NSWindowDelegate, WKNavigationDele
         // can rebind it (setOverlayHotkey); the config is read per-event so a
         // change takes effect immediately without re-registering.
         overlayHotkey = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self = self else { return }
-            let (keyCode, mods) = self.overlayHotkeyConfig()
-            let pressed = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-            if event.keyCode == keyCode && pressed == mods {
-                DispatchQueue.main.async { self.toggleOverlay() }
-            }
+            guard let self = self, self.overlay.hotkeyMatches(event) else { return }
+            DispatchQueue.main.async { self.voiceControlMode = self.overlay.toggle() }
         }
-    }
-
-    /// The configured overlay summon hotkey: the user's saved binding, or the
-    /// ⌘⌥E default. Read live from UserDefaults so a rebind applies at once.
-    private func overlayHotkeyConfig() -> (UInt16, NSEvent.ModifierFlags) {
-        let d = UserDefaults.standard
-        guard d.object(forKey: "overlayHotkeyKeyCode") != nil else {
-            return (14, [.command, .option]) // 14 = 'e'
-        }
-        var mods: NSEvent.ModifierFlags = []
-        if d.bool(forKey: "overlayHotkeyCmd") { mods.insert(.command) }
-        if d.bool(forKey: "overlayHotkeyOpt") { mods.insert(.option) }
-        if d.bool(forKey: "overlayHotkeyShift") { mods.insert(.shift) }
-        if d.bool(forKey: "overlayHotkeyCtrl") { mods.insert(.control) }
-        // Refuse an empty/modifier-less binding (would fire on every keypress).
-        if mods.isEmpty { return (14, [.command, .option]) }
-        return (UInt16(d.integer(forKey: "overlayHotkeyKeyCode")), mods)
-    }
-
-    /// A human label for the current binding, e.g. "⌘⌥E", for the settings UI.
-    private func overlayHotkeyLabel() -> String {
-        let (keyCode, mods) = overlayHotkeyConfig()
-        var s = ""
-        if mods.contains(.control) { s += "⌃" }
-        if mods.contains(.option) { s += "⌥" }
-        if mods.contains(.shift) { s += "⇧" }
-        if mods.contains(.command) { s += "⌘" }
-        return s + Self.keyName(keyCode)
-    }
-
-    private static func keyName(_ code: UInt16) -> String {
-        // Common letters/keys; falls back to the raw code for anything exotic.
-        let map: [UInt16: String] = [
-            0: "A", 1: "S", 2: "D", 3: "F", 5: "G", 4: "H", 38: "J", 40: "K", 37: "L",
-            13: "W", 14: "E", 15: "R", 17: "T", 16: "Y", 32: "U", 34: "I", 31: "O", 35: "P",
-            12: "Q", 6: "Z", 7: "X", 8: "C", 9: "V", 11: "B", 45: "N", 46: "M",
-            49: "Space", 36: "↩", 53: "⎋",
-        ]
-        return map[code] ?? "key\(code)"
     }
 
     private func forwardStreamLine(command: String, line: String) {
