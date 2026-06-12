@@ -15,16 +15,17 @@
 //! as the GUI. The only thing the CLI does differently is render progress as a
 //! single `\r`-updated status line on stdout instead of a panel.
 
-use std::io::{self, Write};
-use std::path::{Path, PathBuf};
-use std::process::ExitCode;
 use anyhow::Context as _;
 use clap::{CommandFactory, Parser, Subcommand};
 use eri_inference::{InferenceError, TEMPLATES, deploy_to_vercel, template_by_slug};
+use std::io::{self, Write};
+use std::path::{Path, PathBuf};
+use std::process::ExitCode;
 
 mod admin;
 mod agent;
 mod agent_cmd;
+mod assistant;
 mod auth;
 mod awareness;
 mod background;
@@ -41,14 +42,13 @@ mod genui;
 mod git_tools;
 mod line_editor;
 mod mcp_server;
-mod assistant;
 mod memory;
 mod memory_tools;
-mod research;
 mod plan_tui;
 mod plugins;
 mod project;
 mod repl;
+mod research;
 mod sandbox;
 mod sdk_tools;
 mod search;
@@ -57,6 +57,7 @@ mod skills;
 mod trace;
 mod update;
 mod workflow;
+mod local_eval;
 mod worktree;
 
 const ERI_CLI_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -702,12 +703,8 @@ async fn dispatch(cli: Cli) -> anyhow::Result<()> {
             let m = resolve_mode(mode, &cwd());
             // chat honors the same loop-capability flags (sandbox/permission/style)
             // and the per-tier context window — all via the one assembly seam.
-            let opts = build_agent::LoopOpts::for_run(
-                flags.style,
-                flags.sandbox,
-                flags.permission,
-                true,
-            );
+            let opts =
+                build_agent::LoopOpts::for_run(flags.style, flags.sandbox, flags.permission, true);
             chat::run(resume_mode, model_for_mode(m), opts).await
         }
         Command::Sessions => chat::list_sessions(),
@@ -811,9 +808,7 @@ async fn dispatch(cli: Cli) -> anyhow::Result<()> {
         Command::Status => auth::status().await,
         Command::Agent(AgentCommand::List) => agent_cmd::list(),
         Command::Agent(AgentCommand::Set { name }) => agent_cmd::set(&name),
-        Command::Memory(MemoryCommand::Recall { query, limit }) => {
-            memory::recall(&query, limit)
-        }
+        Command::Memory(MemoryCommand::Recall { query, limit }) => memory::recall(&query, limit),
         Command::Memory(MemoryCommand::Remember { text }) => memory::remember(&text),
         Command::Memory(MemoryCommand::Forget { target }) => memory::forget(&target),
         Command::Mcp(McpCommand::List) => repl::print_mcp_status(),
@@ -927,12 +922,8 @@ async fn run_headless(
 
     let workspace = std::env::current_dir().context("read current directory")?;
 
-    let mut opts = build_agent::LoopOpts::for_run(
-        style,
-        sandbox,
-        permission,
-        format == OutputFormat::Text,
-    );
+    let mut opts =
+        build_agent::LoopOpts::for_run(style, sandbox, permission, format == OutputFormat::Text);
     // --max-turns flag wins; else .eri/config.toml; else built-in default.
     if let Some(n) = max_turns.or_else(|| eri_config::load(&workspace).max_turns) {
         opts.max_turns = n.max(1);
@@ -1171,37 +1162,36 @@ async fn run_control(goal: &str, live: bool, yes: bool, mode: Option<Mode>) -> a
     // a = always (persist the grant so eri won't re-ask next time), N = no.
     // "always" is only offered when the action maps to a grantable permission;
     // sensitive refusals never reach here, so they can't be granted away.
-    let mut confirm =
-        |desc: &str, perm: Option<control_safety::Permission>| -> bool {
-            let prompt = if perm.is_some() {
-                format!("[eri] confirm: {desc}? [y]es once / [a]lways / [N]o ")
-            } else {
-                format!("[eri] confirm: {desc}? [y/N] ")
-            };
-            print!("{prompt}");
-            let _ = io::Write::flush(&mut io::stdout());
-            let mut s = String::new();
-            if io::stdin().read_line(&mut s).is_err() {
-                return false;
-            }
-            match s.trim().to_ascii_lowercase().as_str() {
-                "y" | "yes" => true,
-                "a" | "always" => {
-                    if let Some(p) = perm
-                        && let Some(path) = control_safety::PermissionStore::default_path()
-                    {
-                        let mut store = control_safety::PermissionStore::load(&path);
-                        store.grant(p);
-                        match store.save(&path) {
-                            Ok(()) => println!("[eri] remembered: I can {} from now on.", p.label()),
-                            Err(e) => eprintln!("[eri] could not save permission: {e}"),
-                        }
-                    }
-                    true
-                }
-                _ => false,
-            }
+    let mut confirm = |desc: &str, perm: Option<control_safety::Permission>| -> bool {
+        let prompt = if perm.is_some() {
+            format!("[eri] confirm: {desc}? [y]es once / [a]lways / [N]o ")
+        } else {
+            format!("[eri] confirm: {desc}? [y/N] ")
         };
+        print!("{prompt}");
+        let _ = io::Write::flush(&mut io::stdout());
+        let mut s = String::new();
+        if io::stdin().read_line(&mut s).is_err() {
+            return false;
+        }
+        match s.trim().to_ascii_lowercase().as_str() {
+            "y" | "yes" => true,
+            "a" | "always" => {
+                if let Some(p) = perm
+                    && let Some(path) = control_safety::PermissionStore::default_path()
+                {
+                    let mut store = control_safety::PermissionStore::load(&path);
+                    store.grant(p);
+                    match store.save(&path) {
+                        Ok(()) => println!("[eri] remembered: I can {} from now on.", p.label()),
+                        Err(e) => eprintln!("[eri] could not save permission: {e}"),
+                    }
+                }
+                true
+            }
+            _ => false,
+        }
+    };
 
     // Live actuation needs the macOS app's control endpoint (it does the real
     // AX/CGEvent work). Standalone `--live` can't actuate, so it falls back to
@@ -1235,7 +1225,9 @@ async fn run_control(goal: &str, live: bool, yes: bool, mode: Option<Mode>) -> a
         } else {
             // Dry-run actuated nothing — never present the model's summary as if
             // the work was done. Frame it as the plan it actually is.
-            println!("\n[eri] dry-run — nothing was actuated. This is what eri would do:\n{summary}");
+            println!(
+                "\n[eri] dry-run — nothing was actuated. This is what eri would do:\n{summary}"
+            );
         }
     }
     Ok(())
