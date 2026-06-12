@@ -215,10 +215,93 @@ pub fn compose_prompt(skill: &Skill, task: &str) -> String {
     )
 }
 
+/// Lowercase alphanumeric keywords (length > 2, so noise like "a"/"to" drops).
+fn keywords(text: &str) -> std::collections::HashSet<String> {
+    text.to_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|t| t.len() > 2)
+        .map(str::to_string)
+        .collect()
+}
+
+/// How relevant `skill` is to `prompt`: the fraction of the skill's own
+/// keywords (name + description) the prompt mentions. `0.0..=1.0`. Pure.
+fn relevance(skill: &Skill, prompt: &str) -> f32 {
+    let mut keys = keywords(&skill.name);
+    keys.extend(keywords(&skill.description));
+    if keys.is_empty() {
+        return 0.0;
+    }
+    let prompt_words = keywords(prompt);
+    let hits = keys.iter().filter(|k| prompt_words.contains(*k)).count();
+    hits as f32 / keys.len() as f32
+}
+
+/// The skill eri should AUTO-apply for `prompt` — the most relevant one whose
+/// score clears `threshold` — or `None` when nothing is a confident match (so
+/// eri doesn't hijack an unrelated turn). This is the auto-invoke decision the
+/// chat loop consults before running a turn, so a strong skill match applies
+/// without an explicit `/skill`.
+pub fn best_match<'a>(prompt: &str, skills: &'a [Skill], threshold: f32) -> Option<&'a Skill> {
+    skills
+        .iter()
+        .map(|s| (s, relevance(s, prompt)))
+        .filter(|(_, r)| *r >= threshold)
+        .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+        .map(|(s, _)| s)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    fn skill(name: &str, description: &str) -> Skill {
+        Skill {
+            name: name.to_string(),
+            description: description.to_string(),
+            body: "do the thing".to_string(),
+            source: "test".to_string(),
+            allowed_tools: None,
+        }
+    }
+
+    #[test]
+    fn auto_invoke_is_none_when_nothing_is_relevant() {
+        let skills = [skill(
+            "secure-review",
+            "audit code for OWASP vulnerabilities",
+        )];
+        assert!(best_match("what's the weather today", &skills, 0.3).is_none());
+        assert!(best_match("anything", &[], 0.3).is_none());
+    }
+
+    #[test]
+    fn auto_invoke_picks_the_matching_skill() {
+        let skills = [skill(
+            "secure-review",
+            "audit code for security vulnerabilities",
+        )];
+        let picked = best_match(
+            "please audit this for security vulnerabilities",
+            &skills,
+            0.3,
+        );
+        assert_eq!(picked.map(|s| s.name.as_str()), Some("secure-review"));
+    }
+
+    #[test]
+    fn auto_invoke_prefers_the_more_relevant_skill() {
+        let skills = [
+            skill("secure-review", "audit code for security vulnerabilities"),
+            skill(
+                "perf-tune",
+                "optimize slow database queries for performance",
+            ),
+        ];
+        let picked = best_match("optimize my slow database performance", &skills, 0.3);
+        assert_eq!(picked.map(|s| s.name.as_str()), Some("perf-tune"));
+    }
 
     #[test]
     fn parses_frontmatter_and_body() {

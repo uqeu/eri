@@ -69,9 +69,26 @@ pub async fn run(resume: ResumeMode, model: &str, opts: build_agent::LoopOpts) -
             }
             continue;
         }
-        // A normal message -> one agentic turn with retained context.
+        // A normal message -> one agentic turn with retained context. eri
+        // auto-applies a strongly-matching skill (no explicit /skill needed),
+        // honoring that skill's tool cap for the turn.
         snapshot_before_turn(&mut checkpoints, &sess);
-        match build_agent::run_session_turn(&mut sess, &line, &opts).await {
+        const AUTO_SKILL_THRESHOLD: f32 = 0.5;
+        let skills = crate::skills::discover(&sess.workspace_path());
+        let (prompt, turn_opts) =
+            match crate::skills::best_match(&line, &skills, AUTO_SKILL_THRESHOLD) {
+                Some(skill) => {
+                    println!(
+                        "[eri] auto-applying skill '{}' ({})",
+                        skill.name, skill.source
+                    );
+                    let mut o = opts.clone();
+                    o.allowed_tools = skill.allowed_tools.clone();
+                    (crate::skills::compose_prompt(skill, &line), o)
+                }
+                None => (line.clone(), opts.clone()),
+            };
+        match build_agent::run_session_turn(&mut sess, &prompt, &turn_opts).await {
             Ok(outcome) => {
                 println!(
                     "\n[eri] turn done -- {} file(s) touched, {} in / {} out tokens (metered)",
