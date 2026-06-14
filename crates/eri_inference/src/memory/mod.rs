@@ -25,7 +25,9 @@ use serde::{Deserialize, Serialize};
 pub mod cloud;
 pub mod collectors;
 pub mod embeddings;
+pub mod keys;
 pub mod profile;
+pub mod profile_sync;
 pub mod sync;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

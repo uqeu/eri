@@ -1167,6 +1167,7 @@ dependencies = [
  "eri_tokens",
  "getrandom 0.2.16",
  "hkdf",
+ "keyring",
  "log",
  "serde",
  "serde_json",

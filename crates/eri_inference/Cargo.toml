@@ -23,6 +23,11 @@ eri_router = { path = "../eri_router" }
 eri_tokens.workspace = true
 getrandom.workspace = true
 hkdf.workspace = true
+keyring = { version = "3", default-features = false, features = [
+    "apple-native",
+    "windows-native",
+    "linux-native",
+] }
 log.workspace = true
 serde.workspace = true
 serde_json.workspace = true
