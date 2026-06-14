@@ -109,11 +109,19 @@ pub fn memory_path_for(user_id: Option<&str>) -> io::Result<PathBuf> {
 }
 
 fn user_partition(user_id: &str) -> String {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-    let mut h = DefaultHasher::new();
-    user_id.hash(&mut h);
-    format!("{:016x}", h.finish())
+    // SHA-256 (truncated to 16 hex), NOT DefaultHasher: SipHash's output is
+    // explicitly unstable across Rust versions, so a compiler upgrade would
+    // change the partition path and orphan the user's local memory (security:
+    // H-4). A pinned hash keeps `~/.eri/users/<partition>` stable forever.
+    stable_hash16(user_id.as_bytes())
+}
+
+/// First 8 bytes of SHA-256, hex-encoded (16 chars). Version-stable, so any
+/// value derived from it survives a toolchain upgrade.
+fn stable_hash16(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(bytes);
+    digest[..8].iter().map(|b| format!("{b:02x}")).collect()
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -294,13 +302,18 @@ impl MemoryStore {
         self.save()
     }
 
-    /// Drop observations older than the tier's retention window.
+    /// Drop observations older than the tier's retention window. Tombstones are
+    /// **exempt** from the cutoff: a `/forget` marker must outlive the fact it
+    /// suppresses, or an expired tombstone would let a forgotten fact resurrect
+    /// from a stale copy on another device after the next merge (security: C-2).
     pub fn prune(&mut self, window: RetentionWindow) -> io::Result<usize> {
         let Some(cutoff) = window.cutoff_ms(now_ms()) else {
             return Ok(0);
         };
         let before = self.file.observations.len();
-        self.file.observations.retain(|o| o.ts_ms >= cutoff);
+        self.file
+            .observations
+            .retain(|o| o.kind == TOMBSTONE_KIND || o.ts_ms >= cutoff);
         let removed = before - self.file.observations.len();
         if removed > 0 {
             self.save()?;
@@ -520,10 +533,15 @@ fn cap_observations(obs: Vec<Observation>, max: usize) -> Vec<Observation> {
     if obs.len() <= max {
         return obs;
     }
-    let (facts, rest): (Vec<_>, Vec<_>) = obs.into_iter().partition(|o| o.kind == "fact");
-    let keep_rest = max.saturating_sub(facts.len());
+    // Preserve explicit `fact`s AND tombstones: a tombstone evicted before it
+    // has synced everywhere would let the forgotten fact resurrect on another
+    // device (security: C-2). Only the churnier kinds are trimmed oldest-first.
+    let (preserved, rest): (Vec<_>, Vec<_>) = obs
+        .into_iter()
+        .partition(|o| o.kind == "fact" || o.kind == TOMBSTONE_KIND);
+    let keep_rest = max.saturating_sub(preserved.len());
     let rest_start = rest.len().saturating_sub(keep_rest);
-    let mut kept = facts;
+    let mut kept = preserved;
     kept.extend(rest.into_iter().skip(rest_start));
     if kept.len() > max {
         let drop = kept.len() - max;
@@ -550,17 +568,15 @@ fn new_id() -> String {
 }
 
 fn workspace_hash(workspace: &Path) -> String {
-    // Stable, non-cryptographic hash of the canonical path. We only need
-    // collision-resistance against the user's own workspace count, which
-    // is always small.
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
+    // Stable hash of the canonical path (SHA-256 truncated, not DefaultHasher):
+    // this digest is written into every Observation and travels in the synced
+    // blob, so it must NOT change across Rust versions or cross-device recall
+    // scoping would silently break after a toolchain bump (security: H-4). We
+    // only need collision-resistance against the user's small workspace count.
     let canonical = workspace
         .canonicalize()
         .unwrap_or_else(|_| workspace.to_path_buf());
-    let mut h = DefaultHasher::new();
-    canonical.to_string_lossy().hash(&mut h);
-    format!("{:016x}", h.finish())
+    stable_hash16(canonical.to_string_lossy().as_bytes())
 }
 
 #[cfg(test)]
@@ -750,6 +766,45 @@ mod tests {
                 .iter()
                 .any(|o| o.id == id && o.kind != TOMBSTONE_KIND),
             "a tombstoned observation must not come back from a remote pull"
+        );
+    }
+
+    #[test]
+    fn prune_keeps_old_tombstones_so_a_forget_cannot_resurrect() {
+        // Security C-2: a tombstone older than the retention window must NOT be
+        // pruned, or the forgotten fact resurrects from a stale copy on merge.
+        let (dir, mut store) = open_temp();
+        store.file.observations.push(Observation {
+            id: "t".into(),
+            ts_ms: 1, // 1970 — far past any window
+            kind: TOMBSTONE_KIND.into(),
+            workspace_hash: String::new(),
+            body: "forgotten-id".into(),
+            embedding: Vec::new(),
+        });
+        store.insert("fact", dir.path(), "fresh").unwrap();
+        store.prune(RetentionWindow::Day).unwrap();
+        assert!(
+            store
+                .snapshot()
+                .iter()
+                .any(|o| o.kind == TOMBSTONE_KIND && o.body == "forgotten-id"),
+            "an expired tombstone must survive prune"
+        );
+    }
+
+    #[test]
+    fn cap_preserves_tombstones_alongside_facts() {
+        // Security C-2: tombstones are not churn — the cap must keep them like
+        // facts, not trim them oldest-first with the edit history.
+        let mut v = vec![obs(TOMBSTONE_KIND, 0)];
+        for ts in 10..20 {
+            v.push(obs("edit_accepted", ts));
+        }
+        let capped = cap_observations(v, 3);
+        assert!(
+            capped.iter().any(|o| o.kind == TOMBSTONE_KIND),
+            "a tombstone must survive the anti-bloat cap"
         );
     }
 

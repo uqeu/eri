@@ -47,6 +47,22 @@ recency decay, `eri_caveman` token budgeting, and prompt caching.
 - Standing task: re-scan the memory landscape; revisit if a Rust-native, permissive, bi-temporal
   engine matures.
 
+### Accepted risks (security review, Phase 0)
+
+- **`K_user` compromise → silent memory deletion (M-3).** Because merge is tombstone-based and
+  client-side, anyone holding `K_user` can craft a blob whose tombstones suppress every observation
+  on the user's other devices — a silent wipe. This is inherent to the LWW-tombstone model; the
+  mitigation is a user-facing **memory export/backup** (must ship before Tier-B sync goes GA), not a
+  protocol change. (Per-device tombstone signing is the heavier alternative if this proves real.)
+- **IKM provenance for `K_user` (C-1).** `K_user` MUST derive from a high-entropy secret stored in
+  the OS keychain plus a separate stored salt — never the rotating bearer or any derivable value.
+  The Phase-1 wiring (`eri phone link` / sync) owns generating + persisting both; documented on
+  `MemoryKey::derive`.
+- **Tier-A is at-rest-encrypted, not E2E**, and `K_server` is shared across users, so each Tier-A
+  ciphertext is bound to its owner via AAD = `user_id` (M-1). A keyword **sensitivity screen**
+  (`profile::looks_sensitive`) is the always-on floor beneath the planned Claude sensitivity pass so
+  secrets never enter the server-readable tier (L-1).
+
 ## Alternatives rejected
 
 - **Vendor a Python memory service** (mem0/Zep self-host): adds a runtime, breaks local-first +

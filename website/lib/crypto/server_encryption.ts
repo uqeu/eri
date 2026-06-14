@@ -9,39 +9,56 @@ import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
  * an application-managed key `K_server` so a leaked database dump alone reveals
  * nothing — defense in depth, not E2E.
  *
- * AES-256-GCM, with the blob laid out as `iv (12) || authTag (16) || ciphertext`.
- * The pure `seal`/`open` take the key explicitly so they're testable without
- * touching the environment; `encryptAtRest`/`decryptAtRest` wrap them with the
- * env-loaded key for route use.
+ * AES-256-GCM, with the blob laid out as `version (1) || iv (12) || authTag (16)
+ * || ciphertext`. The version byte makes key rotation survivable (security M-5):
+ * a future rotation can write v2 while still reading v1. An `aad` (the user id)
+ * binds each ciphertext to its owner, so a leaked/compromised server cannot swap
+ * user A's blob into user B's row undetected (security M-1) — K_server is shared
+ * across users, so the AAD is what isolates them at the crypto layer.
+ *
+ * The pure `seal`/`open` take the key + aad explicitly so they're testable
+ * without touching the environment; `encryptAtRest`/`decryptAtRest` wrap them
+ * with the env-loaded key for route use.
  */
 
 const ALGORITHM = "aes-256-gcm";
+const VERSION = 0x01;
 const IV_LEN = 12;
 const TAG_LEN = 16;
 const KEY_LEN = 32;
+const HEADER_LEN = 1 + IV_LEN + TAG_LEN;
 const KEY_ENV = "ERI_SERVER_ENCRYPTION_KEY";
 
-/** Encrypt `plaintext` under `key`. Returns `iv || authTag || ciphertext`. */
-export function seal(key: Buffer, plaintext: string): Buffer {
+/**
+ * Encrypt `plaintext` under `key`, binding `aad` as additional authenticated
+ * data. Returns `version || iv || authTag || ciphertext`.
+ */
+export function seal(key: Buffer, plaintext: string, aad?: Buffer): Buffer {
   const iv = randomBytes(IV_LEN);
   const cipher = createCipheriv(ALGORITHM, key, iv);
+  if (aad) cipher.setAAD(aad);
   const ciphertext = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
   const authTag = cipher.getAuthTag();
-  return Buffer.concat([iv, authTag, ciphertext]);
+  return Buffer.concat([Buffer.from([VERSION]), iv, authTag, ciphertext]);
 }
 
 /**
- * Decrypt a `seal()` blob under `key`. Throws on a wrong key, any tampering
- * (GCM authenticates), or a blob too short to hold the iv + tag.
+ * Decrypt a `seal()` blob under `key` + `aad`. Throws on a wrong key, a wrong
+ * aad, any tampering (GCM authenticates), an unknown version byte, or a blob too
+ * short to hold the header.
  */
-export function open(key: Buffer, blob: Buffer): string {
-  if (blob.length < IV_LEN + TAG_LEN) {
+export function open(key: Buffer, blob: Buffer, aad?: Buffer): string {
+  if (blob.length < HEADER_LEN) {
     throw new Error("at-rest blob is malformed");
   }
-  const iv = blob.subarray(0, IV_LEN);
-  const authTag = blob.subarray(IV_LEN, IV_LEN + TAG_LEN);
-  const ciphertext = blob.subarray(IV_LEN + TAG_LEN);
+  if (blob[0] !== VERSION) {
+    throw new Error(`unsupported at-rest blob version ${blob[0]}`);
+  }
+  const iv = blob.subarray(1, 1 + IV_LEN);
+  const authTag = blob.subarray(1 + IV_LEN, HEADER_LEN);
+  const ciphertext = blob.subarray(HEADER_LEN);
   const decipher = createDecipheriv(ALGORITHM, key, iv);
+  if (aad) decipher.setAAD(aad);
   decipher.setAuthTag(authTag);
   return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf8");
 }
@@ -63,12 +80,17 @@ export function serverKey(): Buffer {
   return key;
 }
 
-/** Encrypt `plaintext` at rest with the env-configured `K_server`. */
-export function encryptAtRest(plaintext: string): Buffer {
-  return seal(serverKey(), plaintext);
+/** Stable AAD for a user's Tier-A row — binds ciphertext to its owner. */
+function profileAad(userId: string): Buffer {
+  return Buffer.from(`tier-a:${userId}`, "utf8");
 }
 
-/** Decrypt an at-rest blob with the env-configured `K_server`. */
-export function decryptAtRest(blob: Buffer): string {
-  return open(serverKey(), blob);
+/** Encrypt `plaintext` at rest with `K_server`, bound to `userId`. */
+export function encryptAtRest(plaintext: string, userId: string): Buffer {
+  return seal(serverKey(), plaintext, profileAad(userId));
+}
+
+/** Decrypt a `userId`'s at-rest blob with `K_server`. */
+export function decryptAtRest(blob: Buffer, userId: string): string {
+  return open(serverKey(), blob, profileAad(userId));
 }

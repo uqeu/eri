@@ -81,6 +81,7 @@ ureq = { version = "2.10", features = ["json", "tls"] }
 url = "2.5"
 uuid = { version = "1.10", features = ["v4"] }
 whisper-rs = "0.13"
+zeroize = { version = "1", features = ["derive"] }
 
 [profile.dev]
 opt-level = 0

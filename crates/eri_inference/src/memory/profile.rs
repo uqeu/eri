@@ -52,13 +52,19 @@ pub fn distill(observations: &[Observation], now_ms: u64) -> Profile {
     }
 }
 
-/// Durable facts — newest first, deduped, capped.
+/// Durable facts — newest first, deduped, capped, **sensitivity-screened**.
 fn distill_facts(observations: &[Observation]) -> Vec<String> {
     let mut seen = std::collections::HashSet::new();
     let mut facts: Vec<String> = Vec::new();
     // newest first so the cap keeps the most recent facts
     for o in observations.iter().rev() {
         if o.kind != "fact" {
+            continue;
+        }
+        // Tier-A is server-readable, so a fact like "my password is …" must
+        // never reach it. The ADR's full gate is a Claude sensitivity pass; this
+        // keyword screen is the always-on Phase-0 floor beneath it (security: L-1).
+        if looks_sensitive(&o.body) {
             continue;
         }
         let text = truncate(o.body.trim(), MAX_FACT_CHARS);
@@ -73,15 +79,53 @@ fn distill_facts(observations: &[Observation]) -> Vec<String> {
     facts
 }
 
+/// Conservative keyword screen for secrets that must never enter the
+/// server-readable Tier-A profile. Deliberately broad (a false positive just
+/// keeps a fact local); the Claude sensitivity pass is the precise gate above it.
+fn looks_sensitive(text: &str) -> bool {
+    const NEEDLES: &[&str] = &[
+        "password",
+        "passphrase",
+        "secret",
+        "api key",
+        "api_key",
+        "apikey",
+        "access token",
+        "access_token",
+        "private key",
+        "private_key",
+        "credit card",
+        "card number",
+        "cvv",
+        "ssn",
+        "social security",
+        "routing number",
+        "account number",
+        "seed phrase",
+        "mnemonic",
+        "eri_sk_",
+    ];
+    let hay = text.to_lowercase();
+    NEEDLES.iter().any(|n| hay.contains(n))
+}
+
 /// Behaviour rollups — for now the accept/reject ratio on edits. Extensible:
 /// new observation kinds become new rollups without touching callers.
 fn distill_preferences(observations: &[Observation]) -> Vec<String> {
-    let accepted = observations.iter().filter(|o| o.kind == "edit_accepted").count();
-    let rejected = observations.iter().filter(|o| o.kind == "edit_rejected").count();
+    let accepted = observations
+        .iter()
+        .filter(|o| o.kind == "edit_accepted")
+        .count();
+    let rejected = observations
+        .iter()
+        .filter(|o| o.kind == "edit_rejected")
+        .count();
     let total = accepted + rejected;
     // checked_div yields None when there are no edits yet — no preference to state.
     match (accepted * 100).checked_div(total) {
-        Some(pct) => vec![format!("Accepts {pct}% of eri's edits ({accepted} of {total} recent)")],
+        Some(pct) => vec![format!(
+            "Accepts {pct}% of eri's edits ({accepted} of {total} recent)"
+        )],
         None => Vec::new(),
     }
 }
@@ -150,7 +194,10 @@ mod tests {
             o("edit_rejected", 4, "d"),
         ];
         let p = distill(&obs, NOW);
-        assert_eq!(p.preferences, vec!["Accepts 75% of eri's edits (3 of 4 recent)"]);
+        assert_eq!(
+            p.preferences,
+            vec!["Accepts 75% of eri's edits (3 of 4 recent)"]
+        );
     }
 
     #[test]
@@ -167,6 +214,26 @@ mod tests {
         assert!(dc.contains("header.tsx"));
         assert!(!dc.contains("old action"));
         assert!(!dc.contains("durable fact"));
+    }
+
+    #[test]
+    fn sensitive_facts_are_screened_out_of_the_server_readable_tier() {
+        let obs = vec![
+            o("fact", 10, "name is Khai"),
+            o("fact", 20, "my password is hunter2"),
+            o("fact", 30, "my OpenAI api key is sk-abc"),
+            o("fact", 40, "prefers dark mode"),
+        ];
+        let p = distill(&obs, NOW);
+        assert!(p.facts.contains(&"name is Khai".to_string()));
+        assert!(p.facts.contains(&"prefers dark mode".to_string()));
+        assert!(
+            !p.facts
+                .iter()
+                .any(|f| f.contains("hunter2") || f.contains("api key")),
+            "secrets must never reach Tier-A; got {:?}",
+            p.facts
+        );
     }
 
     #[test]

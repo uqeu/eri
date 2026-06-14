@@ -17,9 +17,10 @@
 
 use std::time::Duration;
 
-use aes_gcm::aead::{Aead, KeyInit};
+use aes_gcm::aead::{Aead, KeyInit, Payload};
 use aes_gcm::{Aes256Gcm, Key, Nonce};
 use base64::Engine as _;
+use zeroize::Zeroizing;
 
 use crate::memory::Observation;
 
@@ -46,40 +47,59 @@ pub enum SyncError {
 
 /// The symmetric key that encrypts the Tier-B memory blob. Newtype over the
 /// 32 raw bytes so it can't be confused with arbitrary `[u8; 32]` data and so
-/// the derivation is the only blessed way to make one.
-#[derive(Clone)]
-pub struct MemoryKey([u8; 32]);
+/// the derivation is the only blessed way to make one. The bytes are wrapped in
+/// [`Zeroizing`] so they're wiped from memory on drop, and the type is
+/// deliberately **not** `Clone` to keep copies of key material from proliferating
+/// (security: H-3).
+pub struct MemoryKey(Zeroizing<[u8; 32]>);
 
 impl MemoryKey {
     /// Derive `K_user` from input keying material + a stored per-user salt via
-    /// HKDF-SHA256. The salt must be persisted per user (e.g. in the keychain);
-    /// deriving from a stored salt rather than the rotating bearer keeps the
-    /// key stable across token rotation (ADR-0001).
+    /// HKDF-SHA256.
+    ///
+    /// **IKM provenance (security: C-1) — the caller MUST honor this:**
+    /// - `ikm` must be a high-entropy secret generated once and stored in the OS
+    ///   keychain (e.g. 32 random bytes). It must **never** be the rotating
+    ///   `eri_sk_…` bearer, the user's email, or any low-entropy/derivable value
+    ///   — using the bearer would re-key on every token rotation and orphan
+    ///   every existing blob.
+    /// - `salt` must be a separate per-user value, also persisted (not the
+    ///   bearer). Deriving from a stored salt keeps the key stable across token
+    ///   rotation (ADR-0001).
     pub fn derive(ikm: &[u8], salt: &[u8]) -> Self {
         let hk = hkdf::Hkdf::<sha2::Sha256>::new(Some(salt), ikm);
-        let mut key = [0u8; 32];
+        let mut key = Zeroizing::new([0u8; 32]);
         // HKDF-Expand only fails when the output length exceeds 255*HashLen;
         // 32 bytes is far under that, so this is infallible here.
-        hk.expand(HKDF_INFO, &mut key)
+        hk.expand(HKDF_INFO, key.as_mut_slice())
             .expect("32-byte HKDF expansion is always valid");
         Self(key)
     }
 
     fn cipher(&self) -> Aes256Gcm {
-        Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&self.0))
+        Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(self.0.as_slice()))
     }
 }
 
 /// Encrypt `plaintext` under `key`. Output layout is `nonce || ciphertext+tag`;
 /// a fresh random nonce is generated per call so identical plaintexts produce
-/// distinct blobs (no deterministic leakage).
+/// distinct blobs (no deterministic leakage). [`HKDF_INFO`] is bound as AAD so
+/// the ciphertext is authenticated against its Tier-B domain (security: M-1).
 pub fn seal(key: &MemoryKey, plaintext: &[u8]) -> Result<Vec<u8>, SyncError> {
     let mut nonce_bytes = [0u8; NONCE_LEN];
-    getrandom::getrandom(&mut nonce_bytes).map_err(|e| SyncError::Transport(e.to_string()))?;
+    // A CSPRNG failure is a fatal crypto condition, not a retriable transport
+    // error (and we never echo the OS error string) — security: M-2.
+    getrandom::getrandom(&mut nonce_bytes).map_err(|_| SyncError::Crypto)?;
     let nonce = Nonce::from_slice(&nonce_bytes);
     let ciphertext = key
         .cipher()
-        .encrypt(nonce, plaintext)
+        .encrypt(
+            nonce,
+            Payload {
+                msg: plaintext,
+                aad: HKDF_INFO,
+            },
+        )
         .map_err(|_| SyncError::Crypto)?;
     let mut out = Vec::with_capacity(NONCE_LEN + ciphertext.len());
     out.extend_from_slice(&nonce_bytes);
@@ -88,8 +108,9 @@ pub fn seal(key: &MemoryKey, plaintext: &[u8]) -> Result<Vec<u8>, SyncError> {
 }
 
 /// Decrypt a `nonce || ciphertext+tag` blob under `key`. Fails with
-/// [`SyncError::Crypto`] on a wrong key or any tampering (GCM authenticates),
-/// and [`SyncError::Malformed`] if the blob is too short to hold a nonce.
+/// [`SyncError::Crypto`] on a wrong key, any tampering, or a mismatched AAD
+/// domain (GCM authenticates), and [`SyncError::Malformed`] if the blob is too
+/// short to hold a nonce.
 pub fn open(key: &MemoryKey, blob: &[u8]) -> Result<Vec<u8>, SyncError> {
     if blob.len() < NONCE_LEN {
         return Err(SyncError::Malformed);
@@ -97,7 +118,13 @@ pub fn open(key: &MemoryKey, blob: &[u8]) -> Result<Vec<u8>, SyncError> {
     let (nonce_bytes, ciphertext) = blob.split_at(NONCE_LEN);
     let nonce = Nonce::from_slice(nonce_bytes);
     key.cipher()
-        .decrypt(nonce, ciphertext)
+        .decrypt(
+            nonce,
+            Payload {
+                msg: ciphertext,
+                aad: HKDF_INFO,
+            },
+        )
         .map_err(|_| SyncError::Crypto)
 }
 
@@ -203,6 +230,13 @@ pub struct HttpSyncTransport {
 impl HttpSyncTransport {
     pub fn new(api_base: impl Into<String>, bearer: impl Into<String>) -> Self {
         let api_base = api_base.into().trim_end_matches('/').to_string();
+        // The bearer + (E2E) blob must never cross plaintext HTTP. Loud in dev
+        // (catches a misconfigured base); HTTPS is enforced for real in prod by
+        // the deployed base URL (security: L-3).
+        debug_assert!(
+            api_base.starts_with("https://") || api_base.starts_with("http://localhost"),
+            "HttpSyncTransport requires HTTPS; got: {api_base}"
+        );
         let http = ureq::AgentBuilder::new()
             .timeout_connect(Duration::from_secs(5))
             .timeout(Duration::from_secs(30))

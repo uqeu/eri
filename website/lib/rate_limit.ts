@@ -29,6 +29,11 @@ const ROUTE_LIMITS: Record<string, RouteLimit> = {
   "auth.refresh": { max: 30, windowSec: 60 },
   "auth.oauth_start": { max: 20, windowSec: 60 },
   "auth.oauth_callback": { max: 20, windowSec: 60 },
+  // Memory sync — reads loose, writes (crypto + DB upsert / blob storage) strict.
+  "memory.sync.read": { max: 60, windowSec: 60 },
+  "memory.sync.write": { max: 20, windowSec: 60 },
+  "memory.profile.read": { max: 60, windowSec: 60 },
+  "memory.profile.write": { max: 20, windowSec: 60 },
 };
 const DEFAULT_LIMIT: RouteLimit = { max: 30, windowSec: 60 };
 

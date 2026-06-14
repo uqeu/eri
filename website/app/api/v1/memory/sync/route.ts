@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { authenticateApiBearer } from "@/lib/auth/api_tokens";
 import { sql } from "@/lib/db";
 import { featureLocked } from "@/lib/feature_gate";
+import { rateLimit } from "@/lib/rate_limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,6 +17,8 @@ const MAX_BLOB_BYTES = 4 * 1024 * 1024; // 4 MB hard cap — memory grows but no
  * IDE has the per-user salt + bearer-derived key needed to decrypt.
  */
 export async function GET(request: Request): Promise<Response> {
+  const limited = await rateLimit(request, "memory.sync.read");
+  if (limited) return limited;
   const auth = await authenticateApiBearer(request.headers.get("authorization"));
   if (!auth) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -41,6 +44,8 @@ export async function GET(request: Request): Promise<Response> {
  * Body: `{ blob_base64 }`. Caller encrypts client-side; we don't inspect.
  */
 export async function PUT(request: Request): Promise<Response> {
+  const limited = await rateLimit(request, "memory.sync.write");
+  if (limited) return limited;
   const auth = await authenticateApiBearer(request.headers.get("authorization"));
   if (!auth) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });

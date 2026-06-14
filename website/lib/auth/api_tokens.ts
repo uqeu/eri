@@ -77,7 +77,11 @@ export async function authenticateApiBearer(
   if (!user) return null;
 
   touchApiToken(apiToken.id).catch((error) => {
-    console.error("api_token.touch_failed", error);
+    // Log only the message — the raw error may carry DB internals (security: M-4).
+    console.error(
+      "api_token.touch_failed",
+      error instanceof Error ? error.message : String(error),
+    );
   });
 
   return { user, apiToken };

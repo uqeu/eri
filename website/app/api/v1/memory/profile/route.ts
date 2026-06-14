@@ -4,6 +4,7 @@ import { decryptAtRest, encryptAtRest } from "@/lib/crypto/server_encryption";
 import { sql } from "@/lib/db";
 import { featureLocked } from "@/lib/feature_gate";
 import { parseProfileUpload } from "@/lib/memory/profile_contract";
+import { rateLimit } from "@/lib/rate_limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,6 +18,8 @@ export const dynamic = "force-dynamic";
  * Ungated on read (mirrors memory/sync) so a user can always see what eri knows.
  */
 export async function GET(request: Request): Promise<Response> {
+  const limited = await rateLimit(request, "memory.profile.read");
+  if (limited) return limited;
   const auth = await authenticateApiBearer(request.headers.get("authorization"));
   if (!auth) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -32,9 +35,20 @@ export async function GET(request: Request): Promise<Response> {
   if (!row) {
     return NextResponse.json({ profile: null, dynamic_context: null, updated_at: null });
   }
+  // Decrypt under guard: a key rotation (or corrupt row) must surface as a
+  // logged 503, not an unhandled 500 with a leaked stack (security: H-1).
+  let profile: unknown;
+  let dynamicContext: string;
+  try {
+    profile = JSON.parse(decryptAtRest(Buffer.from(row.profile_enc), auth.user.id));
+    dynamicContext = decryptAtRest(Buffer.from(row.dynamic_context_enc), auth.user.id);
+  } catch {
+    console.error("profile.decrypt_failed", { userId: auth.user.id });
+    return NextResponse.json({ error: "profile_unavailable" }, { status: 503 });
+  }
   return NextResponse.json({
-    profile: JSON.parse(decryptAtRest(Buffer.from(row.profile_enc))),
-    dynamic_context: decryptAtRest(Buffer.from(row.dynamic_context_enc)),
+    profile,
+    dynamic_context: dynamicContext,
     updated_at:
       row.updated_at instanceof Date ? row.updated_at.toISOString() : String(row.updated_at),
   });
@@ -46,6 +60,8 @@ export async function GET(request: Request): Promise<Response> {
  * encrypts at rest with K_server, since this tier is server-readable).
  */
 export async function PUT(request: Request): Promise<Response> {
+  const limited = await rateLimit(request, "memory.profile.write");
+  if (limited) return limited;
   const auth = await authenticateApiBearer(request.headers.get("authorization"));
   if (!auth) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -67,8 +83,8 @@ export async function PUT(request: Request): Promise<Response> {
     return NextResponse.json({ error: parsed.error }, { status: 400 });
   }
 
-  const profileEnc = encryptAtRest(parsed.profileJson);
-  const dynamicEnc = encryptAtRest(parsed.dynamicContext);
+  const profileEnc = encryptAtRest(parsed.profileJson, auth.user.id);
+  const dynamicEnc = encryptAtRest(parsed.dynamicContext, auth.user.id);
 
   await sql()`
     INSERT INTO personalization_profiles (user_id, profile_enc, dynamic_context_enc)

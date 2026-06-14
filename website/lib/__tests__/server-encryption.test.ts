@@ -28,6 +28,25 @@ const KEY = randomBytes(32);
   assert.throws(() => open(KEY, blob), "tampered blob must fail");
 }
 
+// AAD binds ciphertext to a context (the user id) — wrong/absent aad fails.
+{
+  const aadA = Buffer.from("tier-a:userA");
+  const aadB = Buffer.from("tier-a:userB");
+  const blob = seal(KEY, "user A's profile", aadA);
+  assert.equal(open(KEY, blob, aadA), "user A's profile");
+  assert.throws(() => open(KEY, blob, aadB), "user B's aad must not decrypt A's blob");
+  assert.throws(() => open(KEY, blob), "missing aad must fail when sealed with aad");
+}
+
+// Versioned blob: first byte is the version; an unknown version is rejected.
+{
+  const blob = seal(KEY, "v1 payload");
+  assert.equal(blob[0], 0x01, "blob carries a version byte");
+  const future = Buffer.from(blob);
+  future[0] = 0x02;
+  assert.throws(() => open(KEY, future), "unsupported version must be rejected");
+}
+
 // Fresh IV per call — identical plaintext must not produce identical blobs.
 {
   const a = seal(KEY, "same");
