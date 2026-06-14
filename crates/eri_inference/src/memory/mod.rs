@@ -257,6 +257,15 @@ impl MemoryStore {
         Ok(removed)
     }
 
+    /// Merge a remote observation set (pulled from the cloud blob) into the
+    /// local store and persist — union by id, last-write-wins, tombstone-aware
+    /// (see [`merge_observations`]). The cross-device sync entry point.
+    pub fn apply_merge(&mut self, remote: Vec<Observation>) -> io::Result<()> {
+        let local = std::mem::take(&mut self.file.observations);
+        self.file.observations = merge_observations(local, remote);
+        self.save()
+    }
+
     /// Drop observations older than the tier's retention window.
     pub fn prune(&mut self, window: RetentionWindow) -> io::Result<usize> {
         let Some(cutoff) = window.cutoff_ms(now_ms()) else {
@@ -429,6 +438,58 @@ const MAX_OBSERVATIONS: usize = 2_000;
 /// (the user's `/remember`) are preserved; the churnier kinds are trimmed
 /// oldest-first (the tail is newest, since `insert` pushes chronologically).
 /// If facts alone exceed `max`, the oldest facts are trimmed too. Pure + tested.
+/// Kind marker for a tombstone — a record whose `body` is the id of an
+/// observation that was forgotten. Tombstones are synced so a `/forget` on one
+/// device can't be resurrected by a stale copy on another (ADR-0001).
+pub const TOMBSTONE_KIND: &str = "tombstone";
+
+/// Build a tombstone for `target_id`. Carries its own `ts_ms` so it wins the
+/// last-write-wins merge against the observation it suppresses.
+pub fn tombstone(target_id: &str) -> Observation {
+    Observation {
+        id: new_id(),
+        ts_ms: now_ms(),
+        kind: TOMBSTONE_KIND.to_string(),
+        workspace_hash: String::new(),
+        body: target_id.to_string(),
+        embedding: Vec::new(),
+    }
+}
+
+/// Merge two observation sets for cross-device sync. Pure + total:
+/// 1. **Union by `id`, last-write-wins on `ts_ms`** (a re-observed/edited record
+///    keeps its newest version; ties keep the existing).
+/// 2. **Apply tombstones:** any `TOMBSTONE_KIND` record whose `body` names an id
+///    suppresses that observation from the result — but the tombstone itself is
+///    retained, so it keeps suppressing across future merges.
+/// Result is sorted by `ts_ms` ascending for deterministic storage + tests.
+pub fn merge_observations(
+    local: Vec<Observation>,
+    remote: Vec<Observation>,
+) -> Vec<Observation> {
+    use std::collections::{HashMap, HashSet};
+    let mut by_id: HashMap<String, Observation> = HashMap::new();
+    for o in local.into_iter().chain(remote) {
+        match by_id.get(&o.id) {
+            Some(existing) if existing.ts_ms >= o.ts_ms => {} // keep the newer copy
+            _ => {
+                by_id.insert(o.id.clone(), o);
+            }
+        }
+    }
+    let tombstoned: HashSet<String> = by_id
+        .values()
+        .filter(|o| o.kind == TOMBSTONE_KIND)
+        .map(|o| o.body.clone())
+        .collect();
+    let mut out: Vec<Observation> = by_id
+        .into_values()
+        .filter(|o| o.kind == TOMBSTONE_KIND || !tombstoned.contains(&o.id))
+        .collect();
+    out.sort_by_key(|o| o.ts_ms);
+    out
+}
+
 fn cap_observations(obs: Vec<Observation>, max: usize) -> Vec<Observation> {
     if obs.len() <= max {
         return obs;
@@ -597,6 +658,62 @@ mod tests {
         store.insert("fact", dir.path(), "b").unwrap();
         store.forget("all").unwrap();
         assert_eq!(store.all().len(), 0);
+    }
+
+    fn obs_id(id: &str, ts_ms: u64, kind: &str, body: &str) -> Observation {
+        Observation {
+            id: id.to_string(),
+            ts_ms,
+            kind: kind.to_string(),
+            workspace_hash: String::new(),
+            body: body.to_string(),
+            embedding: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn merge_unions_and_keeps_the_newer_copy_by_id() {
+        let local = vec![obs_id("a", 10, "fact", "old"), obs_id("b", 20, "fact", "b")];
+        let remote = vec![obs_id("a", 30, "fact", "new"), obs_id("c", 40, "fact", "c")];
+        let merged = merge_observations(local, remote);
+        let ids: Vec<&str> = merged.iter().map(|o| o.id.as_str()).collect();
+        assert_eq!(ids, vec!["b", "a", "c"]); // sorted by ts_ms; a takes the ts=30 copy
+        let a = merged.iter().find(|o| o.id == "a").unwrap();
+        assert_eq!(a.body, "new", "last-write-wins keeps the higher ts_ms version");
+    }
+
+    #[test]
+    fn merge_applies_tombstones_and_retains_them() {
+        // A tombstone for "a" suppresses a's observation, even when a fresh copy
+        // of "a" arrives from the remote — and the tombstone itself survives so
+        // it keeps suppressing on the next merge.
+        let local = vec![obs_id("a", 10, "fact", "secret"), obs_id("t1", 50, TOMBSTONE_KIND, "a")];
+        let remote = vec![obs_id("a", 99, "fact", "resurrected from another device")];
+        let merged = merge_observations(local, remote);
+        assert!(!merged.iter().any(|o| o.id == "a"), "tombstoned id is gone");
+        assert!(
+            merged.iter().any(|o| o.kind == TOMBSTONE_KIND && o.body == "a"),
+            "tombstone is retained to keep suppressing"
+        );
+    }
+
+    #[test]
+    fn forgotten_item_does_not_resurrect_after_a_remote_pull() {
+        // The real cross-device scenario: forget on device A, then pull device B's
+        // older copy. With a tombstone, it stays gone.
+        let (dir, mut store) = open_temp();
+        let id = store.insert("fact", dir.path(), "delete me").unwrap().id;
+        // Simulate forget-as-tombstone (the wiring lands next slice; here we
+        // assert the merge contract the wiring will rely on).
+        let remote = vec![
+            obs_id(&id, 1, "fact", "delete me"),    // device B's stale copy
+            tombstone(&id),                          // device A's forget
+        ];
+        store.apply_merge(remote).unwrap();
+        assert!(
+            !store.all().iter().any(|o| o.id == id && o.kind != TOMBSTONE_KIND),
+            "a tombstoned observation must not come back from a remote pull"
+        );
     }
 
     #[test]
