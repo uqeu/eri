@@ -24,6 +24,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod cloud;
 pub mod collectors;
+pub mod consolidation;
 pub mod embeddings;
 pub mod keys;
 pub mod profile;
@@ -53,10 +54,25 @@ pub struct Observation {
     /// replacement (e.g. "favourite colour is blue" after you say it's green).
     #[serde(default, skip_serializing_if = "is_false")]
     pub superseded: bool,
+    /// Set when this episodic observation has been folded into a durable
+    /// `semantic` rollup ([`consolidation`]). Like `superseded`: retained in the
+    /// store + synced for history, but hidden from recall + the profile so eri
+    /// injects the distilled pattern, not the raw episodes it came from.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub consolidated: bool,
 }
 
 fn is_false(b: &bool) -> bool {
     !*b
+}
+
+impl Observation {
+    /// Visible to recall + the Tier-A profile: not superseded, not consolidated,
+    /// and not an internal tombstone. The single source of truth for "should eri
+    /// ever surface this observation" — every recall path filters on it.
+    fn is_active(&self) -> bool {
+        !self.superseded && !self.consolidated && self.kind != TOMBSTONE_KIND
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -248,6 +264,7 @@ impl MemoryStore {
             body: body.to_string(),
             embedding: embeddings::embed_text(body),
             superseded: false,
+            consolidated: false,
         };
         let cloned = observation.clone();
         // Contradiction/supersession (mem0/supermemory): a new `fact` that's
@@ -298,7 +315,7 @@ impl MemoryStore {
             .file
             .observations
             .iter()
-            .filter(|o| (o.workspace_hash == hash || o.kind == "fact") && !o.superseded)
+            .filter(|o| (o.workspace_hash == hash || o.kind == "fact") && o.is_active())
             .map(|o| (o.clone(), embeddings::cosine(&query_vec, &o.embedding)))
             .collect();
         scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
@@ -314,7 +331,7 @@ impl MemoryStore {
         self.file
             .observations
             .iter()
-            .filter(|o| o.kind != TOMBSTONE_KIND && !o.superseded)
+            .filter(|o| o.is_active())
             .cloned()
             .collect()
     }
@@ -387,7 +404,7 @@ impl MemoryStore {
             .file
             .observations
             .iter()
-            .filter(|o| (o.workspace_hash == hash || o.kind == "fact") && !o.superseded)
+            .filter(|o| (o.workspace_hash == hash || o.kind == "fact") && o.is_active())
             .filter(|o| {
                 if needle.is_empty() {
                     return true;
@@ -407,7 +424,7 @@ impl MemoryStore {
             .file
             .observations
             .iter()
-            .filter(|o| (o.workspace_hash == hash || o.kind == "fact") && !o.superseded)
+            .filter(|o| (o.workspace_hash == hash || o.kind == "fact") && o.is_active())
             .collect();
         hits.sort_by_key(|h| std::cmp::Reverse(h.ts_ms));
         hits.into_iter().take(limit).cloned().collect()
@@ -446,7 +463,7 @@ impl MemoryStore {
             .file
             .observations
             .iter()
-            .filter(|o| (o.workspace_hash == hash || o.kind == "fact") && !o.superseded)
+            .filter(|o| (o.workspace_hash == hash || o.kind == "fact") && o.is_active())
             .map(|o| {
                 // cosine is [-1,1]; map to [0,1] so the weighted sum is sane.
                 let sem = (embeddings::cosine(&qvec, &o.embedding) + 1.0) / 2.0;
@@ -455,7 +472,9 @@ impl MemoryStore {
                 // Durable, user-chosen memories get a small standing boost.
                 let kind_boost = match o.kind.as_str() {
                     "fact" => 0.10,
-                    "preference" | "habit" => 0.08,
+                    // A consolidated rollup is a learned, durable pattern — rank it
+                    // alongside explicit preferences, above raw episodic churn.
+                    "preference" | "habit" | consolidation::SEMANTIC_KIND => 0.08,
                     _ => 0.0,
                 };
                 let score = 0.55 * sem + 0.30 * lex + 0.15 * rec + kind_boost;
@@ -482,6 +501,42 @@ impl MemoryStore {
         // A generous candidate pool; MMR + the budget trim it to what fits.
         let candidates = self.recall_hybrid(query, workspace, 50)?;
         Ok(mmr_budget_select(candidates, max_tokens, MMR_LAMBDA))
+    }
+
+    /// Episodic→semantic consolidation (mem0/supermemory). Distill clusters of
+    /// near-identical episodic observations into durable `semantic` rollups,
+    /// hiding the raw episodes from recall while keeping them for history + sync.
+    /// Returns the number of rollups created. Idempotent: a second pass finds the
+    /// episodes already marked `consolidated` and does nothing. Runs on the CPU
+    /// (zero model tokens), so it's safe to call on every sync.
+    pub fn consolidate(&mut self) -> io::Result<usize> {
+        let plan = consolidation::plan_consolidation(&self.file.observations);
+        if plan.new_facts.is_empty() {
+            return Ok(0);
+        }
+        for i in plan.consume {
+            self.file.observations[i].consolidated = true;
+        }
+        let created = plan.new_facts.len();
+        for draft in plan.new_facts {
+            let embedding = embeddings::embed_text(&draft.body);
+            let rollup = Observation {
+                id: new_id(),
+                ts_ms: draft.ts_ms,
+                kind: consolidation::SEMANTIC_KIND.to_string(),
+                workspace_hash: draft.workspace_hash,
+                body: draft.body,
+                embedding,
+                superseded: false,
+                consolidated: false,
+            };
+            // A fresh rollup replaces an older rollup on the same topic, so the
+            // profile/recall never carry "accepts edits in src/x (3×)" twice.
+            supersede_similar_facts(&mut self.file.observations, &rollup);
+            self.file.observations.push(rollup);
+        }
+        self.save()?;
+        Ok(created)
     }
 }
 
@@ -515,12 +570,14 @@ const MMR_LAMBDA: f32 = 0.7;
 /// enough that unrelated facts (score ~0) never supersede each other.
 const SUPERSEDE_THRESHOLD: f32 = 0.75;
 
-/// Mark existing non-superseded facts that are semantically near-identical to
-/// `new_fact` as superseded (called before the new fact is pushed). Pure over
-/// the slice; tested via the store.
+/// Mark existing non-superseded observations of the **same kind** that are
+/// semantically near-identical to `new_fact` as superseded (called before the
+/// new one is pushed). Same-kind so a fresh `fact` only replaces an older `fact`
+/// and a fresh `semantic` rollup only replaces an older rollup on the same topic
+/// — never across kinds. Pure over the slice; tested via the store.
 fn supersede_similar_facts(observations: &mut [Observation], new_fact: &Observation) {
     for o in observations.iter_mut() {
-        if o.kind == "fact"
+        if o.kind == new_fact.kind
             && !o.superseded
             && !o.embedding.is_empty()
             && embeddings::cosine(&o.embedding, &new_fact.embedding) > SUPERSEDE_THRESHOLD
@@ -640,6 +697,7 @@ pub fn tombstone(target_id: &str) -> Observation {
         body: target_id.to_string(),
         embedding: Vec::new(),
         superseded: false,
+        consolidated: false,
     }
 }
 
@@ -687,9 +745,9 @@ fn cap_observations(obs: Vec<Observation>, max: usize) -> Vec<Observation> {
     // Preserve explicit `fact`s AND tombstones: a tombstone evicted before it
     // has synced everywhere would let the forgotten fact resurrect on another
     // device (security: C-2). Only the churnier kinds are trimmed oldest-first.
-    let (preserved, rest): (Vec<_>, Vec<_>) = obs
-        .into_iter()
-        .partition(|o| o.kind == "fact" || o.kind == TOMBSTONE_KIND);
+    let (preserved, rest): (Vec<_>, Vec<_>) = obs.into_iter().partition(|o| {
+        o.kind == "fact" || o.kind == TOMBSTONE_KIND || o.kind == consolidation::SEMANTIC_KIND
+    });
     let keep_rest = max.saturating_sub(preserved.len());
     let rest_start = rest.len().saturating_sub(keep_rest);
     let mut kept = preserved;
@@ -744,6 +802,7 @@ mod tests {
             body: "b".to_string(),
             embedding: Vec::new(),
             superseded: false,
+            consolidated: false,
         }
     }
 
@@ -846,6 +905,7 @@ mod tests {
                 body: body.into(),
                 embedding,
                 superseded: false,
+                consolidated: false,
             },
             rel,
         )
@@ -931,6 +991,66 @@ mod tests {
     }
 
     #[test]
+    fn consolidate_rolls_up_repeated_edits_and_hides_the_episodes() {
+        let (dir, mut store) = open_temp();
+        let ws = dir.path();
+        for f in ["Header.tsx", "Footer.tsx", "Nav.tsx", "Card.tsx"] {
+            let body = format!(r#"{{"path":"src/components/{f}","summary":"adjust layout"}}"#);
+            store.insert("edit_accepted", ws, &body).unwrap();
+        }
+        let created = store.consolidate().unwrap();
+        assert_eq!(created, 1, "the four similar edits become one rollup");
+
+        // The raw episodes are hidden from recall; the rollup stands in for them.
+        let visible = store.all();
+        assert!(
+            !visible.iter().any(|o| o.kind == "edit_accepted"),
+            "episodes are hidden once consolidated"
+        );
+        let rollup = visible
+            .iter()
+            .find(|o| o.kind == consolidation::SEMANTIC_KIND)
+            .expect("a semantic rollup is visible");
+        assert!(rollup.body.contains("accepts"), "rollup: {}", rollup.body);
+        assert!(rollup.body.contains("src/components"), "rollup: {}", rollup.body);
+        // History is preserved in the raw store for sync + future bi-temporal.
+        assert_eq!(
+            store
+                .snapshot()
+                .iter()
+                .filter(|o| o.kind == "edit_accepted")
+                .count(),
+            4,
+            "episodes survive in the snapshot (sync wire form)"
+        );
+    }
+
+    #[test]
+    fn consolidate_is_idempotent() {
+        let (dir, mut store) = open_temp();
+        let ws = dir.path();
+        for f in ["a.tsx", "b.tsx", "c.tsx"] {
+            let body = format!(r#"{{"path":"src/ui/{f}","summary":"tweak spacing"}}"#);
+            store.insert("edit_accepted", ws, &body).unwrap();
+        }
+        assert_eq!(store.consolidate().unwrap(), 1);
+        assert_eq!(
+            store.consolidate().unwrap(),
+            0,
+            "a second pass finds the episodes already consolidated"
+        );
+        assert_eq!(
+            store
+                .all()
+                .iter()
+                .filter(|o| o.kind == consolidation::SEMANTIC_KIND)
+                .count(),
+            1,
+            "no duplicate rollup"
+        );
+    }
+
+    #[test]
     fn forget_removes_specific_id() {
         let (dir, mut store) = open_temp();
         let id = store.insert("fact", dir.path(), "x").unwrap().id;
@@ -957,6 +1077,7 @@ mod tests {
             body: body.to_string(),
             embedding: Vec::new(),
             superseded: false,
+            consolidated: false,
         }
     }
 
@@ -1061,6 +1182,7 @@ mod tests {
             body: "forgotten-id".into(),
             embedding: Vec::new(),
             superseded: false,
+            consolidated: false,
         });
         store.insert("fact", dir.path(), "fresh").unwrap();
         store.prune(RetentionWindow::Day).unwrap();
@@ -1100,6 +1222,7 @@ mod tests {
             body: "ancient".into(),
             embedding: Vec::new(),
             superseded: false,
+            consolidated: false,
         });
         store.insert("fact", dir.path(), "fresh").unwrap();
         store.prune(RetentionWindow::Day).unwrap();
@@ -1164,6 +1287,7 @@ mod tests {
             body: "I prefer dark themes".into(),
             embedding: Vec::new(),
             superseded: false,
+            consolidated: false,
         });
         let hits = store.recall_semantic("dark themes", dir.path(), 1).unwrap();
         assert_eq!(hits.len(), 1);

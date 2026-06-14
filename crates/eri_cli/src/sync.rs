@@ -44,6 +44,11 @@ fn now_ms() -> u64 {
 fn sync_blocking(base: String, bearer: String, user_id: String) -> Result<SyncReport> {
     let mut store = MemoryStore::open_for(Some(&user_id)).context("open local memory store")?;
 
+    // Periodic maintenance: distill clusters of episodic churn into durable
+    // semantic rollups before syncing, so both tiers carry the pattern, not the
+    // raw log. Zero model tokens; idempotent (ADR-0001 consolidation slice).
+    store.consolidate().context("consolidate memory")?;
+
     // Tier-B: encrypted blob round-trip + convergent merge (union + LWW + tombstones).
     let key = k_user(&KeychainStore, &user_id).context("derive K_user from the keychain")?;
     let transport = HttpSyncTransport::new(base.clone(), bearer.clone());

@@ -160,6 +160,7 @@ mod tests {
             body: body.into(),
             embedding: Vec::new(),
             superseded: false,
+            consolidated: false,
         }
     }
 

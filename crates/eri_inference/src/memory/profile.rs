@@ -15,6 +15,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::memory::Observation;
+use crate::memory::consolidation::SEMANTIC_KIND;
 
 /// Hard caps so the whole profile stays small (~≤32KB target) — phone eri
 /// injects this verbatim, so it must never balloon the token budget.
@@ -109,9 +110,13 @@ fn looks_sensitive(text: &str) -> bool {
     NEEDLES.iter().any(|n| hay.contains(n))
 }
 
-/// Behaviour rollups — for now the accept/reject ratio on edits. Extensible:
-/// new observation kinds become new rollups without touching callers.
+/// Behaviour rollups: the accept/reject ratio on edits, plus the durable
+/// `semantic` patterns distilled by consolidation ("Frequently accepts edits in
+/// `src/components`"). Extensible: new observation kinds become new rollups
+/// without touching callers.
 fn distill_preferences(observations: &[Observation]) -> Vec<String> {
+    let mut prefs = Vec::new();
+
     let accepted = observations
         .iter()
         .filter(|o| o.kind == "edit_accepted")
@@ -122,12 +127,30 @@ fn distill_preferences(observations: &[Observation]) -> Vec<String> {
         .count();
     let total = accepted + rejected;
     // checked_div yields None when there are no edits yet — no preference to state.
-    match (accepted * 100).checked_div(total) {
-        Some(pct) => vec![format!(
+    if let Some(pct) = (accepted * 100).checked_div(total) {
+        prefs.push(format!(
             "Accepts {pct}% of eri's edits ({accepted} of {total} recent)"
-        )],
-        None => Vec::new(),
+        ));
     }
+
+    // Consolidated semantic rollups, newest first, deduped + capped so the
+    // server-readable profile stays small.
+    let mut seen = std::collections::HashSet::new();
+    for o in observations.iter().rev() {
+        if o.kind != SEMANTIC_KIND || looks_sensitive(&o.body) {
+            continue;
+        }
+        let text = truncate(o.body.trim(), MAX_FACT_CHARS);
+        if text.is_empty() || !seen.insert(text.clone()) {
+            continue;
+        }
+        prefs.push(text);
+        if prefs.len() >= MAX_FACTS {
+            break;
+        }
+    }
+
+    prefs
 }
 
 /// The live "today" slice — recent (≤24h) non-fact activity, newest first,
@@ -137,7 +160,9 @@ fn distill_dynamic_context(observations: &[Observation], now_ms: u64) -> String 
     let recent: Vec<String> = observations
         .iter()
         .rev()
-        .filter(|o| o.ts_ms >= cutoff && o.kind != "fact")
+        // Durable kinds (facts + consolidated rollups) belong in the static
+        // sections, not "today"; dynamic context is live episodic activity.
+        .filter(|o| o.ts_ms >= cutoff && o.kind != "fact" && o.kind != SEMANTIC_KIND)
         .take(MAX_DYNAMIC_ITEMS)
         .map(|o| truncate(o.body.trim(), 100))
         .filter(|s| !s.is_empty())
@@ -169,6 +194,7 @@ mod tests {
             body: body.to_string(),
             embedding: Vec::new(),
             superseded: false,
+            consolidated: false,
         }
     }
 
@@ -234,6 +260,31 @@ mod tests {
                 .any(|f| f.contains("hunter2") || f.contains("api key")),
             "secrets must never reach Tier-A; got {:?}",
             p.facts
+        );
+    }
+
+    #[test]
+    fn semantic_rollups_become_preferences_not_todays_activity() {
+        let obs = vec![
+            o("edit_accepted", NOW - 100, "header.tsx"),
+            o(
+                SEMANTIC_KIND,
+                NOW - 50,
+                "Frequently accepts edits in `src/components` (5×)",
+            ),
+        ];
+        let p = distill(&obs, NOW);
+        assert!(
+            p.preferences
+                .iter()
+                .any(|pref| pref.contains("Frequently accepts edits")),
+            "the rollup is a durable preference; got {:?}",
+            p.preferences
+        );
+        assert!(
+            !p.dynamic_context.contains("Frequently accepts"),
+            "a durable rollup must not leak into today's activity; got {}",
+            p.dynamic_context
         );
     }
 
