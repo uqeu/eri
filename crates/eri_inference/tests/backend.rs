@@ -55,7 +55,7 @@ fn mock_backend_streams_patch_for_red_button_intent() {
     });
     ctx.commit_transcript_chunk("make the button I am looking at red");
 
-    let events = MockDiffusionBackend::default()
+    let events = MockDiffusionBackend
         .iterate(&ctx, IterationRequest::new(ctx.iteration_budget(), None))
         .unwrap();
 
@@ -65,7 +65,7 @@ fn mock_backend_streams_patch_for_red_button_intent() {
             .iter()
             .any(|event| matches!(event, IterEvent::DraftToken { text } if text.contains("red")))
     );
-    assert!(events.iter().any(|event| matches!(event, IterEvent::CandidatePatch { patch } if patch.path == PathBuf::from("src/App.tsx") && patch.new_text.contains("background: red"))));
+    assert!(events.iter().any(|event| matches!(event, IterEvent::CandidatePatch { patch } if patch.path.as_path() == std::path::Path::new("src/App.tsx") && patch.new_text.contains("background: red"))));
     assert!(events.iter().any(|event| matches!(event, IterEvent::Done)));
 }
 

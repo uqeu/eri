@@ -56,8 +56,13 @@ eri_iterator = { path = "crates/eri_iterator" }
 eri_tokens = { path = "crates/eri_tokens" }
 
 # Third-party — kept minimal. Versions track current crates.io stable.
+aes-gcm = "0.10"
 anyhow = "1.0"
 async-trait = "0.1"
+base64 = "0.22"
+getrandom = "0.2"
+hkdf = "0.12"
+sha2 = "0.10"
 clap = { version = "4.5", features = ["derive"] }
 cpal = "0.15"
 dotenvy = "0.15"

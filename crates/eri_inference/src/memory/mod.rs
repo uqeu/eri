@@ -25,6 +25,7 @@ use serde::{Deserialize, Serialize};
 pub mod collectors;
 pub mod embeddings;
 pub mod profile;
+pub mod sync;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Observation {
@@ -276,6 +277,14 @@ impl MemoryStore {
         Ok(removed)
     }
 
+    /// The full observation log **including tombstones** — the wire form for
+    /// cross-device sync ([`crate::memory::sync`]). Unlike [`all`](Self::all),
+    /// this keeps tombstones so a `/forget` propagates and can't be resurrected
+    /// by a stale copy on another device.
+    pub fn snapshot(&self) -> Vec<Observation> {
+        self.file.observations.clone()
+    }
+
     /// Merge a remote observation set (pulled from the cloud blob) into the
     /// local store and persist — union by id, last-write-wins, tombstone-aware
     /// (see [`merge_observations`]). The cross-device sync entry point.
@@ -483,10 +492,7 @@ pub fn tombstone(target_id: &str) -> Observation {
 ///    retained, so it keeps suppressing across future merges.
 ///
 /// Result is sorted by `ts_ms` ascending for deterministic storage + tests.
-pub fn merge_observations(
-    local: Vec<Observation>,
-    remote: Vec<Observation>,
-) -> Vec<Observation> {
+pub fn merge_observations(local: Vec<Observation>, remote: Vec<Observation>) -> Vec<Observation> {
     use std::collections::{HashMap, HashSet};
     let mut by_id: HashMap<String, Observation> = HashMap::new();
     for o in local.into_iter().chain(remote) {
@@ -699,7 +705,10 @@ mod tests {
         let ids: Vec<&str> = merged.iter().map(|o| o.id.as_str()).collect();
         assert_eq!(ids, vec!["b", "a", "c"]); // sorted by ts_ms; a takes the ts=30 copy
         let a = merged.iter().find(|o| o.id == "a").unwrap();
-        assert_eq!(a.body, "new", "last-write-wins keeps the higher ts_ms version");
+        assert_eq!(
+            a.body, "new",
+            "last-write-wins keeps the higher ts_ms version"
+        );
     }
 
     #[test]
@@ -707,12 +716,17 @@ mod tests {
         // A tombstone for "a" suppresses a's observation, even when a fresh copy
         // of "a" arrives from the remote — and the tombstone itself survives so
         // it keeps suppressing on the next merge.
-        let local = vec![obs_id("a", 10, "fact", "secret"), obs_id("t1", 50, TOMBSTONE_KIND, "a")];
+        let local = vec![
+            obs_id("a", 10, "fact", "secret"),
+            obs_id("t1", 50, TOMBSTONE_KIND, "a"),
+        ];
         let remote = vec![obs_id("a", 99, "fact", "resurrected from another device")];
         let merged = merge_observations(local, remote);
         assert!(!merged.iter().any(|o| o.id == "a"), "tombstoned id is gone");
         assert!(
-            merged.iter().any(|o| o.kind == TOMBSTONE_KIND && o.body == "a"),
+            merged
+                .iter()
+                .any(|o| o.kind == TOMBSTONE_KIND && o.body == "a"),
             "tombstone is retained to keep suppressing"
         );
     }
@@ -726,12 +740,15 @@ mod tests {
         // Simulate forget-as-tombstone (the wiring lands next slice; here we
         // assert the merge contract the wiring will rely on).
         let remote = vec![
-            obs_id(&id, 1, "fact", "delete me"),    // device B's stale copy
-            tombstone(&id),                          // device A's forget
+            obs_id(&id, 1, "fact", "delete me"), // device B's stale copy
+            tombstone(&id),                      // device A's forget
         ];
         store.apply_merge(remote).unwrap();
         assert!(
-            !store.all().iter().any(|o| o.id == id && o.kind != TOMBSTONE_KIND),
+            !store
+                .all()
+                .iter()
+                .any(|o| o.id == id && o.kind != TOMBSTONE_KIND),
             "a tombstoned observation must not come back from a remote pull"
         );
     }

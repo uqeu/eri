@@ -134,13 +134,6 @@ pub trait Instrumentation: Send {
 pub struct NullInstr;
 impl Instrumentation for NullInstr {}
 
-/// Run one iteration end-to-end via the brain layer.
-///
-/// 1. Plan via [`Brain::plan`].
-/// 2. Branch on `plan.intent` (Edit/Build/Refactor → diffusion pipeline,
-///    Search → `SearchProvider`, everything else → chat-style stream).
-/// 3. Stream events to `on_event` in real time. Tokens, edit applies and
-///    edit failures are surfaced as they happen.
 /// Caveman-compress the prose of non-`system:` context parts before budgeting.
 ///
 /// `system:`-labelled parts (instructions) are returned byte-for-byte so
@@ -162,6 +155,13 @@ pub(crate) fn compress_context_parts(parts: Vec<BudgetPart>) -> Vec<BudgetPart> 
         .collect()
 }
 
+/// Run one iteration end-to-end via the brain layer.
+///
+/// 1. Plan via [`Brain::plan`].
+/// 2. Branch on `plan.intent` (Edit/Build/Refactor → diffusion pipeline,
+///    Search → `SearchProvider`, everything else → chat-style stream).
+/// 3. Stream events to `on_event` in real time. Tokens, edit applies and
+///    edit failures are surfaced as they happen.
 pub fn run_iteration_via_brain(
     req: BrainIterationRequest,
     search_provider: Option<&dyn SearchProvider>,
