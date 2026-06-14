@@ -59,14 +59,30 @@ function newCommandId(): string {
 }
 
 const DEFAULT_TTL_MINUTES = 30;
+/** Cap outstanding (non-terminal) commands per user so a runaway dispatch loop
+ *  (or prompt injection) can't flood the queue (review H3). */
+const MAX_PENDING_PER_USER = 5;
 
-/** Enqueue a goal for the user's computer to execute. Returns the command id. */
+/**
+ * Enqueue a goal for the user's computer to execute. Returns the new command id,
+ * or null when the user is already at the outstanding-command cap (the caller
+ * tells the user to wait).
+ */
 export async function enqueueCommand(input: {
   userId: string;
   source: string;
   goal: string;
   ttlMinutes?: number;
-}): Promise<{ id: string }> {
+}): Promise<{ id: string } | null> {
+  const pending = await sql()<{ n: number }[]>`
+    SELECT count(*)::int AS n FROM command_queue
+    WHERE user_id = ${input.userId}
+      AND status IN ('pending', 'claimed', 'awaiting_confirm')
+      AND expires_at > now()
+  `;
+  if ((pending[0]?.n ?? 0) >= MAX_PENDING_PER_USER) {
+    return null;
+  }
   const id = newCommandId();
   const ttl = input.ttlMinutes ?? DEFAULT_TTL_MINUTES;
   const expiresAt = new Date(Date.now() + ttl * 60_000).toISOString();
@@ -87,7 +103,14 @@ export async function claimNextCommand(userId: string): Promise<CommandRow | nul
     UPDATE command_queue SET status = 'claimed', claimed_at = now()
     WHERE id = (
       SELECT id FROM command_queue
-      WHERE user_id = ${userId} AND status = 'pending' AND expires_at > now()
+      WHERE user_id = ${userId}
+        AND expires_at > now()
+        AND (
+          status = 'pending'
+          -- Reclaim a row whose daemon died mid-run (claimed but stale), or it
+          -- would be stranded forever (review H2).
+          OR (status = 'claimed' AND claimed_at < now() - interval '2 minutes')
+        )
       ORDER BY created_at ASC
       LIMIT 1
       FOR UPDATE SKIP LOCKED
@@ -110,13 +133,15 @@ export async function completeCommand(input: {
   confirmPrompt?: string;
 }): Promise<boolean> {
   const stampDone = input.status === "done" || input.status === "error";
+  // Only a CLAIMED row can be completed — makes completion idempotent and stops a
+  // late/duplicate post from resurrecting a finished command (review M3).
   const rows = await sql()<{ id: string }[]>`
     UPDATE command_queue
     SET status = ${input.status},
         result = ${input.result ?? null},
         confirm_prompt = ${input.confirmPrompt ?? null},
         completed_at = CASE WHEN ${stampDone} THEN now() ELSE completed_at END
-    WHERE id = ${input.id} AND user_id = ${input.userId}
+    WHERE id = ${input.id} AND user_id = ${input.userId} AND status = 'claimed'
     RETURNING id
   `;
   return rows.length > 0;

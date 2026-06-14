@@ -78,8 +78,9 @@ export interface InboundDeps {
     tools?: ToolDef[];
     onToolCall?: (name: string, input: unknown) => Promise<string>;
   }): Promise<AgentTurnResultLike>;
-  /** Dispatch a goal to the user's computer (command queue) — async. */
-  enqueueComputerGoal(userId: string, goal: string): Promise<void>;
+  /** Dispatch a goal to the user's computer (command queue). Returns false when
+   *  the user is at the outstanding-command cap. */
+  enqueueComputerGoal(userId: string, goal: string): Promise<boolean>;
   now(): number;
 }
 
@@ -116,6 +117,9 @@ export async function handleInbound(
 
   const { profile, dynamicContext } = await deps.loadProfile(user.userId);
   const started = deps.now();
+  // At most one computer dispatch per text — a single message rarely needs to
+  // queue two independent goals, and it removes the per-turn hop multiplier (H3).
+  let dispatched = false;
   try {
     const turn = await deps.runTurn({
       prompt: msg.content,
@@ -127,9 +131,14 @@ export async function handleInbound(
       // to the command queue; the computer-resident eri runs it and texts back.
       onToolCall: async (name, toolInput) => {
         if (name !== "control_computer") return `Unknown tool: ${name}`;
+        if (dispatched) return "Already dispatched one task for this message; wait for it to finish.";
         const goal = (toolInput as { goal?: unknown })?.goal;
         if (typeof goal !== "string" || !goal.trim()) return "No goal was provided.";
-        await deps.enqueueComputerGoal(user.userId, goal.trim());
+        const ok = await deps.enqueueComputerGoal(user.userId, goal.trim());
+        if (!ok) {
+          return "The user already has several tasks queued — ask them to wait for those to finish first.";
+        }
+        dispatched = true;
         return "Dispatched to the user's computer; it will run shortly and text back the result.";
       },
     });

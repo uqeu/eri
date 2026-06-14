@@ -179,6 +179,11 @@ pub enum Disposition {
 pub struct ControlGate {
     auto_confirm: bool,
     permissions: crate::control_safety::PermissionStore,
+    /// When set, risky actions are confirmed regardless of the granted allowlist.
+    /// Used for the unattended remote channel — a permission the user granted at
+    /// their keyboard must NOT auto-run a risky action triggered from their phone
+    /// (security C1). The app denylist + refusals still apply.
+    force_confirm_risky: bool,
 }
 
 impl ControlGate {
@@ -192,6 +197,19 @@ impl ControlGate {
         Self {
             auto_confirm,
             permissions,
+            force_confirm_risky: false,
+        }
+    }
+
+    /// Build a gate for the **unattended remote channel**: never auto-confirms,
+    /// and granted permissions do NOT let risky actions run (every risky action
+    /// is bounced to the phone). The app denylist is kept so "stay out of X"
+    /// still blocks (security C1).
+    pub fn for_remote(permissions: crate::control_safety::PermissionStore) -> Self {
+        Self {
+            auto_confirm: false,
+            permissions,
+            force_confirm_risky: true,
         }
     }
 
@@ -223,11 +241,14 @@ impl ControlGate {
         {
             return Ok(Disposition::Refused(kind.handback_message().to_string()));
         }
-        // (2) Confirmation — risky unless explicitly permitted.
+        // (2) Confirmation — risky unless explicitly permitted. In remote mode
+        // (`force_confirm_risky`) a granted permission does NOT skip the confirm,
+        // so an unattended risky action always bounces to the phone (security C1).
         if action.is_risky() && !self.auto_confirm {
-            let granted = action
-                .permission()
-                .is_some_and(|p| self.permissions.is_granted(p));
+            let granted = !self.force_confirm_risky
+                && action
+                    .permission()
+                    .is_some_and(|p| self.permissions.is_granted(p));
             if !granted {
                 return Ok(Disposition::NeedsConfirmation(action.describe()));
             }
@@ -1421,6 +1442,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn remote_gate_confirms_a_risky_action_even_when_locally_granted() {
+        // Security C1: a permission granted at the keyboard must NOT let a risky
+        // action auto-run over the unattended remote channel.
+        use crate::control_safety::{Permission, PermissionStore};
+        let bridge = MockBridge::default();
+        let quit = ControlAction::QuitApp("Mail".into());
+
+        // A local gate WITH the grant runs it immediately...
+        let mut granted_local = PermissionStore::default();
+        granted_local.grant(Permission::QuitApps);
+        let local = ControlGate::with_permissions(false, granted_local);
+        assert_eq!(
+            local.submit(&bridge, &quit).await.unwrap(),
+            Disposition::Executed("quit Mail".into())
+        );
+
+        // ...but the remote gate confirms it despite the same grant.
+        let mut granted_remote = PermissionStore::default();
+        granted_remote.grant(Permission::QuitApps);
+        let remote = ControlGate::for_remote(granted_remote);
+        assert!(matches!(
+            remote.submit(&bridge, &quit).await.unwrap(),
+            Disposition::NeedsConfirmation(_)
+        ));
+    }
+
+    #[tokio::test]
     async fn gate_refuses_typing_a_password_even_with_auto_confirm() {
         // Refusal is a boundary, not a confirmation — auto_confirm can't unlock it.
         let bridge = MockBridge::default();
@@ -1918,7 +1966,11 @@ mod tests {
     /// signed-in cloud client, no network, deterministic.
     struct StubTurn {
         engine: &'static str,
-        outs: Mutex<std::collections::VecDeque<std::result::Result<crate::control_turn::TurnOutput, String>>>,
+        outs: Mutex<
+            std::collections::VecDeque<
+                std::result::Result<crate::control_turn::TurnOutput, String>,
+            >,
+        >,
     }
     impl StubTurn {
         fn new(
@@ -1993,7 +2045,11 @@ mod tests {
         let stub = StubTurn::new(
             "local",
             vec![
-                Ok(tool_call_turn("t1", "open_app", json!({ "name": "Safari" }))),
+                Ok(tool_call_turn(
+                    "t1",
+                    "open_app",
+                    json!({ "name": "Safari" }),
+                )),
                 Ok(done_turn("Opened Safari.")),
             ],
         );
@@ -2034,7 +2090,11 @@ mod tests {
         let claude = StubTurn::new(
             "claude",
             vec![
-                Ok(tool_call_turn("c1", "open_app", json!({ "name": "Safari" }))),
+                Ok(tool_call_turn(
+                    "c1",
+                    "open_app",
+                    json!({ "name": "Safari" }),
+                )),
                 Ok(done_turn("done")),
             ],
         );
@@ -2074,7 +2134,11 @@ mod tests {
         let claude = StubTurn::new(
             "claude",
             vec![
-                Ok(tool_call_turn("c1", "open_app", json!({ "name": "Safari" }))),
+                Ok(tool_call_turn(
+                    "c1",
+                    "open_app",
+                    json!({ "name": "Safari" }),
+                )),
                 Ok(done_turn("Done via cloud.")),
             ],
         );
@@ -2152,7 +2216,10 @@ mod tests {
         )
         .await
         .unwrap();
-        assert!(out.contains("same step"), "should hand back the stuck message");
+        assert!(
+            out.contains("same step"),
+            "should hand back the stuck message"
+        );
     }
 
     #[test]

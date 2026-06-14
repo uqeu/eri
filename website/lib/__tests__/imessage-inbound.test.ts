@@ -24,7 +24,7 @@ function deps(over: Partial<InboundDeps> = {}): InboundDeps {
     withinQuota: async () => true,
     loadProfile: async () => ({ profile: { facts: ["likes tabs"] }, dynamicContext: "" }),
     runTurn: async () => ({ text: "**hi**", tokensIn: 10, tokensOut: 5, model: "claude-sonnet-4-6" }),
-    enqueueComputerGoal: async () => {},
+    enqueueComputerGoal: async () => true,
     now: () => 1000,
     ...over,
   };
@@ -96,7 +96,7 @@ async function run() {
       msg("open Spotify on my computer"),
       "+1",
       deps({
-        enqueueComputerGoal: async (userId, goal) => { enqueued = { userId, goal }; },
+        enqueueComputerGoal: async (userId, goal) => { enqueued = { userId, goal }; return true; },
         // Simulate the loop: the model calls control_computer, then answers.
         runTurn: async (input) => {
           await input.onToolCall!("control_computer", { goal: "open Spotify" });

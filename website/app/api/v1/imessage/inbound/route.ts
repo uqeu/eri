@@ -125,7 +125,8 @@ function makeDeps(): InboundDeps {
     loadProfile,
     runTurn: runAgentTurn,
     enqueueComputerGoal: async (userId, goal) => {
-      await enqueueCommand({ userId, source: "imessage", goal });
+      const enqueued = await enqueueCommand({ userId, source: "imessage", goal });
+      return enqueued !== null;
     },
     now: () => Date.now(),
   };

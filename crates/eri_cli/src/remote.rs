@@ -91,11 +91,13 @@ pub async fn run_once(client: &Client, model: &str) -> Result<bool> {
 
 /// Run a goal through the control stack with a NON-confirming gate.
 async fn execute(goal: &str, model: &str) -> (&'static str, Option<String>, Option<String>) {
+    // Load the store for its app DENYLIST, but build a REMOTE gate: a permission
+    // granted at the keyboard does NOT auto-run a risky action unattended; every
+    // risky action bounces to the phone (security C1).
     let permissions = control_safety::PermissionStore::default_path()
         .map(|p| control_safety::PermissionStore::load(&p))
         .unwrap_or_default();
-    // yes = false: risky actions are NOT auto-approved when nobody's at the keyboard.
-    let gate = control_agent::ControlGate::with_permissions(false, permissions);
+    let gate = control_agent::ControlGate::for_remote(permissions);
 
     // Capture the first risky prompt to bounce to the phone; always deny here.
     let confirm_prompt = std::cell::RefCell::new(None::<String>);
@@ -107,11 +109,27 @@ async fn execute(goal: &str, model: &str) -> (&'static str, Option<String>, Opti
         false
     };
 
-    let log = std::sync::Arc::new(std::sync::Mutex::new(action_log::ActionLog::default()));
+    // Persist remote actions to the SAME trust trail as the local session, so
+    // they show in `eri control --history`/`--undo` (security C2). Load first so
+    // we append rather than overwrite the existing history.
+    let log_path = action_log::default_log_path();
+    let log = std::sync::Arc::new(std::sync::Mutex::new(
+        log_path
+            .as_ref()
+            .map(|p| action_log::ActionLog::load(p))
+            .unwrap_or_default(),
+    ));
     let result = match control_agent::HttpBridge::from_env() {
         Some(inner) => {
             let bridge = control_agent::LoggingBridge::new(&inner, std::sync::Arc::clone(&log));
-            control_agent::run_control_agent(goal, model, &bridge, &gate, &mut confirm, 24).await
+            let r = control_agent::run_control_agent(goal, model, &bridge, &gate, &mut confirm, 24)
+                .await;
+            if let Some(p) = &log_path
+                && let Ok(l) = log.lock()
+            {
+                let _ = l.save(p);
+            }
+            r
         }
         None => {
             // No live actuation endpoint — report rather than silently no-op.
