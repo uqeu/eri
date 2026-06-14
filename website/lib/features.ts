@@ -23,6 +23,7 @@ export type Feature =
   | "mentions"
   | "codebaseIndex"
   | "cloudSync"
+  | "phoneEri"
   | "mcp"
   | "multiModel"
   | "cloudAgents"
@@ -72,6 +73,8 @@ export const FEATURE_GATES: Record<Feature, ReadonlyArray<TierName>> = {
   // storage, so 1000s of free users cost ~nothing). Enforced in the
   // /api/v1/memory/sync route.
   cloudSync: ["Starter", "Pro", "Pro+"],
+  // Phone eri (text the eri number) — Pro+; rides the same cloud memory + bucket.
+  phoneEri: ["Pro+"],
   inlineEdit: ["Starter", "Pro", "Pro+"],
   composer: ["Starter", "Pro", "Pro+"],
   multiModel: ["Pro", "Pro+"],

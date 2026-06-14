@@ -34,6 +34,8 @@ const ROUTE_LIMITS: Record<string, RouteLimit> = {
   "memory.sync.write": { max: 20, windowSec: 60 },
   "memory.profile.read": { max: 60, windowSec: 60 },
   "memory.profile.write": { max: 20, windowSec: 60 },
+  // Phone pairing — minting codes is cheap but should not be spammable.
+  "phone.pair": { max: 10, windowSec: 60 },
 };
 const DEFAULT_LIMIT: RouteLimit = { max: 30, windowSec: 60 };
 
