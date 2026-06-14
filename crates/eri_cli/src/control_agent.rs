@@ -98,6 +98,21 @@ impl ControlAction {
         }
     }
 
+    /// Stricter risk check for the **unattended remote** channel (review M1):
+    /// everything `is_risky` gates, PLUS clicking an outward-facing button
+    /// (Send / Post / Pay / Delete / Publish …). Those aren't gated locally
+    /// (the user is watching) but must be confirmed when triggered from a phone,
+    /// or a remote "reply to my landlord" would click Send unattended.
+    pub fn is_risky_remote(&self) -> bool {
+        if self.is_risky() {
+            return true;
+        }
+        match self {
+            ControlAction::Click(ClickTarget::Element(label)) => looks_outward_facing(label),
+            _ => false,
+        }
+    }
+
     /// The permission category that, if the user has granted it, lets this
     /// risky action run without a per-action confirm. `None` = always confirm
     /// (or it isn't risky). Refusals are never mapped here — they can't be
@@ -242,9 +257,15 @@ impl ControlGate {
             return Ok(Disposition::Refused(kind.handback_message().to_string()));
         }
         // (2) Confirmation — risky unless explicitly permitted. In remote mode
-        // (`force_confirm_risky`) a granted permission does NOT skip the confirm,
-        // so an unattended risky action always bounces to the phone (security C1).
-        if action.is_risky() && !self.auto_confirm {
+        // (`force_confirm_risky`) the risk bar is stricter (outward-facing clicks
+        // too) AND a granted permission does NOT skip the confirm, so an
+        // unattended risky action always bounces to the phone (security C1, M1).
+        let risky = if self.force_confirm_risky {
+            action.is_risky_remote()
+        } else {
+            action.is_risky()
+        };
+        if risky && !self.auto_confirm {
             let granted = !self.force_confirm_risky
                 && action
                     .permission()
@@ -310,6 +331,33 @@ fn looks_destructive(text: &str) -> bool {
         "format c:",
     ];
     PATTERNS.iter().any(|p| t.contains(p))
+}
+
+/// Does this clickable element's label look outward-facing / irreversible —
+/// something that should be confirmed when clicked unattended over remote
+/// control (review M1)? Conservative substring match on the element's label.
+fn looks_outward_facing(label: &str) -> bool {
+    let l = label.to_lowercase();
+    const NEEDLES: &[&str] = &[
+        "send",
+        "post",
+        "publish",
+        "tweet",
+        "reply all",
+        "delete",
+        "remove",
+        "discard",
+        "confirm",
+        "pay",
+        "buy",
+        "order",
+        "purchase",
+        "checkout",
+        "submit",
+        "transfer",
+        "withdraw",
+    ];
+    NEEDLES.iter().any(|n| l.contains(n))
 }
 
 /// Dispatch an action to the bridge (no gating — callers gate first).
@@ -1464,6 +1512,21 @@ mod tests {
         let remote = ControlGate::for_remote(granted_remote);
         assert!(matches!(
             remote.submit(&bridge, &quit).await.unwrap(),
+            Disposition::NeedsConfirmation(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn remote_gate_confirms_clicking_an_outward_facing_button() {
+        // Security M1: clicking "Send" isn't risky locally (user is watching) but
+        // must be confirmed when triggered unattended from a phone.
+        let bridge = MockBridge::default();
+        let send = ControlAction::Click(ClickTarget::Element("Send".into()));
+        assert!(!send.is_risky(), "a Send click is not gated locally");
+
+        let remote = ControlGate::for_remote(crate::control_safety::PermissionStore::default());
+        assert!(matches!(
+            remote.submit(&bridge, &send).await.unwrap(),
             Disposition::NeedsConfirmation(_)
         ));
     }
