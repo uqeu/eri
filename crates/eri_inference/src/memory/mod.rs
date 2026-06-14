@@ -47,6 +47,16 @@ pub struct Observation {
     /// the missing vectors so a single recall warms the cache.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub embedding: Vec<f32>,
+    /// Set when a NEWER fact superseded this one (contradiction/supersession,
+    /// mem0/supermemory). Kept in the store + synced for history, but hidden from
+    /// recall + the profile so eri never injects a stale fact alongside its
+    /// replacement (e.g. "favourite colour is blue" after you say it's green).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub superseded: bool,
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -237,8 +247,16 @@ impl MemoryStore {
             workspace_hash: workspace_hash(workspace),
             body: body.to_string(),
             embedding: embeddings::embed_text(body),
+            superseded: false,
         };
         let cloned = observation.clone();
+        // Contradiction/supersession (mem0/supermemory): a new `fact` that's
+        // near-identical in meaning to an older fact REPLACES it — mark the old
+        // ones superseded so recall never injects a stale fact next to its
+        // update. Kept in the store (history), just hidden from recall.
+        if cloned.kind == "fact" && !cloned.embedding.is_empty() {
+            supersede_similar_facts(&mut self.file.observations, &cloned);
+        }
         self.file.observations.push(observation);
         // Anti-bloat: keep eri lean ("hydrated, not fat"). Bound the store by
         // count so recall stays fast and the context fed to the local model
@@ -280,7 +298,7 @@ impl MemoryStore {
             .file
             .observations
             .iter()
-            .filter(|o| o.workspace_hash == hash || o.kind == "fact")
+            .filter(|o| (o.workspace_hash == hash || o.kind == "fact") && !o.superseded)
             .map(|o| (o.clone(), embeddings::cosine(&query_vec, &o.embedding)))
             .collect();
         scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
@@ -296,7 +314,7 @@ impl MemoryStore {
         self.file
             .observations
             .iter()
-            .filter(|o| o.kind != TOMBSTONE_KIND)
+            .filter(|o| o.kind != TOMBSTONE_KIND && !o.superseded)
             .cloned()
             .collect()
     }
@@ -369,7 +387,7 @@ impl MemoryStore {
             .file
             .observations
             .iter()
-            .filter(|o| o.workspace_hash == hash || o.kind == "fact")
+            .filter(|o| (o.workspace_hash == hash || o.kind == "fact") && !o.superseded)
             .filter(|o| {
                 if needle.is_empty() {
                     return true;
@@ -389,7 +407,7 @@ impl MemoryStore {
             .file
             .observations
             .iter()
-            .filter(|o| o.workspace_hash == hash || o.kind == "fact")
+            .filter(|o| (o.workspace_hash == hash || o.kind == "fact") && !o.superseded)
             .collect();
         hits.sort_by_key(|h| std::cmp::Reverse(h.ts_ms));
         hits.into_iter().take(limit).cloned().collect()
@@ -428,7 +446,7 @@ impl MemoryStore {
             .file
             .observations
             .iter()
-            .filter(|o| o.workspace_hash == hash || o.kind == "fact")
+            .filter(|o| (o.workspace_hash == hash || o.kind == "fact") && !o.superseded)
             .map(|o| {
                 // cosine is [-1,1]; map to [0,1] so the weighted sum is sane.
                 let sem = (embeddings::cosine(&qvec, &o.embedding) + 1.0) / 2.0;
@@ -491,6 +509,26 @@ fn lexical_overlap(qtokens: &[String], body: &str) -> f32 {
 /// MMR diversity weight: relevance vs novelty. 0.7 keeps relevance dominant
 /// while still dropping near-duplicates from the injected slice.
 const MMR_LAMBDA: f32 = 0.7;
+
+/// Cosine above which a new fact is treated as an UPDATE of an older one (same
+/// topic, e.g. "favourite colour is blue" → "…is green" score ~0.80). High
+/// enough that unrelated facts (score ~0) never supersede each other.
+const SUPERSEDE_THRESHOLD: f32 = 0.75;
+
+/// Mark existing non-superseded facts that are semantically near-identical to
+/// `new_fact` as superseded (called before the new fact is pushed). Pure over
+/// the slice; tested via the store.
+fn supersede_similar_facts(observations: &mut [Observation], new_fact: &Observation) {
+    for o in observations.iter_mut() {
+        if o.kind == "fact"
+            && !o.superseded
+            && !o.embedding.is_empty()
+            && embeddings::cosine(&o.embedding, &new_fact.embedding) > SUPERSEDE_THRESHOLD
+        {
+            o.superseded = true;
+        }
+    }
+}
 
 /// Rough token estimate for budgeting — ~4 chars/token, min 1 (so an empty body
 /// still costs something and the loop terminates).
@@ -601,6 +639,7 @@ pub fn tombstone(target_id: &str) -> Observation {
         workspace_hash: String::new(),
         body: target_id.to_string(),
         embedding: Vec::new(),
+        superseded: false,
     }
 }
 
@@ -704,6 +743,7 @@ mod tests {
             workspace_hash: "w".to_string(),
             body: "b".to_string(),
             embedding: Vec::new(),
+            superseded: false,
         }
     }
 
@@ -805,6 +845,7 @@ mod tests {
                 workspace_hash: String::new(),
                 body: body.into(),
                 embedding,
+                superseded: false,
             },
             rel,
         )
@@ -849,6 +890,47 @@ mod tests {
     }
 
     #[test]
+    fn a_new_fact_supersedes_a_contradicting_older_one() {
+        let (dir, mut store) = open_temp();
+        let ws = dir.path();
+        store
+            .insert("fact", ws, "my favourite colour is blue")
+            .unwrap();
+        store
+            .insert("fact", ws, "my favourite colour is green")
+            .unwrap();
+        let visible: Vec<String> = store.all().into_iter().map(|o| o.body).collect();
+        assert!(
+            visible.iter().any(|b| b.contains("green")),
+            "the new fact stays"
+        );
+        assert!(
+            !visible.iter().any(|b| b.contains("blue")),
+            "the superseded fact is hidden from recall/all"
+        );
+        // History preserved in the raw store (for sync + future bi-temporal).
+        assert!(store.snapshot().iter().any(|o| o.body.contains("blue")));
+    }
+
+    #[test]
+    fn an_unrelated_fact_does_not_supersede() {
+        let (dir, mut store) = open_temp();
+        let ws = dir.path();
+        store
+            .insert("fact", ws, "my favourite colour is blue")
+            .unwrap();
+        store
+            .insert("fact", ws, "I deploy with cargo and rust")
+            .unwrap();
+        let visible: Vec<String> = store.all().into_iter().map(|o| o.body).collect();
+        assert!(
+            visible.iter().any(|b| b.contains("blue")),
+            "unrelated fact survives"
+        );
+        assert!(visible.iter().any(|b| b.contains("cargo")));
+    }
+
+    #[test]
     fn forget_removes_specific_id() {
         let (dir, mut store) = open_temp();
         let id = store.insert("fact", dir.path(), "x").unwrap().id;
@@ -874,6 +956,7 @@ mod tests {
             workspace_hash: String::new(),
             body: body.to_string(),
             embedding: Vec::new(),
+            superseded: false,
         }
     }
 
@@ -977,6 +1060,7 @@ mod tests {
             workspace_hash: String::new(),
             body: "forgotten-id".into(),
             embedding: Vec::new(),
+            superseded: false,
         });
         store.insert("fact", dir.path(), "fresh").unwrap();
         store.prune(RetentionWindow::Day).unwrap();
@@ -1015,6 +1099,7 @@ mod tests {
             workspace_hash: workspace_hash(dir.path()),
             body: "ancient".into(),
             embedding: Vec::new(),
+            superseded: false,
         });
         store.insert("fact", dir.path(), "fresh").unwrap();
         store.prune(RetentionWindow::Day).unwrap();
@@ -1078,6 +1163,7 @@ mod tests {
             workspace_hash: workspace_hash(dir.path()),
             body: "I prefer dark themes".into(),
             embedding: Vec::new(),
+            superseded: false,
         });
         let hits = store.recall_semantic("dark themes", dir.path(), 1).unwrap();
         assert_eq!(hits.len(), 1);

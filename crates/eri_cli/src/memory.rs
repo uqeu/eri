@@ -76,7 +76,11 @@ pub fn brief() -> Result<()> {
 /// First non-empty line of an observation body, trimmed + length-capped, for a
 /// scannable one-liner. Pure so `brief` formatting is unit-testable.
 fn first_line(body: &str) -> String {
-    let line = body.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
+    let line = body
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .unwrap_or("");
     if line.chars().count() > 100 {
         let cut: String = line.chars().take(99).collect();
         format!("{cut}…")
@@ -155,6 +159,7 @@ mod tests {
             workspace_hash: "h".into(),
             body: body.into(),
             embedding: Vec::new(),
+            superseded: false,
         }
     }
 

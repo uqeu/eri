@@ -277,6 +277,7 @@ mod tests {
             workspace_hash: String::new(),
             body: body.to_string(),
             embedding: Vec::new(),
+            superseded: false,
         }
     }
 
