@@ -1,5 +1,28 @@
 import { strict as assert } from "node:assert";
-import { buildSystemPrompt } from "../agent/run_core";
+import { buildSystemPrompt, extractText, extractToolUses } from "../agent/run_core";
+
+// extractToolUses pulls only well-formed tool_use blocks.
+{
+  const content = [
+    { type: "text", text: "on it" },
+    { type: "tool_use", id: "t1", name: "control_computer", input: { goal: "open Spotify" } },
+    { type: "tool_use", name: "missing_id" }, // dropped (no id)
+  ];
+  const uses = extractToolUses(content);
+  assert.equal(uses.length, 1);
+  assert.equal(uses[0].name, "control_computer");
+  assert.deepEqual(uses[0].input, { goal: "open Spotify" });
+  assert.deepEqual(extractToolUses(undefined), []);
+}
+
+// extractText concatenates + trims text blocks, ignoring tool_use.
+{
+  assert.equal(
+    extractText([{ type: "text", text: "hi " }, { type: "tool_use", id: "x", name: "y" }, { type: "text", text: "there" }]),
+    "hi there",
+  );
+  assert.equal(extractText(undefined), "");
+}
 
 // No profile → just the base persona, no injected block.
 {

@@ -10,7 +10,7 @@
  * send, log.
  */
 
-import type { TierAProfile } from "@/lib/agent/run_core";
+import { CONTROL_COMPUTER_TOOL, type TierAProfile, type ToolDef } from "@/lib/agent/run_core";
 import { featureLocked } from "@/lib/feature_gate";
 import { formatReply } from "@/lib/imessage/format";
 import { extractPairingCode } from "@/lib/imessage/identity";
@@ -75,7 +75,11 @@ export interface InboundDeps {
     profile: TierAProfile | null;
     dynamicContext: string;
     maxTokens: number;
+    tools?: ToolDef[];
+    onToolCall?: (name: string, input: unknown) => Promise<string>;
   }): Promise<AgentTurnResultLike>;
+  /** Dispatch a goal to the user's computer (command queue) — async. */
+  enqueueComputerGoal(userId: string, goal: string): Promise<void>;
   now(): number;
 }
 
@@ -113,7 +117,22 @@ export async function handleInbound(
   const { profile, dynamicContext } = await deps.loadProfile(user.userId);
   const started = deps.now();
   try {
-    const turn = await deps.runTurn({ prompt: msg.content, profile, dynamicContext, maxTokens: 700 });
+    const turn = await deps.runTurn({
+      prompt: msg.content,
+      profile,
+      dynamicContext,
+      maxTokens: 700,
+      tools: [CONTROL_COMPUTER_TOOL],
+      // When the model decides the request needs the user's machine, dispatch it
+      // to the command queue; the computer-resident eri runs it and texts back.
+      onToolCall: async (name, toolInput) => {
+        if (name !== "control_computer") return `Unknown tool: ${name}`;
+        const goal = (toolInput as { goal?: unknown })?.goal;
+        if (typeof goal !== "string" || !goal.trim()) return "No goal was provided.";
+        await deps.enqueueComputerGoal(user.userId, goal.trim());
+        return "Dispatched to the user's computer; it will run shortly and text back the result.";
+      },
+    });
     return {
       replyChunks: formatReply(turn.text),
       meter: {

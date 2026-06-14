@@ -19,6 +19,7 @@ import { NextResponse } from "next/server";
 import { decryptAtRest } from "@/lib/crypto/server_encryption";
 import { sql } from "@/lib/db";
 import { runAgentTurn, type TierAProfile } from "@/lib/agent/run_core";
+import { enqueueCommand } from "@/lib/commands/queue";
 import { handleInbound, type InboundDeps } from "@/lib/imessage/inbound";
 import { consumePairing, normalizeE164, resolveUserByPhone } from "@/lib/imessage/identity";
 import { sendReply } from "@/lib/imessage/provider";
@@ -123,6 +124,9 @@ function makeDeps(): InboundDeps {
     withinQuota: async (userId, tier) => (await ensureWithinQuota(userId, tier, 1000)).ok,
     loadProfile,
     runTurn: runAgentTurn,
+    enqueueComputerGoal: async (userId, goal) => {
+      await enqueueCommand({ userId, source: "imessage", goal });
+    },
     now: () => Date.now(),
   };
 }

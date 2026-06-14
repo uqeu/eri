@@ -24,6 +24,7 @@ function deps(over: Partial<InboundDeps> = {}): InboundDeps {
     withinQuota: async () => true,
     loadProfile: async () => ({ profile: { facts: ["likes tabs"] }, dynamicContext: "" }),
     runTurn: async () => ({ text: "**hi**", tokensIn: 10, tokensOut: 5, model: "claude-sonnet-4-6" }),
+    enqueueComputerGoal: async () => {},
     now: () => 1000,
     ...over,
   };
@@ -86,6 +87,25 @@ async function run() {
     assert.deepEqual(out.replyChunks, ["hi"], "markdown stripped for iMessage");
     assert.equal(out.meter?.status, "ok");
     assert.equal(out.meter?.tokensOut, 5);
+  }
+
+  // The model's control_computer tool call dispatches a goal to the queue.
+  {
+    let enqueued: { userId: string; goal: string } | null = null;
+    const out = await handleInbound(
+      msg("open Spotify on my computer"),
+      "+1",
+      deps({
+        enqueueComputerGoal: async (userId, goal) => { enqueued = { userId, goal }; },
+        // Simulate the loop: the model calls control_computer, then answers.
+        runTurn: async (input) => {
+          await input.onToolCall!("control_computer", { goal: "open Spotify" });
+          return { text: "On it 🌿", tokensIn: 8, tokensOut: 4, model: "claude-sonnet-4-6" };
+        },
+      }),
+    );
+    assert.equal(out.branch, "answered");
+    assert.deepEqual(enqueued, { userId: "u1", goal: "open Spotify" });
   }
 
   // Model throws → errored reply + an error meter (so the turn is still counted).
