@@ -448,6 +448,23 @@ impl MemoryStore {
         scored.truncate(limit);
         Ok(scored)
     }
+
+    /// Token-budgeted, diversity-aware recall — the "remember everything, never
+    /// bloat the prompt" path. Scores with the hybrid ranker, then selects a
+    /// **diverse** high-relevance slice via MMR (λ·relevance − (1−λ)·max-similarity)
+    /// and stops once the next observation would exceed `max_tokens`. So the
+    /// injected context is relevant AND non-redundant AND bounded — the 2026 SOTA
+    /// bar for token-frugal memory (ADR-0001).
+    pub fn recall_hybrid_with_budget(
+        &mut self,
+        query: &str,
+        workspace: &Path,
+        max_tokens: usize,
+    ) -> io::Result<Vec<(Observation, f32)>> {
+        // A generous candidate pool; MMR + the budget trim it to what fits.
+        let candidates = self.recall_hybrid(query, workspace, 50)?;
+        Ok(mmr_budget_select(candidates, max_tokens, MMR_LAMBDA))
+    }
 }
 
 /// Lowercase alphanumeric tokens of length > 1 (drops punctuation + 1-char
@@ -469,6 +486,60 @@ fn lexical_overlap(qtokens: &[String], body: &str) -> f32 {
     let btoks: std::collections::HashSet<String> = tokenize(body).into_iter().collect();
     let hits = qtokens.iter().filter(|t| btoks.contains(*t)).count();
     hits as f32 / qtokens.len() as f32
+}
+
+/// MMR diversity weight: relevance vs novelty. 0.7 keeps relevance dominant
+/// while still dropping near-duplicates from the injected slice.
+const MMR_LAMBDA: f32 = 0.7;
+
+/// Rough token estimate for budgeting — ~4 chars/token, min 1 (so an empty body
+/// still costs something and the loop terminates).
+fn est_tokens(text: &str) -> usize {
+    (text.chars().count() / 4).max(1)
+}
+
+/// Greedy Maximal Marginal Relevance selection within a token budget. Each step
+/// picks the candidate maximising `λ·relevance − (1−λ)·max_cosine_to_selected`,
+/// stopping once the next pick would exceed `max_tokens` (always keeps at least
+/// the top one so recall is never empty when candidates exist). Pure + tested.
+fn mmr_budget_select(
+    mut candidates: Vec<(Observation, f32)>,
+    max_tokens: usize,
+    lambda: f32,
+) -> Vec<(Observation, f32)> {
+    let mut selected: Vec<(Observation, f32)> = Vec::new();
+    let mut used = 0usize;
+    while !candidates.is_empty() {
+        let best = candidates
+            .iter()
+            .enumerate()
+            .max_by(|(_, a), (_, b)| {
+                mmr_value(a, &selected, lambda)
+                    .partial_cmp(&mmr_value(b, &selected, lambda))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .map(|(i, _)| i);
+        let Some(idx) = best else { break };
+        let cost = est_tokens(&candidates[idx].0.body);
+        if !selected.is_empty() && used + cost > max_tokens {
+            break;
+        }
+        let picked = candidates.remove(idx);
+        used += cost;
+        selected.push(picked);
+    }
+    selected
+}
+
+/// MMR value of `candidate` given what's already `selected`: relevance minus a
+/// penalty for being similar (cosine) to anything chosen so far.
+fn mmr_value(candidate: &(Observation, f32), selected: &[(Observation, f32)], lambda: f32) -> f32 {
+    let relevance = candidate.1;
+    let max_sim = selected
+        .iter()
+        .map(|(o, _)| embeddings::cosine(&candidate.0.embedding, &o.embedding))
+        .fold(0.0_f32, f32::max);
+    lambda * relevance - (1.0 - lambda) * max_sim
 }
 
 /// Exponential recency decay with a ~7-day half-life, in [0,1].
@@ -723,6 +794,58 @@ mod tests {
         let hits = store.recall_hybrid("rust cargo build", ws, 2).unwrap();
         assert_eq!(hits.len(), 2);
         assert!(hits[0].1 >= hits[1].1, "scores must be sorted desc");
+    }
+
+    fn scored(id: &str, rel: f32, body: &str, embedding: Vec<f32>) -> (Observation, f32) {
+        (
+            Observation {
+                id: id.into(),
+                ts_ms: 1,
+                kind: "fact".into(),
+                workspace_hash: String::new(),
+                body: body.into(),
+                embedding,
+            },
+            rel,
+        )
+    }
+
+    #[test]
+    fn mmr_prefers_a_diverse_observation_over_a_near_duplicate() {
+        // A and B are near-identical (same embedding); C is different. MMR should
+        // pick C before the second of the A/B pair despite C's lower relevance —
+        // so the injected slice isn't three ways of saying the same thing.
+        let candidates = vec![
+            scored("A", 0.90, "xxxxxxxx", vec![1.0, 0.0]),
+            scored("B", 0.85, "xxxxxxxx", vec![1.0, 0.0]),
+            scored("C", 0.80, "xxxxxxxx", vec![0.0, 1.0]),
+        ];
+        let out = mmr_budget_select(candidates, 1000, MMR_LAMBDA);
+        let order: Vec<&str> = out.iter().map(|(o, _)| o.id.as_str()).collect();
+        assert_eq!(
+            order,
+            vec!["A", "C", "B"],
+            "diverse C beats the near-duplicate B"
+        );
+    }
+
+    #[test]
+    fn mmr_budget_stops_at_the_token_ceiling() {
+        // Each 40-char body ≈ 10 tokens. With a 15-token budget the first fits
+        // (always kept) and the second would overflow → exactly one selected.
+        let forty = "y".repeat(40);
+        let candidates = vec![
+            scored("A", 0.9, &forty, vec![1.0, 0.0]),
+            scored("B", 0.8, &forty, vec![0.0, 1.0]),
+        ];
+        let out = mmr_budget_select(candidates, 15, MMR_LAMBDA);
+        assert_eq!(out.len(), 1, "budget caps the slice");
+    }
+
+    #[test]
+    fn est_tokens_is_roughly_chars_over_four() {
+        assert_eq!(est_tokens("12345678"), 2);
+        assert_eq!(est_tokens(""), 1, "min 1 so the loop terminates");
     }
 
     #[test]
