@@ -238,19 +238,37 @@ impl MemoryStore {
         Ok(scored)
     }
 
-    pub fn all(&self) -> &[Observation] {
-        &self.file.observations
+    /// The visible observations — excludes internal tombstone records (a
+    /// `/forget` marker; see [`merge_observations`]). Recall paths already skip
+    /// tombstones via the workspace/`fact` filter, so this is the only surface
+    /// that needed the explicit exclusion.
+    pub fn all(&self) -> Vec<Observation> {
+        self.file
+            .observations
+            .iter()
+            .filter(|o| o.kind != TOMBSTONE_KIND)
+            .cloned()
+            .collect()
     }
 
-    /// Drop observation by id, or `"all"` to clear everything.
+    /// Forget an observation by id (or `"all"` to clear everything). A specific
+    /// `/forget` removes the target locally AND records a **tombstone**, so a
+    /// later cross-device merge can't resurrect it from a stale copy (ADR-0001).
+    /// `"all"` is a nuclear local reset (no tombstones — it's not sync-merged).
     pub fn forget(&mut self, id_or_all: &str) -> io::Result<usize> {
-        let before = self.file.observations.len();
+        let before = self.all().len();
         if id_or_all == "all" {
             self.file.observations.clear();
-        } else {
+        } else if self
+            .file
+            .observations
+            .iter()
+            .any(|o| o.id == id_or_all && o.kind != TOMBSTONE_KIND)
+        {
             self.file.observations.retain(|o| o.id != id_or_all);
+            self.file.observations.push(tombstone(id_or_all));
         }
-        let removed = before - self.file.observations.len();
+        let removed = before - self.all().len();
         if removed > 0 {
             self.save()?;
         }
@@ -794,8 +812,8 @@ mod tests {
         let hits = store.recall_semantic("dark themes", dir.path(), 1).unwrap();
         assert_eq!(hits.len(), 1);
         // After recall, the legacy observation's embedding is filled.
-        let stored = store
-            .all()
+        let visible = store.all();
+        let stored = visible
             .iter()
             .find(|o| o.id == "legacy")
             .expect("legacy still there");
