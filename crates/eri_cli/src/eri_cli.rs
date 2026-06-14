@@ -60,6 +60,7 @@ mod sdk_tools;
 mod search;
 mod session;
 mod skills;
+mod sync;
 mod trace;
 mod update;
 mod voice_control;
@@ -470,6 +471,9 @@ pub enum Command {
     /// Link your phone so you can text eri (iMessage via Sendblue).
     #[command(subcommand)]
     Phone(PhoneCommand),
+    /// Sync memory to the cloud: Tier-B blob (cross-device) + Tier-A profile
+    /// (so phone eri knows your day).
+    Sync,
     /// Show the resolved .eri/config.toml defaults for this directory.
     Config,
     /// List SKILL.md skills eri can run (project + global, any agent CLI).
@@ -870,8 +874,19 @@ async fn dispatch(cli: Cli) -> anyhow::Result<()> {
         Command::Agent(AgentCommand::List) => agent_cmd::list(),
         Command::Agent(AgentCommand::Set { name }) => agent_cmd::set(&name),
         Command::Memory(MemoryCommand::Recall { query, limit }) => memory::recall(&query, limit),
-        Command::Memory(MemoryCommand::Remember { text }) => memory::remember(&text),
-        Command::Memory(MemoryCommand::Forget { target }) => memory::forget(&target),
+        Command::Memory(MemoryCommand::Remember { text }) => {
+            let result = memory::remember(&text);
+            // A new fact is exactly what phone eri should learn — push it to the
+            // cloud in the background (best-effort; never blocks or fails the
+            // local remember). `forget` syncs too so a tombstone propagates.
+            sync::spawn_best_effort();
+            result
+        }
+        Command::Memory(MemoryCommand::Forget { target }) => {
+            let result = memory::forget(&target);
+            sync::spawn_best_effort();
+            result
+        }
         Command::Mcp(McpCommand::List) => repl::print_mcp_status(),
         Command::Mcp(McpCommand::Serve) => {
             let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
@@ -886,6 +901,7 @@ async fn dispatch(cli: Cli) -> anyhow::Result<()> {
         Command::Init => run_init(),
         Command::Admin(AdminCommand::Usage { days, top }) => admin::usage(days, top).await,
         Command::Phone(PhoneCommand::Link) => phone::link().await,
+        Command::Sync => sync::run().await,
         Command::Config => {
             run_config();
             Ok(())
