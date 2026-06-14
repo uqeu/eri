@@ -278,6 +278,8 @@ mod tests {
             body: body.to_string(),
             embedding: Vec::new(),
             superseded: false,
+            consolidated: false,
+            valid_to: None,
         }
     }
 

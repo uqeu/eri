@@ -207,6 +207,7 @@ mod tests {
             embedding: embeddings::embed_text(body),
             superseded: false,
             consolidated: false,
+            valid_to: None,
         }
     }
 

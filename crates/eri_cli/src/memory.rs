@@ -161,6 +161,7 @@ mod tests {
             embedding: Vec::new(),
             superseded: false,
             consolidated: false,
+            valid_to: None,
         }
     }
 

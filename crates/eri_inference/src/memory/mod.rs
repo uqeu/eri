@@ -60,6 +60,17 @@ pub struct Observation {
     /// injects the distilled pattern, not the raw episodes it came from.
     #[serde(default, skip_serializing_if = "is_false")]
     pub consolidated: bool,
+    /// **Bi-temporal event-time end** (Zep/Graphiti): the moment this fact
+    /// stopped being true, in unix-ms. `None` = still valid right now. eri keeps
+    /// `ts_ms` as the *transaction time* (`learned_at` — when eri recorded it)
+    /// and the fact's *valid-from* (v1 has no event-time extraction, so a fact is
+    /// valid from when it was learned). On supersession we set `valid_to` instead
+    /// of deleting — invalidate-not-delete — so "what did I believe last Tuesday"
+    /// stays answerable via [`recall_as_of`](MemoryStore::recall_as_of).
+    /// `superseded` is the denormalized "currently invalidated" shadow of this:
+    /// kept for fast filtering + back-compat with already-synced blobs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub valid_to: Option<u64>,
 }
 
 fn is_false(b: &bool) -> bool {
@@ -67,11 +78,33 @@ fn is_false(b: &bool) -> bool {
 }
 
 impl Observation {
-    /// Visible to recall + the Tier-A profile: not superseded, not consolidated,
-    /// and not an internal tombstone. The single source of truth for "should eri
-    /// ever surface this observation" — every recall path filters on it.
+    /// Visible to recall + the Tier-A profile *right now*: not superseded, not
+    /// consolidated, and not an internal tombstone. The single source of truth
+    /// for "should eri surface this observation today" — every recall path
+    /// filters on it. For point-in-time history use [`is_valid_at`](Self::is_valid_at).
     fn is_active(&self) -> bool {
         !self.superseded && !self.consolidated && self.kind != TOMBSTONE_KIND
+    }
+
+    /// **Transaction time** — when eri recorded this observation (bi-temporal
+    /// `learned_at`). Currently the same field as the fact's valid-from.
+    pub fn learned_at(&self) -> u64 {
+        self.ts_ms
+    }
+
+    /// Bi-temporal point-in-time validity: was this fact true (and known) at
+    /// `as_of`? True iff it was learned by then and not yet invalidated. A
+    /// legacy `superseded` fact with no recorded `valid_to` is treated as
+    /// invalid at every point (we can't date its invalidation), which is the
+    /// conservative choice — it never resurrects into a past-time view.
+    fn is_valid_at(&self, as_of: u64) -> bool {
+        if self.consolidated || self.kind == TOMBSTONE_KIND || self.ts_ms > as_of {
+            return false;
+        }
+        match self.valid_to {
+            Some(vt) => as_of < vt,
+            None => !self.superseded,
+        }
     }
 }
 
@@ -265,6 +298,7 @@ impl MemoryStore {
             embedding: embeddings::embed_text(body),
             superseded: false,
             consolidated: false,
+            valid_to: None,
         };
         let cloned = observation.clone();
         // Contradiction/supersession (mem0/supermemory): a new `fact` that's
@@ -416,6 +450,37 @@ impl MemoryStore {
         hits.into_iter().take(limit).cloned().collect()
     }
 
+    /// **Bi-temporal point-in-time recall** (Zep/Graphiti): the observations that
+    /// were valid **as of** `as_of_ms` — learned by then and not yet invalidated.
+    /// Lets eri answer "what did I believe last Tuesday" without losing the
+    /// history a plain supersede would hide: a fact superseded *after* `as_of` is
+    /// still returned for that earlier instant. Same workspace/`fact` scope and
+    /// recency ranking as [`recall`](Self::recall); keyword-filtered like it too.
+    pub fn recall_as_of(
+        &self,
+        query: &str,
+        workspace: &Path,
+        limit: usize,
+        as_of_ms: u64,
+    ) -> Vec<Observation> {
+        let needle = query.to_lowercase();
+        let hash = workspace_hash(workspace);
+        let mut hits: Vec<&Observation> = self
+            .file
+            .observations
+            .iter()
+            .filter(|o| (o.workspace_hash == hash || o.kind == "fact") && o.is_valid_at(as_of_ms))
+            .filter(|o| {
+                if needle.is_empty() {
+                    return true;
+                }
+                o.body.to_lowercase().contains(&needle) || o.kind.to_lowercase().contains(&needle)
+            })
+            .collect();
+        hits.sort_by_key(|h| std::cmp::Reverse(h.ts_ms));
+        hits.into_iter().take(limit).cloned().collect()
+    }
+
     /// Top-N most-recent observations across all kinds. Used by the system-
     /// prompt injection in `build_parts` to populate `What I've learned about you`.
     pub fn top_patterns(&self, workspace: &Path, limit: usize) -> Vec<Observation> {
@@ -529,6 +594,7 @@ impl MemoryStore {
                 embedding,
                 superseded: false,
                 consolidated: false,
+                valid_to: None,
             };
             // A fresh rollup replaces an older rollup on the same topic, so the
             // profile/recall never carry "accepts edits in src/x (3×)" twice.
@@ -582,7 +648,11 @@ fn supersede_similar_facts(observations: &mut [Observation], new_fact: &Observat
             && !o.embedding.is_empty()
             && embeddings::cosine(&o.embedding, &new_fact.embedding) > SUPERSEDE_THRESHOLD
         {
+            // Invalidate-not-delete (bi-temporal): record WHEN it stopped being
+            // true (the replacement's learned_at) so the old belief stays
+            // answerable as-of a past time, and flip the denormalized shadow.
             o.superseded = true;
+            o.valid_to = Some(new_fact.ts_ms);
         }
     }
 }
@@ -698,6 +768,7 @@ pub fn tombstone(target_id: &str) -> Observation {
         embedding: Vec::new(),
         superseded: false,
         consolidated: false,
+        valid_to: None,
     }
 }
 
@@ -803,6 +874,7 @@ mod tests {
             embedding: Vec::new(),
             superseded: false,
             consolidated: false,
+            valid_to: None,
         }
     }
 
@@ -906,6 +978,7 @@ mod tests {
                 embedding,
                 superseded: false,
                 consolidated: false,
+                valid_to: None,
             },
             rel,
         )
@@ -1051,6 +1124,95 @@ mod tests {
     }
 
     #[test]
+    fn supersession_records_valid_to_not_just_a_flag() {
+        // Invalidate-not-delete: the older belief keeps its history AND learns
+        // *when* it stopped being true (the replacement's learned_at).
+        let (dir, mut store) = open_temp();
+        let ws = dir.path();
+        store
+            .insert("fact", ws, "my favourite colour is blue")
+            .unwrap();
+        let green = store
+            .insert("fact", ws, "my favourite colour is green")
+            .unwrap();
+        let blue = store
+            .snapshot()
+            .into_iter()
+            .find(|o| o.body.contains("blue"))
+            .expect("blue survives in history");
+        assert!(blue.superseded, "blue is invalidated");
+        assert_eq!(
+            blue.valid_to,
+            Some(green.ts_ms),
+            "valid_to records when the belief ended"
+        );
+    }
+
+    #[test]
+    fn is_valid_at_models_the_bi_temporal_interval() {
+        let mut o = obs("fact", 100);
+        o.valid_to = Some(200);
+        assert!(!o.is_valid_at(50), "not yet learned");
+        assert!(o.is_valid_at(100), "valid from its learned_at (inclusive)");
+        assert!(o.is_valid_at(150), "valid mid-interval");
+        assert!(!o.is_valid_at(200), "invalid once superseded (exclusive end)");
+        assert!(!o.is_valid_at(300), "invalid after");
+
+        let mut still_valid = obs("fact", 100);
+        still_valid.valid_to = None;
+        assert!(still_valid.is_valid_at(999), "open-ended fact is always valid after learn");
+
+        // Legacy: superseded with no recorded valid_to → never valid at any point
+        // (we can't date its invalidation, so we don't resurrect it into history).
+        let mut legacy = obs("fact", 100);
+        legacy.superseded = true;
+        assert!(!legacy.is_valid_at(150));
+    }
+
+    #[test]
+    fn recall_as_of_returns_the_belief_held_at_that_instant() {
+        let (dir, mut store) = open_temp();
+        let ws = dir.path();
+        let hash = workspace_hash(ws);
+        // Blue was true [100, 200); green is true from 200 on.
+        store.file.observations.push(Observation {
+            id: "blue".into(),
+            ts_ms: 100,
+            kind: "fact".into(),
+            workspace_hash: hash.clone(),
+            body: "favourite colour is blue".into(),
+            embedding: Vec::new(),
+            superseded: true,
+            consolidated: false,
+            valid_to: Some(200),
+        });
+        store.file.observations.push(Observation {
+            id: "green".into(),
+            ts_ms: 200,
+            kind: "fact".into(),
+            workspace_hash: hash,
+            body: "favourite colour is green".into(),
+            embedding: Vec::new(),
+            superseded: false,
+            consolidated: false,
+            valid_to: None,
+        });
+
+        let at_150 = store.recall_as_of("colour", ws, 5, 150);
+        assert_eq!(at_150.len(), 1, "only blue was valid at t=150");
+        assert!(at_150[0].body.contains("blue"));
+
+        let at_250 = store.recall_as_of("colour", ws, 5, 250);
+        assert_eq!(at_250.len(), 1, "only green is valid at t=250");
+        assert!(at_250[0].body.contains("green"));
+
+        // And "now" recall (is_active) shows only the current belief.
+        let now = store.recall("colour", ws, 5);
+        assert_eq!(now.len(), 1);
+        assert!(now[0].body.contains("green"));
+    }
+
+    #[test]
     fn forget_removes_specific_id() {
         let (dir, mut store) = open_temp();
         let id = store.insert("fact", dir.path(), "x").unwrap().id;
@@ -1078,6 +1240,7 @@ mod tests {
             embedding: Vec::new(),
             superseded: false,
             consolidated: false,
+            valid_to: None,
         }
     }
 
@@ -1183,6 +1346,7 @@ mod tests {
             embedding: Vec::new(),
             superseded: false,
             consolidated: false,
+            valid_to: None,
         });
         store.insert("fact", dir.path(), "fresh").unwrap();
         store.prune(RetentionWindow::Day).unwrap();
@@ -1223,6 +1387,7 @@ mod tests {
             embedding: Vec::new(),
             superseded: false,
             consolidated: false,
+            valid_to: None,
         });
         store.insert("fact", dir.path(), "fresh").unwrap();
         store.prune(RetentionWindow::Day).unwrap();
@@ -1288,6 +1453,7 @@ mod tests {
             embedding: Vec::new(),
             superseded: false,
             consolidated: false,
+            valid_to: None,
         });
         let hits = store.recall_semantic("dark themes", dir.path(), 1).unwrap();
         assert_eq!(hits.len(), 1);
