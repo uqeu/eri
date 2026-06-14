@@ -30,19 +30,35 @@ function deps(over: Partial<InboundDeps> = {}): InboundDeps {
 }
 
 async function run() {
-  // Pairing code that matches → linked, no meter.
+  // Unknown number texts a valid pairing code → linked, no meter.
   {
-    const out = await handleInbound(msg("ABC123"), "+1", deps({ consumePairing: async () => ({ userId: "u1" }) }));
+    const out = await handleInbound(
+      msg("ABC123"),
+      "+1",
+      deps({ resolveUserByPhone: async () => null, consumePairing: async () => ({ userId: "u1" }) }),
+    );
     assert.equal(out.branch, "paired");
     assert.deepEqual(out.replyChunks, [REPLY.linked]);
     assert.equal(out.meter, null);
   }
 
-  // Unknown number → not linked, no meter.
+  // Unknown number, no valid code → not linked, no meter.
   {
     const out = await handleInbound(msg("hello"), "+1", deps({ resolveUserByPhone: async () => null }));
     assert.equal(out.branch, "not_linked");
     assert.equal(out.meter, null);
+  }
+
+  // A LINKED user texting something code-shaped is answered, not treated as pairing (L3).
+  {
+    let pairingTried = false;
+    const out = await handleInbound(
+      msg("Sounds"),
+      "+1",
+      deps({ consumePairing: async () => { pairingTried = true; return { userId: "x" }; } }),
+    );
+    assert.equal(out.branch, "answered");
+    assert.equal(pairingTried, false, "must not attempt pairing for a known user");
   }
 
   // Linked but not Pro+ → locked.

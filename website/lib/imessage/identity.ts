@@ -47,29 +47,47 @@ export async function resolveUserByPhone(e164: string): Promise<ResolvedUser | n
 /**
  * Try to redeem `code` as a pairing for `fromE164`: if an unexpired pairing
  * exists, bind the number to that user as a **verified** link and consume the
- * code (single-use). Returns the bound user id, or null if the code is unknown
- * or expired. Idempotent on the link via the unique `phone_e164` upsert.
+ * code (single-use). Returns the bound user id, or null when the code is unknown
+ * / expired OR the number is already verified to a DIFFERENT account.
+ *
+ * Two safety properties (review M2):
+ *  - **No takeover:** the conditional upsert only (re)binds when the row is new,
+ *    unverified, or already owned by the same user — a number verified to someone
+ *    else is never silently reassigned.
+ *  - **Bind-then-consume:** the code is deleted only AFTER a successful bind, so
+ *    a failed/refused bind never wastes the code, and concurrent texts of one
+ *    code are idempotent (same user + number).
  */
 export async function consumePairing(
   code: string,
   fromE164: string,
 ): Promise<{ userId: string } | null> {
   const pairings = await sql()<{ user_id: string }[]>`
-    DELETE FROM phone_pairings
+    SELECT user_id FROM phone_pairings
     WHERE code = ${code} AND expires_at > now()
-    RETURNING user_id
+    LIMIT 1
   `;
   const pairing = pairings[0];
   if (!pairing) return null;
 
-  await sql()`
+  const bound = await sql()<{ user_id: string }[]>`
     INSERT INTO phone_links (id, user_id, phone_e164, verified_at, last_service)
     VALUES (${newLinkId()}, ${pairing.user_id}, ${fromE164}, now(), 'iMessage')
     ON CONFLICT (phone_e164) DO UPDATE SET
       user_id = EXCLUDED.user_id,
       verified_at = now(),
       last_service = 'iMessage'
+    WHERE phone_links.verified_at IS NULL
+       OR phone_links.user_id = EXCLUDED.user_id
+    RETURNING user_id
   `;
+  if (bound.length === 0) {
+    // The number is already verified to a different account — refuse the
+    // takeover and leave the code intact (it simply didn't apply here).
+    return null;
+  }
+
+  await sql()`DELETE FROM phone_pairings WHERE code = ${code}`;
   return { userId: pairing.user_id };
 }
 

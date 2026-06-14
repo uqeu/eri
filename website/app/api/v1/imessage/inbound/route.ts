@@ -23,6 +23,7 @@ import { handleInbound, type InboundDeps } from "@/lib/imessage/inbound";
 import { consumePairing, normalizeE164, resolveUserByPhone } from "@/lib/imessage/identity";
 import { sendReply } from "@/lib/imessage/provider";
 import { DEFAULT_SIGNING_HEADER, parseInbound, verifySendblueSecret } from "@/lib/imessage/webhook";
+import { rateLimitKey } from "@/lib/rate_limit";
 import { ensureWithinQuota, recordUsage } from "@/lib/usage/quota";
 
 export const runtime = "nodejs";
@@ -49,6 +50,11 @@ export async function POST(request: Request): Promise<Response> {
 
   const e164 = normalizeE164(msg.fromNumber);
   if (!e164) return NextResponse.json({ ok: true, skipped: "bad_number" });
+
+  // Per-sender rate limit (the webhook shares Sendblue's IP, so we key on the
+  // sender number, not the IP) — review M1.
+  const limited = await rateLimitKey("imessage.inbound", e164);
+  if (limited) return limited;
 
   // Claim the lease. New handle, or one whose prior attempt is incomplete AND
   // stale (the function was killed), wins; a completed handle is a true duplicate.

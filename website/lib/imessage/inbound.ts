@@ -90,16 +90,19 @@ export async function handleInbound(
   e164: string,
   deps: InboundDeps,
 ): Promise<InboundOutcome> {
-  // A text that's just a pairing code binds + verifies this number.
-  const code = extractPairingCode(msg.content);
-  if (code) {
-    const paired = await deps.consumePairing(code, e164);
-    if (paired) return { replyChunks: [REPLY.linked], meter: null, branch: "paired" };
-    // Not a real code — fall through (a normal message can look code-shaped).
-  }
-
+  // Resolve first: a number that's already a known user is handled as a normal
+  // message, never as a pairing attempt — so a linked user texting something
+  // code-shaped ("Sounds") is answered, not mis-parsed (review L3).
   const user = await deps.resolveUserByPhone(e164);
-  if (!user) return { replyChunks: [REPLY.notLinked], meter: null, branch: "not_linked" };
+  if (!user) {
+    // Unknown number — its only valid first move is to text a pairing code.
+    const code = extractPairingCode(msg.content);
+    if (code) {
+      const paired = await deps.consumePairing(code, e164);
+      if (paired) return { replyChunks: [REPLY.linked], meter: null, branch: "paired" };
+    }
+    return { replyChunks: [REPLY.notLinked], meter: null, branch: "not_linked" };
+  }
   if (featureLocked(user.tier, "phoneEri")) {
     return { replyChunks: [REPLY.locked], meter: null, branch: "locked" };
   }

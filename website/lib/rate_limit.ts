@@ -36,6 +36,9 @@ const ROUTE_LIMITS: Record<string, RouteLimit> = {
   "memory.profile.write": { max: 20, windowSec: 60 },
   // Phone pairing — minting codes is cheap but should not be spammable.
   "phone.pair": { max: 10, windowSec: 60 },
+  // Inbound texts, keyed per sender number (a human won't exceed this; caps abuse
+  // if the webhook secret ever leaks — model spend is also bounded by quota).
+  "imessage.inbound": { max: 30, windowSec: 60 },
 };
 const DEFAULT_LIMIT: RouteLimit = { max: 30, windowSec: 60 };
 
@@ -118,19 +121,32 @@ export async function rateLimit(
   request: Request,
   route: string,
 ): Promise<NextResponse | null> {
-  const ip = clientIp(request);
+  return enforceLimit(route, clientIp(request));
+}
+
+/**
+ * Like `rateLimit`, but keyed on an explicit identity instead of the client IP.
+ * Used where the IP isn't the right granularity — e.g. the Sendblue webhook,
+ * where every request shares the provider's IP, so we limit per sender phone
+ * number (review M1).
+ */
+export async function rateLimitKey(route: string, key: string): Promise<NextResponse | null> {
+  return enforceLimit(route, key);
+}
+
+async function enforceLimit(route: string, key: string): Promise<NextResponse | null> {
   const rl = limiter(route);
   if (rl) {
     try {
-      const { success, reset } = await rl.limit(`${route}:${ip}`);
+      const { success, reset } = await rl.limit(`${route}:${key}`);
       if (success) return null;
       const retryAfter = Math.ceil((reset - Date.now()) / 1000);
       return tooMany(retryAfter);
     } catch (e) {
-      // Never hard-fail auth on a limiter outage — fall through to in-process.
+      // Never hard-fail on a limiter outage — fall through to in-process.
       console.error("rate_limit.upstash_failed", e);
     }
   }
-  const res = fallbackAllow(route, ip);
+  const res = fallbackAllow(route, key);
   return res.ok ? null : tooMany(res.retryAfter);
 }

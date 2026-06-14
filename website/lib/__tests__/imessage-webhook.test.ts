@@ -7,7 +7,8 @@ const SECRET = "s3cret-webhook-token-abcdef0123456789";
 // rejects a wrong value, rejects when no secret is configured.
 {
   assert.equal(verifySendblueSecret({ "sb-signing-secret": SECRET }, SECRET), true);
-  assert.equal(verifySendblueSecret({ "x-weird-header": SECRET }, SECRET), true, "name-agnostic");
+  assert.equal(verifySendblueSecret({ "x-sb-signature": SECRET }, SECRET), true, "plausible sb-prefixed header");
+  assert.equal(verifySendblueSecret({ "x-weird-header": SECRET }, SECRET), false, "non-sb header must NOT satisfy auth");
   assert.equal(verifySendblueSecret({ "sb-signing-secret": "nope" }, SECRET), false);
   assert.equal(verifySendblueSecret({}, SECRET), false, "no header → reject");
   assert.equal(verifySendblueSecret({ "sb-signing-secret": SECRET }, ""), false, "no configured secret → reject");
