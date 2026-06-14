@@ -495,8 +495,8 @@ fn format_images_block(images: &[ImageWire]) -> Option<String> {
 /// caller drops the part rather than wasting tokens on an empty header.
 ///
 /// Sorted: errors first (so the model addresses them before warnings),
-/// then within a severity by `path:line`. Capped at the top 40 entries
-/// + a `…and N more` footer so a 1000-warning ESLint sweep doesn't blow
+/// then within a severity by `path:line`. Capped at the top 40 entries,
+/// plus a `…and N more` footer so a 1000-warning ESLint sweep doesn't blow
 /// the prompt budget.
 fn format_diagnostics_block(diagnostics: &[DiagnosticWire]) -> Option<String> {
     if diagnostics.is_empty() {

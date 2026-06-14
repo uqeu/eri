@@ -104,7 +104,7 @@ fn parse_request(stream: &TcpStream) -> Option<CapturedRequest> {
     if reader.read_line(&mut request_line).ok()? == 0 {
         return None;
     }
-    let mut parts = request_line.trim_end().split_whitespace();
+    let mut parts = request_line.split_whitespace();
     let method = parts.next()?.to_string();
     let path = parts.next()?.to_string();
     let mut headers: Vec<(String, String)> = Vec::new();
@@ -115,7 +115,7 @@ fn parse_request(stream: &TcpStream) -> Option<CapturedRequest> {
         if n == 0 {
             break;
         }
-        let trimmed = header_line.trim_end_matches(|c| c == '\r' || c == '\n');
+        let trimmed = header_line.trim_end_matches(['\r', '\n']);
         if trimmed.is_empty() {
             break;
         }

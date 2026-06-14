@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use eri_inference::memory::{
-    collectors, format_learned_block, MemoryStore, Observation, RetentionWindow,
+    MemoryStore, Observation, RetentionWindow, collectors, format_learned_block,
 };
 
 use crate::services::Services;
@@ -175,7 +175,7 @@ pub async fn patterns(
 }
 
 /// Tier-gated nightly prune. The dispatcher hooks this on sidecar startup
-/// + every 6 hours via `tokio::time::interval`. Not exposed as RPC; this
+/// and every 6 hours via `tokio::time::interval`. Not exposed as RPC; this
 /// is a helper that callers (the scheduler) use directly.
 ///
 /// `user_id` partitions the prune to the signed-in user's store. Pass

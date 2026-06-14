@@ -62,32 +62,31 @@ pub async fn run(
         "theme" => handle_theme(&p.workspace, &p.args),
         "new" => handle_new(&p.args),
         "preference" => handle_preference(&p.workspace, &p.args),
-        "recall" | "remember" | "forget" | "learn" | "cost" | "quota" => {
-            SlashResult {
-                ok: false,
-                error: Some("not_implemented".to_string()),
-                phase: Some("8".to_string()),
-                message: Some(format!(
-                    "/{} lands with the memory layer (Phase 8). Coming soon.",
-                    p.command
-                )),
-                persona: None,
-            }
-        }
-        // Commands the IDE handles client-side directly via the existing
-        // JSON-RPC methods. The sidecar arm exists for uniformity but
-        // returns a "dispatch_client" hint so the registry knows.
-        "ship" | "plan" | "execute" | "test" | "refactor" | "explain"
-        | "voice" | "sketch" => SlashResult {
+        "recall" | "remember" | "forget" | "learn" | "cost" | "quota" => SlashResult {
             ok: false,
-            error: Some("dispatch_client".to_string()),
+            error: Some("not_implemented".to_string()),
+            phase: Some("8".to_string()),
             message: Some(format!(
-                "Dispatch /{} client-side via the registry — no server work needed.",
+                "/{} lands with the memory layer (Phase 8). Coming soon.",
                 p.command
             )),
             persona: None,
-            phase: None,
         },
+        // Commands the IDE handles client-side directly via the existing
+        // JSON-RPC methods. The sidecar arm exists for uniformity but
+        // returns a "dispatch_client" hint so the registry knows.
+        "ship" | "plan" | "execute" | "test" | "refactor" | "explain" | "voice" | "sketch" => {
+            SlashResult {
+                ok: false,
+                error: Some("dispatch_client".to_string()),
+                message: Some(format!(
+                    "Dispatch /{} client-side via the registry — no server work needed.",
+                    p.command
+                )),
+                persona: None,
+                phase: None,
+            }
+        }
         other => SlashResult {
             ok: false,
             error: Some("unknown_command".to_string()),
@@ -121,7 +120,9 @@ fn handle_tracer(args: &str) -> SlashResult {
         };
     }
     let (url, query) = match trimmed.split_once(char::is_whitespace) {
-        Some((u, q)) if !u.is_empty() && !q.trim().is_empty() => (u.to_string(), q.trim().to_string()),
+        Some((u, q)) if !u.is_empty() && !q.trim().is_empty() => {
+            (u.to_string(), q.trim().to_string())
+        }
         _ => {
             return SlashResult {
                 ok: false,
@@ -224,9 +225,7 @@ fn handle_theme(workspace: &std::path::Path, args: &str) -> SlashResult {
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    if let Err(err) =
-        std::fs::write(&path, format!("{{\n  \"active\": \"{slug}\"\n}}\n"))
-    {
+    if let Err(err) = std::fs::write(&path, format!("{{\n  \"active\": \"{slug}\"\n}}\n")) {
         return SlashResult {
             ok: false,
             error: Some("write_failed".to_string()),
@@ -370,6 +369,49 @@ fn looks_like_repo_url(url: &str) -> bool {
         || url.starts_with("https://codeberg.org/")
 }
 
+fn handle_agent(workspace: &std::path::Path, args: &str) -> SlashResult {
+    let name = args.trim();
+    if name.is_empty() {
+        let active = personas::read_active(workspace);
+        return SlashResult {
+            ok: true,
+            persona: Some(active.clone()),
+            message: Some(format!("Active persona: {active}")),
+            error: None,
+            phase: None,
+        };
+    }
+    // Confirm the persona exists either as a built-in or a user file.
+    let resolved = personas::resolve(workspace, name);
+    if resolved.name != name {
+        return SlashResult {
+            ok: false,
+            error: Some("unknown_persona".to_string()),
+            message: Some(format!(
+                "No persona named '{name}'. Add .eri/agents/{name}.md or pick a built-in."
+            )),
+            persona: None,
+            phase: None,
+        };
+    }
+    match personas::write_active(workspace, name) {
+        Ok(()) => SlashResult {
+            ok: true,
+            persona: Some(name.to_string()),
+            message: Some(format!("Switched persona → {name}")),
+            error: None,
+            phase: None,
+        },
+        Err(err) => SlashResult {
+            ok: false,
+            error: Some("write_failed".to_string()),
+            message: Some(format!("Failed to write .eri/persona: {err}")),
+            persona: None,
+            phase: None,
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -457,7 +499,10 @@ mod tests {
         let raw = std::fs::read_to_string(dir.path().join(".eri").join("preferences.json"))
             .expect("prefs file written");
         let json: serde_json::Value = serde_json::from_str(&raw).unwrap();
-        assert_eq!(json.pointer("/codeStyle/semicolons"), Some(&serde_json::Value::Bool(false)));
+        assert_eq!(
+            json.pointer("/codeStyle/semicolons"),
+            Some(&serde_json::Value::Bool(false))
+        );
     }
 
     #[test]
@@ -465,8 +510,8 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         let r = handle_preference(dir.path(), "packageManager=pnpm");
         assert!(r.ok);
-        let raw = std::fs::read_to_string(dir.path().join(".eri").join("preferences.json"))
-            .unwrap();
+        let raw =
+            std::fs::read_to_string(dir.path().join(".eri").join("preferences.json")).unwrap();
         let json: serde_json::Value = serde_json::from_str(&raw).unwrap();
         assert_eq!(
             json.pointer("/packageManager"),
@@ -480,48 +525,5 @@ mod tests {
         let r = handle_preference(dir.path(), "no equals here");
         assert!(!r.ok);
         assert_eq!(r.error.as_deref(), Some("bad_args"));
-    }
-}
-
-fn handle_agent(workspace: &std::path::Path, args: &str) -> SlashResult {
-    let name = args.trim();
-    if name.is_empty() {
-        let active = personas::read_active(workspace);
-        return SlashResult {
-            ok: true,
-            persona: Some(active.clone()),
-            message: Some(format!("Active persona: {active}")),
-            error: None,
-            phase: None,
-        };
-    }
-    // Confirm the persona exists either as a built-in or a user file.
-    let resolved = personas::resolve(workspace, name);
-    if resolved.name != name {
-        return SlashResult {
-            ok: false,
-            error: Some("unknown_persona".to_string()),
-            message: Some(format!(
-                "No persona named '{name}'. Add .eri/agents/{name}.md or pick a built-in."
-            )),
-            persona: None,
-            phase: None,
-        };
-    }
-    match personas::write_active(workspace, name) {
-        Ok(()) => SlashResult {
-            ok: true,
-            persona: Some(name.to_string()),
-            message: Some(format!("Switched persona → {name}")),
-            error: None,
-            phase: None,
-        },
-        Err(err) => SlashResult {
-            ok: false,
-            error: Some("write_failed".to_string()),
-            message: Some(format!("Failed to write .eri/persona: {err}")),
-            persona: None,
-            phase: None,
-        },
     }
 }

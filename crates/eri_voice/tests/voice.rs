@@ -32,10 +32,12 @@ fn voice_engine_stops_quickly_when_mic_unavailable() {
     let saw_error = Arc::new(AtomicBool::new(false));
     let saw_error_clone = saw_error.clone();
 
-    let mut cfg = VoiceConfig::default();
-    cfg.model_path = Some(std::path::PathBuf::from(
-        "/tmp/eri-voice-test-does-not-exist.bin",
-    ));
+    let cfg = VoiceConfig {
+        model_path: Some(std::path::PathBuf::from(
+            "/tmp/eri-voice-test-does-not-exist.bin",
+        )),
+        ..VoiceConfig::default()
+    };
 
     let sink = VoiceSink {
         on_partial: Box::new(|_| {}),

@@ -9,9 +9,8 @@
 //!   - eri.recall       — alias for search
 //!   - eri.remember     — pin a fact into the user's local memory
 //!   - eri.tracer       — placeholder: returns a "use the eri.app"
-//!                        message; full GitHub-sandbox flow lives in
-//!                        the desktop client where the filesystem is
-//!                        available
+//!     message; full GitHub-sandbox flow lives in the desktop client
+//!     where the filesystem is available
 //!   - eri.document     — placeholder: same rationale as tracer
 
 use anyhow::{Context, Result};

@@ -340,6 +340,10 @@ mod tests {
         assert_eq!(h.qualified_name(), "github__create_issue");
     }
 
+    // The HOME_ENV_LOCK guard MUST live across the awaits below: HOME is set
+    // for the whole async load (which reads it), so the lock can't be dropped
+    // early without un-serializing the env mutation against sibling tests.
+    #[allow(clippy::await_holding_lock)]
     #[tokio::test]
     async fn mcp_load_with_no_config_returns_empty_state() {
         // Serialize with other HOME-mutating tests in this binary.

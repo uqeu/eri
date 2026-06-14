@@ -62,6 +62,20 @@ impl MemoryCtx {
         })
     }
 
+    /// Test-only: build a context backed by an **isolated** store file. Tests
+    /// must never go through [`open`](Self::open) with `None`, which resolves to
+    /// the developer's real `~/.eri/memory.json` — a shared global that races
+    /// other tests (flaky remember→recall round-trips).
+    #[cfg(test)]
+    pub(crate) fn open_at(root: &Path, store_path: PathBuf) -> Self {
+        Self {
+            root: root.to_path_buf(),
+            index: RefCell::new(None),
+            index_attempted: RefCell::new(false),
+            store: RefCell::new(MemoryStore::open_at(store_path).expect("open test store")),
+        }
+    }
+
     /// Top remembered items relevant to `prompt`, formatted as a fenced,
     /// lower-trust note for injection at loop start. `None` when nothing is
     /// remembered yet (so we add no noise to a fresh project).

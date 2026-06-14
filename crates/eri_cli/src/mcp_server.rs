@@ -109,9 +109,9 @@ mod tests {
 
     fn ctx() -> (TempDir, MemoryCtx) {
         let dir = TempDir::new().unwrap();
-        // MemoryCtx::open uses the real ~/.eri memory store; for the server we
-        // just need a working ctx rooted at a temp dir. open() is best-effort.
-        let ctx = MemoryCtx::open(dir.path(), None).expect("open memory ctx");
+        // Isolated store file per test — never the real ~/.eri (which would race
+        // sibling tests on shared global state, flaking remember→recall).
+        let ctx = MemoryCtx::open_at(dir.path(), dir.path().join("memory.json"));
         (dir, ctx)
     }
 

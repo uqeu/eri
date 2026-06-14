@@ -4448,12 +4448,21 @@ mod tool_call_tests {
     }
 
     fn tempdir_for_rules() -> PathBuf {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        // A process-unique counter, NOT just pid+nanos: macOS's clock is coarse
+        // enough that two parallel rules tests can read the same nanos, collide
+        // on one dir, and stomp each other's scaffold (flaky rules-block asserts).
+        static SEQ: AtomicU64 = AtomicU64::new(0);
         let mut path = std::env::temp_dir();
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos())
             .unwrap_or(0);
-        path.push(format!("eri_rules_test_{}_{nanos}", std::process::id()));
+        let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+        path.push(format!(
+            "eri_rules_test_{}_{nanos}_{seq}",
+            std::process::id()
+        ));
         std::fs::create_dir_all(&path).unwrap();
         path
     }

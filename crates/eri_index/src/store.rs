@@ -378,7 +378,7 @@ mod tests {
 
     #[test]
     fn vector_roundtrip_preserves_values() {
-        let v = vec![-1.5f32, 0.0, 3.14, f32::MIN_POSITIVE];
+        let v = vec![-1.5f32, 0.0, 3.25, f32::MIN_POSITIVE];
         let packed = pack_vector(&v);
         let back = unpack_vector(&packed).unwrap();
         assert_eq!(v, back);
