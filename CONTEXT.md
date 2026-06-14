@@ -99,11 +99,11 @@ The DB table phone eri enqueues "do X on my computer" goals into; the running co
 _Avoid_: job queue, worker, task list.
 
 **Remote turn**:
-One goal phone eri sends to the computer eri via the command queue. Risky actions (`is_risky()`) become `awaiting_confirm` and bounce a confirmation to the phone — remote mode never auto-confirms.
+One goal phone eri sends to the computer eri via the command queue, of one **kind**: a **Control** turn (actuation — run through the control stack; risky actions via `is_risky()` become `awaiting_confirm` and bounce a confirmation to the phone, never auto-confirmed) or a **Recall** turn (a deep Tier-B memory lookup answered locally by the recall adapter and texted back — never risky, never the actuation agent). The daemon routes on the kind.
 _Avoid_: remote command, RPC.
 
 **Bi-temporal fact**:
-A memory fact carrying `valid_from`/`valid_to` (when it was true) + `learned_at` (when eri learned it). On change the old fact is invalidated, not deleted — so eri can answer "what was true when" without recompute.
+A memory fact carrying `valid_from`/`valid_to` (the **event time** — when it was true in the world) + `learned_at` (the **transaction time** — when eri recorded it). v1 has no event-time extraction, so `valid_from` defaults to `learned_at` (`ts_ms`) until an extractor sets it; `valid_to` is recorded on supersession. On change the old fact is invalidated, not deleted — so `recall_as_of` answers "what was true when" without recompute. Read times via `Observation::valid_from()` / `learned_at()`, never raw fields.
 _Avoid_: timestamped fact, versioned fact.
 
 **Memory tier (core / recall / archival)**:

@@ -204,6 +204,7 @@ mod tests {
             workspace_hash: ws.to_string(),
             body: body.to_string(),
             embedding: embeddings::embed_text(body),
+            valid_from: None,
             visibility: Visibility::Active,
         }
     }

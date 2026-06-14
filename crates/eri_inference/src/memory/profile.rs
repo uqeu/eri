@@ -194,6 +194,7 @@ mod tests {
             workspace_hash: String::new(),
             body: body.to_string(),
             embedding: Vec::new(),
+            valid_from: None,
             visibility: Visibility::Active,
         }
     }

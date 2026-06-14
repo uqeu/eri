@@ -160,6 +160,7 @@ mod tests {
             workspace_hash: "h".into(),
             body: body.into(),
             embedding: Vec::new(),
+            valid_from: None,
             visibility: Visibility::Active,
         }
     }

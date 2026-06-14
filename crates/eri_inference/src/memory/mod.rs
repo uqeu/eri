@@ -56,7 +56,7 @@ pub enum Visibility {
 pub struct Observation {
     pub id: String,
     /// Unix epoch milliseconds — the bi-temporal **transaction time**
-    /// (`learned_at`); also the fact's valid-from (v1 has no event-time extraction).
+    /// (`learned_at`): when eri *recorded* this observation.
     pub ts_ms: u64,
     pub kind: String,
     /// Workspace path hash (fxhash) so observations are scoped without
@@ -69,6 +69,13 @@ pub struct Observation {
     /// that pre-date v2; `recall_semantic` lazily computes + persists
     /// the missing vectors so a single recall warms the cache.
     pub embedding: Vec<f32>,
+    /// Bi-temporal **event-time start** (`valid_from`): when the fact *became
+    /// true*, distinct from `ts_ms` (when eri learned it). `None` means "= ts_ms"
+    /// — the default, since v1 has no event-time extraction; a future extractor
+    /// ("I moved to NYC last year", learned today) sets it to the real instant so
+    /// `recall_as_of` answers from the event timeline, not the ingestion one.
+    /// Read it via [`valid_from`](Self::valid_from), never the raw field.
+    pub valid_from: Option<u64>,
     /// Lifecycle state — see [`Visibility`]. Serializes to/from the flat
     /// `superseded`/`consolidated`/`valid_to` wire keys via [`ObservationWire`],
     /// so already-synced Tier-B blobs stay byte-for-byte compatible.
@@ -89,6 +96,8 @@ struct ObservationWire {
     body: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     embedding: Vec<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    valid_from: Option<u64>,
     #[serde(default, skip_serializing_if = "is_false")]
     superseded: bool,
     #[serde(default, skip_serializing_if = "is_false")]
@@ -117,6 +126,7 @@ impl From<ObservationWire> for Observation {
             workspace_hash: w.workspace_hash,
             body: w.body,
             embedding: w.embedding,
+            valid_from: w.valid_from,
             visibility,
         }
     }
@@ -136,6 +146,7 @@ impl From<Observation> for ObservationWire {
             workspace_hash: o.workspace_hash,
             body: o.body,
             embedding: o.embedding,
+            valid_from: o.valid_from,
             superseded,
             consolidated,
             valid_to,
@@ -156,19 +167,27 @@ impl Observation {
         self.kind != TOMBSTONE_KIND && matches!(self.visibility, Visibility::Active)
     }
 
-    /// **Transaction time** — when eri recorded this observation (bi-temporal
-    /// `learned_at`). Currently the same instant as the fact's valid-from.
+    /// **Transaction time** — when eri *recorded* this observation (bi-temporal
+    /// `learned_at`).
     pub fn learned_at(&self) -> u64 {
         self.ts_ms
     }
 
-    /// Bi-temporal point-in-time validity: was this fact true (and known) at
-    /// `as_of`? True iff it was learned by then and either still active or
-    /// superseded only *after* `as_of`. A `Superseded` fact with no recorded
-    /// `valid_to` (legacy) is invalid at every point — we can't date its
-    /// invalidation, so we never resurrect it into a past-time view.
+    /// **Event-time start** — when the fact *became true* (bi-temporal
+    /// `valid_from`). Defaults to `ts_ms` (learned_at) until an event-time
+    /// extractor populates the field, so v1 treats "learned" and "became true"
+    /// as the same instant.
+    pub fn valid_from(&self) -> u64 {
+        self.valid_from.unwrap_or(self.ts_ms)
+    }
+
+    /// Bi-temporal point-in-time validity: was this fact true at `as_of`? True
+    /// iff it had become true by then (`valid_from <= as_of`) and was either
+    /// still active or superseded only *after* `as_of`. A `Superseded` fact with
+    /// no recorded `valid_to` (legacy) is invalid at every point — we can't date
+    /// its invalidation, so we never resurrect it into a past-time view.
     fn is_valid_at(&self, as_of: u64) -> bool {
-        if self.kind == TOMBSTONE_KIND || self.ts_ms > as_of {
+        if self.kind == TOMBSTONE_KIND || self.valid_from() > as_of {
             return false;
         }
         match &self.visibility {
@@ -386,6 +405,7 @@ impl MemoryStore {
             workspace_hash: workspace_hash(workspace),
             body: body.to_string(),
             embedding: embeddings::embed_text(body),
+            valid_from: None,
             visibility: Visibility::Active,
         };
         let cloned = observation.clone();
@@ -674,6 +694,7 @@ impl MemoryStore {
                 workspace_hash: draft.workspace_hash,
                 body: draft.body,
                 embedding,
+                valid_from: None,
                 visibility: Visibility::Active,
             };
             // A fresh rollup replaces an older rollup on the same topic, so the
@@ -847,6 +868,7 @@ pub fn tombstone(target_id: &str) -> Observation {
         workspace_hash: String::new(),
         body: target_id.to_string(),
         embedding: Vec::new(),
+        valid_from: None,
         visibility: Visibility::Active,
     }
 }
@@ -951,6 +973,7 @@ mod tests {
             workspace_hash: "w".to_string(),
             body: "b".to_string(),
             embedding: Vec::new(),
+            valid_from: None,
             visibility: Visibility::Active,
         }
     }
@@ -1053,6 +1076,7 @@ mod tests {
                 workspace_hash: String::new(),
                 body: body.into(),
                 embedding,
+                valid_from: None,
                 visibility: Visibility::Active,
             },
             rel,
@@ -1260,6 +1284,7 @@ mod tests {
             workspace_hash: hash.clone(),
             body: "favourite colour is blue".into(),
             embedding: Vec::new(),
+            valid_from: None,
             visibility: Visibility::Superseded {
                 valid_to: Some(200),
             },
@@ -1271,6 +1296,7 @@ mod tests {
             workspace_hash: hash,
             body: "favourite colour is green".into(),
             embedding: Vec::new(),
+            valid_from: None,
             visibility: Visibility::Active,
         });
 
@@ -1364,6 +1390,34 @@ mod tests {
     }
 
     #[test]
+    fn valid_from_decouples_event_time_from_learned_at() {
+        // A fact learned today about a PAST event: valid_from precedes ts_ms.
+        // It's valid as-of an instant after it became true even though eri learned
+        // it later — the bi-temporal event timeline, distinct from ingestion (D).
+        let mut o = obs("fact", 1000);
+        o.valid_from = Some(200);
+        assert_eq!(o.valid_from(), 200, "event-time start");
+        assert_eq!(o.learned_at(), 1000, "transaction time is unchanged");
+        assert!(o.is_valid_at(500), "true at 500 (after it became true)");
+        assert!(!o.is_valid_at(100), "not yet true at 100");
+
+        // Default: no valid_from → falls back to learned_at (v1 behaviour).
+        assert_eq!(obs("fact", 1000).valid_from(), 1000);
+    }
+
+    #[test]
+    fn valid_from_round_trips_on_the_wire_only_when_set() {
+        let mut o = obs("fact", 1);
+        // Default None → key absent (no bloat for the common case).
+        assert!(serde_json::to_value(&o).unwrap().get("valid_from").is_none());
+        o.valid_from = Some(77);
+        let j = serde_json::to_value(&o).unwrap();
+        assert_eq!(j["valid_from"], serde_json::json!(77));
+        let back: Observation = serde_json::from_value(j).unwrap();
+        assert_eq!(back.valid_from, Some(77));
+    }
+
+    #[test]
     fn forget_removes_specific_id() {
         let (dir, mut store) = open_temp();
         let id = store.insert("fact", dir.path(), "x").unwrap().id;
@@ -1389,6 +1443,7 @@ mod tests {
             workspace_hash: String::new(),
             body: body.to_string(),
             embedding: Vec::new(),
+            valid_from: None,
             visibility: Visibility::Active,
         }
     }
@@ -1493,6 +1548,7 @@ mod tests {
             workspace_hash: String::new(),
             body: "forgotten-id".into(),
             embedding: Vec::new(),
+            valid_from: None,
             visibility: Visibility::Active,
         });
         store.insert("fact", dir.path(), "fresh").unwrap();
@@ -1532,6 +1588,7 @@ mod tests {
             workspace_hash: workspace_hash(dir.path()),
             body: "ancient".into(),
             embedding: Vec::new(),
+            valid_from: None,
             visibility: Visibility::Active,
         });
         store.insert("fact", dir.path(), "fresh").unwrap();
@@ -1596,6 +1653,7 @@ mod tests {
             workspace_hash: workspace_hash(dir.path()),
             body: "I prefer dark themes".into(),
             embedding: Vec::new(),
+            valid_from: None,
             visibility: Visibility::Active,
         });
         let hits = store.recall_semantic("dark themes", dir.path(), 1).unwrap();
