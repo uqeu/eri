@@ -1,14 +1,16 @@
 import { NextResponse } from "next/server";
-import { sweepPhoneTables } from "@/lib/imessage/cleanup";
+import { relayExpiredCommands, sweepPhoneTables } from "@/lib/imessage/cleanup";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
  * Vercel Cron entrypoint — prunes expired phone_pairings + old imessage_inbound
- * rows (review M3). Add to `vercel.json`:
+ * rows (review M3), and closes out + notifies expired command-queue goals whose
+ * computer was offline (review M5). Run FREQUENTLY (e.g. every 10 min) so the
+ * "your computer was offline" notice is timely. Add to `vercel.json`:
  *
- *   { "crons": [{ "path": "/api/v1/imessage/cron", "schedule": "15 0 * * *" }] }
+ *   { "crons": [{ "path": "/api/v1/imessage/cron", "schedule": "* /10 * * * *" }] }
  *
  * Auth mirrors the usage cron: requires `CRON_SECRET` to match the
  * `Authorization: Bearer <secret>` header Vercel attaches.
@@ -22,6 +24,7 @@ export async function GET(request: Request): Promise<NextResponse> {
   if (request.headers.get("authorization") !== `Bearer ${secret}`) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  const result = await sweepPhoneTables();
-  return NextResponse.json({ ok: true, ...result }, { status: 200 });
+  const swept = await sweepPhoneTables();
+  const expiredCommands = await relayExpiredCommands();
+  return NextResponse.json({ ok: true, ...swept, expiredCommands }, { status: 200 });
 }

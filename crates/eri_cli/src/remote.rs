@@ -60,7 +60,20 @@ fn outcome(
     }
     match result {
         Ok(summary) => ("done", Some(summary), None),
-        Err(e) => ("error", Some(e.to_string()), None),
+        // Cap the error so an internal detail (paths, endpoint dumps) can't be
+        // relayed verbatim to the user's phone (review L3).
+        Err(e) => ("error", Some(sanitize_error(&e.to_string())), None),
+    }
+}
+
+/// Keep a relayed error short + first-line-only so internals don't reach the phone.
+fn sanitize_error(msg: &str) -> String {
+    let first = msg.lines().next().unwrap_or(msg).trim();
+    if first.chars().count() > 160 {
+        let head: String = first.chars().take(159).collect();
+        format!("{}…", head.trim_end())
+    } else {
+        first.to_string()
     }
 }
 
