@@ -71,3 +71,41 @@ _Avoid_: credits (internal billing weight), API usage, BYOK.
 **Tier**:
 The user's plan — Free, Starter, Pro, Pro+, Teams — which sizes the eri context window, retention window, eri-token budget, and rate limits.
 _Avoid_: plan-level, subscription (those are billing terms; the agent sizing concept is the tier).
+
+## Phone eri & memory (see docs/adr/0001, 0002)
+
+**Phone eri**:
+The same eri, reached by texting a phone number (iMessage via Sendblue). Not a separate bot — the cloud half of the one brain, backed by the computer-resident eri's memory, that can also act on the user's computer remotely.
+_Avoid_: chatbot, SMS bot, assistant #2.
+
+**Personalization profile (Tier-A)**:
+The small (≤32KB), **server-readable** projection of the user's memory — static facts + preferences + style + a live `dynamic_context` — that phone eri injects to sound like the user's eri. A Claude-sensitivity-gated projection, never the raw log or secrets.
+_Avoid_: memory dump, full profile, the memory (that's Tier-B).
+
+**Memory blob (Tier-B)**:
+The user's **full** observation log, **E2E-encrypted** with `K_user` (the cloud cannot read it), synced device-to-device via `memory_blobs`. The durable private soul.
+_Avoid_: backup, the profile.
+
+**dynamic_context**:
+The live temporal slice of Tier-A — "today you shipped X; right now you're in a planning session" — kept fresh by consolidation. The bi-temporal "now" vs "yesterday" vs "durable".
+_Avoid_: status, session state.
+
+**K_user / K_server**:
+`K_user` = the user-device key (HKDF over a stored salt) that encrypts Tier-B; never leaves the user's devices. `K_server` = eri's at-rest key for Tier-A so the cloud can decrypt the *projection* to personalize phone eri.
+_Avoid_: the key, password.
+
+**Command queue**:
+The DB table phone eri enqueues "do X on my computer" goals into; the running computer eri **polls** it (drives the poll itself), runs each goal through the existing control loop, and reports back.
+_Avoid_: job queue, worker, task list.
+
+**Remote turn**:
+One goal phone eri sends to the computer eri via the command queue. Risky actions (`is_risky()`) become `awaiting_confirm` and bounce a confirmation to the phone — remote mode never auto-confirms.
+_Avoid_: remote command, RPC.
+
+**Bi-temporal fact**:
+A memory fact carrying `valid_from`/`valid_to` (when it was true) + `learned_at` (when eri learned it). On change the old fact is invalidated, not deleted — so eri can answer "what was true when" without recompute.
+_Avoid_: timestamped fact, versioned fact.
+
+**Memory tier (core / recall / archival)**:
+The Letta-style split: a small always-resident **core/working block** (current task, "right now"), searchable **recall**, and cold **archival**. Distinct from the user's plan **Tier**.
+_Avoid_: conflating with plan Tier.
