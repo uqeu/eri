@@ -92,6 +92,7 @@
     <a href="#target">8b - Target agentic loop</a>
     <a href="#capabilities">8c - Agent capability layer</a>
     <a href="#cli-parity">8d - CLI parity + roadmap</a>
+    <a href="#phone-memory">8e - Phone eri &amp; memory</a>
     <a href="#models">9 - Model IDs</a>
     <div class="grp">Meta</div>
     <a href="#repo">Repo map</a>
@@ -100,7 +101,7 @@
 
   <main>
     <h1>eri - Architecture Reference</h1>
-    <p class="lede">The single source of truth for how eri is built: every surface, service, data flow and design decision across the production stack. Read this first; never re-derive it. <span class="muted">Last updated 2026-06-04.</span></p>
+    <p class="lede">The single source of truth for how eri is built: every surface, service, data flow and design decision across the production stack. Read this first; never re-derive it. <span class="muted">Last updated 2026-06-14.</span></p>
 
     <div class="card kvs" style="margin-top:20px">
       <div><span>Product</span> &nbsp; agentic AI IDE - voice + personalization, "learns about you"</div>
@@ -143,11 +144,11 @@
     </div>
     <div class="note small"><b>Deploy gotcha:</b> the Vercel MCP only returns instructions - it does not push bits. Deploy = commit + <code>git push origin main</code> (git integration builds). A direct <code>vercel deploy</code> from repo root tries to tarball the whole monorepo and hangs; push instead.</div>
     <h3>Env (Vercel)</h3>
-    <p class="kvs small"><code>ANTHROPIC_MASTER_KEY</code> <code>INCEPTION_MASTER_KEY</code> <code>OPENAI_MASTER_KEY</code> <code>GOOGLE_MASTER_KEY</code> <code>DATABASE_URL</code> <code>JWT_SECRET</code> <code>SUPABASE_*</code> <code>STRIPE_*</code> <code>GOOGLE_*</code> (OAuth) <code>NEXT_PUBLIC_BASE_URL</code></p>
+    <p class="kvs small"><code>ANTHROPIC_MASTER_KEY</code> <code>INCEPTION_MASTER_KEY</code> <code>OPENAI_MASTER_KEY</code> <code>GOOGLE_MASTER_KEY</code> <code>DATABASE_URL</code> <code>JWT_SECRET</code> <code>SUPABASE_*</code> <code>STRIPE_*</code> <code>GOOGLE_*</code> (OAuth) <code>NEXT_PUBLIC_BASE_URL</code> <code>ERI_SERVER_ENCRYPTION_KEY</code> (Tier-A at-rest, see <a href="#phone-memory">8e</a>)</p>
 
     <!-- 4 -->
     <h2 id="data"><span class="tocnum">4</span>Data model</h2>
-    <p class="small muted">Supabase migrations <code>0001</code>-<code>0008</code> in <code>website/supabase/migrations/</code>.</p>
+    <p class="small muted">Supabase migrations <code>0001</code>-<code>0011</code> in <code>website/supabase/migrations/</code>.</p>
     <table>
       <tr><th>Table</th><th>Key columns</th><th>Purpose</th></tr>
       <tr><td><code>users</code></td><td>id, email (unique), display_name, tier (default free), stripe_customer_id, subscription_status</td><td>Account + plan tier</td></tr>
@@ -155,6 +156,8 @@
       <tr><td><code>device_code_grants</code></td><td>code (= secret device_code, PK), <b>user_code</b> (public, unique), user_id, api_token_id, pending_secret, redeemed_at, delivered_at, expires_at</td><td>RFC 8628 device flow (see <a href="#auth">Auth</a>)</td></tr>
       <tr><td><code>token_buckets</code></td><td>user_id (PK), tokens_used, tokens_included, tokens_overage, <b>mercury_turns_used</b>, period_start/end, warned_at</td><td>Per-user monthly budget (Claude tokens + Mercury turns)</td></tr>
       <tr><td><code>usage_records</code></td><td>id, user_id, ts, provider, model, intent, tokens_in, tokens_out, cost_usd_micros, latency_ms, status</td><td>Per-request audit log</td></tr>
+      <tr><td><code>memory_blobs</code> <span class="pill acc">0007</span></td><td>user_id (PK), blob (bytea), updated_at</td><td><b>Tier-B</b> - opaque E2E memory blob the server never reads (see <a href="#phone-memory">Phone eri</a>)</td></tr>
+      <tr><td><code>personalization_profiles</code> <span class="pill acc">0011</span></td><td>user_id (PK), profile_enc (bytea), dynamic_context_enc (bytea), updated_at</td><td><b>Tier-A</b> - server-readable profile, encrypted at rest with <code>K_server</code></td></tr>
       <tr><td>refresh tokens</td><td>single-use rotating (consumed on use)</td><td>Web session refresh</td></tr>
     </table>
 
@@ -362,6 +365,22 @@
       <tr><td><b>Context engine (P3, beat-Nia)</b></td><td>see <a href="#capabilities">8c</a>: <code>search_context</code>/<code>read_docs</code> loop tools over a token-cheap workspace index (TOON + caveman); phased grep&rarr;index&rarr;remote/research</td><td><span class="pill bad">roadmap (largest)</span></td></tr>
     </table>
     <p class="small muted">Phase A (tool superset + subagents + MCP-in-loop + permission model), Phase B (layered compaction), and Phase C (hooks) are shipped + unit-tested. Remaining multi-session builds: keyboard UX (raw-mode line editor), the context engine (index + retrieval), agent teams / dynamic workflows / background + scheduled tasks (Phase D), plugins + output styles (Phase E), session branch/fork + remote (Phase G), the eri Agent SDK (Phase H), and worktrees / sandbox / observability (Phase I). Each verifies with a signed-in CLI against a real workspace.</p>
+
+    <!-- 8e -->
+    <h2 id="phone-memory"><span class="tocnum">8e</span>Phone eri &amp; two-tier memory</h2>
+    <p>The same eri, reached by texting a phone number (iMessage via <b>Sendblue</b>) - the cloud half of one brain, backed by the computer-resident eri's memory, that can also act on the computer remotely. <span class="muted">Decisions: <code>docs/adr/0001</code> (memory: adopt patterns not a Python engine; two-tier sync), <code>docs/adr/0002</code> (Sendblue transport + polled command queue). Plan phased 0&rarr;1&rarr;2.</span></p>
+    <div class="grid g2">
+      <div class="card"><span class="pill acc">Tier-A</span><h3>Personalization profile <span class="pill ok">server-readable</span></h3><p class="small">A small (&le;32KB) projection - static facts + preference rollups + a live <code>dynamic_context</code> ("today you shipped X") - phone eri injects to sound like the user's eri. Encrypted <b>at rest</b> with <code>K_server</code> (defense-in-depth, not E2E). Never the raw log or secrets. <code>personalization_profiles</code> + <code>/api/v1/memory/profile</code>.</p></div>
+      <div class="card"><span class="pill acc">Tier-B</span><h3>Memory blob <span class="pill ok">E2E</span></h3><p class="small">The user's <b>full</b> observation log, E2E-encrypted with <code>K_user</code> (HKDF over a stored per-user salt, <em>not</em> the rotating bearer - stable across token rotation). The cloud only holds opaque bytes. <code>memory_blobs</code> + <code>/api/v1/memory/sync</code>. Deep/private questions <b>relay</b> to the running computer eri, which holds the keys.</p></div>
+    </div>
+    <p class="small"><b>The sync seam (Rust, <code>crates/eri_inference/src/memory/</code>):</b> <code>MemorySync</code> over a <code>SyncTransport</code> trait (in-memory stub for tests + <code>HttpSyncTransport</code> for prod) round-trips the encrypted blob; <code>sync()</code> pulls &rarr; <code>apply_merge</code> (union + last-write-wins by <code>ts_ms</code> + tombstones, so a <code>/forget</code> can't resurrect from a stale copy) &rarr; pushes the merged result so the cloud converges. <code>profile::distill</code> builds Tier-A from the visible observations (pure). Crypto is pure-Rust RustCrypto (<code>aes-gcm</code>/<code>hkdf</code>/<code>sha2</code>) - no C deps, offline-capable.</p>
+    <table>
+      <tr><th>Phase</th><th>Scope</th><th>State</th></tr>
+      <tr><td><b>0</b> memory-sync foundation</td><td>tombstone <code>forget</code>, merge, <code>sync.rs</code>+<code>profile.rs</code>, Tier-A route + <code>personalization_profiles</code> migration</td><td><span class="pill ok">built</span> (Rust + cloud; Rust push-after-insert is Phase 1)</td></tr>
+      <tr><td><b>1</b> conversational phone eri</td><td>Sendblue webhook (<code>imessage/inbound</code>), <code>phone_links</code>/<code>phone_pairings</code>, <code>run_core</code> + Tier-A profile injection, <code>eri phone link</code></td><td><span class="pill">next</span></td></tr>
+      <tr><td><b>2</b> remote control + GitHub</td><td><code>command_queue</code> polled by the computer, <code>remote.rs</code> daemon &rarr; existing <code>run_control_agent</code>; risky &rarr; <code>awaiting_confirm</code> bounced to the phone</td><td><span class="pill">planned</span></td></tr>
+    </table>
+    <div class="note small"><b>Keys &amp; env:</b> <code>K_user</code> never leaves the user's devices (HKDF over a stored salt). <code>K_server</code> = <code>ERI_SERVER_ENCRYPTION_KEY</code> (base64 of 32 bytes) in the Vercel env; Tier-A is a server-readable projection, so a leaked DB dump alone is useless without it. Both routes reuse <code>authenticateApiBearer</code> + <code>featureLocked('cloudSync')</code>; every read/write is scoped to the bearer's <code>user_id</code> (no cross-tenant access).</div>
 
     <!-- 9 -->
     <h2 id="models"><span class="tocnum">9</span>Model IDs</h2>
