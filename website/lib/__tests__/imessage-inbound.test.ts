@@ -25,6 +25,8 @@ function deps(over: Partial<InboundDeps> = {}): InboundDeps {
     loadProfile: async () => ({ profile: { facts: ["likes tabs"] }, dynamicContext: "" }),
     runTurn: async () => ({ text: "**hi**", tokensIn: 10, tokensOut: 5, model: "claude-sonnet-4-6" }),
     enqueueComputerGoal: async () => true,
+    confirmPending: async () => null,
+    cancelPending: async () => false,
     now: () => 1000,
     ...over,
   };
@@ -106,6 +108,34 @@ async function run() {
     );
     assert.equal(out.branch, "answered");
     assert.deepEqual(enqueued, { userId: "u1", goal: "open Spotify" });
+  }
+
+  // A natural "go ahead" with a pending confirmation approves it (no model turn).
+  {
+    let confirmed = false;
+    const out = await handleInbound(
+      msg("go ahead"),
+      "+1",
+      deps({
+        confirmPending: async () => { confirmed = true; return { goal: "send the email" }; },
+        runTurn: async () => { throw new Error("should not run a turn"); },
+      }),
+    );
+    assert.equal(out.branch, "confirmed");
+    assert.equal(confirmed, true);
+    assert.equal(out.meter, null);
+  }
+
+  // "no" with a pending confirmation cancels it.
+  {
+    const out = await handleInbound(msg("no"), "+1", deps({ cancelPending: async () => true }));
+    assert.equal(out.branch, "cancelled");
+  }
+
+  // A natural "yes" with NOTHING pending falls through to a normal answer.
+  {
+    const out = await handleInbound(msg("yes"), "+1", deps());
+    assert.equal(out.branch, "answered");
   }
 
   // Model throws → errored reply + an error meter (so the turn is still counted).

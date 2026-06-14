@@ -19,7 +19,7 @@ import { NextResponse } from "next/server";
 import { decryptAtRest } from "@/lib/crypto/server_encryption";
 import { sql } from "@/lib/db";
 import { runAgentTurn, type TierAProfile } from "@/lib/agent/run_core";
-import { enqueueCommand } from "@/lib/commands/queue";
+import { cancelPending, confirmPending, enqueueCommand } from "@/lib/commands/queue";
 import { handleInbound, type InboundDeps } from "@/lib/imessage/inbound";
 import { consumePairing, normalizeE164, resolveUserByPhone } from "@/lib/imessage/identity";
 import { sendReply } from "@/lib/imessage/provider";
@@ -128,6 +128,8 @@ function makeDeps(): InboundDeps {
       const enqueued = await enqueueCommand({ userId, source: "imessage", goal });
       return enqueued !== null;
     },
+    confirmPending,
+    cancelPending,
     now: () => Date.now(),
   };
 }

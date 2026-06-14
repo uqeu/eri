@@ -24,6 +24,10 @@ use crate::{action_log, control_agent, control_safety};
 struct PolledCommand {
     id: String,
     goal: String,
+    /// True when the user already confirmed this goal from their phone (H1) —
+    /// run it without re-asking. Defaults false for a fresh dispatch.
+    #[serde(default)]
+    approved: bool,
 }
 
 #[derive(Deserialize)]
@@ -72,7 +76,7 @@ pub async fn run_once(client: &Client, model: &str) -> Result<bool> {
     };
     println!("[eri] remote goal: {}", cmd.goal);
 
-    let (status, result, confirm_prompt) = execute(&cmd.goal, model).await;
+    let (status, result, confirm_prompt) = execute(&cmd.goal, model, cmd.approved).await;
     let _: serde_json::Value = client
         .post_json(
             "/api/v1/commands/complete",
@@ -89,22 +93,37 @@ pub async fn run_once(client: &Client, model: &str) -> Result<bool> {
     Ok(true)
 }
 
-/// Run a goal through the control stack with a NON-confirming gate.
-async fn execute(goal: &str, model: &str) -> (&'static str, Option<String>, Option<String>) {
+/// Run a goal through the control stack. When `approved` (the user already said
+/// go-ahead from their phone) it runs with auto-confirm — risky actions execute,
+/// but sensitive-action REFUSALS and the app denylist still hold. Otherwise it's
+/// the never-confirm remote gate that bounces risky actions back to the phone.
+async fn execute(
+    goal: &str,
+    model: &str,
+    approved: bool,
+) -> (&'static str, Option<String>, Option<String>) {
     // Load the store for its app DENYLIST, but build a REMOTE gate: a permission
     // granted at the keyboard does NOT auto-run a risky action unattended; every
-    // risky action bounces to the phone (security C1).
+    // risky action bounces to the phone (security C1). Once the user has
+    // confirmed (`approved`), auto-confirm runs the goal they OK'd.
     let permissions = control_safety::PermissionStore::default_path()
         .map(|p| control_safety::PermissionStore::load(&p))
         .unwrap_or_default();
-    let gate = control_agent::ControlGate::for_remote(permissions);
+    let gate = if approved {
+        control_agent::ControlGate::with_permissions(true, permissions)
+    } else {
+        control_agent::ControlGate::for_remote(permissions)
+    };
 
-    // Capture the first risky prompt to bounce to the phone; always deny here.
+    // Capture the first risky prompt to ask the user naturally on their phone;
+    // always deny here (only consulted in the non-approved remote gate).
     let confirm_prompt = std::cell::RefCell::new(None::<String>);
     let mut confirm = |desc: &str, _perm: Option<control_safety::Permission>| -> bool {
         let mut slot = confirm_prompt.borrow_mut();
         if slot.is_none() {
-            *slot = Some(format!("eri wants to: {desc} — reply YES to allow."));
+            *slot = Some(format!(
+                "Quick check before I do this — {desc}. Want me to go ahead? 🌿"
+            ));
         }
         false
     };

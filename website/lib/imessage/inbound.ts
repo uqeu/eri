@@ -12,6 +12,7 @@
 
 import { CONTROL_COMPUTER_TOOL, type TierAProfile, type ToolDef } from "@/lib/agent/run_core";
 import { featureLocked } from "@/lib/feature_gate";
+import { isAffirmation, isNegation } from "@/lib/imessage/affirm";
 import { formatReply } from "@/lib/imessage/format";
 import { extractPairingCode } from "@/lib/imessage/identity";
 import type { InboundMessage } from "@/lib/imessage/webhook";
@@ -24,6 +25,8 @@ export const REPLY = {
   overQuota:
     "You're out of eri credits for this cycle — they reset next period, or upgrade at tryeri.ca.",
   errored: "Sorry — I hit a snag answering that. Try me again in a sec 🌿",
+  confirmed: "On it — I'll text you the moment it's done. 🌿",
+  cancelled: "Okay, I'll leave that one. 🌿",
 } as const;
 
 /** A usage row to write (only for turns that actually called the model). */
@@ -40,6 +43,8 @@ export type InboundBranch =
   | "paired"
   | "not_linked"
   | "locked"
+  | "confirmed"
+  | "cancelled"
   | "over_quota"
   | "answered"
   | "errored";
@@ -81,6 +86,10 @@ export interface InboundDeps {
   /** Dispatch a goal to the user's computer (command queue). Returns false when
    *  the user is at the outstanding-command cap. */
   enqueueComputerGoal(userId: string, goal: string): Promise<boolean>;
+  /** Approve the user's latest awaiting-confirm command; returns its goal or null. */
+  confirmPending(userId: string): Promise<{ goal: string } | null>;
+  /** Cancel the user's latest awaiting-confirm command; true if there was one. */
+  cancelPending(userId: string): Promise<boolean>;
   now(): number;
 }
 
@@ -111,6 +120,19 @@ export async function handleInbound(
   if (featureLocked(user.tier, "phoneEri")) {
     return { replyChunks: [REPLY.locked], meter: null, branch: "locked" };
   }
+
+  // A natural "yes, go" / "no" answers a pending confirmation rather than
+  // starting a new turn (review H1) — only acts if something is actually waiting,
+  // so a bare "ok" with nothing pending falls through to a normal reply.
+  if (isAffirmation(msg.content)) {
+    const confirmed = await deps.confirmPending(user.userId);
+    if (confirmed) return { replyChunks: [REPLY.confirmed], meter: null, branch: "confirmed" };
+  } else if (isNegation(msg.content)) {
+    if (await deps.cancelPending(user.userId)) {
+      return { replyChunks: [REPLY.cancelled], meter: null, branch: "cancelled" };
+    }
+  }
+
   if (!(await deps.withinQuota(user.userId, user.tier))) {
     return { replyChunks: [REPLY.overQuota], meter: null, branch: "over_quota" };
   }

@@ -32,6 +32,9 @@ export interface CommandRow {
   id: string;
   goal: string;
   source: string;
+  /** True when the user already confirmed this goal (review H1) — the daemon
+   *  runs it pre-approved. Consumed (reset) on claim. */
+  approved: boolean;
 }
 
 /** How a finished/blocked command reads when texted back to the phone. */
@@ -115,9 +118,47 @@ export async function claimNextCommand(userId: string): Promise<CommandRow | nul
       LIMIT 1
       FOR UPDATE SKIP LOCKED
     )
-    RETURNING id, goal, source
+    RETURNING id, goal, source, approved
   `;
   return rows[0] ?? null;
+}
+
+/**
+ * Confirm the user's most-recent `awaiting_confirm` command (their natural "yes,
+ * go ahead"): flip it back to `pending` with approved = true so the daemon
+ * re-runs that goal pre-approved. Returns the goal that was confirmed, or null if
+ * there was nothing awaiting confirmation. Single user-scoped row (review H1).
+ */
+export async function confirmPending(userId: string): Promise<{ goal: string } | null> {
+  const rows = await sql()<{ goal: string }[]>`
+    UPDATE command_queue SET status = 'pending', approved = true, claimed_at = null
+    WHERE id = (
+      SELECT id FROM command_queue
+      WHERE user_id = ${userId} AND status = 'awaiting_confirm' AND expires_at > now()
+      ORDER BY created_at DESC
+      LIMIT 1
+      FOR UPDATE SKIP LOCKED
+    )
+    RETURNING goal
+  `;
+  return rows[0] ?? null;
+}
+
+/** Cancel the user's most-recent `awaiting_confirm` command (their natural "no"). */
+export async function cancelPending(userId: string): Promise<boolean> {
+  const rows = await sql()<{ id: string }[]>`
+    UPDATE command_queue
+    SET status = 'error', result = 'cancelled by you', completed_at = now()
+    WHERE id = (
+      SELECT id FROM command_queue
+      WHERE user_id = ${userId} AND status = 'awaiting_confirm' AND expires_at > now()
+      ORDER BY created_at DESC
+      LIMIT 1
+      FOR UPDATE SKIP LOCKED
+    )
+    RETURNING id
+  `;
+  return rows.length > 0;
 }
 
 /**
