@@ -11,6 +11,7 @@
 //! stalled. Auth + base URL come from the signed-in credentials — the same ones
 //! the rest of the CLI uses.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
@@ -87,14 +88,34 @@ pub async fn run() -> Result<()> {
     Ok(())
 }
 
+/// Single-flight guard: at most one best-effort sync runs at a time, so a burst
+/// of `remember`s can't pile up redundant full Tier-B+Tier-A syncs that race on
+/// the store file (M4). The explicit `eri sync` and the next write cover any
+/// state a skipped call would have pushed.
+static SYNC_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
+
+/// Resets the in-flight flag when the background task finishes (even on panic).
+struct InFlightGuard;
+impl Drop for InFlightGuard {
+    fn drop(&mut self) {
+        SYNC_IN_FLIGHT.store(false, Ordering::Release);
+    }
+}
+
 /// Fire-and-forget best-effort sync (e.g. after a `remember`, on startup). Never
 /// surfaces an error to the user — a sync failure must never break a local
-/// command — it's logged at debug. No-op when signed out.
+/// command — it's logged only under `ERI_DEBUG`. No-op when signed out or when a
+/// best-effort sync is already running.
 pub fn spawn_best_effort() {
     let Ok((base, bearer, user_id)) = sync_inputs() else {
         return;
     };
+    // Claim the single-flight slot; if one is already running, skip.
+    if SYNC_IN_FLIGHT.swap(true, Ordering::AcqRel) {
+        return;
+    }
     tokio::task::spawn_blocking(move || {
+        let _guard = InFlightGuard;
         if let Err(e) = sync_blocking(base, bearer, user_id)
             && std::env::var("ERI_DEBUG").is_ok()
         {

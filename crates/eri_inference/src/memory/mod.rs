@@ -171,22 +171,59 @@ impl MemoryStore {
     }
 
     pub fn open_at(path: PathBuf) -> io::Result<Self> {
-        let file = match fs::read_to_string(&path) {
-            Ok(raw) => serde_json::from_str::<StoreFile>(&raw).unwrap_or_default(),
-            Err(err) if err.kind() == io::ErrorKind::NotFound => StoreFile::default(),
+        let raw = match fs::read_to_string(&path) {
+            Ok(raw) => raw,
+            // A missing file is a fresh (empty) store — the normal first-run case.
+            Err(err) if err.kind() == io::ErrorKind::NotFound => {
+                return Ok(Self {
+                    path,
+                    file: StoreFile::default(),
+                });
+            }
             Err(err) => return Err(err),
         };
-        Ok(Self { path, file })
+        match serde_json::from_str::<StoreFile>(&raw) {
+            Ok(file) => Ok(Self { path, file }),
+            // A CORRUPT file is NOT the same as an absent one. Silently defaulting
+            // to empty would let the next `save()` overwrite the (recoverable)
+            // bytes AND let `eri sync` push the emptiness to the cloud — a silent
+            // wipe (security M-5). Surface it loudly; the file is left untouched
+            // for recovery. (Atomic `save` makes this near-impossible going forward.)
+            Err(e) => Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("memory store at {} is corrupt: {e}", path.display()),
+            )),
+        }
     }
 
-    /// Persist to disk. Caller invokes after mutations.
+    /// Persist to disk **atomically**: serialize, write to a temp file in the
+    /// same directory, fsync, then `rename` over the target. A crash or power
+    /// loss can only leave the old file or the new file intact — never a
+    /// truncated one — so memory can't be corrupted mid-write (security M-5).
     pub fn save(&self) -> io::Result<()> {
         if let Some(parent) = self.path.parent() {
             fs::create_dir_all(parent)?;
         }
         let raw = serde_json::to_string(&self.file)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("serialize: {e}")))?;
-        fs::write(&self.path, raw)
+        let dir = self.path.parent().unwrap_or_else(|| Path::new("."));
+        // Unique temp name so two concurrent writers (e.g. a foreground command
+        // and a background `eri sync`) don't clobber each other's temp file; the
+        // final `rename` is atomic so the last writer wins cleanly, never torn.
+        let tmp = dir.join(format!(".memory.{}.tmp", new_id()));
+        {
+            use std::io::Write;
+            let mut f = fs::File::create(&tmp)?;
+            f.write_all(raw.as_bytes())?;
+            f.sync_all()?;
+        }
+        match fs::rename(&tmp, &self.path) {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                let _ = fs::remove_file(&tmp);
+                Err(e)
+            }
+        }
     }
 
     /// Append an observation and persist. v2: the body's hash-embedding
@@ -770,6 +807,38 @@ mod tests {
                 .any(|o| o.id == id && o.kind != TOMBSTONE_KIND),
             "a tombstoned observation must not come back from a remote pull"
         );
+    }
+
+    #[test]
+    fn open_at_errors_on_a_corrupt_store_instead_of_silently_emptying() {
+        // Security M-5: a corrupt file must NOT become an empty store (which would
+        // then overwrite the bytes + push emptiness to the cloud). It must error,
+        // leaving the file intact for recovery.
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("memory.json");
+        fs::write(&path, b"{ this is not valid json").unwrap();
+        match MemoryStore::open_at(path.clone()) {
+            Ok(_) => panic!("a corrupt store must not open as empty"),
+            Err(e) => assert_eq!(e.kind(), io::ErrorKind::InvalidData),
+        }
+        assert!(
+            path.exists(),
+            "corrupt file must be left in place for recovery"
+        );
+    }
+
+    #[test]
+    fn save_then_reopen_roundtrips_atomically() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("memory.json");
+        {
+            let mut store = MemoryStore::open_at(path.clone()).unwrap();
+            store
+                .insert("fact", dir.path(), "survives a rename")
+                .unwrap();
+        }
+        let reopened = MemoryStore::open_at(path).unwrap();
+        assert!(reopened.all().iter().any(|o| o.body == "survives a rename"));
     }
 
     #[test]
