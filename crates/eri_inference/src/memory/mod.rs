@@ -186,6 +186,24 @@ fn stable_hash16(bytes: &[u8]) -> String {
     digest[..8].iter().map(|b| format!("{b:02x}")).collect()
 }
 
+/// A point in time to judge an observation's visibility against — the temporal
+/// half of the [`candidates`](MemoryStore::candidates) scope.
+#[derive(Clone, Copy)]
+enum TemporalScope {
+    /// Visible right now: active (not superseded / consolidated / tombstone).
+    Now,
+    /// Valid at a past instant (bi-temporal point-in-time), unix-ms.
+    AsOf(u64),
+}
+
+/// Whether `o` matches a lowercased keyword `needle` (empty needle matches all).
+/// Shared by the keyword-ranked readers so the match rule lives in one place.
+fn keyword_hit(o: &Observation, needle: &str) -> bool {
+    needle.is_empty()
+        || o.body.to_lowercase().contains(needle)
+        || o.kind.to_lowercase().contains(needle)
+}
+
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 struct StoreFile {
     observations: Vec<Observation>,
@@ -327,6 +345,29 @@ impl MemoryStore {
     /// up when their kind is `"fact"` (same scope rule as the keyword
     /// recall). Observations missing an embedding (pre-v2 entries)
     /// get one lazily and `save()` is called once if any were filled.
+    /// The observations in scope for `workspace` at `scope` — **the single point
+    /// of control** for the two cross-cutting recall rules: the *scope* rule
+    /// (facts are global, every other kind is workspace-local) and the
+    /// *visibility* rule (active now, or valid at a past instant). Every reader
+    /// (`recall`, `recall_semantic`, `recall_hybrid`, `recall_as_of`,
+    /// `top_patterns`) ranks over this, so changing either rule is one edit here
+    /// instead of five scattered filters (architecture review B).
+    fn candidates(&self, workspace: &Path, scope: TemporalScope) -> Vec<&Observation> {
+        let hash = workspace_hash(workspace);
+        self.file
+            .observations
+            .iter()
+            .filter(|o| {
+                let in_scope = o.workspace_hash == hash || o.kind == "fact";
+                let visible = match scope {
+                    TemporalScope::Now => o.is_active(),
+                    TemporalScope::AsOf(t) => o.is_valid_at(t),
+                };
+                in_scope && visible
+            })
+            .collect()
+    }
+
     pub fn recall_semantic(
         &mut self,
         query: &str,
@@ -334,7 +375,21 @@ impl MemoryStore {
         limit: usize,
     ) -> io::Result<Vec<(Observation, f32)>> {
         let query_vec = embeddings::embed_text(query);
-        let hash = workspace_hash(workspace);
+        self.backfill_embeddings()?;
+        let mut scored: Vec<(Observation, f32)> = self
+            .candidates(workspace, TemporalScope::Now)
+            .into_iter()
+            .map(|o| (o.clone(), embeddings::cosine(&query_vec, &o.embedding)))
+            .collect();
+        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        scored.truncate(limit);
+        Ok(scored)
+    }
+
+    /// Lazily compute + persist any missing embeddings (pre-v2 observations), so
+    /// the embedding-ranked readers never pay a recompute on the read path. Saves
+    /// once if anything was filled. Shared by `recall_semantic` + `recall_hybrid`.
+    fn backfill_embeddings(&mut self) -> io::Result<()> {
         let mut dirty = false;
         for o in self.file.observations.iter_mut() {
             if o.embedding.is_empty() {
@@ -345,16 +400,7 @@ impl MemoryStore {
         if dirty {
             self.save()?;
         }
-        let mut scored: Vec<(Observation, f32)> = self
-            .file
-            .observations
-            .iter()
-            .filter(|o| (o.workspace_hash == hash || o.kind == "fact") && o.is_active())
-            .map(|o| (o.clone(), embeddings::cosine(&query_vec, &o.embedding)))
-            .collect();
-        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        scored.truncate(limit);
-        Ok(scored)
+        Ok(())
     }
 
     /// The visible observations — excludes internal tombstone records (a
@@ -433,18 +479,10 @@ impl MemoryStore {
     /// Keyword search over `body`, recency-ranked. Embeddings land in v2.
     pub fn recall(&self, query: &str, workspace: &Path, limit: usize) -> Vec<Observation> {
         let needle = query.to_lowercase();
-        let hash = workspace_hash(workspace);
         let mut hits: Vec<&Observation> = self
-            .file
-            .observations
-            .iter()
-            .filter(|o| (o.workspace_hash == hash || o.kind == "fact") && o.is_active())
-            .filter(|o| {
-                if needle.is_empty() {
-                    return true;
-                }
-                o.body.to_lowercase().contains(&needle) || o.kind.to_lowercase().contains(&needle)
-            })
+            .candidates(workspace, TemporalScope::Now)
+            .into_iter()
+            .filter(|o| keyword_hit(o, &needle))
             .collect();
         hits.sort_by_key(|h| std::cmp::Reverse(h.ts_ms));
         hits.into_iter().take(limit).cloned().collect()
@@ -464,18 +502,10 @@ impl MemoryStore {
         as_of_ms: u64,
     ) -> Vec<Observation> {
         let needle = query.to_lowercase();
-        let hash = workspace_hash(workspace);
         let mut hits: Vec<&Observation> = self
-            .file
-            .observations
-            .iter()
-            .filter(|o| (o.workspace_hash == hash || o.kind == "fact") && o.is_valid_at(as_of_ms))
-            .filter(|o| {
-                if needle.is_empty() {
-                    return true;
-                }
-                o.body.to_lowercase().contains(&needle) || o.kind.to_lowercase().contains(&needle)
-            })
+            .candidates(workspace, TemporalScope::AsOf(as_of_ms))
+            .into_iter()
+            .filter(|o| keyword_hit(o, &needle))
             .collect();
         hits.sort_by_key(|h| std::cmp::Reverse(h.ts_ms));
         hits.into_iter().take(limit).cloned().collect()
@@ -484,13 +514,7 @@ impl MemoryStore {
     /// Top-N most-recent observations across all kinds. Used by the system-
     /// prompt injection in `build_parts` to populate `What I've learned about you`.
     pub fn top_patterns(&self, workspace: &Path, limit: usize) -> Vec<Observation> {
-        let hash = workspace_hash(workspace);
-        let mut hits: Vec<&Observation> = self
-            .file
-            .observations
-            .iter()
-            .filter(|o| (o.workspace_hash == hash || o.kind == "fact") && o.is_active())
-            .collect();
+        let mut hits = self.candidates(workspace, TemporalScope::Now);
         hits.sort_by_key(|h| std::cmp::Reverse(h.ts_ms));
         hits.into_iter().take(limit).cloned().collect()
     }
@@ -508,27 +532,15 @@ impl MemoryStore {
         workspace: &Path,
         limit: usize,
     ) -> io::Result<Vec<(Observation, f32)>> {
-        let mut dirty = false;
-        for o in self.file.observations.iter_mut() {
-            if o.embedding.is_empty() {
-                o.embedding = embeddings::embed_text(&o.body);
-                dirty = true;
-            }
-        }
-        if dirty {
-            self.save()?;
-        }
+        self.backfill_embeddings()?;
 
-        let hash = workspace_hash(workspace);
         let now = now_ms();
         let qvec = embeddings::embed_text(query);
         let qtokens = tokenize(query);
 
         let mut scored: Vec<(Observation, f32)> = self
-            .file
-            .observations
-            .iter()
-            .filter(|o| (o.workspace_hash == hash || o.kind == "fact") && o.is_active())
+            .candidates(workspace, TemporalScope::Now)
+            .into_iter()
             .map(|o| {
                 // cosine is [-1,1]; map to [0,1] so the weighted sum is sane.
                 let sem = (embeddings::cosine(&qvec, &o.embedding) + 1.0) / 2.0;
@@ -1210,6 +1222,39 @@ mod tests {
         let now = store.recall("colour", ws, 5);
         assert_eq!(now.len(), 1);
         assert!(now[0].body.contains("green"));
+    }
+
+    #[test]
+    fn candidates_scope_rule_is_uniform_across_readers() {
+        // Facts are global; non-fact observations are workspace-local. The
+        // candidates() seam owns this rule, so every reader honors it identically.
+        let dir = TempDir::new().unwrap();
+        let ws_a = dir.path().join("a");
+        let ws_b = dir.path().join("b");
+        std::fs::create_dir_all(&ws_a).unwrap();
+        std::fs::create_dir_all(&ws_b).unwrap();
+        let mut store = MemoryStore::open_at(dir.path().join("memory.json")).unwrap();
+        store.insert("fact", &ws_a, "global truth").unwrap();
+        store.insert("control_turn", &ws_a, "local-to-a action").unwrap();
+
+        // From workspace B: the fact crosses over, the workspace-local turn does not.
+        for hit in [
+            store.recall("", &ws_b, 10),
+            store.top_patterns(&ws_b, 10),
+            store
+                .recall_hybrid("truth action", &ws_b, 10)
+                .unwrap()
+                .into_iter()
+                .map(|(o, _)| o)
+                .collect(),
+        ] {
+            let bodies: Vec<String> = hit.into_iter().map(|o| o.body).collect();
+            assert!(bodies.iter().any(|b| b.contains("global truth")), "fact is global");
+            assert!(
+                !bodies.iter().any(|b| b.contains("local-to-a")),
+                "workspace-local obs must not leak across workspaces"
+            );
+        }
     }
 
     #[test]
