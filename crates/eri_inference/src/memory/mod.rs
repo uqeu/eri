@@ -481,6 +481,7 @@ pub fn tombstone(target_id: &str) -> Observation {
 /// 2. **Apply tombstones:** any `TOMBSTONE_KIND` record whose `body` names an id
 ///    suppresses that observation from the result — but the tombstone itself is
 ///    retained, so it keeps suppressing across future merges.
+///
 /// Result is sorted by `ts_ms` ascending for deterministic storage + tests.
 pub fn merge_observations(
     local: Vec<Observation>,
