@@ -24,6 +24,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod collectors;
 pub mod embeddings;
+pub mod profile;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Observation {
