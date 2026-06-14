@@ -37,6 +37,18 @@ eri to act on the user's *computer* remotely. Vercel has no native queue/worker.
 - The poll/complete endpoints are powerful → same `eri_sk_*` bearer auth, only ever the caller's
   own `user_id` rows.
 
+### Correction (verified against Sendblue docs, 2026-06-14)
+
+The original plan assumed a Stripe-style **HMAC** of the raw body. Sendblue does **not** do
+that — its webhooks carry a **shared secret you configure** (per-webhook `secret` or a
+`globalSecret`), echoed back in a request header; you verify by **constant-time comparing** it
+to `SENDBLUE_SIGNING_SECRET`, not by recomputing an HMAC. So the inbound route mirrors the
+billing webhook's *idempotency + reject-on-bad-auth shape*, but the auth check is a secret
+compare, not a signature. Inbound payload fields: `from_number`, `content`, `message_handle`
+(dedup key), `is_outbound`, `status` (`RECEIVED`), `date_sent`, `media_url`, `service`. Outbound
+sends use `sb-api-key-id` + `sb-api-secret-key` headers to `POST /api/send-message`
+(`{from_number, number, content}`) — kept in `SENDBLUE_API_KEY_ID` / `SENDBLUE_API_SECRET`.
+
 ## Alternatives rejected
 
 - **Custom Mac-mini bridge** (own the iMessage hardware): infra overhead + 2am Apple-ban debugging
