@@ -15,14 +15,13 @@
 //! `K_user` is derived via HKDF-SHA256 over a **stored per-user salt** (not the
 //! rotating bearer), so the key is stable across token rotation (ADR-0001).
 
-use std::time::Duration;
-
 use aes_gcm::aead::{Aead, KeyInit, Payload};
 use aes_gcm::{Aes256Gcm, Key, Nonce};
 use base64::Engine as _;
 use zeroize::Zeroizing;
 
 use crate::memory::Observation;
+use crate::memory::cloud::EriApiClient;
 
 /// AES-256-GCM nonce length, in bytes.
 const NONCE_LEN: usize = 12;
@@ -217,82 +216,29 @@ fn decode_download_body(json: &str) -> Result<Option<Vec<u8>>, SyncError> {
     }
 }
 
-/// Production transport: a `ureq` client against the cloud `memory_blobs` route,
-/// authenticated with the same `eri_sk_*` bearer as the rest of the API. Thin by
-/// design — all crypto + merge logic lives in [`MemorySync`]; this only moves
-/// opaque base64 bytes (the envelope shaping is the unit-tested part).
+/// Production transport for Tier-B: a thin adapter over [`EriApiClient`] (which
+/// owns the agent + base-URL + bearer + status classification) that targets the
+/// `/memory/sync` route and shapes the `{ blob_base64 }` envelope. All crypto +
+/// merge logic lives in [`MemorySync`]; this only moves opaque base64 bytes.
 pub struct HttpSyncTransport {
-    api_base: String,
-    bearer: String,
-    http: ureq::Agent,
+    client: EriApiClient,
 }
 
 impl HttpSyncTransport {
     pub fn new(api_base: impl Into<String>, bearer: impl Into<String>) -> Self {
-        let api_base = api_base.into().trim_end_matches('/').to_string();
-        // The bearer + (E2E) blob must never cross plaintext HTTP. Loud in dev
-        // (catches a misconfigured base); HTTPS is enforced for real in prod by
-        // the deployed base URL (security: L-3).
-        debug_assert!(
-            api_base.starts_with("https://") || api_base.starts_with("http://localhost"),
-            "HttpSyncTransport requires HTTPS; got: {api_base}"
-        );
-        let http = ureq::AgentBuilder::new()
-            .timeout_connect(Duration::from_secs(5))
-            .timeout(Duration::from_secs(30))
-            .build();
         Self {
-            api_base,
-            bearer: bearer.into(),
-            http,
+            client: EriApiClient::with_base(api_base, bearer),
         }
-    }
-
-    fn url(&self) -> String {
-        format!("{}{}", self.api_base, SYNC_PATH)
-    }
-
-    fn auth(&self) -> String {
-        format!("Bearer {}", self.bearer)
     }
 }
 
 impl SyncTransport for HttpSyncTransport {
     fn download(&self) -> Result<Option<Vec<u8>>, SyncError> {
-        match self
-            .http
-            .get(&self.url())
-            .set("authorization", &self.auth())
-            .call()
-        {
-            Ok(response) => {
-                let body = response
-                    .into_string()
-                    .map_err(|e| SyncError::Transport(e.to_string()))?;
-                decode_download_body(&body)
-            }
-            Err(ureq::Error::Status(status, _)) => {
-                Err(SyncError::Transport(format!("sync GET returned {status}")))
-            }
-            Err(other) => Err(SyncError::Transport(other.to_string())),
-        }
+        decode_download_body(&self.client.get(SYNC_PATH)?)
     }
 
     fn upload(&self, blob: &[u8]) -> Result<(), SyncError> {
-        let body = encode_upload_body(blob)?;
-        match self
-            .http
-            .put(&self.url())
-            .set("authorization", &self.auth())
-            .set("content-type", "application/json")
-            .send_string(&body)
-        {
-            Ok(_) => Ok(()),
-            Err(ureq::Error::Status(status, _)) => {
-                Err(SyncError::Transport(format!("sync PUT returned {status}")))
-            }
-            Err(other) => Err(SyncError::Transport(other.to_string())),
-        }
+        self.client.put_json(SYNC_PATH, &encode_upload_body(blob)?)
     }
 }
 

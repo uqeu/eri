@@ -22,6 +22,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
+pub mod cloud;
 pub mod collectors;
 pub mod embeddings;
 pub mod profile;
