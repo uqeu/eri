@@ -22,6 +22,9 @@ export type CommandStatus =
   | "done"
   | "error";
 
+/** The kind of remote turn: actuation vs a deep-memory lookup (review A). */
+export type CommandKind = "control" | "recall";
+
 const TERMINAL: ReadonlySet<CommandStatus> = new Set(["done", "error"]);
 
 export function isTerminalStatus(status: CommandStatus): boolean {
@@ -32,6 +35,9 @@ export interface CommandRow {
   id: string;
   goal: string;
   source: string;
+  /** control (actuation) or recall (deep memory lookup) — the daemon routes on
+   *  this (review A). A recall row's `goal` is a JSON {query, as_of} spec. */
+  kind: CommandKind;
   /** True when the user already confirmed this goal (review H1) — the daemon
    *  runs it pre-approved. Consumed (reset) on claim. */
   approved: boolean;
@@ -75,6 +81,8 @@ export async function enqueueCommand(input: {
   userId: string;
   source: string;
   goal: string;
+  /** Defaults to "control"; pass "recall" for a deep-memory lookup (review A). */
+  kind?: CommandKind;
   ttlMinutes?: number;
 }): Promise<{ id: string } | null> {
   const pending = await sql()<{ n: number }[]>`
@@ -87,11 +95,12 @@ export async function enqueueCommand(input: {
     return null;
   }
   const id = newCommandId();
+  const kind: CommandKind = input.kind ?? "control";
   const ttl = input.ttlMinutes ?? DEFAULT_TTL_MINUTES;
   const expiresAt = new Date(Date.now() + ttl * 60_000).toISOString();
   await sql()`
-    INSERT INTO command_queue (id, user_id, source, goal, expires_at)
-    VALUES (${id}, ${input.userId}, ${input.source}, ${input.goal}, ${expiresAt})
+    INSERT INTO command_queue (id, user_id, source, goal, kind, expires_at)
+    VALUES (${id}, ${input.userId}, ${input.source}, ${input.goal}, ${kind}, ${expiresAt})
   `;
   return { id };
 }
@@ -118,7 +127,7 @@ export async function claimNextCommand(userId: string): Promise<CommandRow | nul
       LIMIT 1
       FOR UPDATE SKIP LOCKED
     )
-    RETURNING id, goal, source, approved
+    RETURNING id, goal, source, kind, approved
   `;
   return rows[0] ?? null;
 }

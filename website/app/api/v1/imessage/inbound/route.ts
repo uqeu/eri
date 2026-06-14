@@ -124,8 +124,8 @@ function makeDeps(): InboundDeps {
     withinQuota: async (userId, tier) => (await ensureWithinQuota(userId, tier, 1000)).ok,
     loadProfile,
     runTurn: runAgentTurn,
-    enqueueComputerGoal: async (userId, goal) => {
-      const enqueued = await enqueueCommand({ userId, source: "imessage", goal });
+    enqueueComputerGoal: async (userId, goal, kind) => {
+      const enqueued = await enqueueCommand({ userId, source: "imessage", goal, kind });
       return enqueued !== null;
     },
     confirmPending,

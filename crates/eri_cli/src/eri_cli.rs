@@ -54,6 +54,7 @@ mod plugins;
 mod proactive;
 mod project;
 mod remote;
+mod remote_recall;
 mod repl;
 mod research;
 mod sandbox;

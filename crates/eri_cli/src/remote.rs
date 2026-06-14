@@ -18,16 +18,33 @@ use serde::{Deserialize, Serialize};
 
 use crate::client::Client;
 use crate::config;
+use crate::remote_recall;
 use crate::{action_log, control_agent, control_safety};
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
 
 #[derive(Deserialize)]
 struct PolledCommand {
     id: String,
     goal: String,
+    /// The kind of remote turn: `"control"` (actuation) or `"recall"` (a deep
+    /// memory lookup answered locally). Defaults to control for back-compat with
+    /// rows enqueued before the recall adapter existed (architecture review A).
+    #[serde(default = "default_kind")]
+    kind: String,
     /// True when the user already confirmed this goal from their phone (H1) —
     /// run it without re-asking. Defaults false for a fresh dispatch.
     #[serde(default)]
     approved: bool,
+}
+
+fn default_kind() -> String {
+    "control".to_string()
 }
 
 #[derive(Deserialize)]
@@ -87,9 +104,15 @@ pub async fn run_once(client: &Client, model: &str) -> Result<bool> {
     let Some(cmd) = polled.command else {
         return Ok(false);
     };
-    println!("[eri] remote goal: {}", cmd.goal);
+    println!("[eri] remote {} goal: {}", cmd.kind, cmd.goal);
 
-    let (status, result, confirm_prompt) = execute(&cmd.goal, model, cmd.approved).await;
+    // Route by turn kind: a recall is answered locally from the memory store (no
+    // control gate, no actuation agent); everything else runs the control stack.
+    let (status, result, confirm_prompt) = if cmd.kind == "recall" {
+        remote_recall::run_recall(&cmd.goal, now_ms())
+    } else {
+        execute(&cmd.goal, model, cmd.approved).await
+    };
     let _: serde_json::Value = client
         .post_json(
             "/api/v1/commands/complete",

@@ -77,13 +77,14 @@ export const RECALL_MEMORY_TOOL: ToolDef = {
 };
 
 /**
- * Frame a deep-memory lookup as a self-contained goal for the computer eri to
- * run and report back. Pure + unit-tested. The optional `asOf` becomes a plain
- * instruction; the computer side maps it onto bi-temporal `recall_as_of`.
+ * The structured payload of a `recall` command — the queue `goal` for a recall
+ * turn is this JSON (not prose), so the computer's recall adapter parses it
+ * deterministically rather than re-interpreting a sentence. `as_of` is carried
+ * verbatim; the computer maps it onto bi-temporal `recall_as_of`.
  */
-export function buildRecallGoal(query: string, asOf?: string): string {
-  const scope = asOf && asOf.trim() ? ` (as it was ${asOf.trim()})` : "";
-  return `Search my memory${scope} and text me back what you find about: ${query}`;
+export function buildRecallPayload(query: string, asOf?: string): string {
+  const scope = asOf && asOf.trim() ? asOf.trim() : undefined;
+  return JSON.stringify({ query, as_of: scope });
 }
 
 export interface AgentTurnInput {

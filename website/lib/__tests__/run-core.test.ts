@@ -1,19 +1,18 @@
 import { strict as assert } from "node:assert";
-import { buildRecallGoal, buildSystemPrompt, extractText, extractToolUses } from "../agent/run_core";
+import { buildRecallPayload, buildSystemPrompt, extractText, extractToolUses } from "../agent/run_core";
 
-// buildRecallGoal frames a deep-memory lookup as a self-contained computer goal.
+// buildRecallPayload emits the structured {query, as_of} spec the computer parses.
 {
-  const plain = buildRecallGoal("the Henderson deal");
-  assert.match(plain, /text me back/);
-  assert.match(plain, /the Henderson deal/);
-  assert.ok(!plain.includes("as it was"), "no scope clause without as_of");
+  const plain = JSON.parse(buildRecallPayload("the Henderson deal"));
+  assert.equal(plain.query, "the Henderson deal");
+  assert.equal(plain.as_of, undefined, "no scope without as_of");
 
-  const scoped = buildRecallGoal("my standup notes", "last Tuesday");
-  assert.match(scoped, /as it was last Tuesday/);
-  assert.match(scoped, /my standup notes/);
+  const scoped = JSON.parse(buildRecallPayload("my standup notes", "last Tuesday"));
+  assert.equal(scoped.query, "my standup notes");
+  assert.equal(scoped.as_of, "last Tuesday");
 
-  // Blank/whitespace as_of collapses to the plain form.
-  assert.equal(buildRecallGoal("x", "   "), buildRecallGoal("x"));
+  // Blank/whitespace as_of collapses to undefined.
+  assert.equal(buildRecallPayload("x", "   "), buildRecallPayload("x"));
 }
 
 // extractToolUses pulls only well-formed tool_use blocks.

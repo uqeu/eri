@@ -111,14 +111,15 @@ async function run() {
   }
 
   // A recall_memory tool call relays a deep-memory lookup to the computer
-  // (Tier-B is E2E — the cloud can't read it), framed as a recall goal.
+  // (Tier-B is E2E — the cloud can't read it), as a typed `recall` turn whose
+  // goal is a structured {query, as_of} spec the computer parses.
   {
-    let enqueued: { userId: string; goal: string } | null = null;
+    let enqueued: { userId: string; goal: string; kind?: string } | null = null;
     const out = await handleInbound(
       msg("what did I decide about the Henderson deal?"),
       "+1",
       deps({
-        enqueueComputerGoal: async (userId, goal) => { enqueued = { userId, goal }; return true; },
+        enqueueComputerGoal: async (userId, goal, kind) => { enqueued = { userId, goal, kind }; return true; },
         runTurn: async (input) => {
           await input.onToolCall!("recall_memory", { query: "the Henderson deal decision", as_of: "last month" });
           return { text: "Checking your memory 🌿", tokensIn: 8, tokensOut: 4, model: "claude-sonnet-4-6" };
@@ -127,8 +128,10 @@ async function run() {
     );
     assert.equal(out.branch, "answered");
     assert.equal(enqueued!.userId, "u1");
-    assert.match(enqueued!.goal, /Henderson deal decision/);
-    assert.match(enqueued!.goal, /as it was last month/);
+    assert.equal(enqueued!.kind, "recall");
+    const spec = JSON.parse(enqueued!.goal);
+    assert.equal(spec.query, "the Henderson deal decision");
+    assert.equal(spec.as_of, "last month");
   }
 
   // Only one dispatch per text: a second tool call in the same turn is refused.

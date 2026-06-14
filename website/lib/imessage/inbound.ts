@@ -13,10 +13,11 @@
 import {
   CONTROL_COMPUTER_TOOL,
   RECALL_MEMORY_TOOL,
-  buildRecallGoal,
+  buildRecallPayload,
   type TierAProfile,
   type ToolDef,
 } from "@/lib/agent/run_core";
+import type { CommandKind } from "@/lib/commands/queue";
 import { featureLocked } from "@/lib/feature_gate";
 import { isAffirmation, isNegation } from "@/lib/imessage/affirm";
 import { formatReply } from "@/lib/imessage/format";
@@ -89,9 +90,10 @@ export interface InboundDeps {
     tools?: ToolDef[];
     onToolCall?: (name: string, input: unknown) => Promise<string>;
   }): Promise<AgentTurnResultLike>;
-  /** Dispatch a goal to the user's computer (command queue). Returns false when
-   *  the user is at the outstanding-command cap. */
-  enqueueComputerGoal(userId: string, goal: string): Promise<boolean>;
+  /** Dispatch a goal to the user's computer (command queue). `kind` selects the
+   *  remote turn: "control" (actuation) or "recall" (deep memory lookup, goal is
+   *  a JSON spec). Returns false when the user is at the outstanding-command cap. */
+  enqueueComputerGoal(userId: string, goal: string, kind?: CommandKind): Promise<boolean>;
   /** Approve the user's latest awaiting-confirm command; returns its goal or null. */
   confirmPending(userId: string): Promise<{ goal: string } | null>;
   /** Cancel the user's latest awaiting-confirm command; true if there was one. */
@@ -160,9 +162,10 @@ export async function handleInbound(
       tools: [CONTROL_COMPUTER_TOOL, RECALL_MEMORY_TOOL],
       onToolCall: async (name, toolInput) => {
         if (dispatched) return "Already dispatched one task for this message; wait for it to finish.";
-        // One enqueue path so the cap + single-dispatch guard live in one place.
-        const dispatch = async (goal: string): Promise<string> => {
-          const ok = await deps.enqueueComputerGoal(user.userId, goal);
+        // One enqueue path so the cap + single-dispatch guard live in one place;
+        // `kind` routes the turn on the computer (actuation vs deep recall).
+        const dispatch = async (goal: string, kind: CommandKind): Promise<string> => {
+          const ok = await deps.enqueueComputerGoal(user.userId, goal, kind);
           if (!ok) {
             return "The user already has several tasks queued — ask them to wait for those to finish first.";
           }
@@ -172,14 +175,14 @@ export async function handleInbound(
         if (name === "control_computer") {
           const goal = (toolInput as { goal?: unknown })?.goal;
           if (typeof goal !== "string" || !goal.trim()) return "No goal was provided.";
-          return dispatch(goal.trim());
+          return dispatch(goal.trim(), "control");
         }
         if (name === "recall_memory") {
           const query = (toolInput as { query?: unknown })?.query;
           if (typeof query !== "string" || !query.trim()) return "No query was provided.";
           const asOfRaw = (toolInput as { as_of?: unknown })?.as_of;
           const asOf = typeof asOfRaw === "string" ? asOfRaw : undefined;
-          return dispatch(buildRecallGoal(query.trim(), asOf));
+          return dispatch(buildRecallPayload(query.trim(), asOf), "recall");
         }
         return `Unknown tool: ${name}`;
       },
