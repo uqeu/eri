@@ -22,6 +22,7 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+mod action_log;
 mod admin;
 mod agent;
 mod agent_cmd;
@@ -34,7 +35,6 @@ mod build_turn;
 mod chat;
 mod checkpoint;
 mod client;
-mod action_log;
 mod commands;
 mod config;
 mod control_agent;
@@ -48,11 +48,11 @@ mod local_eval;
 mod mcp_server;
 mod memory;
 mod memory_tools;
+mod phone;
 mod plan_tui;
 mod plugins;
 mod proactive;
 mod project;
-mod voice_control;
 mod repl;
 mod research;
 mod sandbox;
@@ -62,6 +62,7 @@ mod session;
 mod skills;
 mod trace;
 mod update;
+mod voice_control;
 mod workflow;
 mod worktree;
 
@@ -466,6 +467,9 @@ pub enum Command {
     /// Owner-only: per-user usage analytics.
     #[command(subcommand)]
     Admin(AdminCommand),
+    /// Link your phone so you can text eri (iMessage via Sendblue).
+    #[command(subcommand)]
+    Phone(PhoneCommand),
     /// Show the resolved .eri/config.toml defaults for this directory.
     Config,
     /// List SKILL.md skills eri can run (project + global, any agent CLI).
@@ -545,6 +549,12 @@ pub enum AdminCommand {
         #[arg(long, default_value_t = 50)]
         top: u32,
     },
+}
+
+#[derive(Subcommand, Debug, PartialEq, Eq)]
+pub enum PhoneCommand {
+    /// Mint a pairing code; text it to the eri number to link this account.
+    Link,
 }
 
 #[derive(Subcommand, Debug, PartialEq, Eq)]
@@ -820,7 +830,19 @@ async fn dispatch(cli: Cli) -> anyhow::Result<()> {
             history,
             suggest,
             goal,
-        } => run_control(&goal.join(" "), live, yes, mode, undo, history, suggest, false).await,
+        } => {
+            run_control(
+                &goal.join(" "),
+                live,
+                yes,
+                mode,
+                undo,
+                history,
+                suggest,
+                false,
+            )
+            .await
+        }
         Command::Voice {
             live,
             yes,
@@ -863,6 +885,7 @@ async fn dispatch(cli: Cli) -> anyhow::Result<()> {
         }
         Command::Init => run_init(),
         Command::Admin(AdminCommand::Usage { days, top }) => admin::usage(days, top).await,
+        Command::Phone(PhoneCommand::Link) => phone::link().await,
         Command::Config => {
             run_config();
             Ok(())
@@ -1323,7 +1346,9 @@ async fn run_control(
             let _ = l.save(p);
         }
         if recorded > 0 {
-            println!("[eri] (recorded {recorded} action(s) — `eri control --history` to review, `--undo` to reverse)");
+            println!(
+                "[eri] (recorded {recorded} action(s) — `eri control --history` to review, `--undo` to reverse)"
+            );
         }
     }
     if !summary.trim().is_empty() {
