@@ -53,6 +53,7 @@ mod plan_tui;
 mod plugins;
 mod proactive;
 mod project;
+mod remote;
 mod repl;
 mod research;
 mod sandbox;
@@ -474,6 +475,16 @@ pub enum Command {
     /// Sync memory to the cloud: Tier-B blob (cross-device) + Tier-A profile
     /// (so phone eri knows your day).
     Sync,
+    /// Run the remote-control daemon: let phone eri dispatch goals to THIS
+    /// computer (it runs them through the control stack and texts back).
+    Remote {
+        /// Inference depth for control turns: fast | thinking | auto.
+        #[arg(long, value_enum)]
+        mode: Option<Mode>,
+        /// Seconds to wait between polls when the queue is empty.
+        #[arg(long, default_value_t = 5)]
+        interval: u64,
+    },
     /// Show the resolved .eri/config.toml defaults for this directory.
     Config,
     /// List SKILL.md skills eri can run (project + global, any agent CLI).
@@ -902,6 +913,11 @@ async fn dispatch(cli: Cli) -> anyhow::Result<()> {
         Command::Admin(AdminCommand::Usage { days, top }) => admin::usage(days, top).await,
         Command::Phone(PhoneCommand::Link) => phone::link().await,
         Command::Sync => sync::run().await,
+        Command::Remote { mode, interval } => {
+            let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+            let model = model_for_mode(resolve_mode(mode, &cwd));
+            remote::serve(model, std::time::Duration::from_secs(interval)).await
+        }
         Command::Config => {
             run_config();
             Ok(())
