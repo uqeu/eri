@@ -46,6 +46,46 @@ export const CONTROL_COMPUTER_TOOL: ToolDef = {
   },
 };
 
+/**
+ * The tool phone eri uses to search the user's *deep* memory. The full memory
+ * store is Tier-B — end-to-end encrypted with the user's `K_user`, which only
+ * the computer holds — so the cloud literally cannot read it. This dispatches
+ * the lookup to the computer-resident eri (via the same command queue as
+ * control_computer); it searches the real store (hybrid + bi-temporal recall)
+ * and texts the answer back. Distinct from the Tier-A profile already in the
+ * prompt: use this only when the answer isn't in "what I know about you" above.
+ */
+export const RECALL_MEMORY_TOOL: ToolDef = {
+  name: "recall_memory",
+  description:
+    "Look something up in the user's full private memory on their computer — for specifics you don't already know from the context above ('what did I say about X', 'when did I last…', 'what was I doing last Tuesday'). Their deep memory is end-to-end encrypted and only searchable on their machine, so this dispatches the lookup there; the computer searches and texts back what it finds. You won't see the result this turn — tell them you're checking.",
+  input_schema: {
+    type: "object",
+    properties: {
+      query: {
+        type: "string",
+        description: "What to look up, in the user's voice (e.g. 'the Henderson deal notes').",
+      },
+      as_of: {
+        type: "string",
+        description:
+          "Optional time scope for what was true then ('last Tuesday', 'last month') — uses bi-temporal recall to answer about a past moment.",
+      },
+    },
+    required: ["query"],
+  },
+};
+
+/**
+ * Frame a deep-memory lookup as a self-contained goal for the computer eri to
+ * run and report back. Pure + unit-tested. The optional `asOf` becomes a plain
+ * instruction; the computer side maps it onto bi-temporal `recall_as_of`.
+ */
+export function buildRecallGoal(query: string, asOf?: string): string {
+  const scope = asOf && asOf.trim() ? ` (as it was ${asOf.trim()})` : "";
+  return `Search my memory${scope} and text me back what you find about: ${query}`;
+}
+
 export interface AgentTurnInput {
   prompt: string;
   profile?: TierAProfile | null;

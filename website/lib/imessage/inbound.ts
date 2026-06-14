@@ -10,7 +10,13 @@
  * send, log.
  */
 
-import { CONTROL_COMPUTER_TOOL, type TierAProfile, type ToolDef } from "@/lib/agent/run_core";
+import {
+  CONTROL_COMPUTER_TOOL,
+  RECALL_MEMORY_TOOL,
+  buildRecallGoal,
+  type TierAProfile,
+  type ToolDef,
+} from "@/lib/agent/run_core";
 import { featureLocked } from "@/lib/feature_gate";
 import { isAffirmation, isNegation } from "@/lib/imessage/affirm";
 import { formatReply } from "@/lib/imessage/format";
@@ -148,20 +154,34 @@ export async function handleInbound(
       profile,
       dynamicContext,
       maxTokens: 700,
-      tools: [CONTROL_COMPUTER_TOOL],
-      // When the model decides the request needs the user's machine, dispatch it
-      // to the command queue; the computer-resident eri runs it and texts back.
+      // Two relays, one queue: control_computer dispatches an action; recall_memory
+      // dispatches a deep-memory lookup (Tier-B is E2E, only the computer can read
+      // it). Both run on the user's machine and text the result back.
+      tools: [CONTROL_COMPUTER_TOOL, RECALL_MEMORY_TOOL],
       onToolCall: async (name, toolInput) => {
-        if (name !== "control_computer") return `Unknown tool: ${name}`;
         if (dispatched) return "Already dispatched one task for this message; wait for it to finish.";
-        const goal = (toolInput as { goal?: unknown })?.goal;
-        if (typeof goal !== "string" || !goal.trim()) return "No goal was provided.";
-        const ok = await deps.enqueueComputerGoal(user.userId, goal.trim());
-        if (!ok) {
-          return "The user already has several tasks queued — ask them to wait for those to finish first.";
+        // One enqueue path so the cap + single-dispatch guard live in one place.
+        const dispatch = async (goal: string): Promise<string> => {
+          const ok = await deps.enqueueComputerGoal(user.userId, goal);
+          if (!ok) {
+            return "The user already has several tasks queued — ask them to wait for those to finish first.";
+          }
+          dispatched = true;
+          return "Dispatched to the user's computer; it will run shortly and text back the result.";
+        };
+        if (name === "control_computer") {
+          const goal = (toolInput as { goal?: unknown })?.goal;
+          if (typeof goal !== "string" || !goal.trim()) return "No goal was provided.";
+          return dispatch(goal.trim());
         }
-        dispatched = true;
-        return "Dispatched to the user's computer; it will run shortly and text back the result.";
+        if (name === "recall_memory") {
+          const query = (toolInput as { query?: unknown })?.query;
+          if (typeof query !== "string" || !query.trim()) return "No query was provided.";
+          const asOfRaw = (toolInput as { as_of?: unknown })?.as_of;
+          const asOf = typeof asOfRaw === "string" ? asOfRaw : undefined;
+          return dispatch(buildRecallGoal(query.trim(), asOf));
+        }
+        return `Unknown tool: ${name}`;
       },
     });
     return {

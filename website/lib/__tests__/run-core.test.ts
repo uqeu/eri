@@ -1,5 +1,20 @@
 import { strict as assert } from "node:assert";
-import { buildSystemPrompt, extractText, extractToolUses } from "../agent/run_core";
+import { buildRecallGoal, buildSystemPrompt, extractText, extractToolUses } from "../agent/run_core";
+
+// buildRecallGoal frames a deep-memory lookup as a self-contained computer goal.
+{
+  const plain = buildRecallGoal("the Henderson deal");
+  assert.match(plain, /text me back/);
+  assert.match(plain, /the Henderson deal/);
+  assert.ok(!plain.includes("as it was"), "no scope clause without as_of");
+
+  const scoped = buildRecallGoal("my standup notes", "last Tuesday");
+  assert.match(scoped, /as it was last Tuesday/);
+  assert.match(scoped, /my standup notes/);
+
+  // Blank/whitespace as_of collapses to the plain form.
+  assert.equal(buildRecallGoal("x", "   "), buildRecallGoal("x"));
+}
 
 // extractToolUses pulls only well-formed tool_use blocks.
 {

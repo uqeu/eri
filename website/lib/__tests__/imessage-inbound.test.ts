@@ -110,6 +110,46 @@ async function run() {
     assert.deepEqual(enqueued, { userId: "u1", goal: "open Spotify" });
   }
 
+  // A recall_memory tool call relays a deep-memory lookup to the computer
+  // (Tier-B is E2E — the cloud can't read it), framed as a recall goal.
+  {
+    let enqueued: { userId: string; goal: string } | null = null;
+    const out = await handleInbound(
+      msg("what did I decide about the Henderson deal?"),
+      "+1",
+      deps({
+        enqueueComputerGoal: async (userId, goal) => { enqueued = { userId, goal }; return true; },
+        runTurn: async (input) => {
+          await input.onToolCall!("recall_memory", { query: "the Henderson deal decision", as_of: "last month" });
+          return { text: "Checking your memory 🌿", tokensIn: 8, tokensOut: 4, model: "claude-sonnet-4-6" };
+        },
+      }),
+    );
+    assert.equal(out.branch, "answered");
+    assert.equal(enqueued!.userId, "u1");
+    assert.match(enqueued!.goal, /Henderson deal decision/);
+    assert.match(enqueued!.goal, /as it was last month/);
+  }
+
+  // Only one dispatch per text: a second tool call in the same turn is refused.
+  {
+    let count = 0;
+    await handleInbound(
+      msg("open Spotify and recall my notes"),
+      "+1",
+      deps({
+        enqueueComputerGoal: async () => { count++; return true; },
+        runTurn: async (input) => {
+          await input.onToolCall!("control_computer", { goal: "open Spotify" });
+          const second = await input.onToolCall!("recall_memory", { query: "my notes" });
+          assert.match(second, /Already dispatched/);
+          return { text: "On it 🌿", tokensIn: 8, tokensOut: 4, model: "claude-sonnet-4-6" };
+        },
+      }),
+    );
+    assert.equal(count, 1, "the single-dispatch guard spans both tools");
+  }
+
   // A natural "go ahead" with a pending confirmation approves it (no model turn).
   {
     let confirmed = false;
