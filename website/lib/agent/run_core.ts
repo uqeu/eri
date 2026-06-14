@@ -93,7 +93,10 @@ export async function runAgentTurn(input: AgentTurnInput): Promise<AgentTurnResu
     body: JSON.stringify({
       model,
       max_tokens: input.maxTokens ?? DEFAULT_MAX_TOKENS,
-      system,
+      // Cache the system+profile block: it's identical across a user's texts, so
+      // prompt-caching it cuts the per-turn input cost to ~0.1x on cache hits
+      // (review M6). Anthropic requires the array form for cache_control.
+      system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
       messages: [{ role: "user", content: input.prompt }],
     }),
   });

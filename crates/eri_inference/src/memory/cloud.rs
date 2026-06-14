@@ -74,9 +74,23 @@ impl EriApiClient {
         format!("Bearer {}", self.bearer)
     }
 
+    /// Refuse to transmit the bearer (and any blob) over cleartext HTTP — a hard
+    /// runtime check in *release* too, not just the debug-only constructor assert
+    /// (security: L1). localhost is allowed for local dev.
+    fn ensure_secure(&self) -> Result<(), SyncError> {
+        if self.api_base.starts_with("https://") || self.api_base.starts_with("http://localhost") {
+            Ok(())
+        } else {
+            Err(SyncError::Transport(
+                "refusing to send credentials over insecure HTTP".to_string(),
+            ))
+        }
+    }
+
     /// GET `path`, returning the response body as a string. Non-2xx and network
     /// failures map to [`SyncError::Transport`] (status only, never the body).
     pub fn get(&self, path: &str) -> Result<String, SyncError> {
+        self.ensure_secure()?;
         match self
             .http
             .get(&self.url(path))
@@ -96,6 +110,7 @@ impl EriApiClient {
     /// PUT a JSON `body` to `path`. Non-2xx and network failures map to
     /// [`SyncError::Transport`].
     pub fn put_json(&self, path: &str, body: &str) -> Result<(), SyncError> {
+        self.ensure_secure()?;
         match self
             .http
             .put(&self.url(path))

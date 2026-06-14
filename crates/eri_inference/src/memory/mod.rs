@@ -515,10 +515,6 @@ fn format_observation_line(o: &Observation) -> String {
 /// and the local-model context tight no matter how long a user runs eri.
 const MAX_OBSERVATIONS: usize = 2_000;
 
-/// Bound the observation set to `max`, keeping eri lean. Explicit `fact`s
-/// (the user's `/remember`) are preserved; the churnier kinds are trimmed
-/// oldest-first (the tail is newest, since `insert` pushes chronologically).
-/// If facts alone exceed `max`, the oldest facts are trimmed too. Pure + tested.
 /// Kind marker for a tombstone — a record whose `body` is the id of an
 /// observation that was forgotten. Tombstones are synced so a `/forget` on one
 /// device can't be resurrected by a stale copy on another (ADR-0001).
@@ -569,6 +565,11 @@ pub fn merge_observations(local: Vec<Observation>, remote: Vec<Observation>) -> 
     out
 }
 
+/// Bound the observation set to `max`, keeping eri lean. Explicit `fact`s
+/// (the user's `/remember`) and tombstones are preserved; the churnier kinds are
+/// trimmed oldest-first (the tail is newest, since `insert` pushes
+/// chronologically). If facts alone exceed `max`, the oldest facts are trimmed
+/// too. Pure + tested.
 fn cap_observations(obs: Vec<Observation>, max: usize) -> Vec<Observation> {
     if obs.len() <= max {
         return obs;
