@@ -150,6 +150,7 @@ pub fn forget(target: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use eri_inference::memory::Visibility;
 
     fn obs(kind: &str, body: &str) -> Observation {
         Observation {
@@ -159,9 +160,7 @@ mod tests {
             workspace_hash: "h".into(),
             body: body.into(),
             embedding: Vec::new(),
-            superseded: false,
-            consolidated: false,
-            valid_to: None,
+            visibility: Visibility::Active,
         }
     }
 

@@ -11,7 +11,7 @@
 //! the existing hash-embeddings, summaries are derived from the episodes' own
 //! bodies. No model round-trip — consolidation runs on the CPU during sync.
 
-use super::{Observation, TOMBSTONE_KIND, embeddings};
+use super::{Observation, TOMBSTONE_KIND, Visibility, embeddings};
 
 /// Kind marker for a consolidated rollup — a durable fact derived from a cluster
 /// of episodic observations. Workspace-scoped (carries the cluster's
@@ -62,8 +62,7 @@ pub(crate) fn plan_consolidation(obs: &[Observation]) -> ConsolidationPlan {
     let mut groups: BTreeMap<(&str, &str), Vec<usize>> = BTreeMap::new();
     for (i, o) in obs.iter().enumerate() {
         if is_episodic(&o.kind)
-            && !o.superseded
-            && !o.consolidated
+            && matches!(o.visibility, Visibility::Active)
             && o.kind != TOMBSTONE_KIND
             && !o.embedding.is_empty()
         {
@@ -205,9 +204,7 @@ mod tests {
             workspace_hash: ws.to_string(),
             body: body.to_string(),
             embedding: embeddings::embed_text(body),
-            superseded: false,
-            consolidated: false,
-            valid_to: None,
+            visibility: Visibility::Active,
         }
     }
 
@@ -273,7 +270,7 @@ mod tests {
             ep("edit_accepted", 3, "w", r#"{"path":"src/c.tsx","summary":"x"}"#),
         ];
         for o in &mut obs {
-            o.consolidated = true;
+            o.visibility = Visibility::Consolidated;
         }
         let plan = plan_consolidation(&obs);
         assert!(plan.new_facts.is_empty(), "consolidated episodes never re-roll");

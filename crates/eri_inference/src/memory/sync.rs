@@ -245,6 +245,7 @@ impl SyncTransport for HttpSyncTransport {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::memory::Visibility;
     use std::cell::RefCell;
     use std::rc::Rc;
 
@@ -277,9 +278,7 @@ mod tests {
             workspace_hash: String::new(),
             body: body.to_string(),
             embedding: Vec::new(),
-            superseded: false,
-            consolidated: false,
-            valid_to: None,
+            visibility: Visibility::Active,
         }
     }
 

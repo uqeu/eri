@@ -31,10 +31,32 @@ pub mod profile;
 pub mod profile_sync;
 pub mod sync;
 
+/// An observation's lifecycle/visibility — one state, so the old
+/// `superseded`/`consolidated`/`valid_to` flag soup can't form illegal
+/// combinations (architecture review C). Tombstones are NOT a variant here:
+/// "is this a tombstone" is a `kind`, orthogonal to lifecycle, checked separately.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Visibility {
+    /// Surfaced by recall + the Tier-A profile right now.
+    Active,
+    /// Superseded by a newer contradicting fact (mem0/supermemory). Bi-temporal:
+    /// `valid_to` is when it stopped being true (Zep/Graphiti event-time end) —
+    /// `None` for legacy data synced before the timestamp existed. Kept in the
+    /// store + synced for history, hidden from current recall but answerable
+    /// as-of a past instant via [`recall_as_of`](MemoryStore::recall_as_of).
+    Superseded { valid_to: Option<u64> },
+    /// Folded into a durable `semantic` rollup ([`consolidation`]) — kept for
+    /// history/sync, hidden from recall so eri injects the pattern, not the
+    /// raw episodes.
+    Consolidated,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(from = "ObservationWire", into = "ObservationWire")]
 pub struct Observation {
     pub id: String,
-    /// Unix epoch milliseconds.
+    /// Unix epoch milliseconds — the bi-temporal **transaction time**
+    /// (`learned_at`); also the fact's valid-from (v1 has no event-time extraction).
     pub ts_ms: u64,
     pub kind: String,
     /// Workspace path hash (fxhash) so observations are scoped without
@@ -46,31 +68,79 @@ pub struct Observation {
     /// v2 hash-embedding of `body`. Empty vector on older observations
     /// that pre-date v2; `recall_semantic` lazily computes + persists
     /// the missing vectors so a single recall warms the cache.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub embedding: Vec<f32>,
-    /// Set when a NEWER fact superseded this one (contradiction/supersession,
-    /// mem0/supermemory). Kept in the store + synced for history, but hidden from
-    /// recall + the profile so eri never injects a stale fact alongside its
-    /// replacement (e.g. "favourite colour is blue" after you say it's green).
+    /// Lifecycle state — see [`Visibility`]. Serializes to/from the flat
+    /// `superseded`/`consolidated`/`valid_to` wire keys via [`ObservationWire`],
+    /// so already-synced Tier-B blobs stay byte-for-byte compatible.
+    pub visibility: Visibility,
+}
+
+/// The on-the-wire shape of an [`Observation`] — the flat fields exactly as they
+/// were before the [`Visibility`] enum, so cross-device sync + already-stored
+/// blobs are unaffected. Conversions normalize any inconsistent flag combo into
+/// a single valid [`Visibility`] (e.g. `valid_to: Some` with `superseded: false`
+/// becomes `Superseded`), so illegal states never survive a round-trip.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ObservationWire {
+    id: String,
+    ts_ms: u64,
+    kind: String,
+    workspace_hash: String,
+    body: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    embedding: Vec<f32>,
     #[serde(default, skip_serializing_if = "is_false")]
-    pub superseded: bool,
-    /// Set when this episodic observation has been folded into a durable
-    /// `semantic` rollup ([`consolidation`]). Like `superseded`: retained in the
-    /// store + synced for history, but hidden from recall + the profile so eri
-    /// injects the distilled pattern, not the raw episodes it came from.
+    superseded: bool,
     #[serde(default, skip_serializing_if = "is_false")]
-    pub consolidated: bool,
-    /// **Bi-temporal event-time end** (Zep/Graphiti): the moment this fact
-    /// stopped being true, in unix-ms. `None` = still valid right now. eri keeps
-    /// `ts_ms` as the *transaction time* (`learned_at` — when eri recorded it)
-    /// and the fact's *valid-from* (v1 has no event-time extraction, so a fact is
-    /// valid from when it was learned). On supersession we set `valid_to` instead
-    /// of deleting — invalidate-not-delete — so "what did I believe last Tuesday"
-    /// stays answerable via [`recall_as_of`](MemoryStore::recall_as_of).
-    /// `superseded` is the denormalized "currently invalidated" shadow of this:
-    /// kept for fast filtering + back-compat with already-synced blobs.
+    consolidated: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub valid_to: Option<u64>,
+    valid_to: Option<u64>,
+}
+
+impl From<ObservationWire> for Observation {
+    fn from(w: ObservationWire) -> Self {
+        // consolidated wins over superseded (an episode is one or the other); a
+        // recorded valid_to implies superseded even if the bool was unset.
+        let visibility = if w.consolidated {
+            Visibility::Consolidated
+        } else if w.superseded || w.valid_to.is_some() {
+            Visibility::Superseded {
+                valid_to: w.valid_to,
+            }
+        } else {
+            Visibility::Active
+        };
+        Observation {
+            id: w.id,
+            ts_ms: w.ts_ms,
+            kind: w.kind,
+            workspace_hash: w.workspace_hash,
+            body: w.body,
+            embedding: w.embedding,
+            visibility,
+        }
+    }
+}
+
+impl From<Observation> for ObservationWire {
+    fn from(o: Observation) -> Self {
+        let (superseded, consolidated, valid_to) = match o.visibility {
+            Visibility::Active => (false, false, None),
+            Visibility::Superseded { valid_to } => (true, false, valid_to),
+            Visibility::Consolidated => (false, true, None),
+        };
+        ObservationWire {
+            id: o.id,
+            ts_ms: o.ts_ms,
+            kind: o.kind,
+            workspace_hash: o.workspace_hash,
+            body: o.body,
+            embedding: o.embedding,
+            superseded,
+            consolidated,
+            valid_to,
+        }
+    }
 }
 
 fn is_false(b: &bool) -> bool {
@@ -78,32 +148,34 @@ fn is_false(b: &bool) -> bool {
 }
 
 impl Observation {
-    /// Visible to recall + the Tier-A profile *right now*: not superseded, not
-    /// consolidated, and not an internal tombstone. The single source of truth
-    /// for "should eri surface this observation today" — every recall path
-    /// filters on it. For point-in-time history use [`is_valid_at`](Self::is_valid_at).
+    /// Visible to recall + the Tier-A profile *right now*: lifecycle `Active` and
+    /// not an internal tombstone (tombstone is a `kind`, orthogonal to lifecycle).
+    /// The single source of truth for "should eri surface this today" — every
+    /// recall path filters on it. For history use [`is_valid_at`](Self::is_valid_at).
     fn is_active(&self) -> bool {
-        !self.superseded && !self.consolidated && self.kind != TOMBSTONE_KIND
+        self.kind != TOMBSTONE_KIND && matches!(self.visibility, Visibility::Active)
     }
 
     /// **Transaction time** — when eri recorded this observation (bi-temporal
-    /// `learned_at`). Currently the same field as the fact's valid-from.
+    /// `learned_at`). Currently the same instant as the fact's valid-from.
     pub fn learned_at(&self) -> u64 {
         self.ts_ms
     }
 
     /// Bi-temporal point-in-time validity: was this fact true (and known) at
-    /// `as_of`? True iff it was learned by then and not yet invalidated. A
-    /// legacy `superseded` fact with no recorded `valid_to` is treated as
-    /// invalid at every point (we can't date its invalidation), which is the
-    /// conservative choice — it never resurrects into a past-time view.
+    /// `as_of`? True iff it was learned by then and either still active or
+    /// superseded only *after* `as_of`. A `Superseded` fact with no recorded
+    /// `valid_to` (legacy) is invalid at every point — we can't date its
+    /// invalidation, so we never resurrect it into a past-time view.
     fn is_valid_at(&self, as_of: u64) -> bool {
-        if self.consolidated || self.kind == TOMBSTONE_KIND || self.ts_ms > as_of {
+        if self.kind == TOMBSTONE_KIND || self.ts_ms > as_of {
             return false;
         }
-        match self.valid_to {
-            Some(vt) => as_of < vt,
-            None => !self.superseded,
+        match &self.visibility {
+            Visibility::Active => true,
+            Visibility::Superseded { valid_to: Some(vt) } => as_of < *vt,
+            Visibility::Superseded { valid_to: None } => false,
+            Visibility::Consolidated => false,
         }
     }
 }
@@ -314,9 +386,7 @@ impl MemoryStore {
             workspace_hash: workspace_hash(workspace),
             body: body.to_string(),
             embedding: embeddings::embed_text(body),
-            superseded: false,
-            consolidated: false,
-            valid_to: None,
+            visibility: Visibility::Active,
         };
         let cloned = observation.clone();
         // Contradiction/supersession (mem0/supermemory): a new `fact` that's
@@ -592,7 +662,7 @@ impl MemoryStore {
             return Ok(0);
         }
         for i in plan.consume {
-            self.file.observations[i].consolidated = true;
+            self.file.observations[i].visibility = Visibility::Consolidated;
         }
         let created = plan.new_facts.len();
         for draft in plan.new_facts {
@@ -604,9 +674,7 @@ impl MemoryStore {
                 workspace_hash: draft.workspace_hash,
                 body: draft.body,
                 embedding,
-                superseded: false,
-                consolidated: false,
-                valid_to: None,
+                visibility: Visibility::Active,
             };
             // A fresh rollup replaces an older rollup on the same topic, so the
             // profile/recall never carry "accepts edits in src/x (3×)" twice.
@@ -656,15 +724,16 @@ const SUPERSEDE_THRESHOLD: f32 = 0.75;
 fn supersede_similar_facts(observations: &mut [Observation], new_fact: &Observation) {
     for o in observations.iter_mut() {
         if o.kind == new_fact.kind
-            && !o.superseded
+            && matches!(o.visibility, Visibility::Active)
             && !o.embedding.is_empty()
             && embeddings::cosine(&o.embedding, &new_fact.embedding) > SUPERSEDE_THRESHOLD
         {
             // Invalidate-not-delete (bi-temporal): record WHEN it stopped being
             // true (the replacement's learned_at) so the old belief stays
-            // answerable as-of a past time, and flip the denormalized shadow.
-            o.superseded = true;
-            o.valid_to = Some(new_fact.ts_ms);
+            // answerable as-of a past time.
+            o.visibility = Visibility::Superseded {
+                valid_to: Some(new_fact.ts_ms),
+            };
         }
     }
 }
@@ -778,9 +847,7 @@ pub fn tombstone(target_id: &str) -> Observation {
         workspace_hash: String::new(),
         body: target_id.to_string(),
         embedding: Vec::new(),
-        superseded: false,
-        consolidated: false,
-        valid_to: None,
+        visibility: Visibility::Active,
     }
 }
 
@@ -884,9 +951,7 @@ mod tests {
             workspace_hash: "w".to_string(),
             body: "b".to_string(),
             embedding: Vec::new(),
-            superseded: false,
-            consolidated: false,
-            valid_to: None,
+            visibility: Visibility::Active,
         }
     }
 
@@ -988,9 +1053,7 @@ mod tests {
                 workspace_hash: String::new(),
                 body: body.into(),
                 embedding,
-                superseded: false,
-                consolidated: false,
-                valid_to: None,
+                visibility: Visibility::Active,
             },
             rel,
         )
@@ -1152,32 +1215,35 @@ mod tests {
             .into_iter()
             .find(|o| o.body.contains("blue"))
             .expect("blue survives in history");
-        assert!(blue.superseded, "blue is invalidated");
         assert_eq!(
-            blue.valid_to,
-            Some(green.ts_ms),
-            "valid_to records when the belief ended"
+            blue.visibility,
+            Visibility::Superseded {
+                valid_to: Some(green.ts_ms)
+            },
+            "blue is invalidated, and valid_to records when the belief ended"
         );
     }
 
     #[test]
     fn is_valid_at_models_the_bi_temporal_interval() {
         let mut o = obs("fact", 100);
-        o.valid_to = Some(200);
+        o.visibility = Visibility::Superseded {
+            valid_to: Some(200),
+        };
         assert!(!o.is_valid_at(50), "not yet learned");
         assert!(o.is_valid_at(100), "valid from its learned_at (inclusive)");
         assert!(o.is_valid_at(150), "valid mid-interval");
         assert!(!o.is_valid_at(200), "invalid once superseded (exclusive end)");
         assert!(!o.is_valid_at(300), "invalid after");
 
-        let mut still_valid = obs("fact", 100);
-        still_valid.valid_to = None;
+        // Active (never superseded) → always valid once learned.
+        let still_valid = obs("fact", 100);
         assert!(still_valid.is_valid_at(999), "open-ended fact is always valid after learn");
 
         // Legacy: superseded with no recorded valid_to → never valid at any point
         // (we can't date its invalidation, so we don't resurrect it into history).
         let mut legacy = obs("fact", 100);
-        legacy.superseded = true;
+        legacy.visibility = Visibility::Superseded { valid_to: None };
         assert!(!legacy.is_valid_at(150));
     }
 
@@ -1194,9 +1260,9 @@ mod tests {
             workspace_hash: hash.clone(),
             body: "favourite colour is blue".into(),
             embedding: Vec::new(),
-            superseded: true,
-            consolidated: false,
-            valid_to: Some(200),
+            visibility: Visibility::Superseded {
+                valid_to: Some(200),
+            },
         });
         store.file.observations.push(Observation {
             id: "green".into(),
@@ -1205,9 +1271,7 @@ mod tests {
             workspace_hash: hash,
             body: "favourite colour is green".into(),
             embedding: Vec::new(),
-            superseded: false,
-            consolidated: false,
-            valid_to: None,
+            visibility: Visibility::Active,
         });
 
         let at_150 = store.recall_as_of("colour", ws, 5, 150);
@@ -1258,6 +1322,48 @@ mod tests {
     }
 
     #[test]
+    fn visibility_serializes_to_the_legacy_flat_wire_format() {
+        // C's contract: the Visibility enum must round-trip through the SAME flat
+        // superseded/consolidated/valid_to JSON keys, so already-synced Tier-B
+        // blobs + cross-device merges with older clients stay compatible.
+        let mut o = obs("fact", 1);
+        // Active → none of the three keys present (all skip_serializing_if).
+        let j = serde_json::to_value(&o).unwrap();
+        assert!(j.get("superseded").is_none() && j.get("consolidated").is_none() && j.get("valid_to").is_none());
+
+        o.visibility = Visibility::Superseded { valid_to: Some(42) };
+        let j = serde_json::to_value(&o).unwrap();
+        assert_eq!(j["superseded"], serde_json::json!(true));
+        assert_eq!(j["valid_to"], serde_json::json!(42));
+        assert!(j.get("consolidated").is_none());
+
+        o.visibility = Visibility::Consolidated;
+        let j = serde_json::to_value(&o).unwrap();
+        assert_eq!(j["consolidated"], serde_json::json!(true));
+        assert!(j.get("superseded").is_none());
+    }
+
+    #[test]
+    fn legacy_flat_json_deserializes_into_the_right_visibility() {
+        let base = r#"{"id":"x","ts_ms":1,"kind":"fact","workspace_hash":"w","body":"b""#;
+        let parse = |extra: &str| -> Observation {
+            serde_json::from_str(&format!("{base}{extra}}}")).unwrap()
+        };
+        // Old blob with just superseded:true (no valid_to) → undateable Superseded.
+        assert_eq!(
+            parse(r#","superseded":true"#).visibility,
+            Visibility::Superseded { valid_to: None }
+        );
+        // valid_to present but superseded omitted → still normalized to Superseded.
+        assert_eq!(
+            parse(r#","valid_to":99"#).visibility,
+            Visibility::Superseded { valid_to: Some(99) }
+        );
+        assert_eq!(parse(r#","consolidated":true"#).visibility, Visibility::Consolidated);
+        assert_eq!(parse("").visibility, Visibility::Active);
+    }
+
+    #[test]
     fn forget_removes_specific_id() {
         let (dir, mut store) = open_temp();
         let id = store.insert("fact", dir.path(), "x").unwrap().id;
@@ -1283,9 +1389,7 @@ mod tests {
             workspace_hash: String::new(),
             body: body.to_string(),
             embedding: Vec::new(),
-            superseded: false,
-            consolidated: false,
-            valid_to: None,
+            visibility: Visibility::Active,
         }
     }
 
@@ -1389,9 +1493,7 @@ mod tests {
             workspace_hash: String::new(),
             body: "forgotten-id".into(),
             embedding: Vec::new(),
-            superseded: false,
-            consolidated: false,
-            valid_to: None,
+            visibility: Visibility::Active,
         });
         store.insert("fact", dir.path(), "fresh").unwrap();
         store.prune(RetentionWindow::Day).unwrap();
@@ -1430,9 +1532,7 @@ mod tests {
             workspace_hash: workspace_hash(dir.path()),
             body: "ancient".into(),
             embedding: Vec::new(),
-            superseded: false,
-            consolidated: false,
-            valid_to: None,
+            visibility: Visibility::Active,
         });
         store.insert("fact", dir.path(), "fresh").unwrap();
         store.prune(RetentionWindow::Day).unwrap();
@@ -1496,9 +1596,7 @@ mod tests {
             workspace_hash: workspace_hash(dir.path()),
             body: "I prefer dark themes".into(),
             embedding: Vec::new(),
-            superseded: false,
-            consolidated: false,
-            valid_to: None,
+            visibility: Visibility::Active,
         });
         let hits = store.recall_semantic("dark themes", dir.path(), 1).unwrap();
         assert_eq!(hits.len(), 1);

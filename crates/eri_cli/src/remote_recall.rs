@@ -122,6 +122,7 @@ pub fn run_recall(goal_json: &str, now_ms: u64) -> (&'static str, Option<String>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use eri_inference::memory::Visibility;
 
     const NOW: u64 = 1_000_000_000_000;
 
@@ -157,9 +158,7 @@ mod tests {
             workspace_hash: String::new(),
             body: body.into(),
             embedding: Vec::new(),
-            superseded: false,
-            consolidated: false,
-            valid_to: None,
+            visibility: Visibility::Active,
         }
     }
 

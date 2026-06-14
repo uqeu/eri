@@ -184,6 +184,7 @@ fn truncate(s: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::memory::Visibility;
 
     fn o(kind: &str, ts_ms: u64, body: &str) -> Observation {
         Observation {
@@ -193,9 +194,7 @@ mod tests {
             workspace_hash: String::new(),
             body: body.to_string(),
             embedding: Vec::new(),
-            superseded: false,
-            consolidated: false,
-            valid_to: None,
+            visibility: Visibility::Active,
         }
     }
 
