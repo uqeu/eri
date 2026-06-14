@@ -34,9 +34,18 @@ export async function sendMessage(to: string, content: string): Promise<SendResu
   return { ok: response.ok, status: response.status };
 }
 
-/** Send an ordered set of reply chunks (from `formatReply`), best-effort. */
-export async function sendReply(to: string, chunks: string[]): Promise<void> {
+/**
+ * Send an ordered set of reply chunks (from `formatReply`). Returns true only if
+ * EVERY chunk was accepted by Sendblue — a dropped chunk (4xx/5xx, returned not
+ * thrown) must be visible to the caller so it can avoid completing the dedup
+ * lease and let the retry re-send (Phase 1 review H4). Stops at the first failure
+ * so the user never gets a later chunk without an earlier one.
+ */
+export async function sendReply(to: string, chunks: string[]): Promise<boolean> {
   for (const chunk of chunks) {
-    if (chunk.trim()) await sendMessage(to, chunk);
+    if (!chunk.trim()) continue;
+    const result = await sendMessage(to, chunk);
+    if (!result.ok) return false;
   }
+  return true;
 }

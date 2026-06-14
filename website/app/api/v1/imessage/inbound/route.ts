@@ -1,43 +1,32 @@
 // POST /api/v1/imessage/inbound — the Sendblue webhook for phone eri (ADR-0002).
 //
-// The full flow when you text the eri number:
-//   1. verify Sendblue's shared secret (constant-time) — reject otherwise
-//   2. dedup on message_handle (retries never double-reply / double-meter)
-//   3. if the text is a pairing code → bind + verify the number, confirm
-//   4. resolve the verified user; unknown number → "run `eri phone link`"
-//   5. gate phoneEri (Pro+) + quota
-//   6. load the Tier-A profile, run ONE bounded turn, text the reply back
+// Transport only — the decision lives in `handleInbound` (lib/imessage/inbound).
+// The flow:
+//   1. verify Sendblue's shared secret (constant-time) — 401 otherwise
+//   2. parse; skip our own outbound echoes
+//   3. CLAIM a processing lease on message_handle (review C1): a true duplicate
+//      (already completed) is skipped; a stale incomplete one is reclaimed
+//   4. handleInbound decides the reply + what to meter
+//   5. AWAIT the usage write (review C2 — a dangling promise dies on Vercel)
+//   6. send; if Sendblue drops it (review H4) RELEASE the lease + 500 so the
+//      retry re-sends; on success COMPLETE the lease
+//   7. one structured log line per request (review H3)
 //
-// Always returns 200 (with a friendly text) on app-level problems so Sendblue
-// doesn't retry into a loop; only auth/parse failures return 4xx.
+// On any infra failure the lease is released and we 500 so Sendblue retries;
+// a model failure is already turned into a friendly reply inside handleInbound.
 
 import { NextResponse } from "next/server";
 import { decryptAtRest } from "@/lib/crypto/server_encryption";
 import { sql } from "@/lib/db";
-import { featureLocked } from "@/lib/feature_gate";
 import { runAgentTurn, type TierAProfile } from "@/lib/agent/run_core";
-import { formatReply } from "@/lib/imessage/format";
-import {
-  consumePairing,
-  extractPairingCode,
-  normalizeE164,
-  resolveUserByPhone,
-} from "@/lib/imessage/identity";
+import { handleInbound, type InboundDeps } from "@/lib/imessage/inbound";
+import { consumePairing, normalizeE164, resolveUserByPhone } from "@/lib/imessage/identity";
 import { sendReply } from "@/lib/imessage/provider";
 import { DEFAULT_SIGNING_HEADER, parseInbound, verifySendblueSecret } from "@/lib/imessage/webhook";
 import { ensureWithinQuota, recordUsage } from "@/lib/usage/quota";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-const NOT_LINKED =
-  "Hey! I don't recognize this number yet 🌿 Run `eri phone link` on your computer and text me the code it gives you to connect.";
-const LINKED =
-  'You\'re linked! 🌿 Text me anything — I know your day. Try "what was I working on?"';
-const LOCKED = "Texting with eri is a Pro+ feature — upgrade at tryeri.ca to chat with me here.";
-const OVER_QUOTA =
-  "You're out of eri credits for this cycle — they reset next period, or upgrade at tryeri.ca.";
-const ERRORED = "Sorry — I hit a snag answering that. Try me again in a sec 🌿";
 
 export async function POST(request: Request): Promise<Response> {
   const raw = await request.text();
@@ -58,84 +47,86 @@ export async function POST(request: Request): Promise<Response> {
   if (!msg) return NextResponse.json({ error: "bad_payload" }, { status: 400 });
   if (msg.isOutbound) return NextResponse.json({ ok: true, skipped: "outbound" });
 
-  // Idempotency — only the first delivery of a handle proceeds.
-  const fresh = await sql()<{ message_handle: string }[]>`
-    INSERT INTO imessage_inbound (message_handle) VALUES (${msg.messageHandle})
-    ON CONFLICT (message_handle) DO NOTHING
-    RETURNING message_handle
-  `;
-  if (fresh.length === 0) return NextResponse.json({ ok: true, skipped: "duplicate" });
-
   const e164 = normalizeE164(msg.fromNumber);
   if (!e164) return NextResponse.json({ ok: true, skipped: "bad_number" });
 
-  // Pairing: a text that's just a code binds + verifies this number.
-  const code = extractPairingCode(msg.content);
-  if (code) {
-    const paired = await consumePairing(code, e164);
-    if (paired) {
-      await safeSend(e164, [LINKED]);
-      return NextResponse.json({ ok: true, paired: true });
-    }
-    // Not a real code — fall through (a normal message can look code-shaped).
+  // Claim the lease. New handle, or one whose prior attempt is incomplete AND
+  // stale (the function was killed), wins; a completed handle is a true duplicate.
+  const claimed = await sql()<{ message_handle: string }[]>`
+    INSERT INTO imessage_inbound (message_handle, received_at)
+    VALUES (${msg.messageHandle}, now())
+    ON CONFLICT (message_handle) DO UPDATE SET received_at = now()
+      WHERE imessage_inbound.completed_at IS NULL
+        AND imessage_inbound.received_at < now() - interval '2 minutes'
+    RETURNING message_handle
+  `;
+  if (claimed.length === 0) {
+    return NextResponse.json({ ok: true, skipped: "duplicate" });
   }
 
-  const user = await resolveUserByPhone(e164);
-  if (!user) {
-    await safeSend(e164, [NOT_LINKED]);
-    return NextResponse.json({ ok: true, linked: false });
-  }
-  if (featureLocked(user.tier, "phoneEri")) {
-    await safeSend(e164, [LOCKED]);
-    return NextResponse.json({ ok: true, locked: true });
-  }
-
-  const quota = await ensureWithinQuota(user.userId, user.tier, 1000);
-  if (!quota.ok) {
-    await safeSend(e164, [OVER_QUOTA]);
-    return NextResponse.json({ ok: true, over_quota: true });
-  }
-
-  const { profile, dynamicContext } = await loadProfile(user.userId);
-
-  const started = Date.now();
-  let replyText: string;
-  let tokensIn = 0;
-  let tokensOut = 0;
-  let status: "ok" | "error" = "ok";
   try {
-    const turn = await runAgentTurn({
-      prompt: msg.content,
-      profile,
-      dynamicContext,
-      maxTokens: 700,
+    const outcome = await handleInbound(msg, e164, makeDeps());
+
+    // Meter BEFORE responding — the tokens were spent whether or not the send
+    // lands, and a fire-and-forget write would be killed on Vercel.
+    if (outcome.meter) {
+      await recordUsage({
+        user_id: outcome.meter.userId,
+        provider: "anthropic",
+        model: outcome.meter.model,
+        intent: "imessage",
+        tokens_in: outcome.meter.tokensIn,
+        tokens_out: outcome.meter.tokensOut,
+        cost_usd_micros: 0,
+        latency_ms: outcome.meter.latencyMs,
+        status: outcome.meter.status,
+      }).catch((e) => logEvent("imessage.meter_failed", { handle: msg.messageHandle, error: errMsg(e) }));
+    }
+
+    const sent = await sendReply(e164, outcome.replyChunks);
+    if (!sent) {
+      // Sendblue dropped the reply — release the lease so the retry re-sends.
+      await releaseLease(msg.messageHandle);
+      logEvent("imessage.send_failed", { handle: msg.messageHandle, branch: outcome.branch });
+      return NextResponse.json({ error: "send_failed" }, { status: 502 });
+    }
+
+    await completeLease(msg.messageHandle);
+    logEvent("imessage.handled", {
+      handle: msg.messageHandle,
+      branch: outcome.branch,
+      userId: outcome.meter?.userId ?? null,
+      tokensIn: outcome.meter?.tokensIn ?? 0,
+      tokensOut: outcome.meter?.tokensOut ?? 0,
+      latencyMs: outcome.meter?.latencyMs ?? null,
     });
-    replyText = turn.text;
-    tokensIn = turn.tokensIn;
-    tokensOut = turn.tokensOut;
+    return NextResponse.json({ ok: true, branch: outcome.branch });
   } catch (err) {
-    console.error("imessage.turn_failed", err instanceof Error ? err.message : String(err));
-    replyText = ERRORED;
-    status = "error";
+    // Infra failure (DB, etc.) — release the lease and 500 so Sendblue retries.
+    await releaseLease(msg.messageHandle).catch(() => {});
+    logEvent("imessage.error", { handle: msg.messageHandle, error: errMsg(err) });
+    return NextResponse.json({ error: "internal" }, { status: 500 });
   }
+}
 
-  // Meter against the same monthly bucket as everything else (intent=imessage).
-  recordUsage({
-    user_id: user.userId,
-    provider: "anthropic",
-    model: "claude-sonnet-4-6",
-    intent: "imessage",
-    tokens_in: tokensIn,
-    tokens_out: tokensOut,
-    cost_usd_micros: 0,
-    latency_ms: Date.now() - started,
-    status,
-  }).catch((e) =>
-    console.error("imessage.record_usage_failed", e instanceof Error ? e.message : String(e)),
-  );
+/** Wire the real DB + model behind the orchestrator's injected-deps seam. */
+function makeDeps(): InboundDeps {
+  return {
+    consumePairing,
+    resolveUserByPhone,
+    withinQuota: async (userId, tier) => (await ensureWithinQuota(userId, tier, 1000)).ok,
+    loadProfile,
+    runTurn: runAgentTurn,
+    now: () => Date.now(),
+  };
+}
 
-  await safeSend(e164, formatReply(replyText));
-  return NextResponse.json({ ok: true });
+async function completeLease(handle: string): Promise<void> {
+  await sql()`UPDATE imessage_inbound SET completed_at = now() WHERE message_handle = ${handle}`;
+}
+
+async function releaseLease(handle: string): Promise<void> {
+  await sql()`DELETE FROM imessage_inbound WHERE message_handle = ${handle} AND completed_at IS NULL`;
 }
 
 /** Load + decrypt the caller's Tier-A profile; missing/undecryptable → no context. */
@@ -155,16 +146,16 @@ async function loadProfile(
       dynamicContext: decryptAtRest(Buffer.from(row.dynamic_context_enc), userId),
     };
   } catch {
-    console.error("imessage.profile_decrypt_failed", { userId });
+    logEvent("imessage.profile_decrypt_failed", { userId });
     return { profile: null, dynamicContext: "" };
   }
 }
 
-/** Send without letting a Sendblue hiccup turn into a 500 (would trigger retries). */
-async function safeSend(to: string, chunks: string[]): Promise<void> {
-  try {
-    await sendReply(to, chunks);
-  } catch (e) {
-    console.error("imessage.send_failed", e instanceof Error ? e.message : String(e));
-  }
+function errMsg(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
+
+/** One structured JSON line per event — greppable in the Vercel logs (review H3). */
+function logEvent(event: string, fields: Record<string, unknown>): void {
+  console.log(JSON.stringify({ event, ...fields }));
 }
