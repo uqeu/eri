@@ -27,7 +27,9 @@ const securityHeaders = [
       "object-src 'none'",
       // Next.js needs inline/eval for its runtime; scope to scripts only.
       "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
-      "style-src 'self' 'unsafe-inline'",
+      // Allow the Google Fonts stylesheet (Funnel Display); the font files
+      // themselves are covered by font-src's `https:`.
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
       "img-src 'self' data: blob: https:",
       "font-src 'self' data: https:",
       "connect-src 'self' https://api.anthropic.com https://api.openai.com https://generativelanguage.googleapis.com https://api.inceptionlabs.ai https://api.deepseek.com",

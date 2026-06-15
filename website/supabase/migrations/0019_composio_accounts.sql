@@ -21,3 +21,9 @@ create table if not exists composio_accounts (
 
 create index if not exists composio_accounts_user_idx
   on composio_accounts (user_id);
+
+-- Lock it down: RLS on with no policies, so the table is NOT reachable via the
+-- public anon/authenticated PostgREST API. The app reaches it only through its
+-- privileged server connection (service role), which bypasses RLS — same posture
+-- as the other server-owned tables (command_queue, memory_blobs, …).
+alter table composio_accounts enable row level security;
