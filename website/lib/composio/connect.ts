@@ -7,7 +7,11 @@
  * keeps only transport (auth, tier gate, JSON).
  */
 
-import { isValidToolkit, type ConnectionStatus } from "@/lib/composio/accounts";
+import {
+  isValidToolkit,
+  type ComposioAccountRow,
+  type ConnectionStatus,
+} from "@/lib/composio/accounts";
 
 export type ConnectBranch = "ok" | "invalid_toolkit" | "composio_error";
 
@@ -48,4 +52,52 @@ export async function handleConnect(
   } catch {
     return { branch: "composio_error" };
   }
+}
+
+export interface RefreshDeps {
+  list(userId: string): Promise<ComposioAccountRow[]>;
+  status(connectedAccountId: string): Promise<ConnectionStatus>;
+  record(input: {
+    userId: string;
+    toolkit: string;
+    connectedAccountId: string | null;
+    status: ConnectionStatus;
+  }): Promise<void>;
+}
+
+/**
+ * List the user's connections, **refreshing any still-`pending` ones from
+ * Composio** and persisting the change. Composio's connect is hosted-OAuth: the
+ * user authorizes on Composio's page and there's no callback to our backend, so
+ * a row would otherwise sit `pending` forever. This is the polling model that
+ * actually drives `pending → active` (architecture review #3). A status fetch
+ * that throws leaves the row as-is (transient — keep showing pending).
+ */
+export async function listFreshConnections(
+  userId: string,
+  deps: RefreshDeps,
+): Promise<ComposioAccountRow[]> {
+  const rows = await deps.list(userId);
+  return Promise.all(
+    rows.map(async (row) => {
+      if (row.status !== "pending" || !row.connectedAccountId) {
+        return row;
+      }
+      let fresh: ConnectionStatus;
+      try {
+        fresh = await deps.status(row.connectedAccountId);
+      } catch {
+        return row;
+      }
+      if (fresh !== row.status) {
+        await deps.record({
+          userId,
+          toolkit: row.toolkit,
+          connectedAccountId: row.connectedAccountId,
+          status: fresh,
+        });
+      }
+      return { ...row, status: fresh };
+    }),
+  );
 }

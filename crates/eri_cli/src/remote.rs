@@ -71,32 +71,60 @@ struct CompleteRequest<'a> {
     tokens_out: u64,
 }
 
+/// What to post back for a finished remote turn: the queue status, the relayed
+/// text (or the confirmation prompt), and the tokens it cost.
+struct CommandOutcome {
+    status: &'static str,
+    result: Option<String>,
+    confirm_prompt: Option<String>,
+    usage: crate::control_turn::TokenUsage,
+}
+
+impl CommandOutcome {
+    /// A locally-answered or error outcome with no cloud cost.
+    fn free(status: &'static str, result: Option<String>) -> Self {
+        CommandOutcome {
+            status,
+            result,
+            confirm_prompt: None,
+            usage: crate::control_turn::TokenUsage::default(),
+        }
+    }
+}
+
 /// Map a control run's result + whether a confirmation was needed onto the queue
 /// status + payload + the tokens it cost. A risky action (confirm requested)
 /// ALWAYS becomes `awaiting_confirm` — never reported as `done` — but the tokens
 /// already spent reaching it are still metered. Pure + unit-tested.
-fn outcome(
-    result: Result<control_agent::ControlRun>,
-    confirm_prompt: Option<String>,
-) -> (
-    &'static str,
-    Option<String>,
-    Option<String>,
-    crate::control_turn::TokenUsage,
-) {
+fn outcome(result: Result<control_agent::ControlRun>, confirm_prompt: Option<String>) -> CommandOutcome {
     // Tokens spent before this point are billed regardless of which branch wins.
     let usage = match &result {
         Ok(run) => run.usage,
         Err(_) => crate::control_turn::TokenUsage::default(),
     };
     if let Some(prompt) = confirm_prompt {
-        return ("awaiting_confirm", None, Some(prompt), usage);
+        return CommandOutcome {
+            status: "awaiting_confirm",
+            result: None,
+            confirm_prompt: Some(prompt),
+            usage,
+        };
     }
     match result {
-        Ok(run) => ("done", Some(run.text), None, usage),
+        Ok(run) => CommandOutcome {
+            status: "done",
+            result: Some(run.text),
+            confirm_prompt: None,
+            usage,
+        },
         // Cap the error so an internal detail (paths, endpoint dumps) can't be
         // relayed verbatim to the user's phone (review L3).
-        Err(e) => ("error", Some(sanitize_error(&e.to_string())), None, usage),
+        Err(e) => CommandOutcome {
+            status: "error",
+            result: Some(sanitize_error(&e.to_string())),
+            confirm_prompt: None,
+            usage,
+        },
     }
 }
 
@@ -126,22 +154,28 @@ pub async fn run_once(client: &Client, model: &str) -> Result<bool> {
     // Route by turn kind: a recall is answered locally from the memory store (no
     // control gate, no actuation agent, $0 cloud tokens); everything else runs
     // the control stack and reports the tokens it spent.
-    let (status, result, confirm_prompt, usage) = if cmd.kind == "recall" {
-        let (s, r, p) = remote_recall::run_recall(&cmd.goal, now_ms());
-        (s, r, p, crate::control_turn::TokenUsage::default())
+    let outcome = if cmd.kind == "recall" {
+        let (status, result, confirm_prompt) = remote_recall::run_recall(&cmd.goal, now_ms());
+        CommandOutcome {
+            status,
+            result,
+            confirm_prompt,
+            usage: crate::control_turn::TokenUsage::default(),
+        }
     } else {
         execute(&cmd.goal, model, cmd.approved).await
     };
+    let status = outcome.status;
     let _: serde_json::Value = client
         .post_json(
             "/api/v1/commands/complete",
             &CompleteRequest {
                 id: &cmd.id,
-                status,
-                result,
-                confirm_prompt,
-                tokens_in: usage.input,
-                tokens_out: usage.output,
+                status: outcome.status,
+                result: outcome.result,
+                confirm_prompt: outcome.confirm_prompt,
+                tokens_in: outcome.usage.input,
+                tokens_out: outcome.usage.output,
             },
         )
         .await
@@ -154,16 +188,7 @@ pub async fn run_once(client: &Client, model: &str) -> Result<bool> {
 /// go-ahead from their phone) it runs with auto-confirm — risky actions execute,
 /// but sensitive-action REFUSALS and the app denylist still hold. Otherwise it's
 /// the never-confirm remote gate that bounces risky actions back to the phone.
-async fn execute(
-    goal: &str,
-    model: &str,
-    approved: bool,
-) -> (
-    &'static str,
-    Option<String>,
-    Option<String>,
-    crate::control_turn::TokenUsage,
-) {
+async fn execute(goal: &str, model: &str, approved: bool) -> CommandOutcome {
     // Load the store for its app DENYLIST, but build a REMOTE gate: a permission
     // granted at the keyboard does NOT auto-run a risky action unattended; every
     // risky action bounces to the phone (security C1). Once the user has
@@ -214,13 +239,9 @@ async fn execute(
         }
         None => {
             // No live actuation endpoint — report rather than silently no-op.
-            return (
+            return CommandOutcome::free(
                 "error",
-                Some(
-                    "this computer isn't reachable for control (the eri app isn't running)".into(),
-                ),
-                None,
-                crate::control_turn::TokenUsage::default(),
+                Some("this computer isn't reachable for control (the eri app isn't running)".into()),
             );
         }
     };
@@ -263,31 +284,31 @@ mod tests {
     fn a_risky_goal_becomes_awaiting_confirm_even_if_the_run_returns_ok() {
         // Even parked at awaiting_confirm, the tokens already spent reaching the
         // risky action are reported so remote compute is still metered (M4).
-        let (status, result, prompt, usage) = outcome(
+        let o = outcome(
             Ok(run("partial", 120, 40)),
             Some("eri wants to: send an email".into()),
         );
-        assert_eq!(status, "awaiting_confirm");
-        assert!(result.is_none());
-        assert_eq!(prompt.as_deref(), Some("eri wants to: send an email"));
-        assert_eq!(usage, TokenUsage { input: 120, output: 40 });
+        assert_eq!(o.status, "awaiting_confirm");
+        assert!(o.result.is_none());
+        assert_eq!(o.confirm_prompt.as_deref(), Some("eri wants to: send an email"));
+        assert_eq!(o.usage, TokenUsage { input: 120, output: 40 });
     }
 
     #[test]
     fn a_clean_run_is_done_with_the_summary_and_its_tokens() {
-        let (status, result, prompt, usage) = outcome(Ok(run("opened Spotify", 200, 80)), None);
-        assert_eq!(status, "done");
-        assert_eq!(result.as_deref(), Some("opened Spotify"));
-        assert!(prompt.is_none());
-        assert_eq!(usage, TokenUsage { input: 200, output: 80 });
+        let o = outcome(Ok(run("opened Spotify", 200, 80)), None);
+        assert_eq!(o.status, "done");
+        assert_eq!(o.result.as_deref(), Some("opened Spotify"));
+        assert!(o.confirm_prompt.is_none());
+        assert_eq!(o.usage, TokenUsage { input: 200, output: 80 });
     }
 
     #[test]
     fn a_failed_run_is_error_with_the_reason_and_zero_tokens() {
-        let (status, result, prompt, usage) = outcome(Err(anyhow::anyhow!("app not found")), None);
-        assert_eq!(status, "error");
-        assert!(result.unwrap().contains("app not found"));
-        assert!(prompt.is_none());
-        assert_eq!(usage, TokenUsage::default());
+        let o = outcome(Err(anyhow::anyhow!("app not found")), None);
+        assert_eq!(o.status, "error");
+        assert!(o.result.unwrap().contains("app not found"));
+        assert!(o.confirm_prompt.is_none());
+        assert_eq!(o.usage, TokenUsage::default());
     }
 }

@@ -1,7 +1,8 @@
 import { strict as assert } from "node:assert";
 import { isValidToolkit } from "../composio/accounts";
 import { composioMcpUrl, normalizeStatus } from "../composio/client";
-import { handleConnect, type ConnectDeps } from "../composio/connect";
+import { handleConnect, listFreshConnections, type ConnectDeps, type RefreshDeps } from "../composio/connect";
+import type { ComposioAccountRow } from "../composio/accounts";
 
 async function run() {
   // isValidToolkit: strict slug allowlist.
@@ -78,6 +79,51 @@ async function run() {
     const out = await handleConnect("u1", "gmail", deps);
     assert.equal(out.branch, "composio_error");
     assert.equal(out.redirectUrl, undefined);
+  }
+
+  // listFreshConnections — refreshes pending accounts so they flip to active.
+  {
+    const rows: ComposioAccountRow[] = [
+      { toolkit: "gmail", connectedAccountId: "ca_1", status: "pending" },
+      { toolkit: "github", connectedAccountId: "ca_2", status: "active" },
+      { toolkit: "slack", connectedAccountId: null, status: "pending" },
+    ];
+    const recorded: unknown[] = [];
+    const deps: RefreshDeps = {
+      list: async () => rows,
+      status: async (id) => (id === "ca_1" ? "active" : "error"),
+      record: async (input) => {
+        recorded.push(input);
+      },
+    };
+    const out = await listFreshConnections("u1", deps);
+    // gmail refreshed pending→active and persisted; github untouched (not pending);
+    // slack untouched (no connectedAccountId to query).
+    assert.equal(out.find((c) => c.toolkit === "gmail")?.status, "active");
+    assert.equal(out.find((c) => c.toolkit === "github")?.status, "active");
+    assert.equal(out.find((c) => c.toolkit === "slack")?.status, "pending");
+    assert.equal(recorded.length, 1, "only the changed gmail row is persisted");
+    assert.deepEqual(recorded[0], {
+      userId: "u1",
+      toolkit: "gmail",
+      connectedAccountId: "ca_1",
+      status: "active",
+    });
+  }
+
+  // A transient status-fetch failure leaves the row showing pending (not error).
+  {
+    const deps: RefreshDeps = {
+      list: async () => [{ toolkit: "gmail", connectedAccountId: "ca_1", status: "pending" }],
+      status: async () => {
+        throw new Error("composio 503");
+      },
+      record: async () => {
+        throw new Error("should not record on a fetch failure");
+      },
+    };
+    const out = await listFreshConnections("u1", deps);
+    assert.equal(out[0].status, "pending");
   }
 
   // eslint-disable-next-line no-console

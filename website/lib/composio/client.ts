@@ -78,7 +78,11 @@ export class HttpComposioClient implements ComposioClient {
     const connectedAccountId = body.id;
     const redirectUrl = body.redirect_url ?? body.redirectUrl;
     if (!connectedAccountId || !redirectUrl) {
-      throw new Error("composio connect returned no redirect");
+      // Name the fields we actually saw so a v3 API drift is diagnosable, not a
+      // silent generic failure (review 2a).
+      throw new Error(
+        `composio connect returned no redirect (keys: ${Object.keys(body).join(",") || "none"})`,
+      );
     }
     return { connectedAccountId, redirectUrl };
   }
@@ -91,7 +95,15 @@ export class HttpComposioClient implements ComposioClient {
     );
     if (!res.ok) return "error";
     const body = (await res.json()) as ConnectedAccountResponse;
-    return normalizeStatus(body.status);
+    const status = normalizeStatus(body.status);
+    // An unrecognized status string (a future Composio enum value) maps to
+    // "error" — surface it so it's diagnosable, not a silent broken account (2c).
+    if (status === "error" && body.status) {
+      console.log(
+        JSON.stringify({ event: "composio.unknown_status", status: body.status }),
+      );
+    }
+    return status;
   }
 
   mcpUrl(userId: string): string {

@@ -20,6 +20,14 @@ const WEEK_MS: u64 = 7 * DAY_MS;
 const MONTH_MS: u64 = 30 * DAY_MS;
 const YEAR_MS: u64 = 365 * DAY_MS;
 
+/// Kinds whose body is user-narrated prose, so a time cue can be extracted from
+/// it. Today only explicit `fact`s; listed here explicitly so a future prose kind
+/// (a `preference`, a `goal`) opts in at one place instead of being silently
+/// skipped by a hard-coded `== "fact"` at the call site (review g).
+pub fn is_prose_kind(kind: &str) -> bool {
+    matches!(kind, "fact")
+}
+
 /// Extract the instant a fact *became true* from its prose, or `None` when there's
 /// no clear time cue. Recognizes:
 ///   - `<n> <unit> ago` — n a digit or word-number (`a`/`an`/`one`…`twelve`,
@@ -176,6 +184,18 @@ mod tests {
         assert_eq!(extract_valid_from("I prefer dark mode and tabs", NOW), None);
         assert_eq!(extract_valid_from("I have 3 cats", NOW), None); // 3 not followed by a unit+ago
         assert_eq!(extract_valid_from("", NOW), None);
+    }
+
+    #[test]
+    fn bare_numbers_are_not_mistaken_for_dates() {
+        // A 4-digit number is only a date when "in" directly precedes it — so
+        // object ids / model years / counts don't get mistaken for valid_from
+        // (review f). The "<n> <unit> ago" form likewise needs the unit + "ago".
+        assert_eq!(extract_valid_from("I drive a 2015 model car", NOW), None);
+        assert_eq!(extract_valid_from("my desk is in room 2048", NOW), None);
+        assert_eq!(extract_valid_from("I bought 5 monitors", NOW), None);
+        // But a genuine "in <year>" cue still resolves.
+        assert!(extract_valid_from("I started the company in 2021", NOW).is_some());
     }
 
     #[test]

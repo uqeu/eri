@@ -5,7 +5,9 @@
 
 import { NextResponse } from "next/server";
 import { authenticateApiBearer } from "@/lib/auth/api_tokens";
-import { listConnections } from "@/lib/composio/accounts";
+import { listConnections, upsertConnection } from "@/lib/composio/accounts";
+import { HttpComposioClient } from "@/lib/composio/client";
+import { listFreshConnections } from "@/lib/composio/connect";
 import { featureLocked } from "@/lib/feature_gate";
 
 export const runtime = "nodejs";
@@ -19,6 +21,13 @@ export async function GET(request: Request): Promise<Response> {
   if (featureLocked(auth.user.tier, "mcp")) {
     return NextResponse.json({ error: "tier_locked", required: "pro_plus" }, { status: 402 });
   }
-  const connections = await listConnections(auth.user.id);
+  // Refresh still-pending accounts from Composio so a connection authorized on
+  // its hosted page actually flips to active (review #3 — no backend callback).
+  const client = new HttpComposioClient();
+  const connections = await listFreshConnections(auth.user.id, {
+    list: listConnections,
+    status: (id) => client.connectionStatus(id),
+    record: upsertConnection,
+  });
   return NextResponse.json({ connections });
 }

@@ -405,7 +405,7 @@ impl MemoryStore {
         // the instant it became true out of the prose so `recall_as_of` can answer
         // on the event timeline, not just when eri learned it. Facts only — other
         // kinds carry structured bodies, not narrated time.
-        let valid_from = if kind == "fact" {
+        let valid_from = if eventtime::is_prose_kind(kind) {
             eventtime::extract_valid_from(body, now)
         } else {
             None
