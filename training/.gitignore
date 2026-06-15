@@ -1,2 +1,7 @@
 __pycache__/
 *.pyc
+
+# Generated MLX training artifacts (produced by prepare_corpus.py / mlx_finetune.py)
+mlx_data/
+adapters/
+out/

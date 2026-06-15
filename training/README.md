@@ -138,7 +138,106 @@ corpus is auditable.
 
 ---
 
-## How to run
+## Two training backends
+
+There are **two** ways to LoRA-train the eri-brain. Pick by hardware:
+
+| backend | file | hardware | quant | when |
+|---|---|---|---|---|
+| **MLX-LM** (Apple-native) | `prepare_corpus.py` → `mlx_finetune.py` | **Apple Silicon** (M-series, e.g. M5 Max / 128GB) | MLX 4-bit (`mlx-community/Qwen3-32B-4bit`) | **local on a Mac** — bnb/CUDA won't run here |
+| **HF PEFT + bitsandbytes** | `lora_finetune.py` | **NVIDIA CUDA GPU** | bnb 4-bit nf4 QLoRA | cloud/datacenter GPUs |
+
+Both train the **same Qwen3-32B**, the **same clean corpus**, and the same no-teacher provenance
+rule. They differ only in the kernel/quant stack. The MLX path is the default for local Mac work.
+
+---
+
+## MLX-LM path (Apple Silicon — Qwen3-32B on an M5 Max)
+
+Apple's [`mlx-lm`](https://github.com/ml-explore/mlx-lm) LoRA-trains on the Metal GPU via unified
+memory. bitsandbytes (the CUDA path's quantizer) does **not** run on macOS, so this is the native
+alternative for fine-tuning Qwen3-32B locally.
+
+### Install
+
+```bash
+pip install mlx-lm          # Apple Silicon only; brings in mlx
+pip install pyyaml          # optional: lets mlx_finetune.py read LoRA params from config.yaml
+                            #   (without it, it falls back to the same defaults: rank=16 scale=2.0 dropout=0.05)
+```
+
+### Flow
+
+```bash
+# 1. PREPARE the corpus. Merges eri_data/ + eri_data_local/, validates (provenance + invisibility +
+#    schema, dropping invalids), de-dups by SHA-256 of the normalized messages, converts to the
+#    MLX-LM chat/tools format, and writes mlx_data/{train,valid}.jsonl (95/5 split).
+python3 training/prepare_corpus.py --dry-run        # plan only; no files written, stdlib only
+python3 training/prepare_corpus.py                  # writes mlx_data/{train,valid}.jsonl
+#   python3 training/prepare_corpus.py --with-open 200   # ALSO blend 200 rows/dataset from datasets.yaml
+#                                                        #   (needs HF `datasets`; OFF_LIMITS excluded; skipped if absent)
+
+# 2. DRY-RUN the trainer — validates mlx_data/, writes the generated mlx_lm config, and prints the
+#    EXACT mlx_lm.lora command. NO model download, NO GPU-hours.
+python3 training/mlx_finetune.py --dry-run
+
+# 3. TRAIN (Metal GPU) — downloads mlx-community/Qwen3-32B-4bit (~18GB) ONCE, then LoRA-trains.
+#    This takes HOURS on a 32B. Same command, minus --dry-run:
+python3 training/mlx_finetune.py
+#   (equivalently: python3 -m mlx_lm lora --config training/mlx_data/lora_config.yaml)
+```
+
+### MLX chat-format conversion (how tool calls are handled)
+
+eri's records already use the messages schema mlx_lm expects, so the converter (`prepare_corpus.py`)
+keeps tool calls **structured** rather than flattening them into assistant text:
+
+- `messages` is passed through; only mlx-recognized keys are kept
+  (`role`/`content`/`tool_calls`/`tool_call_id`/`name`). eri's internal `meta` block (which carries
+  provenance) is **dropped from the trainer input** — provenance is enforced at the validation gate,
+  not shipped into the model's context.
+- Assistant turns with `tool_calls` keep `function.name` + the JSON-**string** `arguments` exactly as
+  mlx_lm's tools format documents; the Qwen chat template renders the tool call. `role: "tool"`
+  replies (with `tool_call_id`) pass through unchanged. An optional top-level `tools` array is
+  passed through if a record carries one.
+
+This matches mlx_lm's documented chat/tools JSONL format directly — no Qwen-template hand-rendering
+needed.
+
+### Base model
+
+Defaults to **`mlx-community/Qwen3-32B-4bit`** (the Apple-native 4-bit build mlx_lm loads directly;
+fits a 32B in unified memory and trains in hours). `config.yaml`'s `model.base_id` is `Qwen/Qwen3-32B`
+for the CUDA path; `mlx_finetune.py` auto-prefers the 4-bit MLX repo unless you pass `--model`.
+
+### LoRA param mapping (config.yaml → mlx_lm)
+
+| config.yaml | mlx_lm | note |
+|---|---|---|
+| `lora.r` | `lora_parameters.rank` | |
+| `lora.alpha` (+`r`) | `lora_parameters.scale` | mlx_lm uses `scale = alpha / rank` (32/16 = 2.0) |
+| `lora.dropout` | `lora_parameters.dropout` | |
+| `lora.target_modules` | `num_layers` (default 16) | mlx_lm applies LoRA to the top *N* transformer blocks rather than naming HF projections; the HF target set is surfaced as informational |
+
+### Adapter output + chatting with the result
+
+The LoRA adapter lands in **`training/adapters/eri-v1/`** (override with `--adapter-path`). Chat with
+the trained adapter:
+
+```bash
+python3 -m mlx_lm generate \
+  --model mlx-community/Qwen3-32B-4bit \
+  --adapter-path training/adapters/eri-v1 \
+  --prompt "hey eri"
+```
+
+`prepare_corpus.py --dry-run`, `prepare_corpus.py --self-test`, and `mlx_finetune.py --dry-run` are
+part of the **green gate** — they run with stdlib only (no mlx, no GPU, no network). `mlx_data/` and
+`adapters/` are gitignored generated artifacts.
+
+---
+
+## How to run (CUDA / PEFT path)
 
 ```bash
 # 0. one-time deps. The validator + both dry-runs need NOTHING beyond stdlib (pyyaml is OPTIONAL —
@@ -183,7 +282,10 @@ training/
   datasets.yaml        # commercial-safe, clean-provenance dataset manifest + OFF_LIMITS
   config.yaml          # model id (Qwen), LoRA params, quant, training args
   generate_eri_data.py # multi-backend OPEN-model generator (Kimi/Ollama); --dry-run = no network
-  lora_finetune.py     # QLoRA SFT via PEFT + TRL SFTTrainer; --dry-run validates without a GPU
+  prepare_corpus.py    # MLX path: merge eri_data(+_local) + dedup + validate + convert to MLX chat
+                       #   format -> mlx_data/{train,valid}.jsonl; --dry-run/--self-test = stdlib only
+  mlx_finetune.py      # MLX path: LoRA-train Qwen3-32B via mlx_lm.lora (Apple Silicon); --dry-run = no GPU
+  lora_finetune.py     # CUDA path: QLoRA SFT via PEFT + TRL SFTTrainer; --dry-run validates without a GPU
   validate.py          # STDLIB-ONLY validator + self-check (provenance/schema/invisibility); pyyaml optional
   seeds/               # SEED TEMPLATES — Claude-authored structural scaffolding, NOT training data
     README.md          #   (explains: seeds are shape-only, never trained on)
@@ -193,4 +295,7 @@ training/
     routing.jsonl      #   shape of build/control/answer/chat mode feel
   eri_data/            # GENERATED training data (open-model provenance) — starts EMPTY (.gitkeep)
     .gitkeep           #   populated by generate_eri_data.py: <category>.jsonl per category
+  eri_data_local/      # GENERATED by LOCAL open models (qwen2.5:72b / deepseek-r1:32b); merged + deduped
+  mlx_data/            # GENERATED (gitignored): MLX chat-format train.jsonl/valid.jsonl + lora_config.yaml
+  adapters/            # GENERATED (gitignored): mlx_lm.lora output, e.g. adapters/eri-v1/
 ```
