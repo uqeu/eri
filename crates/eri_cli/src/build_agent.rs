@@ -384,7 +384,12 @@ async fn drive_build_loop(
         if let Some(arr) = tools.as_array_mut() {
             arr.extend(mcp_tool_specs(&mcp_tools));
         }
-        if opts.narrate {
+        // Connectors are meant to be invisible — the user sees eri act, not the
+        // plumbing. Keep the tool-count line as an ERI_DEBUG-only diagnostic so
+        // default output never mentions "MCP"/Composio. (Full invisibility —
+        // aliasing the tool-name prefix + rewording model-facing errors — is the
+        // dedicated Phase 3 pass.)
+        if opts.narrate && std::env::var("ERI_DEBUG").is_ok() {
             let _ = writeln!(
                 std::io::stdout(),
                 "[eri] {} MCP tool(s) available.",
