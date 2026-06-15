@@ -18,12 +18,15 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 
 use crate::DispatchError;
 use crate::services::{Notifier, Services};
+
+mod calibration;
+pub use calibration::{CalibrationProfile, NINE_TARGETS, OneEuroFilter};
 
 /// One gaze sample broadcast over JSON-RPC.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -90,7 +93,10 @@ pub async fn start(params: Value, services: &Services) -> Result<Value, Dispatch
     if let Some(camera) = parsed.camera {
         command.arg("--camera").arg(camera.to_string());
     }
-    command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
 
     let mut child = command
         .spawn()
@@ -129,22 +135,109 @@ pub async fn stop(_params: Value, services: &Services) -> Result<Value, Dispatch
 
 pub async fn status(_params: Value, services: &Services) -> Result<Value, DispatchError> {
     let state = ensure_state(services);
-    let (running, last_point, calibrated) = state.snapshot().await;
+    let (running, last_point, flag) = state.snapshot().await;
+    // A persisted profile is the source of truth for calibration; the in-memory
+    // flag is a fast path that the profile presence supersedes.
+    let profile = profile_path_opt().and_then(|p| calibration::load_profile(&p));
+    let calibrated = flag || profile.is_some();
     Ok(serde_json::json!({
         "running": running,
         "lastPoint": last_point,
         "calibrated": calibrated,
+        "profileTargets": profile.as_ref().map(|p| p.targets),
     }))
 }
 
-pub async fn calibrate(_params: Value, services: &Services) -> Result<Value, DispatchError> {
-    // Calibration in the Python script is currently centered on its first
-    // few frames — there is no separate `--calibrate` mode yet. We mark the
-    // state as calibrated so the extension stops nagging on autostart.
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+struct CalibrateParams {
+    /// Optional camera index, forwarded to the sidecar.
+    camera: Option<u32>,
+    /// Optional override script path (tests).
+    script: Option<PathBuf>,
+    /// Per-target frame budget (sidecar averages this many features).
+    samples: Option<u32>,
+}
+
+/// Run a real per-user 9-point calibration.
+///
+/// Flow: spawn the sidecar in `--calibrate` mode, then feed it one `target`
+/// control line per known screen target on stdin (the sidecar settles, then
+/// averages N gaze-feature samples per target). On `finish` the sidecar fits a
+/// ridge regression and writes `~/.eri/gaze_calibration.json`; we confirm by
+/// loading it back. Fail-safe: any spawn/IO error leaves the existing profile
+/// (and the fallback mapping) untouched and reports `calibrated: false`.
+///
+/// Note: live-camera capture cannot be automated in CI — the regression and
+/// profile load/save math are unit-tested without a camera (see
+/// `calibration::tests`); this end-to-end path is verified on-device.
+pub async fn calibrate(params: Value, services: &Services) -> Result<Value, DispatchError> {
+    let parsed: CalibrateParams =
+        serde_json::from_value(params).map_err(|e| DispatchError::BadParams(e.to_string()))?;
     let state = ensure_state(services);
-    let mut guard = state.calibrated.lock().await;
-    *guard = true;
-    Ok(serde_json::json!({ "calibrated": true }))
+
+    let script = resolve_script(parsed.script.as_deref())
+        .ok_or_else(|| DispatchError::Other(anyhow::anyhow!("gaze sidecar script not found")))?;
+
+    let mut command = Command::new("python3");
+    command.arg(&script).arg("--calibrate");
+    if let Some(camera) = parsed.camera {
+        command.arg("--camera").arg(camera.to_string());
+    }
+    if let Some(samples) = parsed.samples {
+        command.arg("--samples").arg(samples.to_string());
+    }
+    command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    let mut child = command.spawn().map_err(|e| {
+        DispatchError::Other(anyhow::anyhow!("failed to spawn gaze calibration: {e}"))
+    })?;
+
+    let mut stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| DispatchError::Other(anyhow::anyhow!("calibration sidecar has no stdin")))?;
+
+    // Send the nine targets, then ask the sidecar to fit + persist. The
+    // sidecar paces itself (settle + sample) between reads.
+    for (tx, ty) in calibration::NINE_TARGETS {
+        let line = format!("{{\"cmd\":\"target\",\"x\":{tx},\"y\":{ty}}}\n");
+        if let Err(e) = stdin.write_all(line.as_bytes()).await {
+            let _ = child.start_kill();
+            return Err(DispatchError::Other(anyhow::anyhow!(
+                "failed to drive calibration: {e}"
+            )));
+        }
+    }
+    let _ = stdin.write_all(b"{\"cmd\":\"finish\"}\n").await;
+    let _ = stdin.flush().await;
+    drop(stdin);
+
+    // Wait for the sidecar to fit + save before we trust the profile file.
+    let _ = child.wait().await;
+
+    // Confirm by loading the freshly written profile.
+    let profile = profile_path_opt().and_then(|p| calibration::load_profile(&p));
+    let calibrated = profile.is_some();
+    {
+        let mut guard = state.calibrated.lock().await;
+        *guard = calibrated;
+    }
+    Ok(serde_json::json!({
+        "calibrated": calibrated,
+        "targets": profile.as_ref().map(|p| p.targets),
+        "samples": profile.as_ref().map(|p| p.samples),
+        "profilePath": profile_path_opt().map(|p| p.display().to_string()),
+    }))
+}
+
+/// Resolve the per-user profile path (`calibration::profile_path`), surfaced
+/// here so both `status` and `calibrate` agree on the location.
+fn profile_path_opt() -> Option<PathBuf> {
+    calibration::profile_path()
 }
 
 /// Background task: parse the Python sidecar's stdout line-by-line, store
@@ -209,11 +302,7 @@ fn parse_point(value: &Value) -> Option<GazePoint> {
 }
 
 fn clamp01(v: f64) -> f64 {
-    if v.is_nan() {
-        0.0
-    } else {
-        v.clamp(0.0, 1.0)
-    }
+    if v.is_nan() { 0.0 } else { v.clamp(0.0, 1.0) }
 }
 
 fn now_ms() -> u64 {
@@ -309,12 +398,49 @@ mod tests {
         assert!(result.get("lastPoint").is_some());
     }
 
+    // Serialises the `ERI_HOME`-mutating tests below. End-to-end calibration
+    // needs a live camera (deferred); here we exercise the profile→status
+    // wiring with a profile written directly to a redirected home.
+    static ERI_HOME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    // Holds a std Mutex across the `status().await` — acceptable here: this is
+    // a test-only lock serialising `ERI_HOME` mutation so concurrent tests
+    // don't read each other's redirected home; the awaited call is the unit
+    // under test and runs on the same task.
+    #[allow(clippy::await_holding_lock)]
     #[tokio::test]
-    async fn calibrate_marks_state() {
+    async fn status_reports_calibrated_when_profile_present() {
+        let guard = ERI_HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = std::env::temp_dir().join(format!("eri_gaze_status_{}", std::process::id()));
+        let prev = std::env::var("ERI_HOME").ok();
+        // SAFETY: serialised by ERI_HOME_LOCK; restored before unlock.
+        unsafe {
+            std::env::set_var("ERI_HOME", &dir);
+        }
+        let profile = calibration::CalibrationProfile {
+            version: 1,
+            targets: 9,
+            samples: 90,
+            feature_dim: calibration::FEATURE_DIM,
+            coeffs: vec![vec![0.0, 0.0]; calibration::FEATURE_DIM + 1],
+        };
+        let path = dir.join(".eri").join("gaze_calibration.json");
+        calibration::save_profile(&path, &profile).expect("save profile");
+
         let services = Services::new();
-        let _ = calibrate(Value::Null, &services).await.expect("calibrate ok");
-        let status = status(Value::Null, &services).await.expect("status ok");
-        assert_eq!(status["calibrated"], true);
+        let result = status(Value::Null, &services).await.expect("status ok");
+        assert_eq!(result["calibrated"], true);
+        assert_eq!(result["profileTargets"], 9);
+
+        // Restore env + clean up before releasing the lock.
+        unsafe {
+            match prev {
+                Some(v) => std::env::set_var("ERI_HOME", v),
+                None => std::env::remove_var("ERI_HOME"),
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+        drop(guard);
     }
 
     #[tokio::test]
