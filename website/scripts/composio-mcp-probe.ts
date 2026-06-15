@@ -9,6 +9,8 @@
  *     npx tsx scripts/composio-mcp-probe.ts <your-eri-user-id>
  */
 
+export {}; // module scope — isolates top-level names from sibling scripts under tsc
+
 const apiKey = process.env.COMPOSIO_API_KEY;
 const serverId = process.env.COMPOSIO_MCP_SERVER_ID;
 const userId = process.argv[2];

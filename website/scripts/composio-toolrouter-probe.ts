@@ -12,6 +12,8 @@
  * from the user's connected accounts).
  */
 
+export {}; // module scope — keeps top-level names out of the shared script global scope
+
 const apiKey = process.env.COMPOSIO_API_KEY;
 const userId = process.argv[2];
 const toolkits = process.argv.slice(3).map((t) => t.toLowerCase());

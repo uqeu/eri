@@ -3,15 +3,51 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { authedFetch } from "@/lib/auth-client";
 
-/** The starter set of apps eri can connect through Composio. Composio supports
- *  hundreds; this is a curated launch list. Slugs are Composio toolkit slugs. */
-const APPS: ReadonlyArray<{ slug: string; name: string; blurb: string }> = [
-  { slug: "gmail", name: "Gmail", blurb: "Read and send email" },
-  { slug: "googlecalendar", name: "Google Calendar", blurb: "Read and create events" },
-  { slug: "github", name: "GitHub", blurb: "Issues, PRs, repositories" },
-  { slug: "slack", name: "Slack", blurb: "Send and read messages" },
-  { slug: "notion", name: "Notion", blurb: "Read and write pages" },
-  { slug: "linear", name: "Linear", blurb: "Issues and projects" },
+/** The apps eri can connect through Composio. Composio supports hundreds; this
+ *  is a curated, grouped launch set. Slugs are EXACT Composio toolkit slugs
+ *  (verified via the toolkits API) — each needs a matching auth config named
+ *  COMPOSIO_AUTH_CONFIG_<SLUG-UPPERCASED>. With the Tool Router, listing more
+ *  apps costs no per-turn tokens (schemas are lazy-loaded), so breadth is safe. */
+const APPS: ReadonlyArray<{ slug: string; name: string; blurb: string; category: string }> = [
+  // Email & Calendar
+  { slug: "gmail", name: "Gmail", blurb: "Read and send email", category: "Email & Calendar" },
+  { slug: "googlecalendar", name: "Google Calendar", blurb: "Read and create events", category: "Email & Calendar" },
+  { slug: "outlook", name: "Outlook", blurb: "Mail and calendar", category: "Email & Calendar" },
+  { slug: "googlecontacts", name: "Google Contacts", blurb: "Look up people you email", category: "Email & Calendar" },
+  // Docs & Files
+  { slug: "notion", name: "Notion", blurb: "Read and write pages", category: "Docs & Files" },
+  { slug: "googledocs", name: "Google Docs", blurb: "Read and write docs", category: "Docs & Files" },
+  { slug: "googlesheets", name: "Google Sheets", blurb: "Read and edit spreadsheets", category: "Docs & Files" },
+  { slug: "googledrive", name: "Google Drive", blurb: "Find and manage files", category: "Docs & Files" },
+  { slug: "dropbox", name: "Dropbox", blurb: "Find and manage files", category: "Docs & Files" },
+  // Development
+  { slug: "github", name: "GitHub", blurb: "Issues, PRs, repositories", category: "Development" },
+  { slug: "linear", name: "Linear", blurb: "Issues and projects", category: "Development" },
+  { slug: "jira", name: "Jira", blurb: "Issues and sprints", category: "Development" },
+  // Communication
+  { slug: "slack", name: "Slack", blurb: "Send and read messages", category: "Communication" },
+  { slug: "discord", name: "Discord", blurb: "Send and read messages", category: "Communication" },
+  { slug: "telegram", name: "Telegram", blurb: "Send and read messages", category: "Communication" },
+  // Productivity
+  { slug: "asana", name: "Asana", blurb: "Tasks and projects", category: "Productivity" },
+  { slug: "trello", name: "Trello", blurb: "Boards and cards", category: "Productivity" },
+  { slug: "clickup", name: "ClickUp", blurb: "Tasks and docs", category: "Productivity" },
+  { slug: "todoist", name: "Todoist", blurb: "Tasks and reminders", category: "Productivity" },
+  { slug: "calendly", name: "Calendly", blurb: "Scheduling links", category: "Productivity" },
+  // CRM & Social
+  { slug: "hubspot", name: "HubSpot", blurb: "Contacts and deals", category: "CRM & Social" },
+  { slug: "twitter", name: "Twitter / X", blurb: "Post and read", category: "CRM & Social" },
+  { slug: "linkedin", name: "LinkedIn", blurb: "Post and read", category: "CRM & Social" },
+];
+
+/** Stable display order for the category section headers. */
+const CATEGORY_ORDER: ReadonlyArray<string> = [
+  "Email & Calendar",
+  "Docs & Files",
+  "Development",
+  "Communication",
+  "Productivity",
+  "CRM & Social",
 ];
 
 type Status = "active" | "pending" | "error";
@@ -131,36 +167,49 @@ export default function ConnectionsPage(): ReactNode {
           </p>
         </div>
       ) : (
-        <div className="mt-8 overflow-hidden rounded-lg border border-white/[0.08]">
-          {APPS.map((app, i) => {
-            const status = statuses[app.slug];
-            const isActive = status === "active";
+        <div className="mt-8 space-y-8">
+          {CATEGORY_ORDER.map((category) => {
+            const apps = APPS.filter((a) => a.category === category);
+            if (apps.length === 0) return null;
             return (
-              <div
-                key={app.slug}
-                className={`flex items-center justify-between gap-4 px-5 py-4 ${
-                  i > 0 ? "border-t border-white/[0.06]" : ""
-                }`}
-              >
-                <div className="min-w-0">
-                  <div className="text-[14px] font-medium text-paper">{app.name}</div>
-                  <div className="truncate text-[12.5px] text-muted">{app.blurb}</div>
-                </div>
-                <div className="flex shrink-0 items-center gap-4">
-                  <StatusBadge status={status} />
-                  <button
-                    onClick={() => void connect(app.slug)}
-                    disabled={isActive || connecting === app.slug || loading}
-                    className="rounded-md border border-white/[0.1] px-3 py-1.5 text-[13px] text-paper transition-colors hover:bg-white/[0.04] disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    {isActive
-                      ? "Connected"
-                      : connecting === app.slug
-                        ? "Opening…"
-                        : status === "pending"
-                          ? "Reconnect"
-                          : "Connect"}
-                  </button>
+              <div key={category}>
+                <h2 className="mb-2 text-[12px] font-medium uppercase tracking-wide text-muted">
+                  {category}
+                </h2>
+                <div className="overflow-hidden rounded-lg border border-white/[0.08]">
+                  {apps.map((app, i) => {
+                    const status = statuses[app.slug];
+                    const isActive = status === "active";
+                    return (
+                      <div
+                        key={app.slug}
+                        className={`flex items-center justify-between gap-4 px-5 py-4 ${
+                          i > 0 ? "border-t border-white/[0.06]" : ""
+                        }`}
+                      >
+                        <div className="min-w-0">
+                          <div className="text-[14px] font-medium text-paper">{app.name}</div>
+                          <div className="truncate text-[12.5px] text-muted">{app.blurb}</div>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-4">
+                          <StatusBadge status={status} />
+                          <button
+                            onClick={() => void connect(app.slug)}
+                            disabled={isActive || connecting === app.slug || loading}
+                            className="rounded-md border border-white/[0.1] px-3 py-1.5 text-[13px] text-paper transition-colors hover:bg-white/[0.04] disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            {isActive
+                              ? "Connected"
+                              : connecting === app.slug
+                                ? "Opening…"
+                                : status === "pending"
+                                  ? "Reconnect"
+                                  : "Connect"}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             );
