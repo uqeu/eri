@@ -50,6 +50,7 @@ mod local_eval;
 mod mcp_server;
 mod memory;
 mod memory_tools;
+mod openai_turn;
 mod phone;
 mod plan_tui;
 mod plugins;

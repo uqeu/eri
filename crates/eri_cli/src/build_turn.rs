@@ -105,7 +105,8 @@ impl BuildTurn for ClaudeBuildTurn {
         // Identical request shaping + conversation cache to the original loop, so
         // the cloud behaviour is byte-for-byte preserved.
         let cached = eri_agent::request::with_conversation_cache(messages);
-        let body = eri_agent::request::messages_body(&self.model, MAX_TOKENS, system, tools, &cached);
+        let body =
+            eri_agent::request::messages_body(&self.model, MAX_TOKENS, system, tools, &cached);
         let response = match self
             .client
             .post_stream("/api/v1/inference/messages", &body)
@@ -118,7 +119,9 @@ impl BuildTurn for ClaudeBuildTurn {
                 if let Some(msg) = crate::build_agent::graceful_halt_message(&e) {
                     return Err(BuildTurnError::Halt(msg));
                 }
-                return Err(BuildTurnError::Hard(crate::build_agent::friendly_proxy_error(e)));
+                return Err(BuildTurnError::Hard(
+                    crate::build_agent::friendly_proxy_error(e),
+                ));
             }
         };
         let mut stdout = std::io::stdout();
@@ -240,13 +243,185 @@ pub fn build_local_turn(v: &Value) -> Turn {
         })
         .collect();
 
-    let stop_reason = Some(if tool_uses.is_empty() { "end_turn" } else { "tool_use" }.to_string());
+    let stop_reason = Some(
+        if tool_uses.is_empty() {
+            "end_turn"
+        } else {
+            "tool_use"
+        }
+        .to_string(),
+    );
     Turn {
         content,
         tool_uses,
         stop_reason,
-        usage_in: v.get("prompt_eval_count").and_then(Value::as_u64).unwrap_or(0),
+        usage_in: v
+            .get("prompt_eval_count")
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
         usage_out: v.get("eval_count").and_then(Value::as_u64).unwrap_or(0),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// eri-brain adapter — eri's hosted, model-agnostic OpenAI-compatible engine.
+// ---------------------------------------------------------------------------
+
+/// Env var holding the *base* URL of eri's hosted brain (a vLLM OpenAI-compatible
+/// server). When set, the eri-brain engine answers first and Claude is the
+/// escalation. Model-agnostic: the URL is the only thing that points at a model.
+pub const ERI_BRAIN_URL_ENV: &str = "ERI_BRAIN_URL";
+
+/// Optional bearer token for the hosted brain (`vLLM --api-key`). Omitted when
+/// the endpoint is unauthenticated (e.g. a private network or the eri.dev proxy
+/// adds auth upstream).
+pub const ERI_BRAIN_KEY_ENV: &str = "ERI_BRAIN_KEY";
+
+/// Optional model id sent to the OpenAI endpoint. The served model is a deploy
+/// choice; vLLM ignores/validates this, so a default keeps config minimal.
+pub const ERI_BRAIN_MODEL_ENV: &str = "ERI_BRAIN_MODEL";
+
+/// Default model label when `ERI_BRAIN_MODEL` is unset — purely a wire label, not
+/// a code dependency on any particular model (the endpoint decides what's served).
+const DEFAULT_ERI_BRAIN_MODEL: &str = "eri-brain";
+
+/// eri's hosted brain as a build engine: speaks OpenAI `/v1/chat/completions` to
+/// `ERI_BRAIN_URL`. The cheap first engine — handles most build turns at 0 Claude
+/// tokens and surfaces a `Hard` error (so the loop escalates to Claude) when the
+/// endpoint is unreachable or empty. A dumb executor: persona/memory arrive in
+/// `system`/`messages` from the layer above.
+pub struct EriBrainBuildTurn {
+    endpoint: String,
+    api_key: Option<String>,
+    model: String,
+    client: reqwest::Client,
+}
+
+impl EriBrainBuildTurn {
+    /// Build from `ERI_BRAIN_URL` (+ optional `ERI_BRAIN_KEY`/`ERI_BRAIN_MODEL`).
+    /// `None` when the URL is unset/blank, so selection cleanly falls back to the
+    /// existing engines.
+    pub fn from_env() -> Option<Self> {
+        let url = std::env::var(ERI_BRAIN_URL_ENV).ok()?;
+        let key = std::env::var(ERI_BRAIN_KEY_ENV).ok();
+        let model = std::env::var(ERI_BRAIN_MODEL_ENV).ok();
+        Self::new(&url, key.as_deref(), model.as_deref())
+    }
+
+    /// Env-free constructor — testable. `None` for a blank base URL.
+    pub fn new(base_url: &str, api_key: Option<&str>, model: Option<&str>) -> Option<Self> {
+        let base = base_url.trim();
+        if base.is_empty() {
+            return None;
+        }
+        let endpoint = format!(
+            "{}{}",
+            base.trim_end_matches('/'),
+            crate::openai_turn::OPENAI_CHAT_PATH
+        );
+        let api_key = api_key
+            .map(str::trim)
+            .filter(|k| !k.is_empty())
+            .map(str::to_string);
+        let model = model
+            .map(str::trim)
+            .filter(|m| !m.is_empty())
+            .unwrap_or(DEFAULT_ERI_BRAIN_MODEL)
+            .to_string();
+        Some(Self {
+            endpoint,
+            api_key,
+            model,
+            client: reqwest::Client::new(),
+        })
+    }
+}
+
+#[async_trait::async_trait]
+impl BuildTurn for EriBrainBuildTurn {
+    fn engine(&self) -> &'static str {
+        "eri-brain"
+    }
+
+    async fn run(
+        &self,
+        system: &[Value],
+        messages: &[Value],
+        tools: &Value,
+    ) -> std::result::Result<Turn, BuildTurnError> {
+        // `stream:false` — the OpenAI decoder works on the assembled body, and the
+        // build loop materialises tools per turn, so a single response is enough.
+        let body = crate::openai_turn::build_request_body(
+            &self.model,
+            system,
+            messages,
+            tools,
+            MAX_TOKENS,
+            false,
+        );
+        let mut req = self.client.post(&self.endpoint).json(&body);
+        if let Some(key) = &self.api_key {
+            req = req.bearer_auth(key);
+        }
+        let resp = req.send().await.map_err(|e| {
+            // Unreachable endpoint → Hard, so the loop escalates to Claude.
+            BuildTurnError::Hard(anyhow!("eri-brain unreachable at {} ({e})", self.endpoint))
+        })?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let detail = resp.text().await.unwrap_or_default();
+            return Err(BuildTurnError::Hard(anyhow!(
+                "eri-brain returned {status}: {detail}"
+            )));
+        }
+        let v: Value = resp
+            .json()
+            .await
+            .map_err(|e| BuildTurnError::Hard(anyhow!("eri-brain sent invalid JSON: {e}")))?;
+        let turn = eri_brain_turn(&v);
+        if turn.content.is_empty() {
+            // No text and no tool calls is unusable — escalate to Claude.
+            return Err(BuildTurnError::Hard(anyhow!(
+                "eri-brain produced no usable turn"
+            )));
+        }
+        Ok(turn)
+    }
+}
+
+/// Shape a decoded OpenAI reply into the build loop's [`Turn`]. Pure + tested so
+/// the eri-brain build contract is verifiable without a live endpoint: text +
+/// tool_use blocks become `content`, tool calls become `tool_uses`, `stop_reason`
+/// is `tool_use` when tools were called (so the loop iterates) else `end_turn`,
+/// and usage maps from OpenAI's `prompt_tokens`/`completion_tokens`.
+pub fn eri_brain_turn(v: &Value) -> Turn {
+    let parsed = crate::openai_turn::parse_openai_response(v);
+    let mut content: Vec<Value> = Vec::new();
+    if !parsed.text.trim().is_empty() {
+        content.push(json!({ "type": "text", "text": parsed.text }));
+    }
+    let tool_uses: Vec<ToolUse> = parsed
+        .tool_calls
+        .into_iter()
+        .map(|(id, name, input)| {
+            content.push(json!({ "type": "tool_use", "id": &id, "name": &name, "input": &input }));
+            ToolUse { id, name, input }
+        })
+        .collect();
+    let stop_reason = Some(
+        if tool_uses.is_empty() {
+            "end_turn"
+        } else {
+            "tool_use"
+        }
+        .to_string(),
+    );
+    Turn {
+        content,
+        tool_uses,
+        stop_reason,
+        usage_in: parsed.usage_in,
+        usage_out: parsed.usage_out,
     }
 }
 
@@ -254,25 +429,37 @@ pub fn build_local_turn(v: &Value) -> Turn {
 // Local-first selection.
 // ---------------------------------------------------------------------------
 
-/// Choose the build engines, **local-first**: when eri's on-device model is
-/// configured (`ERI_LOCAL_MODEL`), it answers first and Claude is the escalation;
-/// otherwise Claude alone. The returned vec is the loop's escalation order.
-/// Errors only when *no* engine can be built (not signed in AND no local model).
+/// Choose the build engines in escalation order. When eri's hosted brain is
+/// configured (`ERI_BRAIN_URL`) it answers **first** (the cheap engine); the
+/// on-device model (`ERI_LOCAL_MODEL`) follows if set; Claude is always the final
+/// escalation. With nothing extra configured, behaviour is unchanged (Claude
+/// alone). Errors only when *no* engine can be built.
 pub fn select_build_turn(model: &str, narrate: bool) -> Result<Vec<Box<dyn BuildTurn>>> {
     let local = std::env::var("ERI_LOCAL_MODEL")
         .ok()
         .map(|m| m.trim().to_string())
         .filter(|m| !m.is_empty());
-    select_build_turn_with(local.as_deref(), model, narrate)
+    select_build_turn_with(
+        EriBrainBuildTurn::from_env(),
+        local.as_deref(),
+        model,
+        narrate,
+    )
 }
 
 /// Env-free core of [`select_build_turn`] — testable without global state.
+/// Engine order: eri-brain (if any) → local (if any) → Claude (fallback).
 pub fn select_build_turn_with(
+    eri_brain: Option<EriBrainBuildTurn>,
     local_model: Option<&str>,
     model: &str,
     narrate: bool,
 ) -> Result<Vec<Box<dyn BuildTurn>>> {
     let mut engines: Vec<Box<dyn BuildTurn>> = Vec::new();
+    // eri-brain is the cheap first engine when configured.
+    if let Some(brain) = eri_brain {
+        engines.push(Box::new(brain));
+    }
     if let Some(m) = local_model.filter(|m| !m.trim().is_empty())
         && let Some(lt) = LocalBuildTurn::new(m)
     {
@@ -285,7 +472,7 @@ pub fn select_build_turn_with(
     }
     if engines.is_empty() {
         return Err(anyhow!(
-            "no build engine available — sign in (`eri auth login`) or set ERI_LOCAL_MODEL"
+            "no build engine available — sign in (`eri auth login`), set ERI_BRAIN_URL, or set ERI_LOCAL_MODEL"
         ));
     }
     Ok(engines)
@@ -365,6 +552,98 @@ mod tests {
                 .take()
                 .unwrap_or_else(|| Err(BuildTurnError::Hard(anyhow!("stub exhausted"))))
         }
+    }
+
+    #[test]
+    fn eri_brain_turn_maps_text_only_to_end_turn() {
+        let v = json!({
+            "choices": [ { "message": { "role": "assistant", "content": "all done, tests pass" } } ],
+            "usage": { "prompt_tokens": 40, "completion_tokens": 9 }
+        });
+        let turn = eri_brain_turn(&v);
+        assert_eq!(turn.stop_reason.as_deref(), Some("end_turn"));
+        assert!(turn.tool_uses.is_empty());
+        assert_eq!(turn.content.len(), 1);
+        assert_eq!(turn.content[0]["type"], "text");
+        assert_eq!(turn.usage_in, 40);
+        assert_eq!(turn.usage_out, 9);
+    }
+
+    #[test]
+    fn eri_brain_turn_maps_tool_calls_to_tool_use_stop() {
+        let v = json!({
+            "choices": [ {
+                "message": {
+                    "role": "assistant",
+                    "content": "writing the file",
+                    "tool_calls": [ {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": { "name": "write_file", "arguments": "{\"path\":\"a.ts\",\"content\":\"x\"}" }
+                    } ]
+                }
+            } ],
+            "usage": { "prompt_tokens": 12, "completion_tokens": 5 }
+        });
+        let turn = eri_brain_turn(&v);
+        assert_eq!(turn.stop_reason.as_deref(), Some("tool_use"));
+        assert_eq!(turn.tool_uses.len(), 1);
+        assert_eq!(turn.tool_uses[0].name, "write_file");
+        assert_eq!(turn.tool_uses[0].id, "call_1");
+        assert_eq!(
+            turn.tool_uses[0].input,
+            json!({ "path": "a.ts", "content": "x" })
+        );
+        // content carries the text block + the tool_use block.
+        assert_eq!(turn.content.len(), 2);
+        assert_eq!(turn.content[1]["type"], "tool_use");
+        assert_eq!(turn.usage_in, 12);
+        assert_eq!(turn.usage_out, 5);
+    }
+
+    #[test]
+    fn eri_brain_turn_empty_response_yields_empty_content() {
+        let turn = eri_brain_turn(&json!({ "choices": [] }));
+        assert!(turn.content.is_empty());
+        assert!(turn.tool_uses.is_empty());
+    }
+
+    #[test]
+    fn eri_brain_is_first_engine_when_configured() {
+        // When ERI_BRAIN_URL is set, the hosted brain leads the escalation order.
+        let brain = EriBrainBuildTurn::new("https://brain.eri.dev", None, None);
+        assert!(brain.is_some());
+        let engines = select_build_turn_with(brain, None, "claude-sonnet-4-6", false)
+            .expect("eri-brain is always buildable");
+        assert_eq!(engines[0].engine(), "eri-brain");
+    }
+
+    #[test]
+    fn eri_brain_precedes_local_when_both_configured() {
+        // Both Local and eri-brain configured → eri-brain first, local next.
+        let brain = EriBrainBuildTurn::new("https://brain.eri.dev", Some("k"), Some("qwen3"));
+        let engines =
+            select_build_turn_with(brain, Some("qwen2.5:1.5b"), "claude-sonnet-4-6", false)
+                .expect("buildable");
+        assert_eq!(engines[0].engine(), "eri-brain");
+        assert_eq!(engines[1].engine(), "local");
+    }
+
+    #[test]
+    fn claude_only_when_nothing_extra_is_configured() {
+        // No eri-brain, no local → behaviour is unchanged. Selection either
+        // returns Claude (signed in) or errors (not signed in) — never a phantom
+        // eri-brain/local engine.
+        if let Ok(engines) = select_build_turn_with(None, None, "claude-sonnet-4-6", false) {
+            assert_eq!(engines[0].engine(), "claude");
+            assert_eq!(engines.len(), 1);
+        }
+    }
+
+    #[test]
+    fn blank_eri_brain_url_yields_no_engine() {
+        assert!(EriBrainBuildTurn::new("   ", None, None).is_none());
+        assert!(EriBrainBuildTurn::new("", Some("k"), Some("m")).is_none());
     }
 
     #[tokio::test]
