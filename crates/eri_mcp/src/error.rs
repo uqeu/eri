@@ -58,6 +58,12 @@ pub enum McpError {
 
     #[error("unknown handle: {0}")]
     UnknownHandle(String),
+
+    /// A `${VAR}` reference in a server's config (url/header/env/arg) had no value
+    /// in the injected vars or the process environment. Fail-closed: we never ship
+    /// a literal `${COMPOSIO_API_KEY}` as a header or URL.
+    #[error("MCP server {server}: config references unset variable ${{{name}}}")]
+    UnsetVariable { server: String, name: String },
 }
 
 impl From<reqwest::Error> for McpError {

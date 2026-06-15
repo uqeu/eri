@@ -87,6 +87,88 @@ impl ServerConfig {
             TransportKind::Stdio
         }
     }
+
+    /// Expand `${VAR}` references in `url`, `headers`, `env`, `args`, and
+    /// `command` against `vars` first, then the process environment. Returns a
+    /// **new** config (immutable) — the on-disk one keeps the `${…}` placeholders.
+    ///
+    /// This is what lets a remote MCP server reference secrets + per-user values
+    /// without writing them to disk: e.g. Composio's URL
+    /// `…/v3/mcp/${COMPOSIO_SERVER_ID}?user_id=${ERI_USER_ID}` and header
+    /// `x-api-key: ${COMPOSIO_API_KEY}` — the api key comes from the environment,
+    /// the per-user id is injected at launch via `vars`.
+    ///
+    /// **Fail-closed:** a referenced variable with no value is an error, never a
+    /// silently-passed literal `${…}` (which would leak the placeholder or send a
+    /// broken credential).
+    pub fn expand(&self, vars: &BTreeMap<String, String>) -> Result<ServerConfig, McpError> {
+        let lookup = |name: &str| -> Option<String> {
+            vars.get(name)
+                .cloned()
+                .or_else(|| std::env::var(name).ok())
+        };
+        let exp = |s: &str| expand_vars(s, &self.name, &lookup);
+
+        let command = self.command.as_deref().map(exp).transpose()?;
+        let url = self.url.as_deref().map(exp).transpose()?;
+        let args = self.args.iter().map(|a| exp(a)).collect::<Result<_, _>>()?;
+        let env = self
+            .env
+            .iter()
+            .map(|(k, v)| Ok((k.clone(), exp(v)?)))
+            .collect::<Result<_, McpError>>()?;
+        let headers = self
+            .headers
+            .iter()
+            .map(|(k, v)| Ok((k.clone(), exp(v)?)))
+            .collect::<Result<_, McpError>>()?;
+
+        Ok(ServerConfig {
+            name: self.name.clone(),
+            command,
+            args,
+            env,
+            url,
+            headers,
+            transport: self.transport,
+            disabled: self.disabled,
+        })
+    }
+}
+
+/// Substitute every `${VAR}` in `s` using `lookup`, leaving all other text
+/// (including a lone `$` or `${` with no closing brace) untouched. `server` names
+/// the config for a clear error. Pure — the env/vars source is the closure.
+pub(crate) fn expand_vars(
+    s: &str,
+    server: &str,
+    lookup: &dyn Fn(&str) -> Option<String>,
+) -> Result<String, McpError> {
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(start) = rest.find("${") {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 2..];
+        match after.find('}') {
+            Some(end) => {
+                let name = &after[..end];
+                let value = lookup(name).ok_or_else(|| McpError::UnsetVariable {
+                    server: server.to_string(),
+                    name: name.to_string(),
+                })?;
+                out.push_str(&value);
+                rest = &after[end + 1..];
+            }
+            // No closing brace — emit the literal "${" and continue past it so we
+            // don't loop forever on a malformed string.
+            None => {
+                out.push_str("${");
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    Ok(out)
 }
 
 /// On-disk shapes we accept. Both Claude Desktop and Cursor use the
@@ -264,6 +346,81 @@ fn strip_json_comments(raw: &str) -> String {
 mod tests {
     use super::*;
     use std::path::Path;
+
+    fn lookup<'a>(pairs: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {
+        move |name: &str| {
+            pairs
+                .iter()
+                .find(|(k, _)| *k == name)
+                .map(|(_, v)| v.to_string())
+        }
+    }
+
+    #[test]
+    fn expand_vars_substitutes_and_preserves_literals() {
+        let l = lookup(&[("A", "x"), ("B", "y")]);
+        assert_eq!(expand_vars("${A}/${B}", "s", &l).unwrap(), "x/y");
+        assert_eq!(expand_vars("no vars here", "s", &l).unwrap(), "no vars here");
+        // A lone "${" with no closing brace is left literal, not an infinite loop.
+        assert_eq!(expand_vars("cost is $5 and ${A", "s", &l).unwrap(), "cost is $5 and ${A");
+    }
+
+    #[test]
+    fn expand_vars_fails_closed_on_unset_variable() {
+        let l = lookup(&[]);
+        match expand_vars("key=${MISSING}", "srv", &l) {
+            Err(McpError::UnsetVariable { server, name }) => {
+                assert_eq!(server, "srv");
+                assert_eq!(name, "MISSING");
+            }
+            other => panic!("expected UnsetVariable, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn expand_resolves_a_composio_shaped_server() {
+        // The motivating case: a remote MCP whose URL carries a server id + the
+        // per-user id, and whose api key lives only in the environment — none of
+        // it written to disk.
+        let mut headers = BTreeMap::new();
+        headers.insert("x-api-key".to_string(), "${COMPOSIO_API_KEY}".to_string());
+        let cfg = ServerConfig {
+            name: "composio".into(),
+            url: Some(
+                "https://backend.composio.dev/v3/mcp/${COMPOSIO_SERVER_ID}?user_id=${ERI_USER_ID}"
+                    .into(),
+            ),
+            headers,
+            ..Default::default()
+        };
+        let mut vars = BTreeMap::new();
+        vars.insert("COMPOSIO_SERVER_ID".to_string(), "srv_123".to_string());
+        vars.insert("ERI_USER_ID".to_string(), "user_abc".to_string());
+        vars.insert("COMPOSIO_API_KEY".to_string(), "ak_secret".to_string());
+
+        let resolved = cfg.expand(&vars).expect("expands");
+        assert_eq!(
+            resolved.url.as_deref(),
+            Some("https://backend.composio.dev/v3/mcp/srv_123?user_id=user_abc")
+        );
+        assert_eq!(resolved.headers.get("x-api-key").map(String::as_str), Some("ak_secret"));
+        // The on-disk config is untouched — placeholders stay for the next launch.
+        assert!(cfg.url.as_deref().unwrap().contains("${COMPOSIO_SERVER_ID}"));
+    }
+
+    #[test]
+    fn expand_errors_when_a_referenced_var_is_missing() {
+        let cfg = ServerConfig {
+            name: "composio".into(),
+            url: Some("https://x/${COMPOSIO_SERVER_ID}".into()),
+            ..Default::default()
+        };
+        // Empty vars + (assumed) unset env → fail-closed.
+        assert!(matches!(
+            cfg.expand(&BTreeMap::new()),
+            Err(McpError::UnsetVariable { .. })
+        ));
+    }
 
     #[test]
     fn parses_mcp_servers_object_shape() {
