@@ -27,6 +27,23 @@ use serde_json::{Value, json};
 /// What one model turn produced for the control loop. Engine-agnostic: both the
 /// Claude and the local adapter fill the same shape, so the loop never branches
 /// on which engine answered.
+/// Cloud token usage for one model turn (input + output). Local/on-device turns
+/// are `$0`, so they leave this at the default zero — only cloud (Claude) turns
+/// populate it. Summed across a control run so remote compute can be metered the
+/// same as any other eri-token spend (review M4).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TokenUsage {
+    pub input: u64,
+    pub output: u64,
+}
+
+impl std::ops::AddAssign for TokenUsage {
+    fn add_assign(&mut self, rhs: Self) {
+        self.input += rhs.input;
+        self.output += rhs.output;
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct TurnOutput {
     /// Raw assistant `content` block array, appended verbatim to the running
@@ -41,6 +58,8 @@ pub struct TurnOutput {
     /// "tool_use"`, or the local model emitted tool calls). False = it's done
     /// talking and the loop should return its text.
     pub wants_tools: bool,
+    /// Cloud tokens this turn cost ($0 for local turns — left zero).
+    pub usage: TokenUsage,
 }
 
 /// One turn of model interaction, abstracted over the engine behind it. The
@@ -53,8 +72,7 @@ pub trait ControlTurn: Send + Sync {
 
     /// Run one turn against the given system blocks, running `messages`, and
     /// `tools` spec. Errors surface so the loop can escalate (local → cloud).
-    async fn run(&self, system: &[Value], messages: &[Value], tools: &Value)
-    -> Result<TurnOutput>;
+    async fn run(&self, system: &[Value], messages: &[Value], tools: &Value) -> Result<TurnOutput>;
 }
 
 /// Parse a local model's `/api/chat` tool-call array into the loop's
@@ -75,9 +93,7 @@ pub fn parse_local_tool_calls(message: &Value) -> Vec<(String, String, Value)> {
             let name = func.get("name").and_then(Value::as_str)?.to_string();
             // `arguments` may arrive as an object or as a JSON string — accept both.
             let input = match func.get("arguments") {
-                Some(Value::String(s)) => {
-                    serde_json::from_str(s).unwrap_or_else(|_| json!({}))
-                }
+                Some(Value::String(s)) => serde_json::from_str(s).unwrap_or_else(|_| json!({})),
                 Some(obj) => obj.clone(),
                 None => json!({}),
             };
@@ -94,11 +110,15 @@ pub fn parse_local_tool_calls(message: &Value) -> Vec<(String, String, Value)> {
 /// to emit instead. Order = preference; first present alias wins.
 fn local_arg_aliases(tool: &str) -> &'static [(&'static str, &'static [&'static str])] {
     match tool {
-        "open_app" | "quit_app" => {
-            &[("name", &["app_name", "application", "app", "appname", "app_name"])]
-        }
+        "open_app" | "quit_app" => &[(
+            "name",
+            &["app_name", "application", "app", "appname", "app_name"],
+        )],
         "type" => &[("text", &["string", "value", "content", "input", "txt"])],
-        "key" => &[("combo", &["key", "keys", "shortcut", "combination", "hotkey"])],
+        "key" => &[(
+            "combo",
+            &["key", "keys", "shortcut", "combination", "hotkey"],
+        )],
         "click" => &[("element", &["id", "target", "element_id", "elementid"])],
         "wait" => &[("ms", &["milliseconds", "duration", "time", "millis"])],
         _ => &[],
@@ -206,12 +226,7 @@ impl ControlTurn for ClaudeControlTurn {
         "claude"
     }
 
-    async fn run(
-        &self,
-        system: &[Value],
-        messages: &[Value],
-        tools: &Value,
-    ) -> Result<TurnOutput> {
+    async fn run(&self, system: &[Value], messages: &[Value], tools: &Value) -> Result<TurnOutput> {
         // Identical request shaping + prompt-caching to the original loop, so
         // the cloud behaviour is byte-for-byte preserved.
         let cached = eri_agent::request::with_conversation_cache(messages);
@@ -239,6 +254,10 @@ impl ControlTurn for ClaudeControlTurn {
                 .collect(),
             wants_tools: turn.stop_reason.as_deref() == Some("tool_use"),
             text,
+            usage: TokenUsage {
+                input: turn.usage_in,
+                output: turn.usage_out,
+            },
         })
     }
 }
@@ -292,12 +311,7 @@ impl ControlTurn for LocalControlTurn {
         "local"
     }
 
-    async fn run(
-        &self,
-        system: &[Value],
-        messages: &[Value],
-        tools: &Value,
-    ) -> Result<TurnOutput> {
+    async fn run(&self, system: &[Value], messages: &[Value], tools: &Value) -> Result<TurnOutput> {
         let body = json!({
             "model": self.model,
             "messages": to_local_messages(system, messages),
@@ -337,6 +351,8 @@ impl ControlTurn for LocalControlTurn {
             wants_tools: !tool_calls.is_empty(),
             tool_calls,
             text,
+            // On-device turns are $0 — no cloud tokens to meter.
+            usage: TokenUsage::default(),
         })
     }
 }
@@ -487,7 +503,11 @@ impl ControlTurnLog {
         if self.tool_names.is_empty() {
             format!("control[{}] {goal:?} -> answered (no tools)", self.engine)
         } else {
-            format!("control[{}] {goal:?} -> {}", self.engine, self.tool_names.join(","))
+            format!(
+                "control[{}] {goal:?} -> {}",
+                self.engine,
+                self.tool_names.join(",")
+            )
         }
     }
 }
@@ -653,7 +673,11 @@ mod tests {
 
     #[test]
     fn local_assistant_content_mirrors_claude_block_shape() {
-        let calls = vec![("local-0".to_string(), "open_app".to_string(), json!({ "name": "Safari" }))];
+        let calls = vec![(
+            "local-0".to_string(),
+            "open_app".to_string(),
+            json!({ "name": "Safari" }),
+        )];
         let content = local_assistant_content("opening it", &calls);
         let blocks = content.as_array().unwrap();
         assert_eq!(blocks[0]["type"], "text");
@@ -690,10 +714,18 @@ mod tests {
         let local = to_local_messages(&system, &messages);
         // system block first, joined.
         assert_eq!(local[0]["role"], "system");
-        assert!(local[0]["content"].as_str().unwrap().contains("you are eri"));
+        assert!(
+            local[0]["content"]
+                .as_str()
+                .unwrap()
+                .contains("you are eri")
+        );
         assert!(local[0]["content"].as_str().unwrap().contains("be frugal"));
         // user text passes through.
-        assert_eq!(local[1], json!({ "role": "user", "content": "open Safari" }));
+        assert_eq!(
+            local[1],
+            json!({ "role": "user", "content": "open Safari" })
+        );
         // assistant text + tool_calls.
         assert_eq!(local[2]["role"], "assistant");
         assert_eq!(local[2]["content"], "on it");
@@ -742,6 +774,7 @@ mod tests {
                 ("b".into(), "type".into(), json!({})),
             ],
             wants_tools: true,
+            usage: TokenUsage::default(),
         };
         let log = control_turn_log("local", "  open Safari  ", &out);
         assert_eq!(log.engine, "local");
@@ -758,6 +791,7 @@ mod tests {
             text: "done".into(),
             tool_calls: vec![],
             wants_tools: false,
+            usage: TokenUsage::default(),
         };
         let log = control_turn_log("claude", "summarize my screen", &out);
         assert!(log.summary().contains("answered (no tools)"));

@@ -63,23 +63,40 @@ struct CompleteRequest<'a> {
     result: Option<String>,
     #[serde(rename = "confirmPrompt", skip_serializing_if = "Option::is_none")]
     confirm_prompt: Option<String>,
+    /// Cloud tokens this remote turn cost, so the server can meter remote compute
+    /// like any other eri-token spend (review M4). 0 for local recall / fast-lane.
+    #[serde(rename = "tokensIn")]
+    tokens_in: u64,
+    #[serde(rename = "tokensOut")]
+    tokens_out: u64,
 }
 
 /// Map a control run's result + whether a confirmation was needed onto the queue
-/// status + payload. A risky action (confirm requested) ALWAYS becomes
-/// `awaiting_confirm` — never reported as `done`. Pure + unit-tested.
+/// status + payload + the tokens it cost. A risky action (confirm requested)
+/// ALWAYS becomes `awaiting_confirm` — never reported as `done` — but the tokens
+/// already spent reaching it are still metered. Pure + unit-tested.
 fn outcome(
-    result: Result<String>,
+    result: Result<control_agent::ControlRun>,
     confirm_prompt: Option<String>,
-) -> (&'static str, Option<String>, Option<String>) {
+) -> (
+    &'static str,
+    Option<String>,
+    Option<String>,
+    crate::control_turn::TokenUsage,
+) {
+    // Tokens spent before this point are billed regardless of which branch wins.
+    let usage = match &result {
+        Ok(run) => run.usage,
+        Err(_) => crate::control_turn::TokenUsage::default(),
+    };
     if let Some(prompt) = confirm_prompt {
-        return ("awaiting_confirm", None, Some(prompt));
+        return ("awaiting_confirm", None, Some(prompt), usage);
     }
     match result {
-        Ok(summary) => ("done", Some(summary), None),
+        Ok(run) => ("done", Some(run.text), None, usage),
         // Cap the error so an internal detail (paths, endpoint dumps) can't be
         // relayed verbatim to the user's phone (review L3).
-        Err(e) => ("error", Some(sanitize_error(&e.to_string())), None),
+        Err(e) => ("error", Some(sanitize_error(&e.to_string())), None, usage),
     }
 }
 
@@ -107,9 +124,11 @@ pub async fn run_once(client: &Client, model: &str) -> Result<bool> {
     println!("[eri] remote {} goal: {}", cmd.kind, cmd.goal);
 
     // Route by turn kind: a recall is answered locally from the memory store (no
-    // control gate, no actuation agent); everything else runs the control stack.
-    let (status, result, confirm_prompt) = if cmd.kind == "recall" {
-        remote_recall::run_recall(&cmd.goal, now_ms())
+    // control gate, no actuation agent, $0 cloud tokens); everything else runs
+    // the control stack and reports the tokens it spent.
+    let (status, result, confirm_prompt, usage) = if cmd.kind == "recall" {
+        let (s, r, p) = remote_recall::run_recall(&cmd.goal, now_ms());
+        (s, r, p, crate::control_turn::TokenUsage::default())
     } else {
         execute(&cmd.goal, model, cmd.approved).await
     };
@@ -121,6 +140,8 @@ pub async fn run_once(client: &Client, model: &str) -> Result<bool> {
                 status,
                 result,
                 confirm_prompt,
+                tokens_in: usage.input,
+                tokens_out: usage.output,
             },
         )
         .await
@@ -137,7 +158,12 @@ async fn execute(
     goal: &str,
     model: &str,
     approved: bool,
-) -> (&'static str, Option<String>, Option<String>) {
+) -> (
+    &'static str,
+    Option<String>,
+    Option<String>,
+    crate::control_turn::TokenUsage,
+) {
     // Load the store for its app DENYLIST, but build a REMOTE gate: a permission
     // granted at the keyboard does NOT auto-run a risky action unattended; every
     // risky action bounces to the phone (security C1). Once the user has
@@ -194,6 +220,7 @@ async fn execute(
                     "this computer isn't reachable for control (the eri app isn't running)".into(),
                 ),
                 None,
+                crate::control_turn::TokenUsage::default(),
             );
         }
     };
@@ -223,31 +250,44 @@ pub async fn serve(model: &str, interval: Duration) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::control_turn::TokenUsage;
+
+    fn run(text: &str, input: u64, output: u64) -> control_agent::ControlRun {
+        control_agent::ControlRun {
+            text: text.into(),
+            usage: TokenUsage { input, output },
+        }
+    }
 
     #[test]
     fn a_risky_goal_becomes_awaiting_confirm_even_if_the_run_returns_ok() {
-        let (status, result, prompt) = outcome(
-            Ok("partial".into()),
+        // Even parked at awaiting_confirm, the tokens already spent reaching the
+        // risky action are reported so remote compute is still metered (M4).
+        let (status, result, prompt, usage) = outcome(
+            Ok(run("partial", 120, 40)),
             Some("eri wants to: send an email".into()),
         );
         assert_eq!(status, "awaiting_confirm");
         assert!(result.is_none());
         assert_eq!(prompt.as_deref(), Some("eri wants to: send an email"));
+        assert_eq!(usage, TokenUsage { input: 120, output: 40 });
     }
 
     #[test]
-    fn a_clean_run_is_done_with_the_summary() {
-        let (status, result, prompt) = outcome(Ok("opened Spotify".into()), None);
+    fn a_clean_run_is_done_with_the_summary_and_its_tokens() {
+        let (status, result, prompt, usage) = outcome(Ok(run("opened Spotify", 200, 80)), None);
         assert_eq!(status, "done");
         assert_eq!(result.as_deref(), Some("opened Spotify"));
         assert!(prompt.is_none());
+        assert_eq!(usage, TokenUsage { input: 200, output: 80 });
     }
 
     #[test]
-    fn a_failed_run_is_error_with_the_reason() {
-        let (status, result, prompt) = outcome(Err(anyhow::anyhow!("app not found")), None);
+    fn a_failed_run_is_error_with_the_reason_and_zero_tokens() {
+        let (status, result, prompt, usage) = outcome(Err(anyhow::anyhow!("app not found")), None);
         assert_eq!(status, "error");
         assert!(result.unwrap().contains("app not found"));
         assert!(prompt.is_none());
+        assert_eq!(usage, TokenUsage::default());
     }
 }

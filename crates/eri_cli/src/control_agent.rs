@@ -1151,7 +1151,7 @@ pub(crate) async fn drive_control_loop(
     tools: &Value,
     goal: &str,
     max_turns: usize,
-) -> Result<String> {
+) -> Result<ControlRun> {
     use std::io::Write;
 
     if engines.is_empty() {
@@ -1160,6 +1160,7 @@ pub(crate) async fn drive_control_loop(
     let mut messages: Vec<Value> = vec![json!({ "role": "user", "content": goal.trim() })];
     let mut stdout = std::io::stdout();
     let mut final_text = String::new();
+    let mut usage = crate::control_turn::TokenUsage::default();
     let mut stuck = StuckGuard::default();
     let mut engine_idx = 0usize;
 
@@ -1191,6 +1192,7 @@ pub(crate) async fn drive_control_loop(
         // enough vs. where it escalated. Through the sink seam, so tests can
         // assert this sequence.
         sink.record(control_turn_log(turn.engine(), goal, &out));
+        usage += out.usage;
         step += 1;
 
         if !out.text.trim().is_empty() {
@@ -1199,16 +1201,17 @@ pub(crate) async fn drive_control_loop(
         messages.push(json!({ "role": "assistant", "content": out.assistant_content }));
 
         if !out.wants_tools {
-            return Ok(final_text);
+            return Ok(ControlRun { text: final_text, usage });
         }
         // Two-strike anti-spin: if the executor keeps proposing the identical
         // action set, it's stuck — stop before spending more turns/tokens.
         if stuck.record(&action_signature(&out.tool_calls)) {
-            return Ok(if final_text.trim().is_empty() {
+            let text = if final_text.trim().is_empty() {
                 STUCK_HANDBACK.to_string()
             } else {
                 final_text
-            });
+            };
+            return Ok(ControlRun { text, usage });
         }
         let executed = execute_tool_calls(bridge, gate, confirm, &out.tool_calls).await;
         for line in &executed.log {
@@ -1216,10 +1219,21 @@ pub(crate) async fn drive_control_loop(
         }
         messages.push(json!({ "role": "user", "content": executed.results }));
         if executed.done {
-            return Ok(final_text);
+            return Ok(ControlRun { text: final_text, usage });
         }
     }
-    Ok(final_text)
+    Ok(ControlRun { text: final_text, usage })
+}
+
+/// The result of a control run: the final narrated text + the cloud tokens it
+/// cost, summed across turns. Zero when the on-device engine handled everything
+/// or the zero-token prelude (cancellation / gate / fast-lane) did — so the
+/// remote daemon can meter remote compute exactly like any other token spend
+/// (review M4).
+#[derive(Debug)]
+pub struct ControlRun {
+    pub text: String,
+    pub usage: crate::control_turn::TokenUsage,
 }
 
 pub async fn run_control_agent(
@@ -1229,7 +1243,7 @@ pub async fn run_control_agent(
     gate: &ControlGate,
     confirm: &mut dyn FnMut(&str, Option<crate::control_safety::Permission>) -> bool,
     max_turns: usize,
-) -> Result<String> {
+) -> Result<ControlRun> {
     if goal.trim().is_empty() {
         return Err(anyhow!("control goal is empty"));
     }
@@ -1238,7 +1252,10 @@ pub async fn run_control_agent(
     // we return its result and nothing reaches the model; otherwise we fall
     // through to the reasoning loop below.
     if let Some(result) = control_prelude(goal, bridge, gate, confirm).await? {
-        return Ok(result);
+        return Ok(ControlRun {
+            text: result,
+            usage: crate::control_turn::TokenUsage::default(),
+        });
     }
     let mut system = vec![
         json!({
@@ -1626,7 +1643,7 @@ mod tests {
         .await
         .unwrap();
         assert!(
-            out.to_lowercase().contains("money"),
+            out.text.to_lowercase().contains("money"),
             "should hand the goal back"
         );
         assert!(bridge.calls().is_empty(), "must not actuate a refused goal");
@@ -2086,6 +2103,7 @@ mod tests {
             text: String::new(),
             tool_calls: vec![(id.into(), name.into(), input)],
             wants_tools: true,
+            ..Default::default()
         }
     }
     fn done_turn(text: &str) -> crate::control_turn::TurnOutput {
@@ -2094,6 +2112,7 @@ mod tests {
             text: text.into(),
             tool_calls: vec![],
             wants_tools: false,
+            ..Default::default()
         }
     }
 
@@ -2132,7 +2151,7 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(out, "Opened Safari.");
+        assert_eq!(out.text, "Opened Safari.");
         assert_eq!(bridge.calls(), vec!["open:Safari"]);
         // Both turns were recorded to the self-improvement log, tagged "local".
         let logs = sink.logs();
@@ -2221,7 +2240,7 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(out, "Done via cloud.");
+        assert_eq!(out.text, "Done via cloud.");
         assert_eq!(bridge.calls(), vec!["open:Safari"]);
     }
 
@@ -2280,7 +2299,7 @@ mod tests {
         .await
         .unwrap();
         assert!(
-            out.contains("same step"),
+            out.text.contains("same step"),
             "should hand back the stuck message"
         );
     }

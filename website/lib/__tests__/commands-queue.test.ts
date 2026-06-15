@@ -1,5 +1,25 @@
 import { strict as assert } from "node:assert";
-import { isTerminalStatus, relayMessage } from "../commands/queue";
+import { isTerminalStatus, meteredRemoteUsage, relayMessage } from "../commands/queue";
+
+// meteredRemoteUsage — what (if anything) a completed remote turn bills (M4).
+{
+  // Terminal + real tokens → metered.
+  assert.deepEqual(meteredRemoteUsage({ status: "done", tokensIn: 200, tokensOut: 80 }), {
+    tokensIn: 200,
+    tokensOut: 80,
+  });
+  assert.deepEqual(meteredRemoteUsage({ status: "error", tokensIn: 50, tokensOut: 0 }), {
+    tokensIn: 50,
+    tokensOut: 0,
+  });
+  // Non-terminal never meters (a resumed awaiting_confirm bills on its own completion).
+  assert.equal(meteredRemoteUsage({ status: "awaiting_confirm", tokensIn: 999, tokensOut: 999 }), null);
+  // Zero tokens (local recall / fast-lane) → nothing to bill.
+  assert.equal(meteredRemoteUsage({ status: "done", tokensIn: 0, tokensOut: 0 }), null);
+  assert.equal(meteredRemoteUsage({ status: "done" }), null);
+  // Garbage token values are coerced to 0, not trusted.
+  assert.equal(meteredRemoteUsage({ status: "done", tokensIn: -5, tokensOut: "lots" }), null);
+}
 
 // Terminal vs in-flight statuses.
 {

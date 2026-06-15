@@ -31,6 +31,29 @@ export function isTerminalStatus(status: CommandStatus): boolean {
   return TERMINAL.has(status);
 }
 
+/**
+ * The tokens to meter for a completed remote command — or `null` when nothing
+ * should be billed: a non-terminal status (awaiting_confirm will resume and
+ * meter then) or zero tokens (a local recall / fast-lane turn is `$0`). Pure +
+ * tested. Metering only terminal turns means a YES-resume can't double-count
+ * (review M4).
+ */
+export function meteredRemoteUsage(input: {
+  status: CommandStatus;
+  tokensIn?: unknown;
+  tokensOut?: unknown;
+}): { tokensIn: number; tokensOut: number } | null {
+  if (!isTerminalStatus(input.status)) return null;
+  const tokensIn = nonNegInt(input.tokensIn);
+  const tokensOut = nonNegInt(input.tokensOut);
+  if (tokensIn <= 0 && tokensOut <= 0) return null;
+  return { tokensIn, tokensOut };
+}
+
+function nonNegInt(v: unknown): number {
+  return typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.floor(v) : 0;
+}
+
 export interface CommandRow {
   id: string;
   goal: string;

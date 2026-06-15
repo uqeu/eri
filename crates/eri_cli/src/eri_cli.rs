@@ -1356,7 +1356,7 @@ async fn run_control(
     let summary = if let Some(inner) = live_bridge {
         println!("[eri] live control: actuating via the eri app.\n");
         let bridge = control_agent::LoggingBridge::new(&inner, std::sync::Arc::clone(&log));
-        control_agent::run_control_agent(goal, model, &bridge, &gate, &mut confirm, 24).await?
+        control_agent::run_control_agent(goal, model, &bridge, &gate, &mut confirm, 24).await?.text
     } else {
         if live {
             println!(
@@ -1370,7 +1370,7 @@ async fn run_control(
         }
         let inner = control_agent::DryRunBridge;
         let bridge = control_agent::LoggingBridge::new(&inner, std::sync::Arc::clone(&log));
-        control_agent::run_control_agent(goal, model, &bridge, &gate, &mut confirm, 24).await?
+        control_agent::run_control_agent(goal, model, &bridge, &gate, &mut confirm, 24).await?.text
     };
     // Persist only REAL actions (dry-run "would do" must not become undoable).
     if actuated && let Some(p) = &log_path {
