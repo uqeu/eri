@@ -239,6 +239,41 @@ pub fn active_servers(all: &[ServerConfig]) -> Vec<ServerConfig> {
     all.iter().filter(|s| !s.disabled).cloned().collect()
 }
 
+/// Servers that ship **built in** to eri, so users never configure them. The
+/// Composio connector MCP is one: its url/key/per-user id are `${VAR}`s the pool
+/// resolves at launch, and it's auto-skipped when those aren't set (the
+/// fail-closed expansion). So "connect Gmail" just works after the keys are
+/// present — no `mcp.json` editing, nothing for a user to set up.
+pub fn builtin_servers() -> Vec<ServerConfig> {
+    let mut headers = BTreeMap::new();
+    headers.insert("x-api-key".to_string(), "${COMPOSIO_API_KEY}".to_string());
+    vec![ServerConfig {
+        name: "composio".to_string(),
+        url: Some(
+            "https://backend.composio.dev/v3/mcp/${COMPOSIO_MCP_SERVER_ID}?user_id=${ERI_USER_ID}"
+                .to_string(),
+        ),
+        headers,
+        transport: Some(TransportKind::Http),
+        ..Default::default()
+    }]
+}
+
+/// Prepend the built-in servers to `user` servers — but a user-defined server of
+/// the same name **wins** (explicit config overrides a built-in default). So a
+/// power user can still point `composio` somewhere else, and everyone else gets
+/// the built-in for free.
+pub fn with_builtins(user: Vec<ServerConfig>) -> Vec<ServerConfig> {
+    let taken: std::collections::HashSet<String> =
+        user.iter().map(|s| s.name.clone()).collect();
+    let mut out: Vec<ServerConfig> = builtin_servers()
+        .into_iter()
+        .filter(|b| !taken.contains(&b.name))
+        .collect();
+    out.extend(user);
+    out
+}
+
 /// Path of the user-global config under `$HOME/.eri/mcp.json`.
 pub fn global_path() -> Option<PathBuf> {
     let home = std::env::var_os("HOME").map(PathBuf::from)?;
@@ -375,6 +410,33 @@ mod tests {
             }
             other => panic!("expected UnsetVariable, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn composio_is_a_builtin_server() {
+        // Built in by default, with ${VAR} url + api-key header — no user config.
+        let built = builtin_servers();
+        let composio = built.iter().find(|s| s.name == "composio").expect("composio builtin");
+        assert!(composio.url.as_deref().unwrap().contains("${COMPOSIO_MCP_SERVER_ID}"));
+        assert_eq!(composio.headers.get("x-api-key").map(String::as_str), Some("${COMPOSIO_API_KEY}"));
+    }
+
+    #[test]
+    fn with_builtins_adds_composio_but_user_config_wins() {
+        // A fresh user gets the built-in composio for free.
+        let added = with_builtins(vec![]);
+        assert!(added.iter().any(|s| s.name == "composio"));
+
+        // A user-defined "composio" overrides the built-in (not duplicated).
+        let user = ServerConfig {
+            name: "composio".into(),
+            url: Some("https://my-own-proxy".into()),
+            ..Default::default()
+        };
+        let merged = with_builtins(vec![user]);
+        let composios: Vec<_> = merged.iter().filter(|s| s.name == "composio").collect();
+        assert_eq!(composios.len(), 1, "no duplicate composio");
+        assert_eq!(composios[0].url.as_deref(), Some("https://my-own-proxy"));
     }
 
     #[test]

@@ -165,7 +165,10 @@ impl Mcp {
         vars: &BTreeMap<String, String>,
     ) -> Result<Self, McpError> {
         let all = config::load(workspace)?;
-        let active = config::active_servers(&all);
+        // Built-in servers (Composio) ship with eri; a user's own config of the
+        // same name overrides. The built-in is auto-skipped below when its
+        // ${VAR}s aren't set, so it costs nothing until the keys are present.
+        let active = config::with_builtins(config::active_servers(&all));
 
         let mut connections = Vec::with_capacity(active.len());
         for server in active {

@@ -579,8 +579,6 @@ pub enum PhoneCommand {
 
 #[derive(Subcommand, Debug, PartialEq, Eq)]
 pub enum ComposioCommand {
-    /// Wire the Composio MCP server into ~/.eri/mcp.json (run once).
-    Setup,
     /// Start connecting a toolkit (opens its authorize page), e.g. `connect gmail`.
     Connect {
         /// Composio toolkit slug (gmail, github, googlecalendar, …).
@@ -930,7 +928,6 @@ async fn dispatch(cli: Cli) -> anyhow::Result<()> {
         Command::Init => run_init(),
         Command::Admin(AdminCommand::Usage { days, top }) => admin::usage(days, top).await,
         Command::Phone(PhoneCommand::Link) => phone::link().await,
-        Command::Composio(ComposioCommand::Setup) => composio::setup(),
         Command::Composio(ComposioCommand::Connect { toolkit }) => {
             composio::connect(&toolkit).await
         }
