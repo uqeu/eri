@@ -6,8 +6,8 @@
 // hosted Composio OAuth URL the user opens to authorize.
 
 import { NextResponse } from "next/server";
-import { authenticateApiBearer } from "@/lib/auth/api_tokens";
 import { upsertConnection } from "@/lib/composio/accounts";
+import { composioCaller } from "@/lib/composio/auth";
 import { ComposioApiClient } from "@/lib/composio/client";
 import { handleConnect } from "@/lib/composio/connect";
 import { featureLocked } from "@/lib/feature_gate";
@@ -16,11 +16,11 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request): Promise<Response> {
-  const auth = await authenticateApiBearer(request.headers.get("authorization"));
-  if (!auth) {
+  const caller = await composioCaller(request.headers.get("authorization"));
+  if (!caller) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  if (featureLocked(auth.user.tier, "mcp")) {
+  if (featureLocked(caller.tier, "mcp")) {
     return NextResponse.json({ error: "tier_locked", required: "pro_plus" }, { status: 402 });
   }
 
@@ -33,7 +33,7 @@ export async function POST(request: Request): Promise<Response> {
   const toolkit = (body as { toolkit?: unknown })?.toolkit;
 
   const client = new ComposioApiClient();
-  const outcome = await handleConnect(auth.user.id, toolkit, {
+  const outcome = await handleConnect(caller.id, toolkit, {
     initiate: (userId, tk) => client.initiateConnection(userId, tk),
     record: upsertConnection,
   });
