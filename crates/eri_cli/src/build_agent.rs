@@ -2064,15 +2064,28 @@ async fn load_mcp(root: &Path) -> (Option<eri_mcp::Mcp>, Vec<eri_mcp::ToolHandle
         return (None, Vec::new());
     }
     // Poll until at least one server reports tools, or a short deadline passes.
-    // Servers handshake quickly; the cap keeps a slow/hung server from stalling
-    // the whole build.
+    // We actively drive `refresh()` rather than waiting on the background
+    // refresher's 5s timer: a handshake completes in well under a second, and
+    // the timer's next tick could otherwise land *after* this deadline, leaving
+    // the first turn with no tools even though the server is Ready. `refresh()`
+    // is a cheap no-op until a server reaches Ready, then fires `tools/list`.
     let mut tools = mcp.tools().await;
     for _ in 0..25 {
         if !tools.is_empty() {
             break;
         }
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        mcp.refresh().await;
         tools = mcp.tools().await;
+    }
+    // Under ERI_DEBUG, report each server's connection state + tool count so a
+    // "no tools" mystery (auth, transport, server config) is diagnosable.
+    if std::env::var("ERI_DEBUG").is_ok() {
+        for s in mcp.servers().await {
+            let n = tools.iter().filter(|t| t.server == s.name).count();
+            let err = s.last_error.as_deref().unwrap_or("");
+            eprintln!("[eri-mcp] {} state={} tools={n} {}", s.name, s.state, err);
+        }
     }
     (Some(mcp), tools)
 }

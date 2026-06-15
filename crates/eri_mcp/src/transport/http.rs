@@ -5,9 +5,16 @@
 //!   - Server may respond with `application/json` (one message in the body)
 //!     or `text/event-stream` (zero or more SSE `message:` events). Either
 //!     way the messages get pushed onto our inbound queue.
-//!   - To receive server-initiated messages between requests, we also open
-//!     a long-lived GET on the same URL with `Accept: text/event-stream`
-//!     and parse SSE in the background.
+//!   - To receive server-initiated messages between requests, the server MAY
+//!     also expose a long-lived GET on the same URL with `Accept:
+//!     text/event-stream`. Per the spec this side-channel is OPTIONAL and
+//!     exists only for *unsolicited* server→client messages — request/response
+//!     traffic always flows over POST bodies. We therefore open it LAZILY:
+//!     only once a POST returns `202 Accepted` (the server's signal that it
+//!     will deliver our response out-of-band). Opening it eagerly is wrong —
+//!     some streamable-HTTP servers (e.g. Composio) switch to routing every
+//!     response onto the GET stream the moment one is open, which strands the
+//!     replies a POST-only client would otherwise receive inline.
 //!
 //! We hand-roll SSE parsing — `reqwest` exposes a byte stream and a full
 //! `eventsource-client` dependency would be overkill for a single event
@@ -66,7 +73,9 @@ impl HttpTransport {
 
         let (tx, rx) = mpsc::channel(CHANNEL_BUFFER);
 
-        let mut transport = Self {
+        // No eager GET stream: we start POST-only and open the side-channel
+        // lazily if (and only if) a server asks us to via `202 Accepted`.
+        let transport = Self {
             name: config.name.clone(),
             url,
             client,
@@ -76,15 +85,19 @@ impl HttpTransport {
             listener: Mutex::new(None),
             closed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         };
-        transport.spawn_event_stream().await;
         Ok(transport)
     }
 
-    /// Open a long-lived GET to the endpoint with `Accept: text/event-stream`
-    /// and forward parsed JSON-RPC frames to the inbound channel. Some MCP
-    /// servers don't support this side channel (they only reply via POST
-    /// bodies); we tolerate a 4xx response by silently exiting the task.
-    async fn spawn_event_stream(&mut self) {
+    /// Open the long-lived GET side-channel (`Accept: text/event-stream`) if it
+    /// isn't already running, and forward parsed JSON-RPC frames to the inbound
+    /// channel. Idempotent — safe to call on every `202`. Some MCP servers
+    /// don't support this side channel (they only reply via POST bodies); we
+    /// tolerate a 4xx response by silently exiting the task.
+    async fn ensure_event_stream(&self) {
+        let mut listener = self.listener.lock().await;
+        if listener.is_some() {
+            return; // already running
+        }
         let url = self.url.clone();
         let client = self.client.clone();
         let headers = self.headers.clone();
@@ -142,7 +155,7 @@ impl HttpTransport {
             }
         });
 
-        *self.listener.lock().await = Some(handle);
+        *listener = Some(handle);
     }
 }
 
@@ -176,9 +189,26 @@ impl Transport for HttpTransport {
             .map(|s| s.to_string())
             .unwrap_or_default();
 
-        // 202 + empty body means "accepted, expect inbound via SSE side
-        // channel" — the response carries no message we need to enqueue.
+        if std::env::var("ERI_DEBUG").is_ok() {
+            let method = message.get("method").and_then(Value::as_str).unwrap_or("?");
+            eprintln!(
+                "[eri-mcp/http] {} POST method={method} -> {} ct={content_type}",
+                self.name, status
+            );
+        }
+
+        // 202 Accepted carries no body. Per the streamable-HTTP spec a 202 is
+        // the normal reply to a *notification or response* we POSTed — nothing
+        // is coming back, so we must NOT open the GET stream (doing so after
+        // `notifications/initialized` is exactly what strands the next
+        // request's inline reply). Only a 202 to a *request* (one with an `id`)
+        // means "your response will arrive out-of-band" — then, and only then,
+        // do we lazily bring up the GET side-channel to receive it.
         if status == reqwest::StatusCode::ACCEPTED {
+            let is_request = message.get("id").is_some_and(|id| !id.is_null());
+            if is_request {
+                self.ensure_event_stream().await;
+            }
             return Ok(());
         }
 
@@ -349,5 +379,27 @@ mod tests {
         let mut sse = SseBuffer::default();
         let events = sse.feed(b"event: message\nid: 42\ndata: {\"a\":1}\n\n");
         assert_eq!(events, vec![r#"{"a":1}"#]);
+    }
+
+    /// Regression: `connect()` must NOT eagerly open the GET SSE side-channel.
+    /// Opening it eagerly flips streamable-HTTP servers (e.g. Composio) into
+    /// routing responses out-of-band, stranding the inline POST reply and
+    /// yielding `tools=0`. The side-channel is lazy — opened only on a `202`
+    /// to a request. `connect()` just validates the URL (no network), so this
+    /// is a fast, offline guard on that invariant.
+    #[tokio::test]
+    async fn connect_does_not_eagerly_open_get_stream() {
+        let config = ServerConfig {
+            name: "test".to_string(),
+            url: Some("https://example.invalid/mcp".to_string()),
+            ..Default::default()
+        };
+        let transport = HttpTransport::connect(&config)
+            .await
+            .expect("connect validates URL only");
+        assert!(
+            transport.listener.lock().await.is_none(),
+            "GET side-channel must stay closed until a 202 to a request opens it lazily"
+        );
     }
 }
