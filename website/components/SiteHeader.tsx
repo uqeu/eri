@@ -9,9 +9,9 @@ interface SiteHeaderProps {
 }
 
 const NAV_LINKS: ReadonlyArray<{ href: string; label: string }> = [
-  { href: "/download", label: "Download" },
   { href: "/pricing", label: "Pricing" },
   { href: "/features", label: "Features" },
+  { href: "/phone", label: "Phone" },
   { href: "/security", label: "Security" },
   { href: "/changelog", label: "Changelog" },
 ];
@@ -52,23 +52,15 @@ export function SiteHeader({ variant = "transparent" }: SiteHeaderProps) {
         </Link>
 
         <nav className="hidden md:flex items-center gap-1">
-          {NAV_LINKS.map((link) => {
-            const active =
-              pathname === link.href ||
-              (link.href !== "/" && pathname?.startsWith(`${link.href}/`));
-            return (
-              <Link
-                key={link.href}
-                href={link.href}
-                aria-current={active ? "page" : undefined}
-                className={`px-3 py-1.5 text-[14px] transition-colors rounded-sm ${
-                  active ? "text-text" : "text-text-sec hover:text-text"
-                }`}
-              >
-                {link.label}
-              </Link>
-            );
-          })}
+          {NAV_LINKS.map((link) => (
+            <Link
+              key={link.href}
+              href={link.href}
+              className="px-3 py-1.5 text-[14px] text-text-sec hover:text-text transition-colors rounded-sm"
+            >
+              {link.label}
+            </Link>
+          ))}
         </nav>
 
         <div className="flex items-center gap-2">
@@ -114,7 +106,7 @@ export function SiteHeader({ variant = "transparent" }: SiteHeaderProps) {
                 href="/sign-up"
                 className="inline-flex items-center gap-1.5 rounded-md bg-text px-3.5 py-1.5 text-[13px] font-medium text-bg hover:opacity-90 transition-colors"
               >
-                Request access
+                Try eri free
                 <span aria-hidden className="text-[10px]">
                   →
                 </span>
