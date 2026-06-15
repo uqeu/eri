@@ -9,12 +9,18 @@
 //! Why a shared module rather than per-adapter code: the build loop and the
 //! control loop both hand the engine the *same* engine-agnostic shapes (system
 //! blocks, an Anthropic-style message list, and Anthropic-style tool specs), and
-//! both need the *same* OpenAI request body and the *same* response decoding
-//! (text + `tool_calls` + `usage`). Only the final container differs — the build
-//! loop wants a [`eri_agent::Turn`], the control loop wants a
+//! both need the *same* OpenAI request body, the *same* HTTP call, and the *same*
+//! response decoding (text + `tool_calls` + `usage`). Only the final container
+//! differs — the build loop wants a [`eri_agent::Turn`], the control loop wants a
 //! [`crate::control_turn::TurnOutput`]. So everything up to that last mapping is
 //! identical; centralising it here keeps the OpenAI wire knowledge in one tested
 //! place and lets the two adapters stay thin.
+//!
+//! Centralised here (architecture-review C1): the connection config
+//! ([`EriBrainConfig`] — env reads and endpoint construction), and the single
+//! HTTP executor ([`execute_openai`] — the `reqwest` POST, bearer auth, status
+//! check, body read, and [`parse_openai_response`]), which returns a classified
+//! [`EriBrainError`] so each adapter renders its own escalation diagnostic.
 //!
 //! Identity (persona + memory) is assembled *above* this layer and arrives in the
 //! `system`/`messages`; this module is a dumb executor that forwards them and
@@ -28,6 +34,137 @@ use crate::control_turn::{join_block_text_pub, tool_result_text_pub};
 /// holds the *base* URL (e.g. `https://brain.eri.dev`); we append the standard
 /// OpenAI route so the same config points at any OpenAI-compatible server.
 pub const OPENAI_CHAT_PATH: &str = "/v1/chat/completions";
+
+/// Env var holding the *base* URL of eri's hosted brain (a vLLM OpenAI-compatible
+/// server). When set, the eri-brain engine answers first and Claude is the
+/// escalation. Model-agnostic: the URL is the only thing that points at a model.
+pub const ERI_BRAIN_URL_ENV: &str = "ERI_BRAIN_URL";
+
+/// Optional bearer token for the hosted brain (`vLLM --api-key`). Omitted when
+/// the endpoint is unauthenticated (e.g. a private network or the eri.dev proxy
+/// adds auth upstream).
+pub const ERI_BRAIN_KEY_ENV: &str = "ERI_BRAIN_KEY";
+
+/// Optional model id sent to the OpenAI endpoint. The served model is a deploy
+/// choice; vLLM ignores/validates this, so a default keeps config minimal.
+pub const ERI_BRAIN_MODEL_ENV: &str = "ERI_BRAIN_MODEL";
+
+/// Default model label when `ERI_BRAIN_MODEL` is unset — purely a wire label, not
+/// a code dependency on any particular model (the endpoint decides what's served).
+const DEFAULT_ERI_BRAIN_MODEL: &str = "eri-brain";
+
+/// Connection config shared by the eri-brain build and control adapters: the
+/// resolved chat-completions endpoint, an optional bearer key, and the wire model
+/// label.
+///
+/// Why hoisted here: both adapters read the exact same env vars and build the
+/// exact same endpoint (`base.trim_end()` + [`OPENAI_CHAT_PATH`]). Centralising
+/// the config — and the HTTP call that consumes it ([`execute_openai`]) — keeps
+/// the OpenAI wire knowledge in one tested place; the adapters differ only in the
+/// container they map the decoded [`OpenAiTurn`] into.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EriBrainConfig {
+    /// Fully-resolved `/v1/chat/completions` endpoint (base URL + path).
+    pub endpoint: String,
+    /// Optional bearer token; `None` for an unauthenticated endpoint.
+    pub api_key: Option<String>,
+    /// Wire model label sent in the request body.
+    pub model: String,
+}
+
+impl EriBrainConfig {
+    /// Build from `ERI_BRAIN_URL` (+ optional `ERI_BRAIN_KEY`/`ERI_BRAIN_MODEL`).
+    /// `None` when the URL is unset/blank, so engine selection cleanly falls back
+    /// to the existing engines.
+    pub fn from_env() -> Option<Self> {
+        let url = std::env::var(ERI_BRAIN_URL_ENV).ok()?;
+        let key = std::env::var(ERI_BRAIN_KEY_ENV).ok();
+        let model = std::env::var(ERI_BRAIN_MODEL_ENV).ok();
+        Self::new(&url, key.as_deref(), model.as_deref())
+    }
+
+    /// Env-free constructor — testable. `None` for a blank base URL. The base URL
+    /// has any trailing slash trimmed before [`OPENAI_CHAT_PATH`] is appended, so
+    /// config is forgiving; a blank key/model falls back to unauthenticated /
+    /// the default label.
+    pub fn new(base_url: &str, api_key: Option<&str>, model: Option<&str>) -> Option<Self> {
+        let base = base_url.trim();
+        if base.is_empty() {
+            return None;
+        }
+        let endpoint = format!("{}{}", base.trim_end_matches('/'), OPENAI_CHAT_PATH);
+        let api_key = api_key
+            .map(str::trim)
+            .filter(|k| !k.is_empty())
+            .map(str::to_string);
+        let model = model
+            .map(str::trim)
+            .filter(|m| !m.is_empty())
+            .unwrap_or(DEFAULT_ERI_BRAIN_MODEL)
+            .to_string();
+        Some(Self {
+            endpoint,
+            api_key,
+            model,
+        })
+    }
+}
+
+/// Why a turn against the hosted brain failed, classified so each adapter can
+/// craft its *own* error message (the build loop wants a [`anyhow::Error`] for a
+/// `Hard` escalation; the control loop wants a plain `anyhow!`) while the shared
+/// executor owns the *detection*. All three variants mean "escalate to the next
+/// engine"; they differ only in the diagnostic the adapter renders.
+#[derive(Debug)]
+pub enum EriBrainError {
+    /// The endpoint was unreachable / the request never completed (DNS, connect,
+    /// TLS, timeout). Carries the underlying transport error.
+    Transport(reqwest::Error),
+    /// The server replied with a non-2xx status. Carries the status and the
+    /// response body (best-effort) for diagnostics.
+    Status {
+        status: reqwest::StatusCode,
+        body: String,
+    },
+    /// A 2xx reply whose body could not be decoded as JSON. Carries the decode
+    /// error.
+    MalformedBody(reqwest::Error),
+}
+
+/// Run one OpenAI chat-completions turn against `cfg` and decode the reply.
+///
+/// This is the single HTTP executor shared by the eri-brain build and control
+/// adapters (architecture-review C1): it owns endpoint use, the `reqwest` POST +
+/// optional bearer auth, the status check, the body read, and
+/// [`parse_openai_response`]. It returns the decoded [`OpenAiTurn`] or a
+/// classified [`EriBrainError`] — the caller decides terminal-vs-escalation on
+/// the parsed turn and maps it into its own container ([`eri_agent::Turn`] vs the
+/// control loop's `TurnOutput`).
+///
+/// `stream:false` — the decoder works on the assembled body, and both loops
+/// materialise tools per turn, so a single response is enough.
+pub(crate) async fn execute_openai(
+    client: &reqwest::Client,
+    cfg: &EriBrainConfig,
+    system: &[Value],
+    messages: &[Value],
+    tools: &Value,
+    max_tokens: u32,
+) -> Result<OpenAiTurn, EriBrainError> {
+    let body = build_request_body(&cfg.model, system, messages, tools, max_tokens, false);
+    let mut req = client.post(&cfg.endpoint).json(&body);
+    if let Some(key) = &cfg.api_key {
+        req = req.bearer_auth(key);
+    }
+    let resp = req.send().await.map_err(EriBrainError::Transport)?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(EriBrainError::Status { status, body });
+    }
+    let v: Value = resp.json().await.map_err(EriBrainError::MalformedBody)?;
+    Ok(parse_openai_response(&v))
+}
 
 /// Convert eri's Anthropic-style tool specs (`{name, description, input_schema}`)
 /// into the OpenAI function-tool shape
@@ -673,6 +810,58 @@ mod tests {
         assert_eq!(m[3]["role"], "tool");
         assert_eq!(m[3]["tool_call_id"], "t1");
         assert_eq!(m[3]["content"], "opened Safari");
+    }
+
+    // ── C1: shared EriBrainConfig (construction + endpoint) ──
+
+    #[test]
+    fn config_appends_openai_chat_path_trimming_trailing_slash() {
+        // The env var holds the base URL; the OpenAI route is appended once,
+        // trimming any trailing slash so config is forgiving.
+        let cfg = EriBrainConfig::new("https://brain.eri.dev/", None, None).unwrap();
+        assert_eq!(cfg.endpoint, "https://brain.eri.dev/v1/chat/completions");
+    }
+
+    #[test]
+    fn config_defaults_model_and_drops_blank_key() {
+        // A blank/absent model falls back to the wire label; a blank key becomes
+        // unauthenticated (None) so we never send an empty bearer token.
+        let cfg = EriBrainConfig::new("https://b", Some("   "), Some("  ")).unwrap();
+        assert_eq!(cfg.model, DEFAULT_ERI_BRAIN_MODEL);
+        assert_eq!(cfg.api_key, None);
+        let cfg2 = EriBrainConfig::new("https://b", Some("secret"), Some("qwen3")).unwrap();
+        assert_eq!(cfg2.api_key.as_deref(), Some("secret"));
+        assert_eq!(cfg2.model, "qwen3");
+    }
+
+    #[test]
+    fn blank_base_url_yields_no_config() {
+        // A blank base URL must not produce a (broken) config — selection then
+        // cleanly falls back to the other engines.
+        assert!(EriBrainConfig::new("   ", None, None).is_none());
+        assert!(EriBrainConfig::new("", Some("k"), Some("m")).is_none());
+    }
+
+    // ── C1: EriBrainError classification ──
+    //
+    // `execute_openai` wraps a live `reqwest` call, so the variants can't be
+    // produced without a socket. We instead lock the classification *contract*
+    // each adapter relies on: the three escalation cases are distinct variants
+    // and a `Status` carries the status + body for diagnostics.
+
+    #[test]
+    fn error_status_carries_status_and_body_for_diagnostics() {
+        let err = EriBrainError::Status {
+            status: reqwest::StatusCode::BAD_GATEWAY,
+            body: "upstream is down".to_string(),
+        };
+        match err {
+            EriBrainError::Status { status, body } => {
+                assert_eq!(status, reqwest::StatusCode::BAD_GATEWAY);
+                assert_eq!(body, "upstream is down");
+            }
+            other => panic!("expected Status, got {other:?}"),
+        }
     }
 
     #[test]

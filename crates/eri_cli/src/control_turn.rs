@@ -24,6 +24,8 @@
 use anyhow::{Result, anyhow};
 use serde_json::{Value, json};
 
+use crate::openai_turn::{EriBrainConfig, EriBrainError, execute_openai};
+
 /// What one model turn produced for the control loop. Engine-agnostic: both the
 /// Claude and the local adapter fill the same shape, so the loop never branches
 /// on which engine answered.
@@ -458,53 +460,58 @@ fn join_block_text(blocks: &[Value]) -> String {
 /// goals at 0 Claude tokens and errors (so the loop escalates to Claude) when the
 /// endpoint is unreachable or empty. A dumb executor: persona/memory arrive in
 /// `system`/`messages` from the layer above. Env vars are shared with the build
-/// adapter ([`crate::build_turn::ERI_BRAIN_URL_ENV`] etc.) so one config drives
-/// both loops.
+/// adapter (via [`crate::openai_turn::EriBrainConfig`]) so one config drives both
+/// loops.
+///
+/// Holds the shared [`EriBrainConfig`] + a `reqwest::Client`; the HTTP call is the
+/// shared [`execute_openai`] (C1). This adapter only maps the decoded turn into
+/// the control loop's [`TurnOutput`] and makes the S4 escalation decision.
 pub struct EriBrainControlTurn {
-    endpoint: String,
-    api_key: Option<String>,
-    model: String,
+    config: EriBrainConfig,
     max_tokens: u32,
     client: reqwest::Client,
 }
 
 impl EriBrainControlTurn {
     /// Build from `ERI_BRAIN_URL` (+ optional `ERI_BRAIN_KEY`/`ERI_BRAIN_MODEL`).
-    /// `None` when the URL is unset/blank, so selection falls back cleanly.
+    /// `None` when the URL is unset/blank, so selection falls back cleanly. Routes
+    /// through [`EriBrainConfig::from_env`] (the shared env-read + endpoint build).
     pub fn from_env() -> Option<Self> {
-        let url = std::env::var(crate::build_turn::ERI_BRAIN_URL_ENV).ok()?;
-        let key = std::env::var(crate::build_turn::ERI_BRAIN_KEY_ENV).ok();
-        let model = std::env::var(crate::build_turn::ERI_BRAIN_MODEL_ENV).ok();
-        Self::new(&url, key.as_deref(), model.as_deref())
+        Some(Self::from_config(EriBrainConfig::from_env()?))
     }
 
     /// Env-free constructor — testable. `None` for a blank base URL.
+    #[cfg(test)]
     pub fn new(base_url: &str, api_key: Option<&str>, model: Option<&str>) -> Option<Self> {
-        let base = base_url.trim();
-        if base.is_empty() {
-            return None;
-        }
-        let endpoint = format!(
-            "{}{}",
-            base.trim_end_matches('/'),
-            crate::openai_turn::OPENAI_CHAT_PATH
-        );
-        let api_key = api_key
-            .map(str::trim)
-            .filter(|k| !k.is_empty())
-            .map(str::to_string);
-        let model = model
-            .map(str::trim)
-            .filter(|m| !m.is_empty())
-            .unwrap_or("eri-brain")
-            .to_string();
-        Some(Self {
-            endpoint,
-            api_key,
-            model,
+        Some(Self::from_config(EriBrainConfig::new(
+            base_url, api_key, model,
+        )?))
+    }
+
+    /// Wrap a resolved config with the control loop's token cap + a fresh client.
+    fn from_config(config: EriBrainConfig) -> Self {
+        Self {
+            config,
             max_tokens: crate::build_agent::MAX_TOKENS,
             client: reqwest::Client::new(),
-        })
+        }
+    }
+
+    /// Render a classified [`EriBrainError`] into the control loop's escalation
+    /// error. The wording is byte-identical to the pre-extraction inline errors
+    /// so existing behaviour (and the self-improvement log) is unchanged: an
+    /// unreachable endpoint, a non-2xx status (with body), or an undecodable body
+    /// all become an error the loop escalates on.
+    fn escalation_error(&self, err: EriBrainError) -> anyhow::Error {
+        match err {
+            EriBrainError::Transport(e) => {
+                anyhow!("eri-brain unreachable at {} ({e})", self.config.endpoint)
+            }
+            EriBrainError::Status { status, body } => {
+                anyhow!("eri-brain returned {status}: {body}")
+            }
+            EriBrainError::MalformedBody(e) => anyhow!("eri-brain sent invalid JSON: {e}"),
+        }
     }
 }
 
@@ -515,32 +522,19 @@ impl ControlTurn for EriBrainControlTurn {
     }
 
     async fn run(&self, system: &[Value], messages: &[Value], tools: &Value) -> Result<TurnOutput> {
-        let body = crate::openai_turn::build_request_body(
-            &self.model,
+        // The shared executor (C1) owns the HTTP call + response decode; here we
+        // only render its classified failure into the control loop's escalation
+        // error (byte-identical wording to the welded messages).
+        let parsed = execute_openai(
+            &self.client,
+            &self.config,
             system,
             messages,
             tools,
             self.max_tokens,
-            false,
-        );
-        let mut req = self.client.post(&self.endpoint).json(&body);
-        if let Some(key) = &self.api_key {
-            req = req.bearer_auth(key);
-        }
-        let resp = req
-            .send()
-            .await
-            .map_err(|e| anyhow!("eri-brain unreachable at {} ({e})", self.endpoint))?;
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let detail = resp.text().await.unwrap_or_default();
-            return Err(anyhow!("eri-brain returned {status}: {detail}"));
-        }
-        let v: Value = resp
-            .json()
-            .await
-            .map_err(|e| anyhow!("eri-brain sent invalid JSON: {e}"))?;
-        let parsed = crate::openai_turn::parse_openai_response(&v);
+        )
+        .await
+        .map_err(|e| self.escalation_error(e))?;
         // S4: only escalate a *failure*-empty turn, not a *terminal*-empty one.
         // A well-formed `stop`/`end_turn` with no text and no tool calls is the
         // model legitimately finishing; escalating it to Claude wastes tokens and
@@ -1009,6 +1003,9 @@ mod tests {
         // The env var holds the base URL; the OpenAI route is appended once,
         // trimming any trailing slash so config is forgiving.
         let brain = EriBrainControlTurn::new("https://brain.eri.dev/", None, None).unwrap();
-        assert_eq!(brain.endpoint, "https://brain.eri.dev/v1/chat/completions");
+        assert_eq!(
+            brain.config.endpoint,
+            "https://brain.eri.dev/v1/chat/completions"
+        );
     }
 }
