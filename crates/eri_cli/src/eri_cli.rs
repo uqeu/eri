@@ -36,6 +36,8 @@ mod chat;
 mod checkpoint;
 mod client;
 mod commands;
+mod composio;
+mod composio_session;
 mod config;
 mod control_agent;
 mod control_safety;
@@ -53,7 +55,6 @@ mod plan_tui;
 mod plugins;
 mod proactive;
 mod project;
-mod composio;
 mod remote;
 mod remote_recall;
 mod repl;
@@ -1381,7 +1382,9 @@ async fn run_control(
     let summary = if let Some(inner) = live_bridge {
         println!("[eri] live control: actuating via the eri app.\n");
         let bridge = control_agent::LoggingBridge::new(&inner, std::sync::Arc::clone(&log));
-        control_agent::run_control_agent(goal, model, &bridge, &gate, &mut confirm, 24).await?.text
+        control_agent::run_control_agent(goal, model, &bridge, &gate, &mut confirm, 24)
+            .await?
+            .text
     } else {
         if live {
             println!(
@@ -1395,7 +1398,9 @@ async fn run_control(
         }
         let inner = control_agent::DryRunBridge;
         let bridge = control_agent::LoggingBridge::new(&inner, std::sync::Arc::clone(&log));
-        control_agent::run_control_agent(goal, model, &bridge, &gate, &mut confirm, 24).await?.text
+        control_agent::run_control_agent(goal, model, &bridge, &gate, &mut confirm, 24)
+            .await?
+            .text
     };
     // Persist only REAL actions (dry-run "would do" must not become undoable).
     if actuated && let Some(p) = &log_path {

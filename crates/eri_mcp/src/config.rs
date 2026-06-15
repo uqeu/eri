@@ -103,9 +103,7 @@ impl ServerConfig {
     /// broken credential).
     pub fn expand(&self, vars: &BTreeMap<String, String>) -> Result<ServerConfig, McpError> {
         let lookup = |name: &str| -> Option<String> {
-            vars.get(name)
-                .cloned()
-                .or_else(|| std::env::var(name).ok())
+            vars.get(name).cloned().or_else(|| std::env::var(name).ok())
         };
         let exp = |s: &str| expand_vars(s, &self.name, &lookup);
 
@@ -249,10 +247,15 @@ pub fn builtin_servers() -> Vec<ServerConfig> {
     headers.insert("x-api-key".to_string(), "${COMPOSIO_API_KEY}".to_string());
     vec![ServerConfig {
         name: "composio".to_string(),
-        url: Some(
-            "https://backend.composio.dev/v3/mcp/${COMPOSIO_MCP_SERVER_ID}?user_id=${ERI_USER_ID}"
-                .to_string(),
-        ),
+        // The whole URL is a single `${COMPOSIO_MCP_URL}` var: a Composio Tool
+        // Router *session* endpoint (`…/tool_router/trs_.../mcp`) minted at
+        // launch. That session exposes only 6 meta-tools instead of the flat
+        // 61-tool catalog — a large per-turn token win — and lets eri drive
+        // search → schema → multi-execute itself. The session url is resolved
+        // in `eri_cli::load_mcp` (mint-on-connect) and injected via `vars`; if
+        // it doesn't resolve the server is skipped (fail-closed expansion),
+        // exactly as the old hardcoded URL behaved when its vars were unset.
+        url: Some("${COMPOSIO_MCP_URL}".to_string()),
         headers,
         transport: Some(TransportKind::Http),
         ..Default::default()
@@ -264,8 +267,7 @@ pub fn builtin_servers() -> Vec<ServerConfig> {
 /// power user can still point `composio` somewhere else, and everyone else gets
 /// the built-in for free.
 pub fn with_builtins(user: Vec<ServerConfig>) -> Vec<ServerConfig> {
-    let taken: std::collections::HashSet<String> =
-        user.iter().map(|s| s.name.clone()).collect();
+    let taken: std::collections::HashSet<String> = user.iter().map(|s| s.name.clone()).collect();
     let mut out: Vec<ServerConfig> = builtin_servers()
         .into_iter()
         .filter(|b| !taken.contains(&b.name))
@@ -395,9 +397,15 @@ mod tests {
     fn expand_vars_substitutes_and_preserves_literals() {
         let l = lookup(&[("A", "x"), ("B", "y")]);
         assert_eq!(expand_vars("${A}/${B}", "s", &l).unwrap(), "x/y");
-        assert_eq!(expand_vars("no vars here", "s", &l).unwrap(), "no vars here");
+        assert_eq!(
+            expand_vars("no vars here", "s", &l).unwrap(),
+            "no vars here"
+        );
         // A lone "${" with no closing brace is left literal, not an infinite loop.
-        assert_eq!(expand_vars("cost is $5 and ${A", "s", &l).unwrap(), "cost is $5 and ${A");
+        assert_eq!(
+            expand_vars("cost is $5 and ${A", "s", &l).unwrap(),
+            "cost is $5 and ${A"
+        );
     }
 
     #[test]
@@ -414,11 +422,62 @@ mod tests {
 
     #[test]
     fn composio_is_a_builtin_server() {
-        // Built in by default, with ${VAR} url + api-key header — no user config.
+        // Built in by default. The URL is a single `${COMPOSIO_MCP_URL}` var (the
+        // Tool Router session endpoint, minted at launch), with the api-key header
+        // — no user config needed.
         let built = builtin_servers();
-        let composio = built.iter().find(|s| s.name == "composio").expect("composio builtin");
-        assert!(composio.url.as_deref().unwrap().contains("${COMPOSIO_MCP_SERVER_ID}"));
-        assert_eq!(composio.headers.get("x-api-key").map(String::as_str), Some("${COMPOSIO_API_KEY}"));
+        let composio = built
+            .iter()
+            .find(|s| s.name == "composio")
+            .expect("composio builtin");
+        assert_eq!(composio.url.as_deref(), Some("${COMPOSIO_MCP_URL}"));
+        assert_eq!(
+            composio.headers.get("x-api-key").map(String::as_str),
+            Some("${COMPOSIO_API_KEY}")
+        );
+        assert_eq!(composio.resolved_transport(), TransportKind::Http);
+    }
+
+    #[test]
+    fn composio_builtin_resolves_when_session_url_is_set_and_skips_when_not() {
+        // With both vars present, the builtin expands to the concrete session
+        // URL + key — ready to connect.
+        let composio = builtin_servers()
+            .into_iter()
+            .find(|s| s.name == "composio")
+            .expect("composio builtin");
+
+        let mut vars = BTreeMap::new();
+        vars.insert(
+            "COMPOSIO_MCP_URL".to_string(),
+            "https://backend.composio.dev/tool_router/trs_abc/mcp".to_string(),
+        );
+        vars.insert("COMPOSIO_API_KEY".to_string(), "ak_secret".to_string());
+        let resolved = composio.expand(&vars).expect("expands with both vars");
+        assert_eq!(
+            resolved.url.as_deref(),
+            Some("https://backend.composio.dev/tool_router/trs_abc/mcp")
+        );
+        assert_eq!(
+            resolved.headers.get("x-api-key").map(String::as_str),
+            Some("ak_secret")
+        );
+
+        // Without the session url (and assuming the env var is unset), expansion
+        // fails closed so `load_with_vars` skips the server — same as before.
+        let only_key = {
+            let mut v = BTreeMap::new();
+            v.insert("COMPOSIO_API_KEY".to_string(), "ak_secret".to_string());
+            v
+        };
+        // Only assert the fail-closed behaviour when the ambient env doesn't
+        // happen to define COMPOSIO_MCP_URL (it won't in CI / normal test runs).
+        if std::env::var("COMPOSIO_MCP_URL").is_err() {
+            assert!(matches!(
+                composio.expand(&only_key),
+                Err(McpError::UnsetVariable { name, .. }) if name == "COMPOSIO_MCP_URL"
+            ));
+        }
     }
 
     #[test]
@@ -465,9 +524,17 @@ mod tests {
             resolved.url.as_deref(),
             Some("https://backend.composio.dev/v3/mcp/srv_123?user_id=user_abc")
         );
-        assert_eq!(resolved.headers.get("x-api-key").map(String::as_str), Some("ak_secret"));
+        assert_eq!(
+            resolved.headers.get("x-api-key").map(String::as_str),
+            Some("ak_secret")
+        );
         // The on-disk config is untouched — placeholders stay for the next launch.
-        assert!(cfg.url.as_deref().unwrap().contains("${COMPOSIO_SERVER_ID}"));
+        assert!(
+            cfg.url
+                .as_deref()
+                .unwrap()
+                .contains("${COMPOSIO_SERVER_ID}")
+        );
     }
 
     #[test]

@@ -39,13 +39,14 @@ pub async fn calendar(action: &str) -> Result<()> {
 
 async fn run_category(label: &str, keywords: &[&str], action: &str, example: &str) -> Result<()> {
     let ws = workspace();
-    let tools: Vec<ToolHandle> = match Mcp::load_with_vars(&ws, &crate::build_agent::mcp_vars()).await {
-        Ok(mcp) => mcp.tools().await,
-        Err(e) => {
-            println!("[eri] couldn't load MCP config: {e}");
-            Vec::new()
-        }
-    };
+    let tools: Vec<ToolHandle> =
+        match Mcp::load_with_vars(&ws, &crate::build_agent::mcp_vars_with_session().await).await {
+            Ok(mcp) => mcp.tools().await,
+            Err(e) => {
+                println!("[eri] couldn't load MCP config: {e}");
+                Vec::new()
+            }
+        };
     let matched: Vec<&ToolHandle> = tools
         .iter()
         .filter(|t| matches_category(&t.name, keywords) || matches_category(&t.server, keywords))

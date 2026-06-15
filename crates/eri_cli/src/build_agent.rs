@@ -2052,10 +2052,44 @@ pub(crate) fn mcp_vars() -> std::collections::BTreeMap<String, String> {
     vars
 }
 
+/// Like [`mcp_vars`] but also resolves `COMPOSIO_MCP_URL` — the Composio Tool
+/// Router *session* endpoint the built-in `composio` server points at.
+///
+/// Resolution order (so a cloud-minted session can be used without a code
+/// change): an explicit `COMPOSIO_MCP_URL` in the process env wins; otherwise,
+/// when both `COMPOSIO_API_KEY` and the signed-in user id are present, we mint a
+/// session on the fly and use its url. If neither path yields a url the var is
+/// left unset, and `Mcp::load_with_vars` fail-closed-skips the composio server —
+/// exactly as it did before sessions existed.
+pub(crate) async fn mcp_vars_with_session() -> std::collections::BTreeMap<String, String> {
+    let mut vars = mcp_vars();
+
+    // Already pointed at a session (e.g. minted in the cloud)? Respect it.
+    if let Ok(url) = std::env::var("COMPOSIO_MCP_URL")
+        && !url.trim().is_empty()
+    {
+        vars.insert("COMPOSIO_MCP_URL".to_string(), url);
+        return vars;
+    }
+
+    // Otherwise mint one if we have the key + a user to scope it to. The user id
+    // comes from the same source `mcp_vars` already used for `ERI_USER_ID`.
+    let api_key = std::env::var("COMPOSIO_API_KEY")
+        .ok()
+        .filter(|k| !k.is_empty());
+    let user_id = vars.get("ERI_USER_ID").cloned();
+    if let (Some(key), Some(uid)) = (api_key, user_id)
+        && let Some(url) = crate::composio_session::create_tool_router_session(&key, &uid).await
+    {
+        vars.insert("COMPOSIO_MCP_URL".to_string(), url);
+    }
+    vars
+}
+
 /// MCP is loaded only at depth 0: subagents inherit a restricted, local-only
 /// tool set by design, so they don't get external servers.
 async fn load_mcp(root: &Path) -> (Option<eri_mcp::Mcp>, Vec<eri_mcp::ToolHandle>) {
-    let mcp = match eri_mcp::Mcp::load_with_vars(root, &mcp_vars()).await {
+    let mcp = match eri_mcp::Mcp::load_with_vars(root, &mcp_vars_with_session().await).await {
         Ok(m) => m,
         // A broken mcp.json must never break a build — degrade to no MCP.
         Err(_) => return (None, Vec::new()),

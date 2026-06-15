@@ -2,8 +2,9 @@
 //! connector layer, ADR-0002).
 //!
 //! The Composio MCP server is **built in** to eri (`eri_mcp::config::builtin_servers`),
-//! so there's nothing to set up: once `COMPOSIO_API_KEY` + `COMPOSIO_MCP_SERVER_ID`
-//! are present the pool connects it automatically, scoped per user. These commands
+//! so there's nothing to set up: once `COMPOSIO_API_KEY` is present (plus a
+//! signed-in user) eri mints a per-user Tool Router session at launch and the
+//! pool connects to it automatically. These commands
 //! are just the connect flow on top of that:
 //!   - `eri composio connect <toolkit>` starts a connection and opens Composio's
 //!     hosted authorize page.
