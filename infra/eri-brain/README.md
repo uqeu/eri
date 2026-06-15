@@ -31,10 +31,15 @@ cp .env.example .env   # then edit
 Then point eri at it:
 
 ```bash
-export ERI_BRAIN_URL="https://<your-pod-host>/v1"   # OpenAI-compatible base
+# eri appends "/v1/chat/completions" itself — give the ORIGIN, NOT a /v1 path.
+export ERI_BRAIN_URL="https://<your-pod-host>"      # e.g. http://localhost:11434 for Ollama
 export ERI_BRAIN_KEY="<the same key you set in .env>"
 eri build "what's on my calendar today"             # answered by eri-brain, 0 Claude tokens
 ```
+
+Verified end-to-end against a local Ollama (`ERI_BRAIN_URL=http://localhost:11434`,
+`ERI_BRAIN_MODEL=llama3.2:3b`): eri-brain answered in one turn with no Claude escalation,
+and an unreachable endpoint cleanly escalated to Claude.
 
 ## Notes
 
