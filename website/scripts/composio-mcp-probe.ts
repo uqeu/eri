@@ -45,7 +45,7 @@ async function rpc(
   };
 }
 
-async function main(): Promise<void> {
+async function probeWithVersion(protocolVersion: string): Promise<void> {
   const base: Record<string, string> = {
     "x-api-key": apiKey as string,
     "Content-Type": "application/json",
@@ -56,30 +56,26 @@ async function main(): Promise<void> {
     jsonrpc: "2.0",
     id: 1,
     method: "initialize",
-    params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "probe", version: "0" } },
+    params: { protocolVersion, capabilities: {}, clientInfo: { name: "probe", version: "0" } },
   });
-  // eslint-disable-next-line no-console
-  console.log("initialize → status", init.status, "session", init.sid);
-
   const withSession = init.sid ? { ...base, "mcp-session-id": init.sid } : base;
-
-  // The MCP spec requires this notification before normal requests.
   await fetch(url, {
     method: "POST",
     headers: withSession,
     body: JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }),
   });
-
   const list = await rpc(withSession, { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
   const tools = (list.json as { result?: { tools?: { name: string }[] } })?.result?.tools ?? [];
   // eslint-disable-next-line no-console
-  console.log("tools/list → status", list.status, "TOOL COUNT:", tools.length);
-  // eslint-disable-next-line no-console
-  console.log("first few:", tools.slice(0, 5).map((t) => t.name));
-  if (tools.length === 0) {
-    // eslint-disable-next-line no-console
-    console.log("raw tools/list response:", JSON.stringify(list.json, null, 2).slice(0, 1500));
-  }
+  console.log(
+    `protocolVersion ${protocolVersion}: init=${init.status} session=${init.sid ?? "none"} → tools/list=${list.status} TOOL COUNT=${tools.length}`,
+  );
+}
+
+async function main(): Promise<void> {
+  // eri sends 2025-03-26; the earlier probe used 2025-06-18. Test both.
+  await probeWithVersion("2025-03-26");
+  await probeWithVersion("2025-06-18");
 }
 
 main().catch((err) => {
