@@ -26,7 +26,8 @@ async function main(): Promise<void> {
   }
 
   const composio = new Composio({ apiKey });
-  const server = await composio.mcp.create("eri", { toolkits });
+  // Composio requires a server name of at least 4 characters.
+  const server = await composio.mcp.create("eri-mcp", { toolkits });
 
   // eslint-disable-next-line no-console
   console.log(
