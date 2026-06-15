@@ -26,26 +26,25 @@ async function main(): Promise<void> {
 
   const composio = new Composio({ apiKey });
 
-  // Discover each toolkit's tool slugs from Composio (no hardcoding).
-  const allowedTools: string[] = [];
+  // Discover each toolkit's tool slugs from Composio (no hardcoding) and nest
+  // them UNDER the toolkit — a top-level allowedTools is ignored by mcp.update.
+  let total = 0;
+  const toolkitConfigs = [];
   for (const toolkit of toolkits) {
     const tools = await composio.tools.getRawComposioTools({ toolkits: [toolkit] });
-    for (const t of tools) {
-      if (t.slug) allowedTools.push(t.slug);
+    const allowedTools = tools.map((t) => t.slug).filter((s): s is string => Boolean(s));
+    if (allowedTools.length === 0) {
+      throw new Error(`Composio returned no tools for "${toolkit}"`);
     }
-  }
-  if (allowedTools.length === 0) {
-    throw new Error(`Composio returned no tools for: ${toolkits.join(", ")}`);
+    total += allowedTools.length;
+    toolkitConfigs.push({ toolkit, allowedTools });
   }
 
-  const updated = await composio.mcp.update(serverId, {
-    toolkits: toolkits.map((toolkit) => ({ toolkit })),
-    allowedTools,
-  });
+  const updated = await composio.mcp.update(serverId, { toolkits: toolkitConfigs });
 
   // eslint-disable-next-line no-console
   console.log(
-    `✓ Enabled ${allowedTools.length} tool(s) on the eri MCP server (${toolkits.join(", ")}):\n`,
+    `✓ Enabled ${total} tool(s) on the eri MCP server (${toolkits.join(", ")}):\n`,
     JSON.stringify(updated, null, 2),
   );
 }
