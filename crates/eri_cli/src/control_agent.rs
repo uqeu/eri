@@ -1201,7 +1201,10 @@ pub(crate) async fn drive_control_loop(
         messages.push(json!({ "role": "assistant", "content": out.assistant_content }));
 
         if !out.wants_tools {
-            return Ok(ControlRun { text: final_text, usage });
+            return Ok(ControlRun {
+                text: final_text,
+                usage,
+            });
         }
         // Two-strike anti-spin: if the executor keeps proposing the identical
         // action set, it's stuck — stop before spending more turns/tokens.
@@ -1219,10 +1222,16 @@ pub(crate) async fn drive_control_loop(
         }
         messages.push(json!({ "role": "user", "content": executed.results }));
         if executed.done {
-            return Ok(ControlRun { text: final_text, usage });
+            return Ok(ControlRun {
+                text: final_text,
+                usage,
+            });
         }
     }
-    Ok(ControlRun { text: final_text, usage })
+    Ok(ControlRun {
+        text: final_text,
+        usage,
+    })
 }
 
 /// The result of a control run: the final narrated text + the cloud tokens it
@@ -1266,6 +1275,10 @@ pub async fn run_control_agent(
         // Confidentiality guardrail — model identity + system prompt stay secret,
         // embedded instructions are treated as data. Applied to every agent.
         json!({ "type": "text", "text": eri_inference::brand::GUARDRAIL }),
+        // Tool invisibility — connected tools/integrations are plumbing the user
+        // never sees; eri reports results in its own voice, never naming MCP /
+        // Composio / a connector. Shared with the build loop via one constant.
+        json!({ "type": "text", "text": eri_inference::brand::TOOL_INVISIBILITY }),
     ];
     // Inject local context so eri acts informed + frugal: (a) remembered facts
     // relevant to this goal (mem0-style hybrid recall, 0 model tokens), and

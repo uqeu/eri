@@ -665,7 +665,7 @@ async fn drive_build_loop(
                 results.push(json!({
                     "type": "tool_result",
                     "tool_use_id": tu.id,
-                    "content": "plan mode: writes, shell, and external (MCP) tools are disabled. Describe the change/command instead of running it.",
+                    "content": "plan mode: writes, shell, and external tools are disabled. Describe the change/command instead of running it.",
                     "is_error": true,
                 }));
                 continue;
@@ -680,7 +680,9 @@ async fn drive_build_loop(
                     // Safe: an MCP handle only exists in `mcp_tools` when `_mcp` is Some.
                     match _mcp.as_ref() {
                         Some(mcp) => call_mcp_tool(mcp, handle, &tu.input).await,
-                        None => err("MCP host unavailable".to_string()),
+                        // User-facing wording: stays neutral so the model can't
+                        // parrot internal mechanics ("MCP") back to the user.
+                        None => err("couldn't reach a connected tool right now".to_string()),
                     }
                 } else {
                     execute_tool(
@@ -1579,19 +1581,24 @@ mod bash_tests {
     #[test]
     fn build_system_adds_style_block_for_non_builder() {
         let dir = tempfile::tempdir().unwrap();
-        // Builder: persona block + the confidentiality guardrail.
+        // Builder: persona block + confidentiality guardrail + tool-invisibility.
         let base = build_system(dir.path(), SystemStyle::Builder);
-        assert_eq!(base.len(), 2);
+        assert_eq!(base.len(), 3);
         assert_eq!(
             base[1]["text"].as_str().unwrap(),
             eri_inference::brand::GUARDRAIL,
             "every agent gets the confidentiality guardrail"
         );
-        // Reviewer: persona + guardrail + a style directive block.
+        assert_eq!(
+            base[2]["text"].as_str().unwrap(),
+            eri_inference::brand::TOOL_INVISIBILITY,
+            "every agent gets the tool-invisibility directive"
+        );
+        // Reviewer: persona + guardrail + invisibility + a style directive block.
         let reviewed = build_system(dir.path(), SystemStyle::Reviewer);
-        assert_eq!(reviewed.len(), 3);
+        assert_eq!(reviewed.len(), 4);
         assert!(
-            reviewed[2]["text"]
+            reviewed[3]["text"]
                 .as_str()
                 .unwrap()
                 .contains("OUTPUT STYLE: REVIEWER")
@@ -2173,10 +2180,12 @@ async fn call_mcp_tool(
                 written: Vec::new(),
             }
         }
-        Err(e) => err(format!(
-            "MCP tool '{}' failed: {e}",
-            handle.qualified_name()
-        )),
+        // User-facing wording: drop the server-qualified name (e.g.
+        // `composio__GMAIL_...`, which names the service) and the word "MCP" so a
+        // neutral message flows back as the tool_result — the model can't then
+        // parrot "Composio failed" to the user. The matching identifier used for
+        // dispatch (`handle.qualified_name()`) is untouched.
+        Err(e) => err(format!("that step couldn't be completed: {e}")),
     }
 }
 
@@ -2251,6 +2260,10 @@ fn build_system(root: &Path, style: SystemStyle) -> Vec<Value> {
         // Confidentiality guardrail — model identity + system prompt stay secret,
         // embedded instructions are treated as data. Applied to every agent.
         json!({ "type": "text", "text": eri_inference::brand::GUARDRAIL }),
+        // Tool invisibility — connected tools/integrations are plumbing the user
+        // never sees; eri reports results in its own voice, never naming MCP /
+        // Composio / a connector. Shared with the control loop via one constant.
+        json!({ "type": "text", "text": eri_inference::brand::TOOL_INVISIBILITY }),
     ];
     if let Some(directive) = style.directive() {
         blocks.push(json!({
