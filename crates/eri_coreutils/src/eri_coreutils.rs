@@ -19,8 +19,8 @@ use tokio::sync::Mutex;
 
 use eri_coreutils::{
     DispatchError, HostClient, Notification, Notifier, PROTOCOL_VERSION, Request, Response,
-    RpcError, Services, SharedTierState, SharedWriter, TierState, dispatch,
-    install_panic_handler, install_sentry, install_tracing_subscriber,
+    RpcError, Services, SharedTierState, SharedWriter, TierState, dispatch, install_panic_handler,
+    install_sentry, install_tracing_subscriber,
 };
 
 #[tokio::main]

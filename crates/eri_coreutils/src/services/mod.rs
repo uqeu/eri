@@ -20,8 +20,8 @@ use crate::host_client::{HostClient, SecretCache};
 
 pub mod account;
 pub mod apply;
-pub mod autosubscribe;
 pub mod audit_svc;
+pub mod autosubscribe;
 pub mod background;
 pub mod brain;
 pub mod checkpoints;
@@ -40,12 +40,13 @@ pub mod preferences;
 pub mod preview;
 pub mod review;
 pub mod rules;
+pub mod screen_extract;
 pub mod ship;
-pub mod templates;
-pub mod themes;
 pub mod skills;
 pub mod slash;
 pub mod tab;
+pub mod templates;
+pub mod themes;
 pub mod voice;
 pub mod voice_route;
 pub mod web_docs;
@@ -191,10 +192,7 @@ impl Services {
     /// Build a `Services` registry wired up with the reverse-channel host
     /// client AND the outbound notifier. The binary uses this so background
     /// services (voice transcripts, etc.) can push unsolicited events.
-    pub fn with_host_and_notifier(
-        host: Arc<HostClient>,
-        notifier: Arc<dyn Notifier>,
-    ) -> Arc<Self> {
+    pub fn with_host_and_notifier(host: Arc<HostClient>, notifier: Arc<dyn Notifier>) -> Arc<Self> {
         Arc::new(Self {
             host_client: Some(host),
             notifier: Some(notifier),
