@@ -26,6 +26,7 @@ pub mod cloud;
 pub mod collectors;
 pub mod consolidation;
 pub mod embeddings;
+pub mod eventtime;
 pub mod keys;
 pub mod profile;
 pub mod profile_sync;
@@ -398,14 +399,25 @@ impl MemoryStore {
     /// is computed at insert time so semantic recall has the vector
     /// already cached and never pays a recompute cost on the read path.
     pub fn insert(&mut self, kind: &str, workspace: &Path, body: &str) -> io::Result<Observation> {
+        let now = now_ms();
+        // Event-time extraction (bi-temporal): a user-stated fact may describe
+        // something that happened in the past ("two years ago I founded …"). Pull
+        // the instant it became true out of the prose so `recall_as_of` can answer
+        // on the event timeline, not just when eri learned it. Facts only — other
+        // kinds carry structured bodies, not narrated time.
+        let valid_from = if kind == "fact" {
+            eventtime::extract_valid_from(body, now)
+        } else {
+            None
+        };
         let observation = Observation {
             id: new_id(),
-            ts_ms: now_ms(),
+            ts_ms: now,
             kind: kind.to_string(),
             workspace_hash: workspace_hash(workspace),
             body: body.to_string(),
             embedding: embeddings::embed_text(body),
-            valid_from: None,
+            valid_from,
             visibility: Visibility::Active,
         };
         let cloned = observation.clone();
@@ -1387,6 +1399,39 @@ mod tests {
         );
         assert_eq!(parse(r#","consolidated":true"#).visibility, Visibility::Consolidated);
         assert_eq!(parse("").visibility, Visibility::Active);
+    }
+
+    #[test]
+    fn insert_extracts_event_time_from_a_remembered_fact() {
+        // The producer end-to-end: remembering "two years ago …" stores a fact
+        // whose valid_from is ~2 years before it was learned, so a recall_as_of
+        // from back then surfaces it (review D + event-time extraction).
+        let (dir, mut store) = open_temp();
+        let ws = dir.path();
+        let o = store
+            .insert("fact", ws, "two years ago I founded a startup that failed")
+            .unwrap();
+        let two_years = 2 * 365 * 24 * 60 * 60 * 1000u64;
+        assert!(o.valid_from.is_some(), "event-time was extracted");
+        let vf = o.valid_from();
+        assert!(
+            vf < o.learned_at() && o.learned_at() - vf >= two_years - 24 * 60 * 60 * 1000,
+            "valid_from is ~2 years before learned_at"
+        );
+        // A recall as-of one year ago finds it (it was already true then); the
+        // event happened ~2 years ago, so it was valid 1 year ago.
+        let one_year_ago = o.learned_at() - 365 * 24 * 60 * 60 * 1000;
+        assert!(
+            store
+                .recall_as_of("startup", ws, 5, one_year_ago)
+                .iter()
+                .any(|h| h.body.contains("founded")),
+            "the back-dated fact is valid as-of a year ago"
+        );
+
+        // A plain fact with no time cue keeps valid_from = learned_at (None).
+        let plain = store.insert("fact", ws, "I prefer dark mode").unwrap();
+        assert_eq!(plain.valid_from, None);
     }
 
     #[test]
