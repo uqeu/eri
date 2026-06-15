@@ -81,24 +81,39 @@ pub fn classify_intent(prompt: &str) -> Intent {
         return Intent::Answer;
     }
 
-    // 3. Control — drive the machine. Imperatives about apps/screen/input, or
+    // 3. Destructive-action guard (SAFETY, high precedence). A clearly
+    //    destructive imperative against the user's local system or broad scope
+    //    ("delete all my files", "wipe my downloads", "rm -rf everything") has no
+    //    GUI/control verb and no connector keyword, so without this it would fall
+    //    through to `Answer` → `agent::ask`, which carries tools but is NOT behind
+    //    the control confirm/denylist safety gate. Routing it to `Control` instead
+    //    subjects it to that gate (`run_control` → `ControlGate` confirmation +
+    //    refusal/denylist), so eri asks before doing anything irreversible. We run
+    //    this BEFORE Build/Answer but bias conservatively: only fire on broad or
+    //    local-system destruction, and step aside for a benign in-editor edit
+    //    ("delete this line") when a build artifact is present.
+    if is_destructive_local(&p) {
+        return Intent::Control;
+    }
+
+    // 4. Control — drive the machine. Imperatives about apps/screen/input, or
     //    explicit "on my computer / my screen" framing.
     if is_control(&p) {
         return Intent::Control;
     }
 
-    // 4. Build — author/ship code or a project. Code-y verbs + software
+    // 5. Build — author/ship code or a project. Code-y verbs + software
     //    artifacts (and explicit fix/refactor of code).
     if is_build(&p) {
         return Intent::Build;
     }
 
-    // 5. Answer — connected-tool actions (email/calendar/slack) not caught above.
+    // 6. Answer — connected-tool actions (email/calendar/slack) not caught above.
     if is_answer(&p) {
         return Intent::Answer;
     }
 
-    // 6. Fallback. The agentic answer path is the safest general default: it has
+    // 7. Fallback. The agentic answer path is the safest general default: it has
     //    the tools and can also just talk. Ties/ambiguous → Answer.
     Intent::Answer
 }
@@ -210,6 +225,94 @@ fn is_control(p: &str) -> bool {
     }
 
     false
+}
+
+/// Destructive verbs that, against a broad or local-system target, should never
+/// run un-gated. WHY whole-word: we don't want "format" inside "reformat the
+/// paragraph" or "drop" inside "dropdown" to trip the guard on its own — the
+/// scope check below still has to agree.
+const DESTRUCTIVE_VERBS: &[&str] = &[
+    "delete",
+    "remove",
+    "wipe",
+    "erase",
+    "rm",
+    "format",
+    "uninstall",
+    "drop",
+    "purge",
+    "trash",
+    "destroy",
+    "shred",
+    "nuke",
+    "reset",
+];
+
+/// Scope/target words signalling broad or local-system destruction (as opposed
+/// to a narrow in-editor edit or a connector action). Presence of one of these
+/// alongside a destructive verb is what makes the action dangerous enough to
+/// gate. Deliberately about *files/devices/system state* — NOT connector nouns
+/// like "email" — so a connector "delete that email" stays on the Answer path.
+const DESTRUCTIVE_SCOPE: &[&str] = &[
+    "all",
+    "everything",
+    "my files",
+    "my photos",
+    "my pictures",
+    "my documents",
+    "my data",
+    "my downloads",
+    "downloads",
+    "desktop",
+    "directory",
+    "folder",
+    "drive",
+    "disk",
+    "database",
+    "home folder",
+    "system",
+    "partition",
+    "everything on",
+    "all my",
+];
+
+/// True when the prompt is a clearly-destructive imperative against the user's
+/// local system or a broad target — the case that must be routed to the gated
+/// `Control` path rather than the un-gated `Answer` tool path (S2 safety).
+///
+/// WHY this lives in the classifier (not only in the agent loop): the routing
+/// decision happens *before* any engine is chosen, so a destructive prompt that
+/// lacks a GUI verb and a connector keyword would otherwise be handed to
+/// `agent::ask` — which has tools but no confirm/denylist gate. Catching it here
+/// guarantees every clearly-destructive request flows through `run_control`'s
+/// confirmation and refusal/denylist checks.
+///
+/// Conservative on purpose:
+///   - requires BOTH a destructive verb AND a broad/local-system scope word, so
+///     a narrow edit ("delete this line") or a connector action ("delete that
+///     email") never trips it — those keep their normal Build/Answer routing;
+///   - `rm -rf …` (and `sudo rm …`) is treated as destructive regardless of
+///     scope words — the shell incantation is unambiguous on its own;
+///   - `uninstall <anything>` is gated even without a scope word, since
+///     uninstalling software is inherently a local-system change.
+fn is_destructive_local(p: &str) -> bool {
+    // `rm -rf` / `rm -fr` / `sudo rm` are unambiguous destructive shell commands.
+    if p.contains("rm -rf") || p.contains("rm -fr") || p.contains("sudo rm") {
+        return true;
+    }
+
+    if !has_any(p, DESTRUCTIVE_VERBS) {
+        return false;
+    }
+
+    // Uninstalling software is a local-system change regardless of phrasing.
+    if has_word(p, "uninstall") {
+        return true;
+    }
+
+    // Otherwise gate ONLY when a broad/local-system scope word is present, so the
+    // guard can't grab a narrow editor edit or a connector action.
+    DESTRUCTIVE_SCOPE.iter().any(|s| p.contains(s))
 }
 
 /// Build: write/ship code or a project.
@@ -437,6 +540,49 @@ mod tests {
     fn case_and_whitespace_insensitive() {
         assert_eq!(classify_intent("  BUILD me an APP  "), Intent::Build);
         assert_eq!(classify_intent("Take A Screenshot"), Intent::Control);
+    }
+
+    /// S2 (safety): clearly-destructive imperatives against the local system or
+    /// a broad target must route to the GATED `Control` path, never to the
+    /// un-gated `Answer` tool path. Benign in-editor "delete" stays Build/Answer.
+    #[test]
+    fn destructive_local_imperatives_route_to_gated_control() {
+        let destructive: &[&str] = &[
+            "delete all my files",
+            "wipe my downloads",
+            "rm -rf everything",
+            "erase my photos",
+            "format the drive",
+            "purge the database",
+            "uninstall everything on my computer",
+            "nuke my home folder",
+            "sudo rm /etc/hosts",
+        ];
+        for prompt in destructive {
+            assert_eq!(
+                classify_intent(prompt),
+                Intent::Control,
+                "destructive prompt {prompt:?} must route to the gated Control path"
+            );
+        }
+    }
+
+    #[test]
+    fn benign_delete_does_not_get_grabbed_by_the_destructive_guard() {
+        // A narrow in-editor edit is not system destruction — it should NOT be
+        // forced to Control. "delete this line" lands on the normal paths.
+        assert_ne!(
+            classify_intent("delete this line from the function"),
+            Intent::Control,
+        );
+        assert_ne!(classify_intent("remove the unused import"), Intent::Control);
+        // Build-shaped destructive-sounding edits still go to Build.
+        assert_eq!(
+            classify_intent("refactor the delete endpoint"),
+            Intent::Build,
+        );
+        // A connector "delete" with no broad/local scope is not local destruction.
+        assert_ne!(classify_intent("delete that email"), Intent::Control);
     }
 
     #[test]

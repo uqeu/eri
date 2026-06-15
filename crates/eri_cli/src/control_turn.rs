@@ -541,8 +541,13 @@ impl ControlTurn for EriBrainControlTurn {
             .await
             .map_err(|e| anyhow!("eri-brain sent invalid JSON: {e}"))?;
         let parsed = crate::openai_turn::parse_openai_response(&v);
-        // A turn with neither text nor tool calls is unusable — signal escalation.
-        if parsed.text.trim().is_empty() && parsed.tool_calls.is_empty() {
+        // S4: only escalate a *failure*-empty turn, not a *terminal*-empty one.
+        // A well-formed `stop`/`end_turn` with no text and no tool calls is the
+        // model legitimately finishing; escalating it to Claude wastes tokens and
+        // inflates the Claude-escalation-share metric. A reply with no content
+        // AND no terminal finish_reason (malformed / truncated-without-content)
+        // is the only unusable case worth escalating.
+        if !parsed.is_terminal() {
             return Err(empty_local_turn());
         }
         Ok(TurnOutput {
@@ -720,6 +725,34 @@ mod tests {
     fn no_tool_calls_is_an_empty_vec_not_an_error() {
         let msg = json!({ "role": "assistant", "content": "all done" });
         assert!(parse_local_tool_calls(&msg).is_empty());
+    }
+
+    // ── S4: the EriBrainControlTurn escalation decision ──
+    //
+    // The adapter escalates iff the parsed reply is NOT terminal. We assert that
+    // decision on the parsed value (the `run()` body wraps a live HTTP call, so
+    // the pure decision is what's worth pinning).
+
+    #[test]
+    fn well_formed_empty_stop_does_not_escalate() {
+        let v = json!({
+            "choices": [ { "finish_reason": "stop", "message": { "content": "" } } ]
+        });
+        let parsed = crate::openai_turn::parse_openai_response(&v);
+        assert!(
+            parsed.is_terminal(),
+            "well-formed empty stop is terminal → control returns it, no escalation"
+        );
+    }
+
+    #[test]
+    fn malformed_empty_turn_escalates() {
+        let v = json!({ "choices": [ { "message": { "content": "" } } ] });
+        let parsed = crate::openai_turn::parse_openai_response(&v);
+        assert!(
+            !parsed.is_terminal(),
+            "malformed empty turn is not terminal → control escalates"
+        );
     }
 
     #[test]

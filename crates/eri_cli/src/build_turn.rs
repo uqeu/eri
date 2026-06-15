@@ -378,28 +378,50 @@ impl BuildTurn for EriBrainBuildTurn {
             .json()
             .await
             .map_err(|e| BuildTurnError::Hard(anyhow!("eri-brain sent invalid JSON: {e}")))?;
-        let turn = eri_brain_turn(&v);
-        if turn.content.is_empty() {
-            // No text and no tool calls is unusable — escalate to Claude.
+        let parsed = crate::openai_turn::parse_openai_response(&v);
+        // S4: distinguish a *terminal* empty turn from a *failure* empty turn.
+        // A legitimately-empty `end_turn`/`stop` from eri-brain is the model
+        // deciding it's done; escalating it to Claude would waste tokens and
+        // inflate the Claude-escalation-share metric. Only escalate when the
+        // reply was malformed/truncated-without-content (no terminal
+        // finish_reason and no usable content).
+        if !parsed.is_terminal() {
             return Err(BuildTurnError::Hard(anyhow!(
                 "eri-brain produced no usable turn"
             )));
         }
-        Ok(turn)
+        Ok(eri_brain_turn_from_parsed(parsed))
     }
 }
 
-/// Shape a decoded OpenAI reply into the build loop's [`Turn`]. Pure + tested so
-/// the eri-brain build contract is verifiable without a live endpoint: text +
+/// Shape a decoded OpenAI reply into the build loop's [`Turn`]. Pure so the
+/// eri-brain build contract is verifiable without a live endpoint: text +
 /// tool_use blocks become `content`, tool calls become `tool_uses`, `stop_reason`
-/// is `tool_use` when tools were called (so the loop iterates) else `end_turn`,
-/// and usage maps from OpenAI's `prompt_tokens`/`completion_tokens`.
+/// mirrors the Claude wire vocabulary, and usage maps from OpenAI's
+/// `prompt_tokens`/`completion_tokens`.
+///
+/// Test-only: production goes through [`eri_brain_turn_from_parsed`] so the
+/// adapter can make the terminal-vs-failure escalation decision (S4) on the
+/// parsed value first.
+#[cfg(test)]
 pub fn eri_brain_turn(v: &Value) -> Turn {
-    let parsed = crate::openai_turn::parse_openai_response(v);
+    eri_brain_turn_from_parsed(crate::openai_turn::parse_openai_response(v))
+}
+
+/// Shape an already-parsed [`OpenAiTurn`] into the build loop's [`Turn`]. Split
+/// out from [`eri_brain_turn`] so the adapter can decide terminal-vs-failure
+/// (S4) on the parsed value before materialising the [`Turn`].
+///
+/// `stop_reason` mirrors the Claude path's wire vocabulary: tools called →
+/// `tool_use` (so the loop iterates), a truncated reply → `max_tokens` (the
+/// Anthropic truncation signal — never reported as a clean end), otherwise
+/// `end_turn`.
+fn eri_brain_turn_from_parsed(parsed: crate::openai_turn::OpenAiTurn) -> Turn {
     let mut content: Vec<Value> = Vec::new();
     if !parsed.text.trim().is_empty() {
         content.push(json!({ "type": "text", "text": parsed.text }));
     }
+    let truncated = parsed.finish_reason.is_truncated();
     let tool_uses: Vec<ToolUse> = parsed
         .tool_calls
         .into_iter()
@@ -409,10 +431,14 @@ pub fn eri_brain_turn(v: &Value) -> Turn {
         })
         .collect();
     let stop_reason = Some(
-        if tool_uses.is_empty() {
-            "end_turn"
-        } else {
+        if !tool_uses.is_empty() {
             "tool_use"
+        } else if truncated {
+            // Mirror Anthropic's truncation signal so a cut-off turn is never
+            // surfaced as a clean end_turn.
+            "max_tokens"
+        } else {
+            "end_turn"
         }
         .to_string(),
     );
@@ -606,6 +632,48 @@ mod tests {
         let turn = eri_brain_turn(&json!({ "choices": [] }));
         assert!(turn.content.is_empty());
         assert!(turn.tool_uses.is_empty());
+    }
+
+    // ── S4: terminal-empty vs failure-empty, and truncation signalling ──
+
+    #[test]
+    fn eri_brain_turn_truncated_maps_to_max_tokens_not_end_turn() {
+        // finish_reason "length" must surface as the Anthropic-style max_tokens
+        // signal so a cut-off turn is never mistaken for a clean end.
+        let v = json!({
+            "choices": [ { "finish_reason": "length",
+                           "message": { "content": "this was cut o" } } ]
+        });
+        let turn = eri_brain_turn(&v);
+        assert_eq!(turn.stop_reason.as_deref(), Some("max_tokens"));
+    }
+
+    #[tokio::test]
+    async fn well_formed_empty_stop_is_terminal_no_escalation() {
+        // A legitimately-empty `stop` from eri-brain must be returned as a turn,
+        // NOT escalated. We verify the parsed-turn decision the adapter uses.
+        let v = json!({
+            "choices": [ { "finish_reason": "stop", "message": { "content": "" } } ]
+        });
+        let parsed = crate::openai_turn::parse_openai_response(&v);
+        assert!(
+            parsed.is_terminal(),
+            "empty stop must be terminal (no escalation)"
+        );
+        let turn = eri_brain_turn(&v);
+        assert_eq!(turn.stop_reason.as_deref(), Some("end_turn"));
+        assert!(turn.content.is_empty());
+    }
+
+    #[test]
+    fn malformed_empty_turn_is_not_terminal_so_it_escalates() {
+        // No finish_reason and no content → the adapter escalates (Hard error).
+        let v = json!({ "choices": [ { "message": { "content": "" } } ] });
+        let parsed = crate::openai_turn::parse_openai_response(&v);
+        assert!(
+            !parsed.is_terminal(),
+            "malformed empty turn must NOT be terminal (escalate)"
+        );
     }
 
     #[test]
