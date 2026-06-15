@@ -42,6 +42,7 @@ mod config;
 mod control_agent;
 mod control_safety;
 mod control_turn;
+mod engine_ladder;
 mod eri_config;
 mod genui;
 mod git_tools;

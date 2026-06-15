@@ -479,6 +479,17 @@ async fn drive_build_loop(
     let mut tokens_out: u64 = 0;
     let mut final_text = String::new();
     let mut stdout = std::io::stdout();
+    // ONE unified escalation policy across build + control (review C5): cheap
+    // engine first per turn, per-turn escalation on a `Hard` failure, and a
+    // 2-consecutive-failure circuit breaker that trips the cheap engine for the
+    // rest of the goal. The policy lives in `engine_ladder`; this loop supplies
+    // the "try engine i" closure (mapping `BuildTurnError` to the ladder's
+    // attempt/abort vocabulary) and consumes the escalation events. A graceful
+    // `Halt` is the ladder's `Abort` — it short-circuits the run, never an
+    // escalation. Single-engine (Claude-only) lists behave exactly as before.
+    let mut ladder = crate::engine_ladder::EngineLadder::new(
+        engines.iter().map(|e| e.engine().to_string()).collect(),
+    );
 
     for turn in 0..opts.max_turns {
         // Shape the growing context before the call: cheapest reductions first,
@@ -500,56 +511,96 @@ async fn drive_build_loop(
             );
         }
 
-        // One model turn through the provider-agnostic BuildTurn seam. `engines`
-        // is tried in order: the primary (local-first when configured), escalating
-        // to the next on a hard failure. Request shaping, prompt-caching, and the
+        // One model turn through the provider-agnostic BuildTurn seam, driven by
+        // the unified engine ladder (review C5). `engines` is tried cheapest-first
+        // per turn; a `Hard` failure escalates to the next engine for this turn; a
+        // `Halt` (quota/capacity) is the ladder's `Abort` — a graceful, recoverable
+        // stop, NOT an escalation. Request shaping, prompt-caching, and the
         // streamed consume_turn all live inside the Claude adapter, byte-for-byte
         // with the old welded loop.
-        let turn_result = {
-            let mut chosen: Option<TurnResult> = None;
-            for (i, engine) in engines.iter().enumerate() {
-                match engine.run(&system, messages.as_slice(), &tools).await {
-                    Ok(t) => {
-                        chosen = Some(t);
-                        break;
-                    }
-                    // A quota or capacity stop mid-build is recoverable, not fatal:
-                    // tools materialize incrementally, so files already written are
-                    // safe on disk. Stop cleanly and report, preserving the work.
-                    Err(crate::build_turn::BuildTurnError::Halt(msg)) => {
-                        if opts.narrate {
-                            let _ = writeln!(stdout, "\n{msg}");
-                        }
-                        emit_run_end(turn, tokens_in, tokens_out, files_written.len(), "halted");
-                        return Ok(BuildOutcome {
-                            files_written,
-                            turns: turn,
-                            tokens_in,
-                            tokens_out,
-                            final_text,
-                            halted: Some(msg),
-                            hit_turn_cap: false,
-                        });
-                    }
-                    Err(crate::build_turn::BuildTurnError::Hard(e)) => {
-                        if i + 1 < engines.len() {
-                            if opts.narrate {
-                                let _ = writeln!(
-                                    stdout,
-                                    "[eri] {} engine couldn't continue ({e}); escalating to {}.",
-                                    engine.engine(),
-                                    engines[i + 1].engine()
-                                );
+        let last_err: std::cell::RefCell<Option<anyhow::Error>> = std::cell::RefCell::new(None);
+        let outcome = ladder
+            .run_turn(
+                turn,
+                |idx: usize| {
+                    let last_err = &last_err;
+                    let system = &system;
+                    let tools = &tools;
+                    let messages = messages.as_slice();
+                    async move {
+                        match engines[idx].run(system, messages, tools).await {
+                            Ok(t) => crate::engine_ladder::TurnAttempt::Produced(t),
+                            // Recoverable quota/capacity stop: short-circuit the
+                            // whole run, preserving files already written.
+                            Err(crate::build_turn::BuildTurnError::Halt(msg)) => {
+                                crate::engine_ladder::TurnAttempt::Abort(msg)
                             }
-                            continue;
+                            // A real failure: escalate to the next engine.
+                            Err(crate::build_turn::BuildTurnError::Hard(e)) => {
+                                *last_err.borrow_mut() = Some(e);
+                                crate::engine_ladder::TurnAttempt::Escalate
+                            }
                         }
-                        return Err(e);
+                    }
+                },
+                |_idx: usize| {
+                    // The escalation reason / propagated error is the `Hard` error
+                    // the engine just produced. Take it so each escalation event +
+                    // the exhaustion path carry the right message.
+                    last_err
+                        .borrow_mut()
+                        .take()
+                        .unwrap_or_else(|| anyhow!("engine couldn't continue"))
+                },
+            )
+            .await;
+
+        let turn_result = match outcome {
+            crate::engine_ladder::LadderOutcome::Turn(t) => {
+                // Narrate + trace each escalation that happened this turn, in
+                // order, with the SAME event shape the control loop uses.
+                for ev in &t.events {
+                    if opts.narrate {
+                        let _ = writeln!(
+                            stdout,
+                            "[eri] {} engine couldn't continue ({}); escalating to {}.",
+                            ev.from_engine_name, ev.reason, ev.to_engine_name
+                        );
+                    }
+                    if tracer.is_enabled() {
+                        tracer.event(
+                            run_clock.elapsed().as_millis(),
+                            "escalation",
+                            json!({
+                                "from_engine_name": ev.from_engine_name,
+                                "to_engine_name": ev.to_engine_name,
+                                "turn_index": ev.turn_index,
+                                "reason": ev.reason,
+                                "tripped": ev.tripped,
+                            }),
+                        );
                     }
                 }
+                t.value
             }
-            // The loop above either breaks with a turn, returns, or exhausts all
-            // engines via the last-engine `return Err`. So `chosen` is always set.
-            chosen.expect("an engine produced a turn")
+            // Every engine escalated this turn — propagate the last error, as before.
+            crate::engine_ladder::LadderOutcome::Exhausted(e) => return Err(e),
+            // Graceful quota/capacity halt: stop cleanly, keeping written files.
+            crate::engine_ladder::LadderOutcome::Aborted(msg) => {
+                if opts.narrate {
+                    let _ = writeln!(stdout, "\n{msg}");
+                }
+                emit_run_end(turn, tokens_in, tokens_out, files_written.len(), "halted");
+                return Ok(BuildOutcome {
+                    files_written,
+                    turns: turn,
+                    tokens_in,
+                    tokens_out,
+                    final_text,
+                    halted: Some(msg),
+                    hit_turn_cap: false,
+                });
+            }
         };
         tokens_in += turn_result.usage_in;
         tokens_out += turn_result.usage_out;
@@ -2416,6 +2467,71 @@ mod build_loop_tests {
         }
     }
 
+    /// A scripted engine that pops a per-turn outcome from a queue — lets a test
+    /// drive the unified ladder's across-turn circuit breaker (cheap fails N
+    /// turns running). A text turn keeps the loop iterating only via `tool_use`,
+    /// so a "continue" turn carries a no-op `todo_read` tool call; a "finish"
+    /// turn is a plain `end_turn`.
+    enum Step {
+        /// Hard-fail this turn (escalate).
+        Fail,
+        /// Produce a tool-use turn (so the loop continues to the next turn).
+        Continue,
+        /// Produce a terminal text turn carrying this label.
+        Finish(&'static str),
+    }
+    struct ScriptedEngine {
+        label: &'static str,
+        steps: std::sync::Mutex<std::collections::VecDeque<Step>>,
+    }
+    impl ScriptedEngine {
+        fn new(label: &'static str, steps: Vec<Step>) -> Self {
+            Self {
+                label,
+                steps: std::sync::Mutex::new(steps.into()),
+            }
+        }
+    }
+    #[async_trait::async_trait]
+    impl BuildTurn for ScriptedEngine {
+        fn engine(&self) -> &'static str {
+            self.label
+        }
+        async fn run(
+            &self,
+            _system: &[Value],
+            _messages: &[Value],
+            _tools: &Value,
+        ) -> std::result::Result<TurnResult, BuildTurnError> {
+            match self.steps.lock().unwrap().pop_front() {
+                Some(Step::Fail) | None => Err(BuildTurnError::Hard(anyhow!(
+                    "{} couldn't continue",
+                    self.label
+                ))),
+                Some(Step::Continue) => Ok(TurnResult {
+                    content: vec![
+                        json!({ "type": "tool_use", "id": "t", "name": "todo_read", "input": {} }),
+                    ],
+                    tool_uses: vec![eri_agent::stream::ToolUse {
+                        id: "t".into(),
+                        name: "todo_read".into(),
+                        input: json!({}),
+                    }],
+                    stop_reason: Some("tool_use".into()),
+                    usage_in: 1,
+                    usage_out: 1,
+                }),
+                Some(Step::Finish(t)) => Ok(TurnResult {
+                    content: vec![json!({ "type": "text", "text": t })],
+                    tool_uses: vec![],
+                    stop_reason: Some("end_turn".into()),
+                    usage_in: 1,
+                    usage_out: 1,
+                }),
+            }
+        }
+    }
+
     fn quiet_opts() -> LoopOpts {
         LoopOpts {
             max_turns: 4,
@@ -2501,5 +2617,42 @@ mod build_loop_tests {
             Ok(_) => panic!("expected the loop to propagate the failure"),
             Err(e) => assert!(e.to_string().contains("couldn't continue")),
         }
+    }
+
+    #[tokio::test]
+    async fn drive_build_loop_retries_cheap_each_turn_until_the_breaker_trips() {
+        // C5 unified policy, end-to-end in the build loop: the cheap engine fails
+        // every turn. The OLD build policy retried cheap on EVERY turn forever
+        // (thrash); the unified ladder retries it for the first two turns, then
+        // trips it and starts subsequent turns on claude (sticky). We prove the
+        // cheap engine is consulted exactly twice (turns 0 and 1) and never after.
+        let dir = tempfile::TempDir::new().unwrap();
+        let local = ScriptedEngine::new(
+            "local",
+            // Fail forever — but the ladder must stop calling it after 2 turns.
+            vec![Step::Fail, Step::Fail, Step::Fail, Step::Fail],
+        );
+        // Claude carries every turn: continue, continue, then finish.
+        let claude = ScriptedEngine::new(
+            "claude",
+            vec![Step::Continue, Step::Continue, Step::Finish("done")],
+        );
+        let refs: Vec<&dyn BuildTurn> = vec![&local, &claude];
+        let mut messages = vec![json!({ "role": "user", "content": "build x" })];
+        let opts = LoopOpts {
+            max_turns: 6,
+            ..quiet_opts()
+        };
+        let out = drive_build_loop(&refs, dir.path(), "m", &mut messages, &opts, 0)
+            .await
+            .expect("loop runs to completion on claude");
+        assert_eq!(out.final_text, "done");
+        // The cheap "local" engine was tried on turn 0 and turn 1 only — its 3rd
+        // and 4th queued `Fail` steps are never consumed because it's tripped.
+        let remaining = local.steps.lock().unwrap().len();
+        assert_eq!(
+            remaining, 2,
+            "cheap engine consulted exactly twice, then tripped (sticky)"
+        );
     }
 }

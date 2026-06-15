@@ -653,6 +653,13 @@ pub fn control_turn_log(engine: &str, goal: &str, out: &TurnOutput) -> ControlTu
 /// escalation — is verifiable, which it wasn't when the sink no-op'd under test.
 pub trait ControlTurnSink: Send + Sync {
     fn record(&self, log: ControlTurnLog);
+
+    /// Record ONE engine escalation. The unified [`crate::engine_ladder`] emits
+    /// this on every escalation across BOTH the build and control loops, so the
+    /// Claude-escalation-share metric (the moat's north-star) is measured with
+    /// an identical event shape on every surface. Default no-op so existing
+    /// sinks that only care about per-turn records need no change.
+    fn record_escalation(&self, _event: &crate::engine_ladder::LadderEvent) {}
 }
 
 /// Production sink: appends each turn to the local learn-do memory so the
@@ -668,6 +675,26 @@ impl ControlTurnSink for MemorySink {
             let _ = store.insert("control_turn", &workspace, &log.summary());
         }
     }
+
+    fn record_escalation(&self, event: &crate::engine_ladder::LadderEvent) {
+        let workspace = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        if let Ok(mut store) = eri_inference::memory::MemoryStore::open() {
+            let _ = store.insert("engine_escalation", &workspace, &escalation_summary(event));
+        }
+    }
+}
+
+/// One-line summary of an engine escalation for the learn-do store. Uniform
+/// across build + control so the Claude-share metric can be scraped the same way.
+pub fn escalation_summary(event: &crate::engine_ladder::LadderEvent) -> String {
+    format!(
+        "escalation[{}→{}] turn {} (tripped={}): {}",
+        event.from_engine_name,
+        event.to_engine_name,
+        event.turn_index,
+        event.tripped,
+        truncate(&event.reason, 80)
+    )
 }
 
 /// Truncate a string to `max` chars with an ellipsis (display only).

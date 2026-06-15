@@ -1162,36 +1162,94 @@ pub(crate) async fn drive_control_loop(
     let mut final_text = String::new();
     let mut usage = crate::control_turn::TokenUsage::default();
     let mut stuck = StuckGuard::default();
-    let mut engine_idx = 0usize;
+    // ONE unified escalation policy across build + control (review C5): cheap
+    // engine first per turn, per-turn escalation on failure, and a 2-consecutive-
+    // failure circuit breaker that trips the cheap engine for the rest of the
+    // goal. The policy lives in `engine_ladder`; this loop only supplies the
+    // "try engine i" closure + reason rendering, and consumes the events.
+    let mut ladder = crate::engine_ladder::EngineLadder::new(
+        engines.iter().map(|e| e.engine().to_string()).collect(),
+    );
 
     let mut step = 0usize;
     while step < max_turns {
-        let turn = engines[engine_idx];
-        let out = match turn.run(system, &messages, tools).await {
-            Ok(o) => o,
-            Err(e) => {
-                // Escalate to the next engine (local → cloud) without consuming a
-                // step; the transcript so far carries forward. No fallback left =
-                // surface the error.
-                if engine_idx + 1 < engines.len() {
-                    let next = engines[engine_idx + 1];
+        // Run one ladder turn. Each engine attempt that errors is an escalation;
+        // an Ok is the produced turn. Control has no graceful-abort case, so the
+        // abort type is `Infallible`. The reason closure re-runs the engine only
+        // on the escalation/exhaustion path is NOT possible (a turn is one-shot),
+        // so we capture each engine's error as it happens via a shared cell.
+        let last_err: std::cell::RefCell<Option<anyhow::Error>> = std::cell::RefCell::new(None);
+        // Which engine index actually produced the turn (for the self-improvement
+        // log: attribute the turn to the engine that ran it, not the first tried).
+        let ran_idx: std::cell::Cell<usize> = std::cell::Cell::new(0);
+        let outcome = ladder
+            .run_turn(
+                step,
+                |idx: usize| {
+                    let last_err = &last_err;
+                    let ran_idx = &ran_idx;
+                    let engines = &engines;
+                    let messages = messages.as_slice();
+                    async move {
+                        match engines[idx].run(system, messages, tools).await {
+                            Ok(o) => {
+                                ran_idx.set(idx);
+                                crate::engine_ladder::TurnAttempt::<
+                                    crate::control_turn::TurnOutput,
+                                    std::convert::Infallible,
+                                >::Produced(o)
+                            }
+                            Err(e) => {
+                                *last_err.borrow_mut() = Some(e);
+                                crate::engine_ladder::TurnAttempt::Escalate
+                            }
+                        }
+                    }
+                },
+                |_idx: usize| {
+                    // The reason for an escalation is the error the engine just
+                    // produced (captured above). Take it so each escalation's
+                    // event/propagation carries the right message.
+                    last_err
+                        .borrow_mut()
+                        .take()
+                        .map(|e| e.to_string())
+                        .unwrap_or_else(|| "engine couldn't continue".to_string())
+                },
+            )
+            .await;
+
+        let out = match outcome {
+            crate::engine_ladder::LadderOutcome::Turn(t) => {
+                // Narrate + record each escalation that happened this turn, in
+                // order, with the SAME event shape the build loop uses.
+                for ev in &t.events {
                     let _ = writeln!(
                         stdout,
-                        "[eri] {} engine couldn't continue ({e}); escalating to {}.",
-                        turn.engine(),
-                        next.engine()
+                        "[eri] {} engine couldn't continue ({}); escalating to {}.",
+                        ev.from_engine_name, ev.reason, ev.to_engine_name
                     );
-                    engine_idx += 1;
-                    continue;
+                    sink.record_escalation(ev);
                 }
-                return Err(e);
+                t.value
             }
+            crate::engine_ladder::LadderOutcome::Exhausted(reason) => {
+                // No engine left for this turn — propagate the error, as before.
+                return Err(anyhow!(reason));
+            }
+            // Control has no abort case (`Infallible`); unreachable but exhaustive.
+            crate::engine_ladder::LadderOutcome::Aborted(never) => match never {},
         };
         // Self-improvement log: every control turn that produced output is
         // recorded (engine + outcome) so the routing can learn where local was
-        // enough vs. where it escalated. Through the sink seam, so tests can
+        // enough vs. where it escalated. Tagged with the engine that actually
+        // ran it (across an escalation). Through the sink seam, so tests can
         // assert this sequence.
-        sink.record(control_turn_log(turn.engine(), goal, &out));
+        sink.record(control_turn_log(
+            engines[ran_idx.get()].engine(),
+            goal,
+            &out,
+        ));
         usage += out.usage;
         step += 1;
 
@@ -2096,17 +2154,28 @@ mod tests {
     }
 
     /// A recording sink — the test double that makes the self-improvement log
-    /// verifiable. Replaces the old `cfg!(test)` no-op.
+    /// verifiable. Replaces the old `cfg!(test)` no-op. Also records the unified
+    /// ladder's escalation events so "did the loop emit the right escalation
+    /// event with the right fields?" is assertable.
     #[derive(Default)]
-    struct RecordingSink(Mutex<Vec<crate::control_turn::ControlTurnLog>>);
+    struct RecordingSink {
+        turns: Mutex<Vec<crate::control_turn::ControlTurnLog>>,
+        escalations: Mutex<Vec<crate::engine_ladder::LadderEvent>>,
+    }
     impl crate::control_turn::ControlTurnSink for RecordingSink {
         fn record(&self, log: crate::control_turn::ControlTurnLog) {
-            self.0.lock().unwrap().push(log);
+            self.turns.lock().unwrap().push(log);
+        }
+        fn record_escalation(&self, event: &crate::engine_ladder::LadderEvent) {
+            self.escalations.lock().unwrap().push(event.clone());
         }
     }
     impl RecordingSink {
         fn logs(&self) -> Vec<crate::control_turn::ControlTurnLog> {
-            self.0.lock().unwrap().clone()
+            self.turns.lock().unwrap().clone()
+        }
+        fn escalations(&self) -> Vec<crate::engine_ladder::LadderEvent> {
+            self.escalations.lock().unwrap().clone()
         }
     }
 
@@ -2255,6 +2324,110 @@ mod tests {
         .unwrap();
         assert_eq!(out.text, "Done via cloud.");
         assert_eq!(bridge.calls(), vec!["open:Safari"]);
+    }
+
+    #[tokio::test]
+    async fn loop_emits_a_unified_escalation_event_through_the_sink() {
+        // C5: an escalation emits ONE event with the shared shape so the
+        // Claude-share metric is uniform across build + control. A single local
+        // failure (below the trip threshold) escalates to claude WITHOUT tripping.
+        let bridge = MockBridge::with_snapshot(graph());
+        let gate = ControlGate::default();
+        let mut confirm = |_: &str, _: Option<crate::control_safety::Permission>| true;
+        let local = StubTurn::new("local", vec![Err("on-device offline".into())]);
+        let claude = StubTurn::new("claude", vec![Ok(done_turn("done"))]);
+        let sink = RecordingSink::default();
+        let system = vec![json!({ "type": "text", "text": "sys" })];
+        let tools = json!(tool_specs());
+        drive_control_loop(
+            &[&local, &claude],
+            &bridge,
+            &gate,
+            &mut confirm,
+            &sink,
+            &system,
+            &tools,
+            "do the thing",
+            8,
+        )
+        .await
+        .unwrap();
+        let evs = sink.escalations();
+        assert_eq!(evs.len(), 1, "one escalation, one event");
+        assert_eq!(evs[0].from_engine_name, "local");
+        assert_eq!(evs[0].to_engine_name, "claude");
+        assert_eq!(evs[0].turn_index, 0);
+        assert!(evs[0].reason.contains("offline"));
+        assert!(
+            !evs[0].tripped,
+            "a single failure is below the trip threshold"
+        );
+    }
+
+    #[tokio::test]
+    async fn loop_trips_the_cheap_engine_after_two_consecutive_failures_and_sticks() {
+        // C5 circuit breaker, end-to-end through the control loop: the cheap
+        // engine fails two turns running, so the ladder trips it and the loop
+        // stops trying it for the rest of the goal — even though the cheap stub
+        // still has queued (now-irrelevant) outputs. The 2nd escalation carries
+        // tripped=true.
+        let bridge = MockBridge::with_snapshot(graph());
+        let gate = ControlGate::default();
+        let mut confirm = |_: &str, _: Option<crate::control_safety::Permission>| true;
+        // Cheap fails twice, then would succeed — but must never be tried again.
+        let local = StubTurn::new(
+            "local",
+            vec![
+                Err("down-1".into()),
+                Err("down-2".into()),
+                Ok(tool_call_turn("nope", "screen_observe", json!({}))),
+            ],
+        );
+        // Claude carries each turn after the local failure, then finishes.
+        let claude = StubTurn::new(
+            "claude",
+            vec![
+                Ok(tool_call_turn(
+                    "c1",
+                    "open_app",
+                    json!({ "name": "Safari" }),
+                )),
+                Ok(tool_call_turn("c2", "type", json!({ "text": "x" }))),
+                Ok(done_turn("done via claude")),
+            ],
+        );
+        let sink = RecordingSink::default();
+        let system = vec![json!({ "type": "text", "text": "sys" })];
+        let tools = json!(tool_specs());
+        let out = drive_control_loop(
+            &[&local, &claude],
+            &bridge,
+            &gate,
+            &mut confirm,
+            &sink,
+            &system,
+            &tools,
+            "do a few steps",
+            8,
+        )
+        .await
+        .unwrap();
+        assert_eq!(out.text, "done via claude");
+        let evs = sink.escalations();
+        // Turn 0 + turn 1 each escalate (cheap → claude); turn 2 starts already on
+        // claude (tripped), so no further escalation event.
+        assert_eq!(evs.len(), 2, "two escalations: one per consecutive failure");
+        assert!(!evs[0].tripped, "1st consecutive failure does not trip");
+        assert!(
+            evs[1].tripped,
+            "2nd consecutive failure trips the cheap engine"
+        );
+        // Every recorded turn ran on claude (the cheap engine never produced one).
+        let logs = sink.logs();
+        assert!(
+            logs.iter().all(|l| l.engine == "claude"),
+            "tripped cheap engine never ran a turn"
+        );
     }
 
     #[tokio::test]
