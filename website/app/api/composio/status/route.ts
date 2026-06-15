@@ -6,7 +6,7 @@
 import { NextResponse } from "next/server";
 import { authenticateApiBearer } from "@/lib/auth/api_tokens";
 import { listConnections, upsertConnection } from "@/lib/composio/accounts";
-import { HttpComposioClient } from "@/lib/composio/client";
+import { ComposioApiClient } from "@/lib/composio/client";
 import { listFreshConnections } from "@/lib/composio/connect";
 import { featureLocked } from "@/lib/feature_gate";
 
@@ -23,7 +23,7 @@ export async function GET(request: Request): Promise<Response> {
   }
   // Refresh still-pending accounts from Composio so a connection authorized on
   // its hosted page actually flips to active (review #3 — no backend callback).
-  const client = new HttpComposioClient();
+  const client = new ComposioApiClient();
   const connections = await listFreshConnections(auth.user.id, {
     list: listConnections,
     status: (id) => client.connectionStatus(id),

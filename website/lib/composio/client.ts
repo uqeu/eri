@@ -7,12 +7,15 @@
  * a hosted OAuth redirect the user opens) and expose the per-user MCP URL the
  * computer-resident eri streams tools from.
  *
- * Behind a `ComposioClient` seam: the orchestration is unit-tested with an
- * in-memory stub; the production adapter (`HttpComposioClient`) is a thin `fetch`
- * client against Composio's v3 REST API. Same shape as the memory-sync transport
- * seam — the external API is wired but verified live (it can't be unit-tested
- * without the vendor), so the testable logic stays green on its own.
+ * Behind a `ComposioClient` seam: the orchestration (`handleConnect`,
+ * `listFreshConnections`) is unit-tested with an in-memory stub; the production
+ * adapter (`ComposioApiClient`) wraps the official `@composio/core` SDK. Using the
+ * SDK (not hand-rolled REST) means we get the maintained, typed `link()` flow —
+ * Composio deprecated the older `initiate()` path — and the SDK tracks endpoint
+ * changes for us. The seam is what made this an implementation-only swap.
  */
+
+import { Composio } from "@composio/core";
 
 /** One initiated connection: the hosted URL to open, plus Composio's account id. */
 export interface ComposioConnection {
@@ -47,61 +50,36 @@ function requireEnv(name: string): string {
   return v;
 }
 
-const COMPOSIO_BASE = "https://backend.composio.dev/api/v3";
-
-interface ConnectedAccountResponse {
-  id?: string;
-  redirect_url?: string;
-  redirectUrl?: string;
-  status?: string;
+/** A Composio SDK instance keyed by the server API key. Constructed per call so a
+ *  missing key fails at request time, never at module load / build. */
+function composio(): Composio {
+  return new Composio({ apiKey: requireEnv("COMPOSIO_API_KEY") });
 }
 
 /**
- * Production adapter — a thin `fetch` client over Composio v3. Reads
- * COMPOSIO_API_KEY (+ per-toolkit COMPOSIO_AUTH_CONFIG_<TOOLKIT> and
- * COMPOSIO_MCP_SERVER_ID) from the environment. Wired to the documented v3 shape;
- * verify live against the user's Composio account before production use.
+ * Production adapter over the official `@composio/core` SDK. Per-toolkit auth
+ * configs are named COMPOSIO_AUTH_CONFIG_<TOOLKIT> (uppercased), e.g.
+ * COMPOSIO_AUTH_CONFIG_GMAIL; the MCP server id is COMPOSIO_MCP_SERVER_ID.
  */
-export class HttpComposioClient implements ComposioClient {
+export class ComposioApiClient implements ComposioClient {
   async initiateConnection(userId: string, toolkit: string): Promise<ComposioConnection> {
-    const apiKey = requireEnv("COMPOSIO_API_KEY");
     const authConfigId = requireEnv(`COMPOSIO_AUTH_CONFIG_${toolkit.toUpperCase()}`);
-    const res = await fetch(`${COMPOSIO_BASE}/connected_accounts`, {
-      method: "POST",
-      headers: { "x-api-key": apiKey, "content-type": "application/json" },
-      body: JSON.stringify({ user_id: userId, auth_config_id: authConfigId }),
-    });
-    if (!res.ok) {
-      throw new Error(`composio connect failed: ${res.status}`);
+    // link() = Composio-managed OAuth (hosted redirect, multiple accounts) — the
+    // non-deprecated replacement for initiate().
+    const req = await composio().connectedAccounts.link(userId, authConfigId);
+    if (!req.id || !req.redirectUrl) {
+      throw new Error(`composio link returned no redirect for "${toolkit}"`);
     }
-    const body = (await res.json()) as ConnectedAccountResponse;
-    const connectedAccountId = body.id;
-    const redirectUrl = body.redirect_url ?? body.redirectUrl;
-    if (!connectedAccountId || !redirectUrl) {
-      // Name the fields we actually saw so a v3 API drift is diagnosable, not a
-      // silent generic failure (review 2a).
-      throw new Error(
-        `composio connect returned no redirect (keys: ${Object.keys(body).join(",") || "none"})`,
-      );
-    }
-    return { connectedAccountId, redirectUrl };
+    return { connectedAccountId: req.id, redirectUrl: req.redirectUrl };
   }
 
   async connectionStatus(connectedAccountId: string): Promise<"pending" | "active" | "error"> {
-    const apiKey = requireEnv("COMPOSIO_API_KEY");
-    const res = await fetch(
-      `${COMPOSIO_BASE}/connected_accounts/${encodeURIComponent(connectedAccountId)}`,
-      { headers: { "x-api-key": apiKey } },
-    );
-    if (!res.ok) return "error";
-    const body = (await res.json()) as ConnectedAccountResponse;
-    const status = normalizeStatus(body.status);
-    // An unrecognized status string (a future Composio enum value) maps to
-    // "error" — surface it so it's diagnosable, not a silent broken account (2c).
-    if (status === "error" && body.status) {
-      console.log(
-        JSON.stringify({ event: "composio.unknown_status", status: body.status }),
-      );
+    const account = await composio().connectedAccounts.get(connectedAccountId);
+    const status = normalizeStatus(account.status);
+    // An unrecognized status (a future Composio enum value) maps to "error" —
+    // surface it so it's diagnosable, not a silent broken account.
+    if (status === "error" && account.status) {
+      console.log(JSON.stringify({ event: "composio.unknown_status", status: account.status }));
     }
     return status;
   }

@@ -8,7 +8,7 @@
 import { NextResponse } from "next/server";
 import { authenticateApiBearer } from "@/lib/auth/api_tokens";
 import { upsertConnection } from "@/lib/composio/accounts";
-import { HttpComposioClient } from "@/lib/composio/client";
+import { ComposioApiClient } from "@/lib/composio/client";
 import { handleConnect } from "@/lib/composio/connect";
 import { featureLocked } from "@/lib/feature_gate";
 
@@ -32,7 +32,7 @@ export async function POST(request: Request): Promise<Response> {
   }
   const toolkit = (body as { toolkit?: unknown })?.toolkit;
 
-  const client = new HttpComposioClient();
+  const client = new ComposioApiClient();
   const outcome = await handleConnect(auth.user.id, toolkit, {
     initiate: (userId, tk) => client.initiateConnection(userId, tk),
     record: upsertConnection,
