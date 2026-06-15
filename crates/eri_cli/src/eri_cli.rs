@@ -45,6 +45,7 @@ mod control_turn;
 mod eri_config;
 mod genui;
 mod git_tools;
+mod intent;
 mod line_editor;
 mod local_eval;
 mod mcp_server;
@@ -514,6 +515,14 @@ pub enum Command {
     /// Show the active sign-in + tier + remaining quota. Alias of
     /// `eri auth status`.
     Status,
+    /// Catch-all: any invocation whose first token isn't a known subcommand is
+    /// captured here as a free-text prompt (e.g. `eri what is on my calendar`).
+    /// WHY: the top UX priority is `eri <natural language>` with NO subcommand
+    /// and NO required quotes — eri decides its own mode (build/control/answer/
+    /// chat) via the intent router. Explicit subcommands stay unchanged
+    /// overrides; this only fires when nothing else matched.
+    #[command(external_subcommand)]
+    External(Vec<String>),
 }
 
 #[derive(Subcommand, Debug, PartialEq, Eq)]
@@ -972,6 +981,62 @@ async fn dispatch(cli: Cli) -> anyhow::Result<()> {
             }
         },
         Command::Doctor => repl::print_doctor(),
+        // Bare natural-language prompt with no subcommand. The intent router
+        // (0-token, sub-ms) decides the mode and we hand off to the SAME handler
+        // the matching explicit subcommand would use — no reimplementation.
+        Command::External(words) => dispatch_external(&words.join(" "), flags).await,
+    }
+}
+
+/// Route a bare prompt (`eri <natural language>`) to the right existing handler
+/// using the deterministic intent classifier.
+///
+/// WHY a dedicated helper: keeps the big dispatch match readable and gives the
+/// routing one clear, testable seam. Each branch reuses an existing handler with
+/// the same defaults its explicit subcommand uses (no deploy for Build, the
+/// non-live SAFE default for Control, the tool-carrying one-shot for Answer).
+async fn dispatch_external(prompt: &str, flags: LoopFlags) -> anyhow::Result<()> {
+    // Empty after join → fall back to the bare-`eri` interactive session.
+    if prompt.trim().is_empty() {
+        return repl::run().await;
+    }
+    let intent = intent::classify_intent(prompt);
+    if std::env::var("ERI_DEBUG").is_ok() {
+        eprintln!("[eri-intent] {}", intent_label(intent));
+    }
+    match intent {
+        // Same path as `Command::Build` (no deploy, default output + model).
+        intent::Intent::Build => {
+            run_build_metered(
+                prompt,
+                false,
+                Path::new(DEFAULT_OUTPUT_FILE),
+                model_for_mode(resolve_mode(None, &cwd())),
+                flags,
+            )
+            .await
+        }
+        // Same path as `Command::Control` with goal=prompt and its SAFE defaults
+        // (non-live dry-run, no auto-yes, no undo/history/suggest, not spoken).
+        intent::Intent::Control => {
+            run_control(prompt, false, false, None, false, false, false, false).await
+        }
+        // The agentic one-shot path that carries the connected tools.
+        intent::Intent::Answer => agent::ask(prompt).await,
+        // Open-ended conversation: the one-shot agentic path also just talks, so
+        // it's the feasible single-message handler here (a full interactive chat
+        // seeded with this prompt is the future refinement).
+        intent::Intent::Chat => agent::ask(prompt).await,
+    }
+}
+
+/// Lowercase one-word label for the debug trace.
+fn intent_label(intent: intent::Intent) -> &'static str {
+    match intent {
+        intent::Intent::Build => "build",
+        intent::Intent::Control => "control",
+        intent::Intent::Answer => "answer",
+        intent::Intent::Chat => "chat",
     }
 }
 
@@ -1930,6 +1995,53 @@ mod tests {
             parsed_command(["eri", "fork", "s_abc"]),
             Command::Fork { id: "s_abc".into() }
         );
+    }
+
+    #[test]
+    fn bare_prompt_routes_to_external_catch_all() {
+        // `eri what is on my calendar` — no subcommand, no quotes — must be
+        // captured as a free-text prompt, NOT error as an unknown subcommand.
+        match parsed_command(["eri", "what", "is", "on", "my", "calendar"]) {
+            Command::External(words) => {
+                assert_eq!(words, vec!["what", "is", "on", "my", "calendar"]);
+                assert_eq!(words.join(" "), "what is on my calendar");
+            }
+            other => panic!("expected External, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn bare_imperative_routes_to_external() {
+        match parsed_command(["eri", "open", "Spotify", "and", "play", "jazz"]) {
+            Command::External(words) => {
+                assert_eq!(words.join(" "), "open Spotify and play jazz");
+            }
+            other => panic!("expected External, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn explicit_subcommands_override_the_catch_all() {
+        // Known subcommands must still parse as themselves, not External.
+        assert!(matches!(
+            parsed_command(["eri", "build", "a site"]),
+            Command::Build { .. }
+        ));
+        assert!(matches!(
+            parsed_command(["eri", "control", "open Spotify"]),
+            Command::Control { .. }
+        ));
+        assert!(matches!(
+            parsed_command(["eri", "ask", "what is rust"]),
+            Command::Ask { .. }
+        ));
+    }
+
+    #[test]
+    fn bare_eri_still_starts_interactive_session() {
+        // The no-subcommand interactive path must be untouched by the catch-all.
+        let cli = Cli::parse_from(["eri"]);
+        assert!(cli.command.is_none());
     }
 
     #[test]
