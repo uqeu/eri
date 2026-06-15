@@ -225,14 +225,22 @@ def build_generation_messages(category: str, count: int, exemplars: list[dict]) 
 # Backend call (OpenAI-compatible /v1/chat/completions) — shared path
 # --------------------------------------------------------------------------- #
 def call_backend(cfg: dict, messages: list[dict], *, temperature: float = 0.9,
-                 timeout: float = 120.0) -> str:
-    """POST to <base_url>/chat/completions and return the assistant message content (text)."""
+                 timeout: float = 300.0, retries: int = 2) -> str:
+    """POST to <base_url>/chat/completions and return the assistant message content (text).
+
+    Retries transient failures (timeouts/network/partial body) up to `retries` times —
+    slow reasoning models (Kimi K2.7 Code, local 72B) routinely exceed a short timeout
+    on the first try, so an unattended run must tolerate it.
+    """
     guard_base_url(cfg["base_url"])  # belt-and-suspenders: never call a guarded URL.
     url = f"{cfg['base_url']}/chat/completions"
+    # Some models only accept a fixed temperature — Kimi K2.7 Code rejects
+    # anything but temperature=1 (HTTP 400). Honor that rather than 400-ing.
+    effective_temperature = 1.0 if "kimi" in cfg["model"].lower() else temperature
     payload = json.dumps({
         "model": cfg["model"],
         "messages": messages,
-        "temperature": temperature,
+        "temperature": effective_temperature,
         "stream": False,
     }).encode("utf-8")
     headers = {"Content-Type": "application/json"}
@@ -240,15 +248,23 @@ def call_backend(cfg: dict, messages: list[dict], *, temperature: float = 0.9,
         headers["Authorization"] = f"Bearer {cfg['api_key']}"
 
     req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 - guarded URL
-            body = json.loads(resp.read().decode("utf-8"))
-    except urllib.error.URLError as e:
-        raise GenerationError(f"backend call failed ({cfg['backend']} @ {url}): {e}")
-    try:
-        return body["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, TypeError) as e:
-        raise GenerationError(f"unexpected backend response shape: {e}: {str(body)[:200]}")
+    last_err: Exception | None = None
+    for _ in range(retries + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 - guarded URL
+                body = json.loads(resp.read().decode("utf-8"))
+        except (urllib.error.URLError, OSError, json.JSONDecodeError) as e:
+            # OSError covers ConnectionResetError / BrokenPipe / socket timeouts
+            # (e.g. when the Mac sleeps mid-request) — all transient, so retry.
+            last_err = e
+            continue
+        try:
+            return body["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError) as e:
+            raise GenerationError(f"unexpected backend response shape: {e}: {str(body)[:200]}")
+    raise GenerationError(
+        f"backend call failed after {retries + 1} tries ({cfg['backend']} @ {url}): {last_err}"
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -370,17 +386,41 @@ def generate_category(cfg: dict, category: str, count: int, out_dir: Path, *,
         plan["dry_run"] = True
         return plan
 
-    reply = call_backend(cfg, messages)
-    parsed = parse_examples(reply)
+    # Generate in small per-call batches: each request stays fast + robust (slow
+    # reasoning models time out on one big call), one bad batch doesn't sink the
+    # run, and `seen` is shared so filter_and_stamp dedups across batches + the
+    # existing file.
+    BATCH = 4
     seen = existing_hashes(out_path)
-    accepted, rejected = filter_and_stamp(parsed, generator, seen, where=category)
-    append_records(out_path, accepted)
+    total_parsed = 0
+    accepted_total: list[dict] = []
+    rejections: list[str] = []
+    attempts = 0
+    max_attempts = (count + BATCH - 1) // BATCH * 3 + 3  # cap; avoids infinite loops
+    while len(accepted_total) < count and attempts < max_attempts:
+        attempts += 1
+        n = min(BATCH, count - len(accepted_total))
+        batch_messages = build_generation_messages(category, n, exemplars)
+        try:
+            reply = call_backend(cfg, batch_messages)
+            parsed = parse_examples(reply)
+        except (GenerationError, json.JSONDecodeError, ValueError) as e:
+            # A model returning malformed JSON (common with smaller local models)
+            # must drop just this batch, never crash the unattended run.
+            rejections.append(f"batch {attempts}: {e}")
+            continue
+        total_parsed += len(parsed)
+        accepted, rejected = filter_and_stamp(parsed, generator, seen, where=f"{category}.b{attempts}")
+        append_records(out_path, accepted)
+        accepted_total.extend(accepted)
+        rejections.extend(rejected)
 
     plan.update({
-        "parsed": len(parsed),
-        "accepted": len(accepted),
-        "rejected": len(rejected),
-        "rejections": rejected,
+        "parsed": total_parsed,
+        "accepted": len(accepted_total),
+        "rejected": len(rejections),
+        "attempts": attempts,
+        "rejections": rejections[:20],
     })
     return plan
 
