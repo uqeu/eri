@@ -39,7 +39,7 @@ pub async fn calendar(action: &str) -> Result<()> {
 
 async fn run_category(label: &str, keywords: &[&str], action: &str, example: &str) -> Result<()> {
     let ws = workspace();
-    let tools: Vec<ToolHandle> = match Mcp::load(&ws).await {
+    let tools: Vec<ToolHandle> = match Mcp::load_with_vars(&ws, &crate::build_agent::mcp_vars()).await {
         Ok(mcp) => mcp.tools().await,
         Err(e) => {
             println!("[eri] couldn't load MCP config: {e}");

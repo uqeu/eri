@@ -35,6 +35,7 @@ pub mod error;
 pub mod protocol;
 pub mod transport;
 
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -146,13 +147,38 @@ impl Mcp {
     /// and the catalog populates as each handshake completes. Polling
     /// [`Mcp::servers`] returns live state.
     pub async fn load(workspace: &Path) -> Result<Self, McpError> {
+        Self::load_with_vars(workspace, &BTreeMap::new()).await
+    }
+
+    /// Like [`load`](Self::load), but expands `${VAR}` placeholders in each
+    /// server's config (url/headers/env/args/command) against `vars` first, then
+    /// the process environment ([`ServerConfig::expand`]). This is how per-user
+    /// remote MCPs (Composio) get their `ERI_USER_ID` + secrets at connect time
+    /// without those ever living on disk.
+    ///
+    /// A server whose placeholders can't all resolve (a missing secret, or no
+    /// per-user id supplied) is **skipped** — fail-closed: we never open a
+    /// connection that would send a literal `${COMPOSIO_API_KEY}`. The rest of
+    /// the pool still comes up.
+    pub async fn load_with_vars(
+        workspace: &Path,
+        vars: &BTreeMap<String, String>,
+    ) -> Result<Self, McpError> {
         let all = config::load(workspace)?;
         let active = config::active_servers(&all);
 
         let mut connections = Vec::with_capacity(active.len());
         for server in active {
-            let conn = Connection::open(server).await;
-            connections.push(conn);
+            match server.expand(vars) {
+                Ok(resolved) => connections.push(Connection::open(resolved).await),
+                Err(err) => {
+                    // Unresolved placeholders → skip, don't crash the pool. Surface
+                    // it under debug so a misconfigured server isn't silent.
+                    if std::env::var("ERI_DEBUG").is_ok() {
+                        eprintln!("eri-mcp: skipping server with unresolved config: {err}");
+                    }
+                }
+            }
         }
 
         let catalog = Arc::new(RwLock::new(Catalog::default()));
@@ -359,6 +385,42 @@ mod tests {
         assert!(mcp.servers().await.is_empty());
         assert!(mcp.tools().await.is_empty());
         assert!(mcp.resources().await.is_empty());
+        mcp.shutdown().await.unwrap();
+        unsafe {
+            match prev_home {
+                Some(v) => std::env::set_var("HOME", v),
+                None => std::env::remove_var("HOME"),
+            }
+        }
+    }
+
+    // A remote server whose ${VAR}s can't resolve is skipped (fail-closed), never
+    // connected with a literal placeholder. Uses only an unresolvable server, so
+    // no real Connection::open / network happens.
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn load_with_vars_skips_servers_with_unresolved_placeholders() {
+        let _env = HOME_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempfile::tempdir().unwrap();
+        let eri_dir = dir.path().join(".eri");
+        std::fs::create_dir_all(&eri_dir).unwrap();
+        std::fs::write(
+            eri_dir.join("mcp.json"),
+            r#"{"mcpServers":{"composio":{"url":"https://x/${NEVER_SET_VAR}","transport":"http"}}}"#,
+        )
+        .unwrap();
+        let prev_home = std::env::var_os("HOME");
+        unsafe {
+            std::env::set_var("HOME", dir.path());
+        }
+        // Empty vars + (unset) env → the one server can't expand → skipped.
+        let mcp = Mcp::load_with_vars(dir.path(), &BTreeMap::new())
+            .await
+            .expect("loads cleanly");
+        assert!(
+            mcp.servers().await.is_empty(),
+            "an unresolvable server must be skipped, not connected"
+        );
         mcp.shutdown().await.unwrap();
         unsafe {
             match prev_home {

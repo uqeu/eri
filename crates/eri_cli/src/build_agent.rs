@@ -2041,10 +2041,21 @@ fn tool_specs(allow_shell: bool, depth: u8) -> Value {
 /// on MCP. When servers ARE configured we poll the catalog briefly (handshakes
 /// run in the background after `load`) so first-turn tool specs are populated.
 ///
+/// The `${VAR}` substitutions injected into MCP server configs at connect time.
+/// Currently the signed-in user's id (so a per-user remote MCP like Composio can
+/// route `?user_id=${ERI_USER_ID}`); secrets come from the process environment.
+pub(crate) fn mcp_vars() -> std::collections::BTreeMap<String, String> {
+    let mut vars = std::collections::BTreeMap::new();
+    if let Some(uid) = config::load().ok().and_then(|c| c.user_id) {
+        vars.insert("ERI_USER_ID".to_string(), uid);
+    }
+    vars
+}
+
 /// MCP is loaded only at depth 0: subagents inherit a restricted, local-only
 /// tool set by design, so they don't get external servers.
 async fn load_mcp(root: &Path) -> (Option<eri_mcp::Mcp>, Vec<eri_mcp::ToolHandle>) {
-    let mcp = match eri_mcp::Mcp::load(root).await {
+    let mcp = match eri_mcp::Mcp::load_with_vars(root, &mcp_vars()).await {
         Ok(m) => m,
         // A broken mcp.json must never break a build — degrade to no MCP.
         Err(_) => return (None, Vec::new()),
@@ -2352,12 +2363,22 @@ mod build_loop_tests {
     #[tokio::test]
     async fn drive_build_loop_returns_a_text_turn_with_no_network() {
         let dir = tempfile::TempDir::new().unwrap();
-        let engine = StubEngine { label: "stub", behavior: Behavior::Text("built it, 12 tests pass") };
+        let engine = StubEngine {
+            label: "stub",
+            behavior: Behavior::Text("built it, 12 tests pass"),
+        };
         let refs: Vec<&dyn BuildTurn> = vec![&engine];
         let mut messages = vec![json!({ "role": "user", "content": "build x" })];
-        let out = drive_build_loop(&refs, dir.path(), "test-model", &mut messages, &quiet_opts(), 0)
-            .await
-            .expect("loop runs");
+        let out = drive_build_loop(
+            &refs,
+            dir.path(),
+            "test-model",
+            &mut messages,
+            &quiet_opts(),
+            0,
+        )
+        .await
+        .expect("loop runs");
         assert_eq!(out.final_text, "built it, 12 tests pass");
         assert_eq!(out.turns, 1);
         assert_eq!(out.tokens_in, 7);
@@ -2369,13 +2390,26 @@ mod build_loop_tests {
         // local-first shape: the first engine hard-fails, the loop escalates to
         // the second, which answers. This is the seam's payoff.
         let dir = tempfile::TempDir::new().unwrap();
-        let local = StubEngine { label: "local", behavior: Behavior::AlwaysHard };
-        let claude = StubEngine { label: "claude", behavior: Behavior::Text("done via fallback") };
+        let local = StubEngine {
+            label: "local",
+            behavior: Behavior::AlwaysHard,
+        };
+        let claude = StubEngine {
+            label: "claude",
+            behavior: Behavior::Text("done via fallback"),
+        };
         let refs: Vec<&dyn BuildTurn> = vec![&local, &claude];
         let mut messages = vec![json!({ "role": "user", "content": "build x" })];
-        let out = drive_build_loop(&refs, dir.path(), "test-model", &mut messages, &quiet_opts(), 0)
-            .await
-            .expect("loop escalates and runs");
+        let out = drive_build_loop(
+            &refs,
+            dir.path(),
+            "test-model",
+            &mut messages,
+            &quiet_opts(),
+            0,
+        )
+        .await
+        .expect("loop escalates and runs");
         assert_eq!(out.final_text, "done via fallback");
         assert_eq!(out.turns, 1);
     }
@@ -2383,11 +2417,21 @@ mod build_loop_tests {
     #[tokio::test]
     async fn drive_build_loop_propagates_when_all_engines_fail() {
         let dir = tempfile::TempDir::new().unwrap();
-        let a = StubEngine { label: "local", behavior: Behavior::AlwaysHard };
+        let a = StubEngine {
+            label: "local",
+            behavior: Behavior::AlwaysHard,
+        };
         let refs: Vec<&dyn BuildTurn> = vec![&a];
         let mut messages = vec![json!({ "role": "user", "content": "build x" })];
-        let result =
-            drive_build_loop(&refs, dir.path(), "test-model", &mut messages, &quiet_opts(), 0).await;
+        let result = drive_build_loop(
+            &refs,
+            dir.path(),
+            "test-model",
+            &mut messages,
+            &quiet_opts(),
+            0,
+        )
+        .await;
         match result {
             Ok(_) => panic!("expected the loop to propagate the failure"),
             Err(e) => assert!(e.to_string().contains("couldn't continue")),
