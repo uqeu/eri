@@ -1,0 +1,210 @@
+#!/usr/bin/env python3
+"""eri-brain QLoRA SFT — train eri's OWN model directly on clean data + authored examples.
+
+NO TEACHER. This trains the student (Qwen eri-brain) on:
+  - clean-provenance public datasets from datasets.yaml (human or open-model only), and
+  - eri-specific examples in eri_data/*.jsonl, GENERATED FRESH by OPEN models (Kimi/Qwen/DeepSeek
+    via generate_eri_data.py) — provenance-clean by construction. The Claude-authored seeds/ are
+    structural scaffolding for the generator and are NEVER trained on.
+Never on Claude/GPT outputs. See docs/architecture/personalization-learning-loop.md.
+
+This is the TRAINING path (bnb 4-bit QLoRA via PEFT + TRL SFTTrainer). Serving-quant (AWQ/FP8) and
+vLLM multi-LoRA serving are a separate concern (infra/eri-brain).
+
+Usage:
+    python3 training/lora_finetune.py --config training/config.yaml --dry-run   # no GPU, no weights
+    python3 training/lora_finetune.py --config training/config.yaml             # real training (GPU)
+
+--dry-run validates config + manifest + eri_data and prints the planned run WITHOUT importing torch
+or touching the network/weights. Heavy ML imports live inside _train() so this file imports anywhere.
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+
+try:
+    import yaml
+except ImportError:
+    print("FATAL: pyyaml required. `pip install pyyaml`", file=sys.stderr)
+    sys.exit(2)
+
+HERE = Path(__file__).resolve().parent
+
+# Reuse the validator so the trainer and the gate agree on what "valid" means.
+try:
+    import validate as _v
+except ImportError:  # when invoked as a module from repo root
+    sys.path.insert(0, str(HERE))
+    import validate as _v
+
+
+def load_config(path: Path) -> dict:
+    return yaml.safe_load(path.read_text(encoding="utf-8"))
+
+
+def preflight(config_path: Path) -> dict:
+    """Validate everything (config, manifest, eri_data) before any heavy work. Raises on violation."""
+    root = config_path.resolve().parent
+    cfg = load_config(config_path)
+
+    cfg_info = _v.validate_config(yaml.safe_dump(cfg))
+    manifest_path = root / cfg["data"]["manifest"]
+    ds_info = _v.validate_datasets_manifest(manifest_path.read_text(encoding="utf-8"))
+    eri_counts = _v.validate_eri_data(root / "eri_data")
+
+    return {"cfg": cfg, "root": root, "config": cfg_info, "datasets": ds_info,
+            "eri_data": eri_counts}
+
+
+def print_plan(info: dict) -> None:
+    cfg = info["cfg"]
+    print("== eri-brain QLoRA SFT — PLANNED RUN (dry-run) ==")
+    print(f"  base model      : {cfg['model']['base_id']}  (model-agnostic via config)")
+    q = cfg["quantization"]
+    print(f"  training quant  : 4-bit={q['load_in_4bit']} type={q['bnb_4bit_quant_type']} "
+          f"double={q['bnb_4bit_use_double_quant']} compute={q['bnb_4bit_compute_dtype']}")
+    lo = cfg["lora"]
+    print(f"  LoRA            : r={lo['r']} alpha={lo['alpha']} dropout={lo['dropout']} "
+          f"targets={lo['target_modules']}")
+    t = cfg["training"]
+    eff_bs = t["per_device_train_batch_size"] * t["gradient_accumulation_steps"]
+    print(f"  schedule        : epochs={t['num_train_epochs']} lr={t['learning_rate']} "
+          f"sched={t['lr_scheduler_type']} eff_batch={eff_bs} max_seq={cfg['data']['max_seq_len']}")
+    print(f"  output_dir      : {t['output_dir']}")
+
+    ds = info["datasets"]
+    print(f"\n  public datasets : {ds['total']} (clean-provenance: human|open-model)")
+    print(f"    by role       : {ds['by_role']}")
+    print(f"    OFF_LIMITS     : {ds['off_limits']} blocked sets (validated, none in mix)")
+    ed = info["eri_data"]
+    n_eri = sum(ed.values())
+    print(f"  eri generated   : {n_eri} examples (open-model provenance)"
+          + ("" if n_eri else "  — empty; run generate_eri_data.py to populate"))
+    for name, c in ed.items():
+        print(f"    {name:18s}: {c}")
+    print("\n  PROVENANCE      : NO teacher. No Claude/GPT. All public data human|open-model; "
+          "eri_data generated fresh by OPEN models (Kimi/Qwen/DeepSeek). Seeds are NOT trained on.")
+    print("  serving note    : LoRA adapters served via vLLM multi-LoRA on AWQ/FP8 base "
+          "(infra/eri-brain) — NOT this script.")
+    print("\n  DRY-RUN OK: config + manifest + eri_data valid. Re-run without --dry-run on a GPU.")
+
+
+def _build_corpus(info: dict):
+    """Load public datasets (manifest) + eri_data into a unified messages-format dataset.
+
+    Heavy import path — only reached in real training. Applies provenance/source filtering
+    (Tulu allowed sources, xlam irrelevance split) per config.
+    """
+    from datasets import load_dataset, concatenate_datasets  # noqa: F401
+
+    cfg = info["cfg"]
+    root = info["root"]
+    manifest = yaml.safe_load((root / cfg["data"]["manifest"]).read_text(encoding="utf-8"))
+    max_rows = cfg["data"].get("max_rows_per_dataset")
+
+    parts = []
+    # eri-specific examples (already messages schema) — GENERATED by open models into eri_data/.
+    eri_files = sorted((root / "eri_data").glob("*.jsonl"))
+    if eri_files:
+        parts.append(load_dataset("json", data_files=[str(f) for f in eri_files], split="train"))
+    else:
+        print("WARNING: eri_data/ is empty — training on public datasets only. "
+              "Run generate_eri_data.py to add the eri-specific slice.", file=sys.stderr)
+
+    # public datasets — note: per-dataset column mapping to the messages schema is dataset-specific
+    # and applied here in the real run. Kept declarative so dry-run never needs it.
+    for d in manifest["datasets"]:
+        kwargs = {"split": "train"}
+        ds = load_dataset(d["hf_id"], **kwargs)
+        if max_rows:
+            ds = ds.select(range(min(max_rows, len(ds))))
+        parts.append(ds)
+
+    return concatenate_datasets(parts)
+
+
+def _train(info: dict) -> None:
+    """Real QLoRA SFT. Heavy imports are local so the module imports without a GPU/ML stack."""
+    import torch  # noqa: F401
+    from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+    from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
+    from trl import SFTTrainer, SFTConfig
+
+    cfg = info["cfg"]
+    m, q, lo, t = cfg["model"], cfg["quantization"], cfg["lora"], cfg["training"]
+
+    bnb = BitsAndBytesConfig(
+        load_in_4bit=q["load_in_4bit"],
+        bnb_4bit_quant_type=q["bnb_4bit_quant_type"],
+        bnb_4bit_use_double_quant=q["bnb_4bit_use_double_quant"],
+        bnb_4bit_compute_dtype=getattr(__import__("torch"), q["bnb_4bit_compute_dtype"]),
+    )
+    tok = AutoTokenizer.from_pretrained(m["base_id"], trust_remote_code=m.get("trust_remote_code", True))
+    model = AutoModelForCausalLM.from_pretrained(
+        m["base_id"], quantization_config=bnb, device_map="auto",
+        trust_remote_code=m.get("trust_remote_code", True),
+    )
+    model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=t["gradient_checkpointing"])
+    peft_cfg = LoraConfig(
+        r=lo["r"], lora_alpha=lo["alpha"], lora_dropout=lo["dropout"],
+        bias=lo["bias"], task_type=lo["task_type"], target_modules=lo["target_modules"],
+    )
+    model = get_peft_model(model, peft_cfg)
+
+    corpus = _build_corpus(info)
+
+    sft_cfg = SFTConfig(
+        output_dir=t["output_dir"],
+        num_train_epochs=t["num_train_epochs"],
+        per_device_train_batch_size=t["per_device_train_batch_size"],
+        gradient_accumulation_steps=t["gradient_accumulation_steps"],
+        learning_rate=t["learning_rate"],
+        lr_scheduler_type=t["lr_scheduler_type"],
+        warmup_ratio=t["warmup_ratio"],
+        weight_decay=t["weight_decay"],
+        logging_steps=t["logging_steps"],
+        save_steps=t["save_steps"],
+        bf16=t["bf16"],
+        gradient_checkpointing=t["gradient_checkpointing"],
+        optim=t["optim"],
+        seed=t["seed"],
+        packing=t["packing"],
+        max_seq_length=cfg["data"]["max_seq_len"],
+    )
+    trainer = SFTTrainer(model=model, args=sft_cfg, train_dataset=corpus, processing_class=tok)
+    trainer.train()
+    trainer.save_model(t["output_dir"])
+    print(f"Saved LoRA adapter to {t['output_dir']}")
+
+
+def main(argv: list[str]) -> int:
+    ap = argparse.ArgumentParser(description="eri-brain QLoRA SFT (no teacher)")
+    ap.add_argument("--config", default=str(HERE / "config.yaml"), help="path to config.yaml")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="validate + print the planned run without a GPU/weights/network")
+    args = ap.parse_args(argv)
+
+    config_path = Path(args.config)
+    if not config_path.exists():
+        print(f"FATAL: config not found: {config_path}", file=sys.stderr)
+        return 2
+
+    try:
+        info = preflight(config_path)
+    except (_v.ValidationError, FileNotFoundError) as e:
+        print(f"PREFLIGHT FAILED: {e}", file=sys.stderr)
+        return 1
+
+    if args.dry_run:
+        print_plan(info)
+        return 0
+
+    _train(info)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

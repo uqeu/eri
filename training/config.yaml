@@ -1,0 +1,67 @@
+# eri-brain QLoRA SFT config — MODEL-AGNOSTIC.
+# This is the TRAINING path (bnb 4-bit QLoRA). Serving-quant (AWQ/GPTQ-INT4/FP8) is separate
+# (infra/eri-brain). LoRA adapters produced here are served via vLLM multi-LoRA.
+
+model:
+  # Leading pick per ADR-0004: dense Qwen3-32B (Apache-2.0). Swappable via this id alone.
+  base_id: Qwen/Qwen3-32B
+  trust_remote_code: true
+  # Chat template comes from the tokenizer; override only if a base ships without one.
+  chat_template: null
+
+quantization:
+  # Training-time quant: bitsandbytes 4-bit nf4 + double-quant (QLoRA). NOT the serving quant.
+  load_in_4bit: true
+  bnb_4bit_quant_type: nf4
+  bnb_4bit_use_double_quant: true
+  bnb_4bit_compute_dtype: bfloat16
+
+lora:
+  r: 16
+  alpha: 32
+  dropout: 0.05
+  bias: none
+  task_type: CAUSAL_LM
+  # Qwen attention + MLP projections. Adjust per architecture; these cover Qwen2/Qwen3 dense.
+  target_modules:
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+    - gate_proj
+    - up_proj
+    - down_proj
+
+data:
+  # Public clean-provenance manifest (validated against OFF_LIMITS by validate.py).
+  manifest: datasets.yaml
+  # eri-authored seed examples (messages schema). Globbed and concatenated into the SFT corpus.
+  eri_data_glob: eri_data/*.jsonl
+  max_seq_len: 4096
+  # Cap public-dataset rows per entry for a balanced first SFT run (null = use all).
+  max_rows_per_dataset: 50000
+  # Tulu-3: keep only these source families; drop GPT-distilled / No-Robots slices.
+  tulu_allowed_sources:
+    - tulu
+    - olmo
+    - persona
+    - if
+    - oasst
+    - flan
+
+training:
+  output_dir: ./out/eri-brain-lora
+  num_train_epochs: 3
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 16
+  learning_rate: 0.0002
+  lr_scheduler_type: cosine
+  warmup_ratio: 0.03
+  weight_decay: 0.0
+  logging_steps: 10
+  save_steps: 200
+  bf16: true
+  gradient_checkpointing: true
+  optim: paged_adamw_8bit
+  seed: 42
+  packing: true
