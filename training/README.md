@@ -174,8 +174,11 @@ pip install pyyaml          # optional: lets mlx_finetune.py read LoRA params fr
 #    MLX-LM chat/tools format, and writes mlx_data/{train,valid}.jsonl (95/5 split).
 python3 training/prepare_corpus.py --dry-run        # plan only; no files written, stdlib only
 python3 training/prepare_corpus.py                  # writes mlx_data/{train,valid}.jsonl
+#   python3 training/prepare_corpus.py --probe-open      # stream 1 row/dataset through each converter;
+#                                                        #   prints OK/FAIL + roles (fast verification, tiny download)
 #   python3 training/prepare_corpus.py --with-open 200   # ALSO blend 200 rows/dataset from datasets.yaml
-#                                                        #   (needs HF `datasets`; OFF_LIMITS excluded; skipped if absent)
+#                                                        #   (needs HF `datasets`; OFF_LIMITS + GPT/Claude slices excluded;
+#                                                        #    gated sets e.g. xlam-60k need HF_TOKEN; skipped if absent)
 
 # 2. DRY-RUN the trainer — validates mlx_data/, writes the generated mlx_lm config, and prints the
 #    EXACT mlx_lm.lora command. NO model download, NO GPU-hours.
