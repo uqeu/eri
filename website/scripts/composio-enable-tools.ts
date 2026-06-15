@@ -26,25 +26,32 @@ async function main(): Promise<void> {
 
   const composio = new Composio({ apiKey });
 
-  // Discover each toolkit's tool slugs from Composio (no hardcoding) and nest
-  // them UNDER the toolkit — a top-level allowedTools is ignored by mcp.update.
+  // For each toolkit, the server must (a) reference the toolkit's AUTH CONFIG —
+  // otherwise it can't resolve the user's connected account and returns 0 tools —
+  // and (b) list the toolkit's tools under it (a top-level allowedTools is
+  // ignored). We fetch both from Composio so nothing is hardcoded.
   let total = 0;
   const toolkitConfigs = [];
   for (const toolkit of toolkits) {
+    const authConfigs = await composio.authConfigs.list({ toolkit });
+    const authConfigId = authConfigs.items?.[0]?.id;
+    if (!authConfigId) {
+      throw new Error(`no auth config found for "${toolkit}" — create one in the Composio dashboard`);
+    }
     const tools = await composio.tools.getRawComposioTools({ toolkits: [toolkit] });
     const allowedTools = tools.map((t) => t.slug).filter((s): s is string => Boolean(s));
     if (allowedTools.length === 0) {
       throw new Error(`Composio returned no tools for "${toolkit}"`);
     }
     total += allowedTools.length;
-    toolkitConfigs.push({ toolkit, allowedTools });
+    toolkitConfigs.push({ toolkit, authConfigId, allowedTools });
   }
 
   const updated = await composio.mcp.update(serverId, { toolkits: toolkitConfigs });
 
   // eslint-disable-next-line no-console
   console.log(
-    `✓ Enabled ${total} tool(s) on the eri MCP server (${toolkits.join(", ")}):\n`,
+    `✓ Linked auth config + enabled ${total} tool(s) on the eri MCP server (${toolkits.join(", ")}):\n`,
     JSON.stringify(updated, null, 2),
   );
 }
