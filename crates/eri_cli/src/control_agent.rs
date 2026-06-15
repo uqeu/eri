@@ -1182,9 +1182,25 @@ pub(crate) async fn drive_control_loop(
         // Which engine index actually produced the turn (for the self-improvement
         // log: attribute the turn to the engine that ran it, not the first tried).
         let ran_idx: std::cell::Cell<usize> = std::cell::Cell::new(0);
+        // Vision → Claude routing: eri-brain is text-only, so a turn whose input
+        // carries an image (a screenshot/camera frame in computer-control) must
+        // start on a vision-capable engine (Claude), skipping the cheap engine.
+        // Text-only turns are unchanged (cheap-first).
+        let vision_required = crate::engine_ladder::messages_have_image(&messages);
+        if vision_required
+            && !ladder.has_vision_capable_engine()
+            && std::env::var_os("ERI_DEBUG").is_some()
+        {
+            let _ = writeln!(
+                stdout,
+                "[eri] image content present but no vision-capable engine configured; \
+                 falling back to the cheap (text-only) engine."
+            );
+        }
         let outcome = ladder
             .run_turn(
                 step,
+                vision_required,
                 |idx: usize| {
                     let last_err = &last_err;
                     let ran_idx = &ran_idx;

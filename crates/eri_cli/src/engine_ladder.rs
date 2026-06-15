@@ -45,11 +45,61 @@
 //! and error type), so the *policy* lives here exactly once while the
 //! transport, tool dispatch, usage accounting, and narration stay in each loop.
 
+use serde_json::Value;
+
 /// Consecutive turns the cheapest (index-0) engine must fail before the ladder
 /// trips it and escalates stickily for the rest of the goal. Two gives one
 /// transient blip a free retry on the next turn before we stop paying the cheap
 /// engine's latency on every turn.
 pub(crate) const TRIP_THRESHOLD: usize = 2;
+
+/// True if any message in `messages` carries an IMAGE content block.
+///
+/// ## Why (vision → Claude routing)
+///
+/// eri's hosted eri-brain is a **text** dense model, NOT a VLM — it would choke
+/// on / silently ignore an image. The architecture's core principle is "vision
+/// reasons on Claude" (`docs/architecture/vision-perception.md`): any turn whose
+/// input contains image content (a screenshot, camera frame, pasted image) must
+/// be handled by a vision-capable engine (Claude), never eri-brain. This pure
+/// predicate is how the ladder detects such a turn.
+///
+/// Messages are Anthropic-shaped: each message's `content` is either a string
+/// (text only — no image) or an array of content blocks, where an image is a
+/// block with `"type":"image"` (`{"type":"image","source":{...}}`). For safety
+/// against OpenAI-shaped inputs that may transit the same path, `"image_url"` is
+/// also treated as an image block. A turn is "vision-required" if ANY block in
+/// ANY message is an image block.
+pub(crate) fn messages_have_image(messages: &[Value]) -> bool {
+    messages.iter().any(message_has_image)
+}
+
+/// True if a single message's `content` array contains an image block. A
+/// string `content` (text-only) is never an image; only an array of blocks can
+/// hold one.
+fn message_has_image(message: &Value) -> bool {
+    message
+        .get("content")
+        .and_then(Value::as_array)
+        .is_some_and(|blocks| blocks.iter().any(block_is_image))
+}
+
+/// True if a content block is an image. Accepts the Anthropic shape
+/// (`"type":"image"`) and, defensively, the OpenAI shape (`"type":"image_url"`).
+fn block_is_image(block: &Value) -> bool {
+    matches!(
+        block.get("type").and_then(Value::as_str),
+        Some("image") | Some("image_url")
+    )
+}
+
+/// True if the engine named `name` can reason over images (a VLM). Claude is
+/// vision-capable; eri-brain (text-only hosted model) and on-device `local`
+/// models are NOT. Matched case-insensitively on a `claude` prefix so the
+/// concrete model label (e.g. `claude-sonnet-4-6`) still counts.
+pub(crate) fn is_vision_capable(name: &str) -> bool {
+    name.to_ascii_lowercase().starts_with("claude")
+}
 
 /// What one engine attempt produced, from the loop's point of view. Generic
 /// over the loop's own turn type `T` (a `Turn` for build, a `TurnOutput` for
@@ -123,13 +173,49 @@ impl EngineLadder {
         }
     }
 
-    /// The index this turn starts from: the cheapest engine not tripped away.
-    /// While untripped that's 0; once tripped it's 1 (sticky escalation past the
-    /// cheap engine). Capped to the last index so a single-engine ladder always
-    /// starts at 0.
-    fn start_index(&self) -> usize {
-        let start = if self.tripped { 1 } else { 0 };
+    /// The index this turn starts from, given whether the turn requires vision.
+    ///
+    /// Base start: the cheapest engine not tripped away — 0 while untripped, 1
+    /// once tripped (sticky escalation past the cheap engine).
+    ///
+    /// Vision override: when `vision_required` is true, the cheap engine
+    /// (eri-brain) is text-only and cannot see the image, so we jump straight to
+    /// the FIRST vision-capable engine in the list (Claude) and never try the
+    /// cheap engine for this turn. The index is *derived* from the engine list,
+    /// not hard-coded, so a Claude-only or differently-ordered list still works.
+    /// If no engine is vision-capable, we fall back to the base start (don't
+    /// deadlock) — the caller's narration notes this under `ERI_DEBUG`.
+    ///
+    /// Always capped to the last index so a single-engine ladder starts at 0.
+    fn start_index(&self, vision_required: bool) -> usize {
+        let base = if self.tripped { 1 } else { 0 };
+        let start = if vision_required {
+            match self.first_vision_capable() {
+                // Honour the trip state too: never restart below the tripped
+                // floor, even toward a vision engine that sits before it.
+                Some(vision_idx) => vision_idx.max(base),
+                // No vision engine at all — fall back to base (graceful, no
+                // deadlock). Vision will be sent to a text engine, but that's
+                // strictly better than refusing to run the turn.
+                None => base,
+            }
+        } else {
+            base
+        };
         start.min(self.names.len().saturating_sub(1))
+    }
+
+    /// Index of the first vision-capable engine in the list, if any. Used to
+    /// pick the per-turn start for image turns without hard-coding index 1.
+    fn first_vision_capable(&self) -> Option<usize> {
+        self.names.iter().position(|n| is_vision_capable(n))
+    }
+
+    /// Whether this ladder has any vision-capable engine at all. Exposed so the
+    /// loops can note (under `ERI_DEBUG`) when an image turn cannot be routed to
+    /// a VLM and falls back to the cheap engine.
+    pub(crate) fn has_vision_capable_engine(&self) -> bool {
+        self.first_vision_capable().is_some()
     }
 
     /// True once index-0 has been tripped for the rest of the goal. Exposed for
@@ -149,9 +235,15 @@ impl EngineLadder {
     /// `last_error(index)` renders the escalation reason / propagated error for
     /// the engine at `index` (the loops format these differently, so it's a
     /// closure) — called only on an escalation/exhaustion path.
+    ///
+    /// `vision_required` forces the turn to START at the first vision-capable
+    /// engine (Claude), skipping the text-only cheap engine — see
+    /// [`messages_have_image`] for WHY. Pass `false` for text-only turns to keep
+    /// the unchanged cheap-first behaviour.
     pub(crate) async fn run_turn<T, A, E, F, Fut, R>(
         &mut self,
         turn_index: usize,
+        vision_required: bool,
         mut attempt: F,
         mut reason_for: R,
     ) -> LadderOutcome<T, A, E>
@@ -161,7 +253,7 @@ impl EngineLadder {
         R: FnMut(usize) -> E,
         E: ToString,
     {
-        let start = self.start_index();
+        let start = self.start_index(vision_required);
         let last = self.names.len().saturating_sub(1);
         let mut events: Vec<LadderEvent> = Vec::new();
 
@@ -263,7 +355,7 @@ mod tests {
         let plan = [Ok("cheap-ok"), Ok("mid"), Ok("claude")];
         for turn in 0..5 {
             let outcome = ladder
-                .run_turn(turn, attempt_from(&plan), reason_from(&plan))
+                .run_turn(turn, false, attempt_from(&plan), reason_from(&plan))
                 .await;
             match outcome {
                 LadderOutcome::Turn(t) => {
@@ -287,7 +379,7 @@ mod tests {
         // Turn 0: cheap fails, escalate to mid (succeeds). One failure < threshold.
         let plan0 = [Err("blip"), Ok("mid"), Ok("claude")];
         let out0 = ladder
-            .run_turn(0, attempt_from(&plan0), reason_from(&plan0))
+            .run_turn(0, false, attempt_from(&plan0), reason_from(&plan0))
             .await;
         match out0 {
             LadderOutcome::Turn(t) => {
@@ -301,7 +393,7 @@ mod tests {
         // Turn 1: cheap recovers — and because it wasn't tripped, we tried it.
         let plan1 = [Ok("cheap-back"), Ok("mid"), Ok("claude")];
         let out1 = ladder
-            .run_turn(1, attempt_from(&plan1), reason_from(&plan1))
+            .run_turn(1, false, attempt_from(&plan1), reason_from(&plan1))
             .await;
         match out1 {
             LadderOutcome::Turn(t) => assert_eq!(t.value, "cheap-back"),
@@ -316,12 +408,12 @@ mod tests {
         let plan = [Err("down"), Ok("mid"), Ok("claude")];
         // Turn 0: cheap fails (1st). Not yet tripped.
         let _ = ladder
-            .run_turn(0, attempt_from(&plan), reason_from(&plan))
+            .run_turn(0, false, attempt_from(&plan), reason_from(&plan))
             .await;
         assert!(!ladder.is_tripped());
         // Turn 1: cheap fails (2nd consecutive) → trips on THIS escalation event.
         let out1 = ladder
-            .run_turn(1, attempt_from(&plan), reason_from(&plan))
+            .run_turn(1, false, attempt_from(&plan), reason_from(&plan))
             .await;
         match out1 {
             LadderOutcome::Turn(t) => {
@@ -336,7 +428,7 @@ mod tests {
         // a now-recovered cheap engine is ignored (sticky resilience guarantee).
         let plan2 = [Ok("cheap-recovered"), Ok("mid-2"), Ok("claude")];
         let out2 = ladder
-            .run_turn(2, attempt_from(&plan2), reason_from(&plan2))
+            .run_turn(2, false, attempt_from(&plan2), reason_from(&plan2))
             .await;
         match out2 {
             LadderOutcome::Turn(t) => {
@@ -359,18 +451,18 @@ mod tests {
         // Turn 0: cheap fails (1st).
         let fail = [Err("down"), Ok("mid"), Ok("claude")];
         let _ = ladder
-            .run_turn(0, attempt_from(&fail), reason_from(&fail))
+            .run_turn(0, false, attempt_from(&fail), reason_from(&fail))
             .await;
         assert!(!ladder.is_tripped());
         // Turn 1: cheap SUCCEEDS → resets the streak to 0.
         let ok = [Ok("cheap-ok"), Ok("mid"), Ok("claude")];
         let _ = ladder
-            .run_turn(1, attempt_from(&ok), reason_from(&ok))
+            .run_turn(1, false, attempt_from(&ok), reason_from(&ok))
             .await;
         assert!(!ladder.is_tripped());
         // Turn 2: cheap fails again (counts as 1st of a fresh streak, not 2nd).
         let out2 = ladder
-            .run_turn(2, attempt_from(&fail), reason_from(&fail))
+            .run_turn(2, false, attempt_from(&fail), reason_from(&fail))
             .await;
         match out2 {
             LadderOutcome::Turn(t) => {
@@ -391,7 +483,7 @@ mod tests {
         // Both engines escalate.
         let plan = [Err("cheap-down"), Err("claude-down")];
         let outcome = ladder
-            .run_turn(0, attempt_from(&plan), reason_from(&plan))
+            .run_turn(0, false, attempt_from(&plan), reason_from(&plan))
             .await;
         match outcome {
             LadderOutcome::Exhausted(e) => assert_eq!(e, "claude-down"),
@@ -405,7 +497,7 @@ mod tests {
         let mut ladder = EngineLadder::new(names());
         let plan = [Err("cheap blew up"), Ok("mid"), Ok("claude")];
         let outcome = ladder
-            .run_turn(3, attempt_from(&plan), reason_from(&plan))
+            .run_turn(3, false, attempt_from(&plan), reason_from(&plan))
             .await;
         match outcome {
             LadderOutcome::Turn(t) => {
@@ -427,7 +519,7 @@ mod tests {
         let mut ladder = EngineLadder::new(names());
         let plan = [Err("cheap-down"), Err("mid-down"), Ok("claude")];
         let outcome = ladder
-            .run_turn(0, attempt_from(&plan), reason_from(&plan))
+            .run_turn(0, false, attempt_from(&plan), reason_from(&plan))
             .await;
         match outcome {
             LadderOutcome::Turn(t) => {
@@ -451,7 +543,7 @@ mod tests {
         // Success path: runs the sole engine, no events.
         let ok = [Ok("claude-only")];
         match ladder
-            .run_turn(0, attempt_from(&ok), reason_from(&ok))
+            .run_turn(0, false, attempt_from(&ok), reason_from(&ok))
             .await
         {
             LadderOutcome::Turn(t) => {
@@ -464,7 +556,7 @@ mod tests {
         // Failure path: exhausts immediately with the sole engine's error.
         let bad = [Err("claude-down")];
         match ladder
-            .run_turn(1, attempt_from(&bad), reason_from(&bad))
+            .run_turn(1, false, attempt_from(&bad), reason_from(&bad))
             .await
         {
             LadderOutcome::Exhausted(e) => assert_eq!(e, "claude-down"),
@@ -473,7 +565,7 @@ mod tests {
         // Even after a failure, a single-engine ladder never trips (no index to
         // trip away to) — index 0 stays the start.
         assert!(!ladder.is_tripped());
-        assert_eq!(ladder.start_index(), 0);
+        assert_eq!(ladder.start_index(false), 0);
     }
 
     // Abort short-circuits the run without escalating (build's graceful Halt).
@@ -489,11 +581,204 @@ mod tests {
             std::future::ready(out)
         };
         let reason = |_: usize| "unused".to_string();
-        match ladder.run_turn(0, attempt, reason).await {
+        match ladder.run_turn(0, false, attempt, reason).await {
             LadderOutcome::Aborted(a) => assert_eq!(a, "halt: quota"),
             _ => panic!("expected the abort to short-circuit"),
         }
         // An abort is not a cheap failure — it must not advance the trip counter.
         assert!(!ladder.is_tripped());
+    }
+
+    // ---- vision → Claude routing -------------------------------------------
+
+    use serde_json::json;
+
+    // Predicate: an image block inside a user message's content array → true.
+    #[test]
+    fn messages_have_image_detects_anthropic_image_block() {
+        let messages = vec![json!({
+            "role": "user",
+            "content": [
+                { "type": "text", "text": "what is on my screen?" },
+                { "type": "image", "source": { "type": "base64", "media_type": "image/png", "data": "..." } },
+            ],
+        })];
+        assert!(messages_have_image(&messages));
+    }
+
+    // Predicate: text-only messages (string content and a text block) → false.
+    #[test]
+    fn messages_have_image_is_false_for_text_only() {
+        let string_content = json!({ "role": "user", "content": "hello there" });
+        let block_content = json!({
+            "role": "assistant",
+            "content": [ { "type": "text", "text": "hi" } ],
+        });
+        assert!(!messages_have_image(&[string_content, block_content]));
+    }
+
+    // Predicate: OpenAI-shaped "image_url" block is also treated as an image
+    // (defensive — anything image-bearing must bypass the text-only engine).
+    #[test]
+    fn messages_have_image_accepts_openai_image_url_block() {
+        let messages = vec![json!({
+            "role": "user",
+            "content": [ { "type": "image_url", "image_url": { "url": "data:..." } } ],
+        })];
+        assert!(messages_have_image(&messages));
+    }
+
+    // Predicate edge cases: empty list, missing/odd content shapes → false (no
+    // panic, no false positive).
+    #[test]
+    fn messages_have_image_handles_edge_shapes() {
+        assert!(!messages_have_image(&[]));
+        // No content key.
+        assert!(!messages_have_image(&[json!({ "role": "user" })]));
+        // content is an object, not an array.
+        assert!(!messages_have_image(&[
+            json!({ "role": "user", "content": { "type": "image" } })
+        ]));
+        // A block whose type is not a string.
+        assert!(!messages_have_image(&[json!({
+            "role": "user",
+            "content": [ { "type": 7 } ],
+        })]));
+        // An image block somewhere in the middle of a longer conversation.
+        let convo = vec![
+            json!({ "role": "user", "content": "first" }),
+            json!({ "role": "assistant", "content": [ { "type": "text", "text": "ok" } ] }),
+            json!({ "role": "user", "content": [ { "type": "image", "source": {} } ] }),
+        ];
+        assert!(messages_have_image(&convo));
+    }
+
+    // Capability helper: Claude (incl. concrete model labels) is vision-capable;
+    // eri-brain / local are not.
+    #[test]
+    fn is_vision_capable_only_for_claude() {
+        assert!(is_vision_capable("claude"));
+        assert!(is_vision_capable("claude-sonnet-4-6"));
+        assert!(is_vision_capable("Claude"));
+        assert!(!is_vision_capable("eri-brain"));
+        assert!(!is_vision_capable("local"));
+        assert!(!is_vision_capable("mid"));
+    }
+
+    // Vision turn starts at the first vision-capable engine even though eri-brain
+    // is index 0 — the cheap engine is never tried, and reaching the vision
+    // engine without per-turn escalation emits no escalation events.
+    #[tokio::test]
+    async fn vision_turn_starts_at_claude_even_with_cheap_engine_first() {
+        let mut ladder =
+            EngineLadder::new(vec!["eri-brain".into(), "local".into(), "claude".into()]);
+        // If the ladder wrongly started at index 0, it would PRODUCE "brain";
+        // routing to Claude (index 2) must yield "claude" with no events.
+        let plan = [Ok("brain"), Ok("local"), Ok("claude")];
+        match ladder
+            .run_turn(0, true, attempt_from(&plan), reason_from(&plan))
+            .await
+        {
+            LadderOutcome::Turn(t) => {
+                assert_eq!(t.value, "claude", "vision turn must run the vision engine");
+                assert!(
+                    t.events.is_empty(),
+                    "starting on the vision engine is not an escalation"
+                );
+            }
+            _ => panic!("expected the vision engine to produce the turn"),
+        }
+        // Skipping the cheap engine is not a cheap failure — it must not trip it.
+        assert!(!ladder.is_tripped());
+    }
+
+    // Index is DERIVED from the list, not hard-coded to 1: with the vision engine
+    // at index 1, a vision turn starts there; with it at the end, it starts there.
+    #[test]
+    fn vision_start_index_is_derived_from_the_engine_list() {
+        let mid = EngineLadder::new(vec!["eri-brain".into(), "claude".into(), "local".into()]);
+        assert_eq!(mid.start_index(true), 1);
+        let end = EngineLadder::new(vec!["eri-brain".into(), "local".into(), "claude".into()]);
+        assert_eq!(end.start_index(true), 2);
+        // Non-vision turn is unchanged: cheapest engine first.
+        assert_eq!(end.start_index(false), 0);
+    }
+
+    // A non-vision (text) turn is unchanged: cheap-first, succeeds at index 0.
+    #[tokio::test]
+    async fn text_turn_is_unchanged_cheap_first() {
+        let mut ladder =
+            EngineLadder::new(vec!["eri-brain".into(), "local".into(), "claude".into()]);
+        let plan = [Ok("brain"), Ok("local"), Ok("claude")];
+        match ladder
+            .run_turn(0, false, attempt_from(&plan), reason_from(&plan))
+            .await
+        {
+            LadderOutcome::Turn(t) => {
+                assert_eq!(t.value, "brain", "text turn runs the cheap engine");
+                assert!(t.events.is_empty());
+            }
+            _ => panic!("expected the cheap engine to produce the turn"),
+        }
+    }
+
+    // A Claude-only list is unaffected by vision: index 0 is already the vision
+    // engine, so a vision turn behaves identically to a text turn.
+    #[tokio::test]
+    async fn claude_only_list_is_unaffected_by_vision() {
+        let mut ladder = EngineLadder::new(vec!["claude".into()]);
+        assert!(ladder.has_vision_capable_engine());
+        assert_eq!(ladder.start_index(true), 0);
+        let plan = [Ok("claude-only")];
+        match ladder
+            .run_turn(0, true, attempt_from(&plan), reason_from(&plan))
+            .await
+        {
+            LadderOutcome::Turn(t) => {
+                assert_eq!(t.value, "claude-only");
+                assert!(t.events.is_empty());
+            }
+            _ => panic!("expected the sole engine to produce the turn"),
+        }
+    }
+
+    // No vision-capable engine at all: a vision turn falls back to the base
+    // (cheap-first) start rather than deadlocking, and never trips.
+    #[tokio::test]
+    async fn no_vision_engine_falls_back_gracefully() {
+        let mut ladder = EngineLadder::new(vec!["eri-brain".into(), "local".into()]);
+        assert!(!ladder.has_vision_capable_engine());
+        // Falls back to the base start (index 0) for a vision turn.
+        assert_eq!(ladder.start_index(true), 0);
+        let plan = [Ok("brain"), Ok("local")];
+        match ladder
+            .run_turn(0, true, attempt_from(&plan), reason_from(&plan))
+            .await
+        {
+            LadderOutcome::Turn(t) => {
+                assert_eq!(
+                    t.value, "brain",
+                    "no vision engine → fall back to cheap-first"
+                );
+            }
+            _ => panic!("expected a produced turn (graceful fallback, no deadlock)"),
+        }
+        assert!(!ladder.is_tripped());
+    }
+
+    // Vision routing respects the trip floor: once the cheap engine is tripped,
+    // a vision turn never restarts below the tripped index.
+    #[test]
+    fn vision_start_index_never_below_trip_floor() {
+        // claude at index 0, tripped → base floor is 1; vision must not pull back
+        // to 0 below the floor.
+        let mut ladder = EngineLadder::new(vec!["claude".into(), "local".into()]);
+        // Force the trip state directly to test start_index in isolation.
+        ladder.tripped = true;
+        assert_eq!(
+            ladder.start_index(true),
+            1,
+            "must not restart below trip floor"
+        );
     }
 }

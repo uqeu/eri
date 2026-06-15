@@ -519,9 +519,24 @@ async fn drive_build_loop(
         // streamed consume_turn all live inside the Claude adapter, byte-for-byte
         // with the old welded loop.
         let last_err: std::cell::RefCell<Option<anyhow::Error>> = std::cell::RefCell::new(None);
+        // Vision → Claude routing: eri-brain is text-only, so a turn whose input
+        // carries an image must start on a vision-capable engine (Claude),
+        // skipping the cheap engine. Text-only turns are unchanged (cheap-first).
+        let vision_required = crate::engine_ladder::messages_have_image(messages);
+        if vision_required
+            && !ladder.has_vision_capable_engine()
+            && std::env::var_os("ERI_DEBUG").is_some()
+        {
+            let _ = writeln!(
+                stdout,
+                "[eri] image content present but no vision-capable engine configured; \
+                 falling back to the cheap (text-only) engine."
+            );
+        }
         let outcome = ladder
             .run_turn(
                 turn,
+                vision_required,
                 |idx: usize| {
                     let last_err = &last_err;
                     let system = &system;
