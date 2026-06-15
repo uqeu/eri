@@ -53,6 +53,7 @@ mod plan_tui;
 mod plugins;
 mod proactive;
 mod project;
+mod composio;
 mod remote;
 mod remote_recall;
 mod repl;
@@ -473,6 +474,9 @@ pub enum Command {
     /// Link your phone so you can text eri (iMessage via Sendblue).
     #[command(subcommand)]
     Phone(PhoneCommand),
+    /// Connect your apps (Gmail, GitHub, …) through Composio so eri can use them.
+    #[command(subcommand)]
+    Composio(ComposioCommand),
     /// Sync memory to the cloud: Tier-B blob (cross-device) + Tier-A profile
     /// (so phone eri knows your day).
     Sync,
@@ -571,6 +575,19 @@ pub enum AdminCommand {
 pub enum PhoneCommand {
     /// Mint a pairing code; text it to the eri number to link this account.
     Link,
+}
+
+#[derive(Subcommand, Debug, PartialEq, Eq)]
+pub enum ComposioCommand {
+    /// Wire the Composio MCP server into ~/.eri/mcp.json (run once).
+    Setup,
+    /// Start connecting a toolkit (opens its authorize page), e.g. `connect gmail`.
+    Connect {
+        /// Composio toolkit slug (gmail, github, googlecalendar, …).
+        toolkit: String,
+    },
+    /// List which apps are connected or pending.
+    Apps,
 }
 
 #[derive(Subcommand, Debug, PartialEq, Eq)]
@@ -913,6 +930,11 @@ async fn dispatch(cli: Cli) -> anyhow::Result<()> {
         Command::Init => run_init(),
         Command::Admin(AdminCommand::Usage { days, top }) => admin::usage(days, top).await,
         Command::Phone(PhoneCommand::Link) => phone::link().await,
+        Command::Composio(ComposioCommand::Setup) => composio::setup(),
+        Command::Composio(ComposioCommand::Connect { toolkit }) => {
+            composio::connect(&toolkit).await
+        }
+        Command::Composio(ComposioCommand::Apps) => composio::apps().await,
         Command::Sync => sync::run().await,
         Command::Remote { mode, interval } => {
             let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
