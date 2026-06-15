@@ -1047,13 +1047,19 @@ async fn run_headless(
 
     match format {
         OutputFormat::Text => {
-            println!(
-                "\n[eri] {} file(s) in {} turn(s) -- {} in / {} out tokens (metered)",
-                outcome.files_written.len(),
-                outcome.turns,
-                outcome.tokens_in,
-                outcome.tokens_out
-            );
+            // The raw token line is noisy and *overstates* real usage — it sums
+            // cache-read/creation tokens that bill at ~0.1x, so it never matches
+            // the credits on `eri usage`. Keep it for diagnostics only; the
+            // dashboard / `eri usage` is the source of truth for what's metered.
+            if std::env::var("ERI_DEBUG").is_ok() {
+                eprintln!(
+                    "[eri] {} file(s) in {} turn(s) -- {} in / {} out raw tokens (incl. cache; see `eri usage` for billed credits)",
+                    outcome.files_written.len(),
+                    outcome.turns,
+                    outcome.tokens_in,
+                    outcome.tokens_out
+                );
+            }
             for f in &outcome.files_written {
                 println!("  {}", f.display());
             }
