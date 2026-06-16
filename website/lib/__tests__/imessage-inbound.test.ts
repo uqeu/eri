@@ -25,6 +25,7 @@ function deps(over: Partial<InboundDeps> = {}): InboundDeps {
     loadProfile: async () => ({ profile: { facts: ["likes tabs"] }, dynamicContext: "" }),
     runTurn: async () => ({ text: "**hi**", tokensIn: 10, tokensOut: 5, model: "claude-sonnet-4-6" }),
     enqueueComputerGoal: async () => true,
+    rememberUserFact: async () => true,
     confirmPending: async () => null,
     cancelPending: async () => false,
     now: () => 1000,
@@ -151,6 +152,30 @@ async function run() {
       }),
     );
     assert.equal(count, 1, "the single-dispatch guard spans both tools");
+  }
+
+  // remember_fact saves to cloud memory in-cloud (no dispatch) AND can co-occur
+  // with a computer dispatch in the same turn (it bypasses the single-dispatch guard).
+  {
+    let saved: { fact: string; kind: string } | null = null;
+    let dispatches = 0;
+    const out = await handleInbound(
+      msg("I live in Toronto, now open Spotify"),
+      "+1",
+      deps({
+        rememberUserFact: async (_u, fact, kind) => { saved = { fact, kind }; return true; },
+        enqueueComputerGoal: async () => { dispatches++; return true; },
+        runTurn: async (input) => {
+          const r = await input.onToolCall!("remember_fact", { fact: "Lives in Toronto", kind: "fact" });
+          assert.match(r, /Saved/);
+          await input.onToolCall!("control_computer", { goal: "open Spotify" });
+          return { text: "got it 🌿", tokensIn: 8, tokensOut: 4, model: "claude-haiku-4-5-20251001" };
+        },
+      }),
+    );
+    assert.equal(out.branch, "answered");
+    assert.deepEqual(saved, { fact: "Lives in Toronto", kind: "fact" });
+    assert.equal(dispatches, 1, "remember_fact did not consume the dispatch slot");
   }
 
   // A natural "go ahead" with a pending confirmation approves it (no model turn).

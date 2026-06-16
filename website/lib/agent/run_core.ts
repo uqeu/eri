@@ -79,6 +79,34 @@ export const RECALL_MEMORY_TOOL: ToolDef = {
 };
 
 /**
+ * The tool eri uses to remember a durable fact the user just told it about
+ * themselves — saved server-side (cloud-primary) so it's known on every future
+ * text, laptop open or closed. Completes in-cloud this turn (unlike control/recall
+ * which dispatch to the computer), so eri can confirm naturally in the same reply.
+ */
+export const REMEMBER_FACT_TOOL: ToolDef = {
+  name: "remember_fact",
+  description:
+    "Save a durable fact or preference the user just revealed about themselves — their name, where they live, people in their life, what they're building/working on, likes/dislikes, ongoing goals, how they like things done. Use it whenever the user shares something worth knowing next time; it saves instantly to their profile and you just acknowledge naturally. Do NOT use for one-off/trivial chatter or general world facts.",
+  input_schema: {
+    type: "object",
+    properties: {
+      fact: {
+        type: "string",
+        description:
+          "A short, self-contained statement about the user, third person (e.g. 'Lives in Toronto', 'Is building eri', 'Prefers terse, lowercase replies').",
+      },
+      kind: {
+        type: "string",
+        enum: ["fact", "preference"],
+        description: "'preference' for how they like things; 'fact' otherwise.",
+      },
+    },
+    required: ["fact"],
+  },
+};
+
+/**
  * The structured payload of a `recall` command — the queue `goal` for a recall
  * turn is this JSON (not prose), so the computer's recall adapter parses it
  * deterministically rather than re-interpreting a sentence. `as_of` is carried
@@ -112,6 +140,15 @@ export interface AgentTurnResult {
 
 /** The model phone/proactive turns default to when the caller doesn't override. */
 export const DEFAULT_MODEL = "claude-sonnet-4-6";
+/**
+ * The model phone *chat replies* use: Haiku is dramatically faster (lower
+ * latency + TTFT) at ~90% of Sonnet's quality, which is the right trade for a
+ * texting companion where speed is the felt experience. Heavier work still
+ * escalates to the computer (control_computer); this is just the conversational
+ * reply tier. Distinct from DEFAULT_MODEL so proactive/other callers are
+ * untouched.
+ */
+export const PHONE_REPLY_MODEL = "claude-haiku-4-5-20251001";
 /** Phone replies are short by nature; bound the turn so it fits the budget. */
 const DEFAULT_MAX_TOKENS = 1024;
 /** Bounded so a phone turn can't loop expensively (review H1). */
@@ -119,27 +156,39 @@ const DEFAULT_MAX_HOPS = 3;
 
 const BASE_PERSONA = [
   "You are eri, the user's personal AI, replying over text message (iMessage).",
-  "Write like a sharp, warm friend: concise, plain text (no markdown — it shows as literal symbols), a few sentences at most unless asked for more.",
-  "You already know the user from the context below — use it naturally; never invent facts you weren't given.",
-  "When a request needs their computer (open/run apps, edit files, send something, anything you can't do from here), use the control_computer tool to dispatch it to their machine — then tell them you're on it; their computer runs it and texts back the result. Don't pretend you did something you only dispatched.",
+  "Write like a sharp, warm friend texting back — concise, plain text (no markdown, it shows as literal symbols), usually a sentence or two. Sound like a real person: contractions, lowercase is fine, match their energy. NEVER use AI-assistant tells ('Certainly!', 'I'd be happy to', 'As an AI', 'Is there anything else'), never over-explain or hedge, never narrate your own mechanics. Just talk.",
+  "Mirror how the user writes (their casing, brevity, slang, emoji use) — shown in the context below. Be them's-best-friend warm, not corporate.",
+  "You already know the user from the context below — use it naturally; never invent facts you weren't given. When the user tells you something durable about themselves, save it with remember_fact so you know it next time.",
+  // The single most important behavior rule: answer directly. The model was
+  // dispatching trivia ("what's the date") to the user's computer and failing —
+  // so be explicit that tools are the exception, not the default.
+  "ANSWER DIRECTLY whenever you can — the date/time (given below), general knowledge, math, advice, anything you already know or that's in your context. Most texts need NO tool; just reply. Tools are only for the two cases below.",
+  "Use control_computer ONLY when the request needs an action ON their machine they can't get from you here — open/run an app, edit/read their files, send a message from their computer. It dispatches to their computer, which runs it and texts the result back; tell them you're on it, and never claim you did something you only dispatched.",
+  "Use recall_memory ONLY for the user's own private history that isn't in the context above — 'what did I say about X', 'when did I last…'. Not for general facts, not for the date.",
 ].join(" ");
 
 /**
  * Build the phone-eri system prompt, injecting the Tier-A profile as a fenced
  * "what I know about you" block (same shape as the IDE's context blocks). Pure +
- * unit-tested. An empty profile just omits the block.
+ * unit-tested. An empty profile just omits the block. `nowText` (a preformatted
+ * current-date string) is injected so eri can answer date/time questions itself
+ * instead of dispatching them to the user's computer.
  */
 export function buildSystemPrompt(
   profile?: TierAProfile | null,
   dynamicContext?: string | null,
+  nowText?: string | null,
 ): string {
   const facts = profile?.facts?.filter((f) => f.trim()) ?? [];
   const prefs = profile?.preferences?.filter((p) => p.trim()) ?? [];
   const style = (profile?.communication_style ?? "").trim();
   const dynamic = (dynamicContext ?? "").trim();
+  const now = (nowText ?? "").trim();
+
+  const persona = now ? `${BASE_PERSONA}\n\nRight now it is ${now}.` : BASE_PERSONA;
 
   if (facts.length === 0 && prefs.length === 0 && style === "" && dynamic === "") {
-    return BASE_PERSONA;
+    return persona;
   }
 
   const lines: string[] = ["```", "What I know about you:"];
@@ -149,7 +198,32 @@ export function buildSystemPrompt(
   if (dynamic) lines.push(`- ${dynamic}`);
   lines.push("```");
 
-  return `${BASE_PERSONA}\n\n${lines.join("\n")}`;
+  return `${persona}\n\n${lines.join("\n")}`;
+}
+
+/**
+ * Format "now" for the system prompt in a friendly, human way. Defaults to the
+ * `ERI_DEFAULT_TZ` timezone (the sole user is US-Eastern today; per-user tz is a
+ * known follow-up), so "what's the date" answers correctly rather than drifting a
+ * day at night under UTC. Impure (reads the clock + env) — kept out of the pure
+ * `buildSystemPrompt` so that stays deterministic + unit-tested.
+ */
+export function currentDateText(): string {
+  const tz = process.env.ERI_DEFAULT_TZ || "America/New_York";
+  try {
+    return new Date().toLocaleString("en-US", {
+      weekday: "long",
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      timeZone: tz,
+      timeZoneName: "short",
+    });
+  } catch {
+    return new Date().toUTCString();
+  }
 }
 
 interface ContentBlock {
@@ -196,7 +270,7 @@ export function extractText(content: ContentBlock[] | undefined): string {
  */
 export async function runAgentTurn(input: AgentTurnInput): Promise<AgentTurnResult> {
   const model = input.model ?? DEFAULT_MODEL;
-  const system = buildSystemPrompt(input.profile, input.dynamicContext);
+  const system = buildSystemPrompt(input.profile, input.dynamicContext, currentDateText());
   const maxHops = input.maxHops ?? DEFAULT_MAX_HOPS;
   const messages: AnthropicMessage[] = [{ role: "user", content: input.prompt }];
 
