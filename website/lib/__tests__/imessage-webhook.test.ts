@@ -7,9 +7,12 @@ const SECRET = "s3cret-webhook-token-abcdef0123456789";
 // rejects a wrong value, rejects when no secret is configured.
 {
   assert.equal(verifySendblueSecret({ "sb-signing-secret": SECRET }, SECRET), true);
-  assert.equal(verifySendblueSecret({ "x-sb-signature": SECRET }, SECRET), true, "plausible sb-prefixed header");
-  assert.equal(verifySendblueSecret({ "x-weird-header": SECRET }, SECRET), false, "non-sb header must NOT satisfy auth");
-  assert.equal(verifySendblueSecret({ "sb-signing-secret": "nope" }, SECRET), false);
+  assert.equal(verifySendblueSecret({ "x-sb-signature": SECRET }, SECRET), true, "sb-prefixed header");
+  // The secret is high-entropy, so it is accepted in ANY header — an undocumented
+  // header name must NOT silently 401 a genuine Sendblue delivery.
+  assert.equal(verifySendblueSecret({ "x-weird-header": SECRET }, SECRET), true, "any header carrying the secret authenticates");
+  assert.equal(verifySendblueSecret({ authorization: `Bearer ${SECRET}` }, SECRET), true, "tolerates a Bearer <secret> wrapper");
+  assert.equal(verifySendblueSecret({ "x-anything": "nope" }, SECRET), false, "wrong value → reject");
   assert.equal(verifySendblueSecret({}, SECRET), false, "no header → reject");
   assert.equal(verifySendblueSecret({ "sb-signing-secret": SECRET }, ""), false, "no configured secret → reject");
 }

@@ -12,6 +12,7 @@
 
 import {
   CONTROL_COMPUTER_TOOL,
+  DEFAULT_MODEL,
   RECALL_MEMORY_TOOL,
   buildRecallPayload,
   type TierAProfile,
@@ -203,8 +204,11 @@ export async function handleInbound(
     return {
       replyChunks: formatReply(REPLY.errored),
       meter: {
+        // The turn failed before returning a model id; record the model it
+        // would have used (the runTurn default) rather than a magic string that
+        // can drift from what was actually attempted.
         userId: user.userId,
-        model: "claude-sonnet-4-6",
+        model: DEFAULT_MODEL,
         tokensIn: 0,
         tokensOut: 0,
         latencyMs: deps.now() - started,

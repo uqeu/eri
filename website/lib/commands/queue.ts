@@ -108,24 +108,27 @@ export async function enqueueCommand(input: {
   kind?: CommandKind;
   ttlMinutes?: number;
 }): Promise<{ id: string } | null> {
-  const pending = await sql()<{ n: number }[]>`
-    SELECT count(*)::int AS n FROM command_queue
-    WHERE user_id = ${input.userId}
-      AND status IN ('pending', 'claimed', 'awaiting_confirm')
-      AND expires_at > now()
-  `;
-  if ((pending[0]?.n ?? 0) >= MAX_PENDING_PER_USER) {
-    return null;
-  }
   const id = newCommandId();
   const kind: CommandKind = input.kind ?? "control";
   const ttl = input.ttlMinutes ?? DEFAULT_TTL_MINUTES;
   const expiresAt = new Date(Date.now() + ttl * 60_000).toISOString();
-  await sql()`
+  // Atomic cap: insert ONLY if the user is still under MAX_PENDING_PER_USER in
+  // the same statement. A separate count-then-insert lets two concurrent calls
+  // both pass the check and overflow the queue (review H3); the conditional
+  // INSERT ... SELECT ... WHERE (count) < cap closes that race. Zero rows
+  // inserted means the cap was hit — treat it as the rejection.
+  const inserted = await sql()<{ id: string }[]>`
     INSERT INTO command_queue (id, user_id, source, goal, kind, expires_at)
-    VALUES (${id}, ${input.userId}, ${input.source}, ${input.goal}, ${kind}, ${expiresAt})
+    SELECT ${id}, ${input.userId}, ${input.source}, ${input.goal}, ${kind}, ${expiresAt}
+    WHERE (
+      SELECT count(*) FROM command_queue
+      WHERE user_id = ${input.userId}
+        AND status IN ('pending', 'claimed', 'awaiting_confirm')
+        AND expires_at > now()
+    ) < ${MAX_PENDING_PER_USER}
+    RETURNING id
   `;
-  return { id };
+  return inserted.length > 0 ? { id } : null;
 }
 
 /**

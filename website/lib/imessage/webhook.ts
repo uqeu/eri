@@ -22,16 +22,16 @@ export function constantTimeEquals(a: string, b: string): boolean {
 /** Default header Sendblue is expected to use; overridable via env if confirmed. */
 export const DEFAULT_SIGNING_HEADER = "sb-signing-secret";
 
-/** Header-name prefixes Sendblue could plausibly use for the secret. */
-const SIGNING_HEADER_PREFIXES = ["sb-", "x-sb-", "x-sendblue-", "sendblue-"];
-
 /**
- * True iff a plausible request header carries the configured shared secret.
- * Checks the configured header first, then any header **whose name looks like a
- * Sendblue signing header** (constant-time) — scoped to an allowlist of prefixes
- * rather than every header, so an unrelated proxy header that happens to equal
- * the secret can't satisfy auth and the check isn't a blanket guess (review M1).
- * Confirm the exact header against a real delivery and set SENDBLUE_SIGNING_HEADER.
+ * True iff any request header carries the configured shared secret.
+ *
+ * Sendblue echoes the configured secret in a request header (raw value, per
+ * their docs) — but the exact header NAME is undocumented and varies, which made
+ * an earlier name-prefix allowlist silently 401 a real delivery whose header
+ * didn't match the guessed names. Since the secret is HIGH-ENTROPY (a 256-bit
+ * token; nothing unrelated could ever equal it), it is safe to accept it in the
+ * configured header OR ANY header whose value carries it — also tolerating a
+ * "Bearer <secret>" wrapper. Every compare is constant-time.
  */
 export function verifySendblueSecret(
   headers: Record<string, string>,
@@ -39,14 +39,16 @@ export function verifySendblueSecret(
   headerName: string = DEFAULT_SIGNING_HEADER,
 ): boolean {
   if (!expected) return false;
-  const direct = headers[headerName.toLowerCase()];
-  if (direct && constantTimeEquals(direct, expected)) return true;
-  for (const [name, value] of Object.entries(headers)) {
-    const lname = name.toLowerCase();
-    if (!SIGNING_HEADER_PREFIXES.some((p) => lname.startsWith(p))) continue;
-    if (value && constantTimeEquals(value, expected)) return true;
-  }
-  return false;
+  const carries = (value: string | undefined): boolean => {
+    if (!value) return false;
+    if (constantTimeEquals(value, expected)) return true;
+    // tolerate "Bearer <secret>" / "<scheme> <secret>" wrappers
+    const space = value.lastIndexOf(" ");
+    return space >= 0 && constantTimeEquals(value.slice(space + 1), expected);
+  };
+  // Configured header first (fast path), then any header (high-entropy ⇒ safe).
+  if (carries(headers[headerName.toLowerCase()])) return true;
+  return Object.values(headers).some(carries);
 }
 
 export interface InboundMessage {

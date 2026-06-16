@@ -72,5 +72,14 @@ import { buildRecallPayload, buildSystemPrompt, extractText, extractToolUses } f
   assert.ok(sys.includes("Right now: in a planning session"));
 }
 
+// Learned communication style is injected as a "mirror this" line.
+{
+  const sys = buildSystemPrompt(
+    { communication_style: "lowercase, terse, uses emoji" },
+    null,
+  );
+  assert.ok(sys.includes("How you write (mirror this): lowercase, terse, uses emoji"));
+}
+
 // eslint-disable-next-line no-console
 console.log("run-core.test.ts: all assertions passed");
