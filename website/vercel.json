@@ -1,6 +1,7 @@
 {
   "crons": [
     { "path": "/api/v1/usage/cron", "schedule": "5 0 * * *" },
-    { "path": "/api/v1/imessage/cron", "schedule": "*/10 * * * *" }
+    { "path": "/api/v1/imessage/cron", "schedule": "*/10 * * * *" },
+    { "path": "/api/v1/proactive/trigger", "schedule": "*/5 * * * *" }
   ]
 }

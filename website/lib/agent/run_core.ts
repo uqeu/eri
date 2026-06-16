@@ -16,6 +16,8 @@ import { getMasterKey } from "@/lib/inference/providers";
 export interface TierAProfile {
   facts?: string[];
   preferences?: string[];
+  /** Learned writing register — how this user writes, so eri mirrors them. */
+  communication_style?: string | null;
 }
 
 /** An Anthropic tool the phone turn may call (e.g. control_computer). */
@@ -108,7 +110,8 @@ export interface AgentTurnResult {
   model: string;
 }
 
-const DEFAULT_MODEL = "claude-sonnet-4-6";
+/** The model phone/proactive turns default to when the caller doesn't override. */
+export const DEFAULT_MODEL = "claude-sonnet-4-6";
 /** Phone replies are short by nature; bound the turn so it fits the budget. */
 const DEFAULT_MAX_TOKENS = 1024;
 /** Bounded so a phone turn can't loop expensively (review H1). */
@@ -132,15 +135,17 @@ export function buildSystemPrompt(
 ): string {
   const facts = profile?.facts?.filter((f) => f.trim()) ?? [];
   const prefs = profile?.preferences?.filter((p) => p.trim()) ?? [];
+  const style = (profile?.communication_style ?? "").trim();
   const dynamic = (dynamicContext ?? "").trim();
 
-  if (facts.length === 0 && prefs.length === 0 && dynamic === "") {
+  if (facts.length === 0 && prefs.length === 0 && style === "" && dynamic === "") {
     return BASE_PERSONA;
   }
 
   const lines: string[] = ["```", "What I know about you:"];
   for (const f of facts) lines.push(`- ${f}`);
   for (const p of prefs) lines.push(`- ${p}`);
+  if (style) lines.push(`- How you write (mirror this): ${style}`);
   if (dynamic) lines.push(`- ${dynamic}`);
   lines.push("```");
 
