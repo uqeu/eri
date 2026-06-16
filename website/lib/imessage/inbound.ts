@@ -13,7 +13,9 @@
 import {
   CONTROL_COMPUTER_TOOL,
   DEFAULT_MODEL,
+  PHONE_REPLY_MODEL,
   RECALL_MEMORY_TOOL,
+  REMEMBER_FACT_TOOL,
   buildRecallPayload,
   type TierAProfile,
   type ToolDef,
@@ -88,6 +90,7 @@ export interface InboundDeps {
     profile: TierAProfile | null;
     dynamicContext: string;
     maxTokens: number;
+    model?: string;
     tools?: ToolDef[];
     onToolCall?: (name: string, input: unknown) => Promise<string>;
   }): Promise<AgentTurnResultLike>;
@@ -95,6 +98,10 @@ export interface InboundDeps {
    *  remote turn: "control" (actuation) or "recall" (deep memory lookup, goal is
    *  a JSON spec). Returns false when the user is at the outstanding-command cap. */
   enqueueComputerGoal(userId: string, goal: string, kind?: CommandKind): Promise<boolean>;
+  /** Save a durable fact/preference about the user to cloud-primary memory
+   *  (learned_facts) so eri knows it on every future text. Returns false on a
+   *  storage failure. Completes in-cloud — not a computer dispatch. */
+  rememberUserFact(userId: string, fact: string, kind: string): Promise<boolean>;
   /** Approve the user's latest awaiting-confirm command; returns its goal or null. */
   confirmPending(userId: string): Promise<{ goal: string } | null>;
   /** Cancel the user's latest awaiting-confirm command; true if there was one. */
@@ -157,11 +164,26 @@ export async function handleInbound(
       profile,
       dynamicContext,
       maxTokens: 700,
-      // Two relays, one queue: control_computer dispatches an action; recall_memory
-      // dispatches a deep-memory lookup (Tier-B is E2E, only the computer can read
-      // it). Both run on the user's machine and text the result back.
-      tools: [CONTROL_COMPUTER_TOOL, RECALL_MEMORY_TOOL],
+      // Haiku for snappy chat replies (cloud pivot) — heavy work still escalates
+      // to the computer via control_computer.
+      model: PHONE_REPLY_MODEL,
+      // Three tools: control_computer dispatches an action to the machine;
+      // recall_memory dispatches a deep-memory lookup there; remember_fact saves
+      // a durable fact to cloud-primary memory in-cloud (no dispatch, known on
+      // every future text — laptop open or closed).
+      tools: [CONTROL_COMPUTER_TOOL, RECALL_MEMORY_TOOL, REMEMBER_FACT_TOOL],
       onToolCall: async (name, toolInput) => {
+        // remember_fact runs in-cloud and is independent of the single-dispatch
+        // guard (it doesn't touch the computer), so eri can both save a fact AND
+        // dispatch a task in one turn.
+        if (name === "remember_fact") {
+          const fact = (toolInput as { fact?: unknown })?.fact;
+          if (typeof fact !== "string" || !fact.trim()) return "No fact was provided.";
+          const kindRaw = (toolInput as { kind?: unknown })?.kind;
+          const kind = kindRaw === "preference" ? "preference" : "fact";
+          const ok = await deps.rememberUserFact(user.userId, fact.trim(), kind);
+          return ok ? "Saved — eri will remember that." : "Couldn't save that just now.";
+        }
         if (dispatched) return "Already dispatched one task for this message; wait for it to finish.";
         // One enqueue path so the cap + single-dispatch guard live in one place;
         // `kind` routes the turn on the computer (actuation vs deep recall).

@@ -8,6 +8,7 @@
  */
 
 const SEND_URL = "https://api.sendblue.co/api/send-message";
+const TYPING_URL = "https://api.sendblue.co/api/send-typing-indicator";
 
 export interface SendResult {
   ok: boolean;
@@ -32,6 +33,32 @@ export async function sendMessage(to: string, content: string): Promise<SendResu
     body: JSON.stringify({ from_number: from, number: to, content }),
   });
   return { ok: response.ok, status: response.status };
+}
+
+/**
+ * Show the "eri is typing…" bubble on the user's phone while we compose the
+ * reply, so the wait reads as intentional rather than broken. Best-effort: never
+ * throws and swallows any error — a missing typing bubble must never block or
+ * fail the actual reply. No-op (returns false) when Sendblue isn't configured.
+ */
+export async function sendTypingIndicator(to: string): Promise<boolean> {
+  const keyId = process.env.SENDBLUE_API_KEY_ID;
+  const secret = process.env.SENDBLUE_API_SECRET;
+  if (!keyId || !secret) return false;
+  try {
+    const response = await fetch(TYPING_URL, {
+      method: "POST",
+      headers: {
+        "sb-api-key-id": keyId,
+        "sb-api-secret-key": secret,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ number: to }),
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
 }
 
 /**

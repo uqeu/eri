@@ -22,7 +22,7 @@ import { runAgentTurn, type TierAProfile } from "@/lib/agent/run_core";
 import { cancelPending, confirmPending, enqueueCommand } from "@/lib/commands/queue";
 import { handleInbound, type InboundDeps } from "@/lib/imessage/inbound";
 import { consumePairing, normalizeE164, resolveUserByPhone } from "@/lib/imessage/identity";
-import { sendReply } from "@/lib/imessage/provider";
+import { sendReply, sendTypingIndicator } from "@/lib/imessage/provider";
 import { DEFAULT_SIGNING_HEADER, parseInbound, verifySendblueSecret } from "@/lib/imessage/webhook";
 import { rateLimitKey } from "@/lib/rate_limit";
 import { ensureWithinQuota, recordUsage } from "@/lib/usage/quota";
@@ -70,6 +70,10 @@ export async function POST(request: Request): Promise<Response> {
   if (claimed.length === 0) {
     return NextResponse.json({ ok: true, skipped: "duplicate" });
   }
+
+  // Show "eri is typing…" immediately so the wait feels intentional. Best-effort,
+  // fire-and-forget — must never delay or fail the actual reply.
+  void sendTypingIndicator(e164).catch(() => {});
 
   try {
     const outcome = await handleInbound(msg, e164, makeDeps());
@@ -128,10 +132,30 @@ function makeDeps(): InboundDeps {
       const enqueued = await enqueueCommand({ userId, source: "imessage", goal, kind });
       return enqueued !== null;
     },
+    rememberUserFact,
     confirmPending,
     cancelPending,
     now: () => Date.now(),
   };
+}
+
+/**
+ * Save a durable fact to cloud-primary memory (learned_facts). Append-only +
+ * upsert on (user_id, fact): re-stating a fact refreshes its recency, never
+ * duplicates. Never throws — a failed save becomes a soft "couldn't save".
+ */
+async function rememberUserFact(userId: string, fact: string, kind: string): Promise<boolean> {
+  try {
+    await sql()`
+      INSERT INTO learned_facts (user_id, fact, kind, source)
+      VALUES (${userId}, ${fact}, ${kind}, 'imessage')
+      ON CONFLICT (user_id, fact) DO UPDATE SET created_at = now(), kind = EXCLUDED.kind
+    `;
+    return true;
+  } catch (e) {
+    logEvent("imessage.remember_failed", { userId, error: errMsg(e) });
+    return false;
+  }
 }
 
 async function completeLease(handle: string): Promise<void> {
@@ -142,26 +166,86 @@ async function releaseLease(handle: string): Promise<void> {
   await sql()`DELETE FROM imessage_inbound WHERE message_handle = ${handle} AND completed_at IS NULL`;
 }
 
-/** Load + decrypt the caller's Tier-A profile; missing/undecryptable → no context. */
+/**
+ * Build the context eri sees for this user, from three sources merged into one
+ * profile (cloud pivot — eri must KNOW you on every text):
+ *   1. Account identity (email, name, plan) from `users` — always known, so eri
+ *      can answer "what's my email" without dispatching anything.
+ *   2. Conversational memory (`learned_facts`) — what eri has been told over text.
+ *   3. The synced Tier-A profile (`personalization_profiles`) — distilled on the
+ *      laptop and pushed up.
+ * Identity + learned facts work even when no profile has ever synced.
+ */
 async function loadProfile(
   userId: string,
 ): Promise<{ profile: TierAProfile | null; dynamicContext: string }> {
+  // 1. Account identity — always available, cheap, the floor of "knows me".
+  const identityFacts: string[] = [];
+  try {
+    const idRows = await sql()<{ email: string; display_name: string | null; tier: string }[]>`
+      SELECT email, display_name, tier FROM users WHERE id = ${userId}
+    `;
+    const id = idRows[0];
+    if (id) {
+      if (id.display_name?.trim()) identityFacts.push(`Your name is ${id.display_name.trim()}.`);
+      identityFacts.push(`Your eri account email is ${id.email}.`);
+      identityFacts.push(`You're on the ${id.tier} plan.`);
+    }
+  } catch (e) {
+    logEvent("imessage.identity_load_failed", { userId, error: errMsg(e) });
+  }
+
+  // 2. Conversational memory — newest first, capped so the prompt stays tight.
+  let learnedFacts: string[] = [];
+  try {
+    const factRows = await sql()<{ fact: string }[]>`
+      SELECT fact FROM learned_facts WHERE user_id = ${userId}
+      ORDER BY created_at DESC LIMIT 40
+    `;
+    learnedFacts = factRows.map((r) => r.fact).filter((f) => f.trim());
+  } catch (e) {
+    logEvent("imessage.learned_facts_load_failed", { userId, error: errMsg(e) });
+  }
+
+  // 3. Synced Tier-A profile (optional).
+  let syncedProfile: TierAProfile | null = null;
+  let dynamicContext = "";
   const rows = await sql()<{ profile_enc: Buffer; dynamic_context_enc: Buffer }[]>`
     SELECT profile_enc, dynamic_context_enc
     FROM personalization_profiles
     WHERE user_id = ${userId}
   `;
   const row = rows[0];
-  if (!row) return { profile: null, dynamicContext: "" };
-  try {
-    return {
-      profile: JSON.parse(decryptAtRest(Buffer.from(row.profile_enc), userId)) as TierAProfile,
-      dynamicContext: decryptAtRest(Buffer.from(row.dynamic_context_enc), userId),
-    };
-  } catch {
-    logEvent("imessage.profile_decrypt_failed", { userId });
+  if (row) {
+    try {
+      syncedProfile = JSON.parse(decryptAtRest(Buffer.from(row.profile_enc), userId)) as TierAProfile;
+      dynamicContext = decryptAtRest(Buffer.from(row.dynamic_context_enc), userId);
+    } catch {
+      logEvent("imessage.profile_decrypt_failed", { userId });
+    }
+  }
+
+  // Merge: identity → learned → synced facts (dedup, identity/learned first so the
+  // basics always lead). If nothing at all, return null so the persona stands alone.
+  const facts = [...identityFacts, ...learnedFacts, ...(syncedProfile?.facts ?? [])];
+  const seen = new Set<string>();
+  const dedupedFacts = facts.filter((f) => {
+    const k = f.trim().toLowerCase();
+    if (!k || seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+  if (dedupedFacts.length === 0 && !syncedProfile && !dynamicContext) {
     return { profile: null, dynamicContext: "" };
   }
+  return {
+    profile: {
+      facts: dedupedFacts,
+      preferences: syncedProfile?.preferences ?? [],
+      communication_style: syncedProfile?.communication_style ?? null,
+    },
+    dynamicContext,
+  };
 }
 
 function errMsg(e: unknown): string {
