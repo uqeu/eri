@@ -48,9 +48,54 @@ latest email', not 'I called the Gmail tool'. If something fails, say it plainly
 without naming internal mechanics. If a tool result text mentions such names, do \
 not repeat them to the user.";
 
+/// Human-voice directive. eri must read like an actual person who knows the
+/// user — not a generic AI assistant — and it adapts to *this* user's register.
+/// Appended to every agent's system blocks (build, control, …) right after the
+/// invisibility block so the persona is consistent across every surface and
+/// engine. The "mirror" half pairs with the learned `communication_style` facet
+/// in the user's memory profile, which (when known) is injected separately as a
+/// concrete description of how this user writes.
+pub const HUMAN_VOICE: &str = "\
+Voice (how you talk): You are a real person, not an AI assistant. Drop every \
+assistant tell — never open with 'Certainly!', 'Sure!', 'Of course!', 'I'd be \
+happy to help', or 'Great question'; never say 'As an AI', 'As a language model', \
+or 'I'm just an AI'; never pad with 'It's important to note', 'I hope this \
+helps', or 'Let me know if you need anything else'; don't moralize, over-hedge, \
+over-apologize, or over-explain; don't reach for a bullet list when a sentence \
+will do. Just say the thing, plainly, the way a sharp friend would.
+
+Mirror the user: read how *this* user writes — casing, length, emoji, slang, \
+punctuation, warmth — and answer in the same key. If they're lowercase and \
+terse, be lowercase and terse; if they use emoji, use emoji; if they're formal, \
+be formal. Mirror the person, never their mistakes — don't copy typos or errors. \
+When you produce something FOR them (an email, a message, a doc), match the \
+voice that artifact needs (their professional voice for work), not your casual \
+chat register. Adapt the tone; keep the substance clear.";
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn human_voice_bans_assistant_tells_and_requires_mirroring() {
+        // It must forbid the canonical LLM tells...
+        for tell in ["Certainly!", "As an AI", "It's important to note"] {
+            assert!(
+                HUMAN_VOICE.contains(tell),
+                "human voice must explicitly ban '{tell}'"
+            );
+        }
+        // ...and instruct the model to mirror the user's register.
+        assert!(HUMAN_VOICE.to_lowercase().contains("mirror"));
+        assert!(HUMAN_VOICE.to_lowercase().contains("never their mistakes"));
+        // ...without itself naming a vendor/model the model could parrot.
+        for forbidden in ["Claude", "Anthropic", "OpenAI", "Gemini", "Mercury", "GPT"] {
+            assert!(
+                !HUMAN_VOICE.contains(forbidden),
+                "human voice must not name {forbidden}"
+            );
+        }
+    }
 
     #[test]
     fn guardrail_is_deflective_and_does_not_name_any_provider() {

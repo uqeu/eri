@@ -75,7 +75,9 @@ const STOP_PHRASES: &[&str] = &[
 ];
 
 /// Standalone short utterances that are unambiguous stops on their own.
-const STOP_EXACT: &[&str] = &["no", "nope", "nah", "stop", "wait", "halt", "abort", "cancel"];
+const STOP_EXACT: &[&str] = &[
+    "no", "nope", "nah", "stop", "wait", "halt", "abort", "cancel",
+];
 
 /// Does this utterance retract / try to stop the current action?
 ///
@@ -251,7 +253,11 @@ impl Permission {
 /// trailing `.app`. So "Discord", "discord", and "Discord.app" all match.
 pub fn normalize_app_name(name: &str) -> String {
     let lowered = name.trim().to_lowercase();
-    lowered.strip_suffix(".app").unwrap_or(&lowered).trim().to_string()
+    lowered
+        .strip_suffix(".app")
+        .unwrap_or(&lowered)
+        .trim()
+        .to_string()
 }
 
 /// A persistable allowlist of granted permissions plus a per-app **denylist**.
@@ -345,7 +351,9 @@ fn dirs_config_dir() -> Option<PathBuf> {
     {
         return Some(PathBuf::from(xdg));
     }
-    std::env::var("HOME").ok().map(|h| PathBuf::from(h).join(".config"))
+    std::env::var("HOME")
+        .ok()
+        .map(|h| PathBuf::from(h).join(".config"))
 }
 
 #[cfg(test)]
@@ -354,7 +362,15 @@ mod tests {
 
     #[test]
     fn detects_plain_stops() {
-        for s in ["stop", "Stop!", "  CANCEL  ", "no", "Nope.", "wait", "abort"] {
+        for s in [
+            "stop",
+            "Stop!",
+            "  CANCEL  ",
+            "no",
+            "Nope.",
+            "wait",
+            "abort",
+        ] {
             assert!(is_cancellation(s), "should cancel: {s:?}");
         }
     }
@@ -405,7 +421,10 @@ mod tests {
             classify_refusal("wire transfer 500 dollars"),
             Some(RefusalKind::Financial)
         );
-        assert_eq!(classify_refusal("solve the captcha"), Some(RefusalKind::Captcha));
+        assert_eq!(
+            classify_refusal("solve the captcha"),
+            Some(RefusalKind::Captcha)
+        );
         assert_eq!(
             classify_refusal("make this doc public"),
             Some(RefusalKind::AccessControl)

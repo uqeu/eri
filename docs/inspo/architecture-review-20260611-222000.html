@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>eri — Architecture Review: ControlTurn seam</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({ startOnLoad: true, theme: "dark" });</script>
+<style>
+  body { background:#0b0d10; color:#e7eaee; }
+  .card { background:#13171c; border:1px solid #232a31; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .badge-strong { background:#16361f; color:#5ee08a; border:1px solid #2a6b41; }
+  .badge-worth { background:#3a2f12; color:#e6c25e; border:1px solid #6b5a2a; }
+  .badge-spec  { background:#2a2230; color:#c79de6; border:1px solid #5a3a6b; }
+  .before { border-left:3px solid #6b3a3a; }
+  .after  { border-left:3px solid #2a6b41; }
+  code { color:#9ad; }
+  h1,h2,h3 { letter-spacing:-0.01em; }
+</style>
+</head>
+<body class="max-w-5xl mx-auto px-6 py-10">
+
+<header class="mb-10">
+  <div class="text-xs uppercase tracking-widest text-neutral-500 mb-2">eri · architecture review · 2026-06-11</div>
+  <h1 class="text-3xl font-semibold">The ControlTurn seam, after the keystone landed</h1>
+  <p class="mt-3 text-neutral-400 max-w-3xl">
+    The computer-control loop is now provider-agnostic: <code>drive_control_loop</code> runs through the
+    <span class="mono">ControlTurn</span> seam with two adapters (<span class="mono">ClaudeControlTurn</span>,
+    <span class="mono">LocalControlTurn</span>), local-first selection, and per-goal escalation. Two adapters = a real seam.
+    This review looks only at the code that just shipped, and asks where it is still <em>shallow</em> — interface nearly
+    as complex as the implementation — and where a small deepening would buy locality + test surface.
+  </p>
+</header>
+
+<!-- Candidate 1 -->
+<section class="card rounded-xl p-6 mb-8">
+  <div class="flex items-center justify-between mb-3">
+    <h2 class="text-xl font-semibold">1 · The self-improvement sink is invisible to tests</h2>
+    <span class="badge-strong text-xs font-semibold px-2 py-1 rounded">Strong</span>
+  </div>
+  <div class="text-sm text-neutral-300 space-y-3">
+    <p><span class="text-neutral-500">Files:</span> <span class="mono">control_turn.rs</span> (<code>record_control_turn</code>), <span class="mono">control_agent.rs</span> (<code>drive_control_loop</code>)</p>
+    <p><span class="text-neutral-500">Problem:</span> <code>record_control_turn</code> is the sink for Candidate B — the whole point of instrumenting the
+    turn is the self-improvement log. But it does <code class="mono">if cfg!(test) { return; }</code> to keep the loop's tests free of
+    filesystem side effects. So the <em>only</em> verified part is the pure <code>control_turn_log</code> builder; whether the loop
+    actually records the right thing on the right turns is <strong>untested by construction</strong>. Behaviour differs between test and prod —
+    the classic smell that hides the real bug (does escalation get logged? does a no-tool answer?).</p>
+    <p><span class="text-neutral-500">Solution:</span> make the sink a <strong>seam</strong>, not a <code>cfg!</code> branch. A
+    <span class="mono">ControlTurnSink</span> trait with two adapters — <span class="mono">MemorySink</span> (prod, writes to the learn-do store /
+    later <span class="mono">eri_graph</span>) and a recording double in tests. The loop calls <code>sink.record(log)</code>; tests assert the
+    sequence of records. The <code>cfg!(test)</code> guard disappears.</p>
+    <p><span class="text-neutral-500">Benefits:</span> the instrumentation gains <em>locality</em> (one place defines what a control turn
+    records, exercised the same way in test and prod) and a real test surface — the routing-learning loop can't silently rot. Leverage:
+    the same sink seam is exactly where <span class="mono">eri_graph</span> causal logging plugs in later, with no loop change.</p>
+  </div>
+  <div class="grid md:grid-cols-2 gap-4 mt-5">
+    <div class="before rounded-lg p-4 bg-[#16191e]">
+      <div class="text-xs uppercase tracking-wide text-rose-300/70 mb-2">Before — cfg branch</div>
+      <pre class="mono text-xs text-neutral-300 whitespace-pre-wrap">fn record_control_turn(..) {
+  if cfg!(test) { return; }   // ← untestable
+  let log = control_turn_log(..);
+  MemoryStore::open()…insert(log)
+}
+// tests verify control_turn_log ONLY,
+// never that the loop calls it correctly.</pre>
+    </div>
+    <div class="after rounded-lg p-4 bg-[#141a16]">
+      <div class="text-xs uppercase tracking-wide text-emerald-300/70 mb-2">After — injected sink</div>
+      <pre class="mono text-xs text-neutral-300 whitespace-pre-wrap">trait ControlTurnSink { fn record(&self, l: ControlTurnLog); }
+struct MemorySink;   // prod
+struct RecordingSink(Mutex&lt;Vec…&gt;);  // tests
+
+loop: sink.record(control_turn_log(engine, goal, &out));
+// test: assert recorded == [local→escalate, claude→open_app, …]</pre>
+    </div>
+  </div>
+</section>
+
+<!-- Candidate 2 -->
+<section class="card rounded-xl p-6 mb-8">
+  <div class="flex items-center justify-between mb-3">
+    <h2 class="text-xl font-semibold">2 · <span class="mono">drive_control_loop</span> wears its dependencies as 8 positional params</h2>
+    <span class="badge-worth text-xs font-semibold px-2 py-1 rounded">Worth exploring</span>
+  </div>
+  <div class="text-sm text-neutral-300 space-y-3">
+    <p><span class="text-neutral-500">Files:</span> <span class="mono">control_agent.rs</span> (<code>drive_control_loop</code>, <code>run_control_agent</code>)</p>
+    <p><span class="text-neutral-500">Problem:</span> the loop carries <code>#[allow(clippy::too_many_arguments)]</code> — engines, bridge, gate,
+    confirm, system, tools, goal, max_turns. Most are <em>static for the session</em> (engines/bridge/gate/system/tools never change across
+    the run); only goal/confirm/max_turns vary per invocation. The signature can't tell you that. Adding the sink from Candidate 1 makes it 9.</p>
+    <p><span class="text-neutral-500">Solution:</span> a <span class="mono">ControlSession</span> deep module that owns the static wiring
+    (engines + bridge + gate + system + tools + sink) and exposes <code>drive(goal, &amp;mut confirm, max_turns)</code>. The loop body is unchanged;
+    the <em>interface</em> shrinks to one verb over a configured session.</p>
+    <p><span class="text-neutral-500">Benefits:</span> leverage — callers see "a session you can drive," not a 9-tuple. Locality — the
+    local-first/escalation wiring is assembled once in the constructor, not re-passed. Deletion test: deleting <code>ControlSession</code>
+    scatters that assembly back across <code>run_control_agent</code> + every test. It concentrates complexity → it earns its keep.</p>
+  </div>
+  <div class="mt-5">
+    <pre class="mermaid">
+flowchart LR
+  subgraph Before [Before: free function, 8 args]
+    R1[run_control_agent] -->|engines,bridge,gate,confirm,system,tools,goal,max| L1[drive_control_loop]
+    T1[5 loop tests] -->|re-pass 8 args each| L1
+  end
+  subgraph After [After: ControlSession deep module]
+    R2[run_control_agent] --> S2[ControlSession::new&#40;engines,bridge,gate,system,tools,sink&#41;]
+    S2 -->|drive&#40;goal, confirm, max&#41;| L2[loop body]
+    T2[loop tests] -->|build session, drive| S2
+  end
+    </pre>
+  </div>
+</section>
+
+<!-- Candidate 3 -->
+<section class="card rounded-xl p-6 mb-8">
+  <div class="flex items-center justify-between mb-3">
+    <h2 class="text-xl font-semibold">3 · The local model's tool arguments don't match the spec keys</h2>
+    <span class="badge-worth text-xs font-semibold px-2 py-1 rounded">Worth exploring</span>
+  </div>
+  <div class="text-sm text-neutral-300 space-y-3">
+    <p><span class="text-neutral-500">Files:</span> <span class="mono">control_turn.rs</span> (<code>parse_local_tool_calls</code>) → <span class="mono">control_agent.rs</span> (<code>parse_action</code>)</p>
+    <p><span class="text-neutral-500">Problem (live-observed):</span> qwen2.5:1.5b, asked to "open Safari", correctly emits an
+    <code>open_app</code> tool call — but with <code class="mono">{"app_name":"Safari"}</code> instead of the spec's <code class="mono">{"name":"Safari"}</code>.
+    <code>parse_action</code> is strict (<code>s("name")</code> → error), so the local turn that <em>chose right</em> still fails downstream. This is the
+    handoff's thesis in miniature: small models are good at <em>deciding</em>, weak at <em>exact structure</em> — "the real work is structured output, not a bigger model."</p>
+    <p><span class="text-neutral-500">Solution:</span> not a leniency patch on <code>parse_action</code> (that's shared with the cloud path, which gets keys right).
+    Instead, a thin <span class="mono">local argument-normalisation</span> step at the <code>LocalControlTurn</code> seam — a tiny per-tool alias map
+    (<code>app_name|application → name</code>, …) applied only to local tool calls, plus a stricter local system-prompt that pins the exact schema.
+    This belongs to the deferred <strong>50-task eval / structured-output hardening</strong> phase, where it can be measured.</p>
+    <p><span class="text-neutral-500">Benefits:</span> keeps the strict shared <code>parse_action</code> honest while absorbing small-model sloppiness at the
+    one seam that owns it. Test surface: alias-normalisation is a pure function — table-tested against recorded local outputs.</p>
+  </div>
+  <div class="grid md:grid-cols-2 gap-4 mt-5">
+    <div class="before rounded-lg p-4 bg-[#16191e]">
+      <div class="text-xs uppercase tracking-wide text-rose-300/70 mb-2">Before</div>
+      <pre class="mono text-xs text-neutral-300 whitespace-pre-wrap">local → {"app_name":"Safari"}
+parse_action("open_app") → s("name") = None
+→ Err "open_app needs name"  ✗ correct choice lost</pre>
+    </div>
+    <div class="after rounded-lg p-4 bg-[#141a16]">
+      <div class="text-xs uppercase tracking-wide text-emerald-300/70 mb-2">After</div>
+      <pre class="mono text-xs text-neutral-300 whitespace-pre-wrap">local → {"app_name":"Safari"}
+normalise_local_args("open_app") → {"name":"Safari"}
+parse_action → OpenApp("Safari")  ✓</pre>
+    </div>
+  </div>
+</section>
+
+<section class="card rounded-xl p-6 mb-8 border-emerald-800/40">
+  <h2 class="text-xl font-semibold mb-3">Top recommendation</h2>
+  <p class="text-sm text-neutral-300">
+    Start with <strong>Candidate 1 (the sink seam)</strong>. It's the only <span class="badge-strong text-xs font-semibold px-2 py-1 rounded">Strong</span>
+    item because it closes a correctness gap, not just an ergonomic one: the self-improvement log is the entire reason the turn is instrumented,
+    and right now its behaviour is verified nowhere. Two adapters (memory + recording double) make it a real seam and delete the <code>cfg!(test)</code>
+    smell. Candidate 2 pairs naturally — once a sink is a 9th dependency, <span class="mono">ControlSession</span> is the right place to put it — so do
+    them together. Candidate 3 is real but belongs to the eval phase where structured-output quality is measured, not guessed.
+  </p>
+</section>
+
+<footer class="text-xs text-neutral-600 pb-10">
+  Scope: only the code shipped in <span class="mono">feat(control): provider-agnostic ControlTurn seam</span> (b456e22). Workspace green (80 bins),
+  eri_cli 218 tests, clippy clean.
+</footer>
+
+</body>
+</html>

@@ -35,11 +35,19 @@ pub struct Profile {
     pub preferences: Vec<String>,
     /// The live temporal slice — "today you did X". Refreshed each distill.
     pub dynamic_context: String,
+    /// Learned description of how this user writes — casing, brevity, emoji,
+    /// slang, warmth. Injected so eri mirrors *their* register (the "responds
+    /// like them" half of the human-voice persona). Newest observation wins.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub communication_style: Option<String>,
 }
 
 impl Profile {
     pub fn is_empty(&self) -> bool {
-        self.facts.is_empty() && self.preferences.is_empty() && self.dynamic_context.is_empty()
+        self.facts.is_empty()
+            && self.preferences.is_empty()
+            && self.dynamic_context.is_empty()
+            && self.communication_style.is_none()
     }
 }
 
@@ -50,7 +58,22 @@ pub fn distill(observations: &[Observation], now_ms: u64) -> Profile {
         facts: distill_facts(observations),
         preferences: distill_preferences(observations),
         dynamic_context: distill_dynamic_context(observations, now_ms),
+        communication_style: distill_communication_style(observations),
     }
+}
+
+/// The user's writing register — the single newest `communication_style`
+/// observation (the learn-loop rewrites it as it observes more), trimmed and
+/// capped. Returns `None` until eri has learned a style, so the persona simply
+/// falls back to mirroring in-context. Sensitivity-screened like every other
+/// section that reaches the server-readable Tier-A profile.
+fn distill_communication_style(observations: &[Observation]) -> Option<String> {
+    observations
+        .iter()
+        .rev()
+        .filter(|o| o.kind == "communication_style" && !looks_sensitive(&o.body))
+        .map(|o| truncate(o.body.trim(), MAX_FACT_CHARS))
+        .find(|s| !s.is_empty())
 }
 
 /// Durable facts — newest first, deduped, capped, **sensitivity-screened**.
@@ -287,6 +310,41 @@ mod tests {
             "a durable rollup must not leak into today's activity; got {}",
             p.dynamic_context
         );
+    }
+
+    #[test]
+    fn communication_style_takes_the_newest_observation() {
+        let obs = vec![
+            o("communication_style", 10, "formal, full sentences"),
+            o("communication_style", 20, "lowercase, terse, uses emoji"),
+            o("fact", 30, "name is Khai"),
+        ];
+        let p = distill(&obs, NOW);
+        // newest wins; it is NOT mixed into facts or today's activity
+        assert_eq!(
+            p.communication_style.as_deref(),
+            Some("lowercase, terse, uses emoji")
+        );
+        assert!(!p.facts.iter().any(|f| f.contains("emoji")));
+        assert!(!p.dynamic_context.contains("emoji"));
+    }
+
+    #[test]
+    fn communication_style_is_absent_until_learned_and_screened() {
+        // none observed -> None (persona falls back to in-context mirroring)
+        assert!(
+            distill(&[o("fact", 1, "x")], NOW)
+                .communication_style
+                .is_none()
+        );
+        // a style note that somehow carries a secret is screened out like any
+        // other section reaching the server-readable tier
+        let leaky = vec![o(
+            "communication_style",
+            5,
+            "casual; my password is hunter2",
+        )];
+        assert!(distill(&leaky, NOW).communication_style.is_none());
     }
 
     #[test]

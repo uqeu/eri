@@ -1,0 +1,447 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ARK · Account & Billing Architecture Review</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>tailwind.config={darkMode:'class',theme:{extend:{fontFamily:{mono:['ui-monospace','SFMono-Regular','Menlo','monospace']},colors:{ink:'#0a0b0d',panel:'#121417',edge:'#23272e',mint:'#3ce8b2',mintdim:'#1f7a5e'}}}}</script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({startOnLoad:true,theme:'dark',themeVariables:{primaryColor:'#121417',primaryBorderColor:'#23272e',lineColor:'#3ce8b2',fontFamily:'ui-monospace,monospace'}});</script>
+<style>
+  body{background:#0a0b0d;color:#e6e9ee}
+  .num{font-variant-numeric:tabular-nums}
+  .card{background:#121417;border:1px solid #23272e}
+  .b-strong{background:#0f2e24;color:#3ce8b2;border:1px solid #1f7a5e}
+  .b-worth{background:#2a2410;color:#e8d23c;border:1px solid #7a6b1f}
+  .b-spec{background:#1a1d22;color:#9aa3af;border:1px solid #3a3f47}
+  .before{background:#1a1012;border:1px solid #4a2226}
+  .after{background:#0f1f18;border:1px solid #1f7a5e}
+  .pill{background:#1a1d22;border:1px solid #2a2f37}
+  a{color:#3ce8b2}
+  h2{scroll-margin-top:1rem}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+</style>
+</head>
+<body class="font-sans antialiased">
+
+<header class="max-w-6xl mx-auto px-6 pt-14 pb-8">
+  <div class="text-mint mono text-xs tracking-[0.3em] uppercase mb-3">Architecture Review · deepening opportunities</div>
+  <h1 class="text-4xl md:text-5xl font-semibold tracking-tight leading-none">Account, identity &amp; two-product billing</h1>
+  <p class="mt-5 text-lg text-gray-400 max-w-3xl leading-relaxed">
+    One <span class="text-mint mono">WorkOS organization</span> should be the single account that carries both products:
+    <strong class="text-gray-200">cameras</strong> (manual, invoiced — <span class="mono">organizations.camera_limit</span>) and the
+    <strong class="text-gray-200">developer API</strong> (Stripe — <span class="mono">org_credits</span>). Today entitlement is resolved
+    <em class="text-gray-200">two different ways</em> and app access is gated by a live Stripe call. This review maps the friction and the deepenings that get it to industry grade.
+  </p>
+  <div class="mt-6 flex flex-wrap gap-2 text-xs mono">
+    <span class="pill rounded-full px-3 py-1">6 candidates</span>
+    <span class="pill rounded-full px-3 py-1">3 <span class="text-mint">Strong</span></span>
+    <span class="pill rounded-full px-3 py-1">2 <span style="color:#e8d23c">Worth exploring</span></span>
+    <span class="pill rounded-full px-3 py-1">1 <span class="text-gray-400">Speculative</span></span>
+    <span class="pill rounded-full px-3 py-1">scope: hs_app + ark/api + Supabase</span>
+  </div>
+</header>
+
+<!-- THE SHAPE TODAY -->
+<section class="max-w-6xl mx-auto px-6 pb-10">
+  <div class="card rounded-2xl p-6 md:p-8">
+    <h2 class="text-sm mono uppercase tracking-widest text-gray-500 mb-5">The shape today — two parallel paths, one account that doesn't exist yet</h2>
+    <div class="grid md:grid-cols-2 gap-5">
+      <div class="before rounded-xl p-5">
+        <div class="text-xs mono uppercase tracking-widest text-red-300/80 mb-3">Camera entitlement</div>
+        <div class="mono text-sm leading-7">
+          <span class="text-gray-400">login</span> → <span class="text-gray-200">email</span><br/>
+          → <span class="text-red-300">check-access</span> <span class="text-gray-500">calls Stripe LIVE (10s)</span><br/>
+          → <span class="text-red-300">subscriptions</span>.camera_limit <span class="text-gray-500">(by user_email)</span><br/>
+          → count <span class="text-red-300">agent_cameras</span> <span class="text-gray-500">(GLOBAL — bug)</span>
+        </div>
+        <div class="mt-3 text-xs text-red-300/70">Stripe is the authority. <span class="mono">subscriptions</span> is write-only from webhooks. Limit check is advisory, not enforced on add.</div>
+      </div>
+      <div class="after rounded-xl p-5">
+        <div class="text-xs mono uppercase tracking-widest text-mint/80 mb-3">API entitlement</div>
+        <div class="mono text-sm leading-7">
+          <span class="text-gray-400">bearer key</span> → <span class="text-gray-200">api_keys.org_id</span><br/>
+          → <span class="text-mint">resolveOrg(email)</span> <span class="text-gray-500">(auto-creates org)</span><br/>
+          → <span class="text-mint">org_credits</span>.credit_balance <span class="text-gray-500">(by org_id+region)</span><br/>
+          → reserve / settle / release <span class="text-gray-500">(ledger)</span>
+        </div>
+        <div class="mt-3 text-xs text-mint/70">Clean, org-scoped, ledger-projected (ADR-0002). This is the <em>good</em> pattern — the camera side should converge on it.</div>
+      </div>
+    </div>
+    <div class="mt-6 grid grid-cols-3 gap-4 text-center">
+      <div class="pill rounded-xl p-4"><div class="text-3xl num text-red-300">3</div><div class="text-xs text-gray-400 mt-1">competing camera-limit sources<br/><span class="mono text-gray-600">subscriptions · customers · organizations</span></div></div>
+      <div class="pill rounded-xl p-4"><div class="text-3xl num text-mint">0</div><div class="text-xs text-gray-400 mt-1">organizations rows wired to the<br/>camera app today</div></div>
+      <div class="pill rounded-xl p-4"><div class="text-3xl num text-yellow-300">2</div><div class="text-xs text-gray-400 mt-1">live bugs in camera-limit<br/><span class="mono text-gray-600">global count · unauth ?email=</span></div></div>
+    </div>
+  </div>
+</section>
+
+<main class="max-w-6xl mx-auto px-6 space-y-8 pb-16">
+
+<!-- C1 -->
+<article id="c1" class="card rounded-2xl p-6 md:p-8">
+  <div class="flex items-start justify-between gap-4 flex-wrap">
+    <div>
+      <div class="text-xs mono text-gray-500 mb-1">Candidate 1</div>
+      <h2 class="text-2xl font-semibold tracking-tight">One deep <span class="text-mint">Account</span> module, keyed by the WorkOS org</h2>
+    </div>
+    <span class="b-strong rounded-full px-3 py-1 text-xs mono uppercase tracking-wider">Strong</span>
+  </div>
+
+  <div class="mt-5 grid md:grid-cols-2 gap-6">
+    <div>
+      <h3 class="text-xs mono uppercase tracking-widest text-gray-500 mb-2">Files</h3>
+      <ul class="text-sm text-gray-300 space-y-1 mono">
+        <li>hs_app/lib/developer-api.ts <span class="text-gray-500">(resolveOrg — already deep)</span></li>
+        <li>hs_app/lib/auth/workos.ts <span class="text-gray-500">(organizationId, role)</span></li>
+        <li>hs_app/app/api/auth/check-access/route.ts</li>
+        <li>hs_app/app/api/subscription/camera-limit/route.ts</li>
+        <li>hs_app/app/api/camera-names · /api/org/*</li>
+      </ul>
+      <h3 class="text-xs mono uppercase tracking-widest text-gray-500 mt-5 mb-2">Problem</h3>
+      <p class="text-sm text-gray-300 leading-relaxed">
+        "Which account is this?" is answered in <strong>two incompatible ways</strong>: the camera side keys on <span class="mono">user_email</span>
+        (→ <span class="mono">subscriptions</span>), the API side keys on <span class="mono">org_id</span> (→ <span class="mono">resolveOrg</span> → <span class="mono">org_credits</span>).
+        A single email could map to several orgs on the API but exactly one Stripe subscription. Org-resolution logic is duplicated; the camera app
+        never touches <span class="mono">organizations</span> at all.
+      </p>
+      <h3 class="text-xs mono uppercase tracking-widest text-gray-500 mt-5 mb-2">Solution</h3>
+      <p class="text-sm text-gray-300 leading-relaxed">
+        Promote the existing deep <span class="mono text-mint">resolveOrg</span> into a shared <span class="text-mint">Account</span> module:
+        <span class="mono">resolveAccount(session) → { orgId, role, cameraLimit, region }</span>, resolved from WorkOS <span class="mono">organizationId</span> via
+        <span class="mono">organizations.workos_org_id</span> (auto-provision on first authenticated request, mirroring resolveOrg's race-safe upsert).
+        Every caller — access gate, camera-limit, camera-add, developer/* — goes through this one seam.
+      </p>
+    </div>
+    <div>
+      <h3 class="text-xs mono uppercase tracking-widest text-gray-500 mb-2">Benefits — locality &amp; leverage</h3>
+      <ul class="text-sm text-gray-300 space-y-2 leading-relaxed">
+        <li><span class="text-mint mono">leverage:</span> one call answers "who is this account, what can it do" for both products.</li>
+        <li><span class="text-mint mono">locality:</span> org-resolution + entitlement live in one module; the WorkOS→org mapping is changed in one place.</li>
+        <li><span class="text-mint mono">tests:</span> the interface becomes the test surface — a <span class="mono">FakeAccountStore</span> lets every route be tested without Supabase or Stripe.</li>
+      </ul>
+      <div class="mt-4 grid grid-cols-2 gap-3">
+        <div class="before rounded-xl p-4">
+          <div class="text-[11px] mono uppercase tracking-widest text-red-300/80 mb-2">Before — shallow, duplicated</div>
+          <div class="mono text-[12px] leading-6 text-gray-300">
+            check-access → Stripe<br/>
+            camera-limit → subscriptions<br/>
+            developer/* → resolveOrg<br/>
+            <span class="text-red-300">3 ways to ask "who?"</span>
+          </div>
+        </div>
+        <div class="after rounded-xl p-4">
+          <div class="text-[11px] mono uppercase tracking-widest text-mint/80 mb-2">After — one deep seam</div>
+          <div class="mono text-[12px] leading-6 text-gray-300">
+            * → <span class="text-mint">resolveAccount()</span><br/>
+            ↳ orgId, role<br/>
+            ↳ cameraLimit (manual)<br/>
+            ↳ credits (Stripe)
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="mt-6 rounded-xl border border-edge p-4 bg-ink">
+    <div class="text-[11px] mono uppercase tracking-widest text-gray-500 mb-3">Deletion test</div>
+    <p class="text-sm text-gray-300">Delete the Account module → org-resolution + entitlement logic <strong class="text-mint">reappears across ~6 routes</strong> (it already does today). Complexity concentrates, not vanishes → it earns its keep. This is a genuinely deep module.</p>
+  </div>
+</article>
+
+<!-- C2 -->
+<article id="c2" class="card rounded-2xl p-6 md:p-8">
+  <div class="flex items-start justify-between gap-4 flex-wrap">
+    <div>
+      <div class="text-xs mono text-gray-500 mb-1">Candidate 2</div>
+      <h2 class="text-2xl font-semibold tracking-tight">Camera entitlement: one source, per-org count, <span class="text-mint">enforced at the add seam</span></h2>
+    </div>
+    <span class="b-strong rounded-full px-3 py-1 text-xs mono uppercase tracking-wider">Strong</span>
+  </div>
+  <div class="mt-5 grid md:grid-cols-2 gap-6">
+    <div>
+      <h3 class="text-xs mono uppercase tracking-widest text-gray-500 mb-2">Files</h3>
+      <ul class="text-sm text-gray-300 space-y-1 mono">
+        <li>hs_app/app/api/subscription/camera-limit/route.ts</li>
+        <li>hs_app/app/api/connector/cameras · /api/agent/[id]/cameras <span class="text-gray-500">(the real add seam)</span></li>
+        <li>migration: organizations.camera_limit</li>
+      </ul>
+      <h3 class="text-xs mono uppercase tracking-widest text-gray-500 mt-5 mb-2">Problem</h3>
+      <p class="text-sm text-gray-300 leading-relaxed">
+        The limit module is <strong>shallow and bypassed</strong>. It reads <span class="mono">subscriptions.camera_limit</span> (wrong source),
+        counts <span class="mono">agent_cameras</span> <strong class="text-red-300">globally</strong> (<span class="mono">.eq('streaming_enabled',true)</span> with no org filter — one camera anywhere blocks everyone),
+        trusts <span class="mono">?email=</span> with no auth, and <strong class="text-red-300">is never called on the add path</strong> — it's advisory UI only.
+      </p>
+      <h3 class="text-xs mono uppercase tracking-widest text-gray-500 mt-5 mb-2">Solution</h3>
+      <p class="text-sm text-gray-300 leading-relaxed">
+        A deep <span class="mono text-mint">assertCanAddCamera(orgId)</span> that reads <span class="mono">organizations.camera_limit</span>, counts
+        <span class="mono">agent_cameras WHERE org_id = $1</span>, and <strong>runs inside the camera-create transaction</strong> — the real seam, not the UI.
+        Over-limit throws a typed <span class="mono">CameraLimitError</span> (→ 409). Same authorize-then-act discipline as the API's reserve/settle.
+      </p>
+    </div>
+    <div>
+      <div class="grid grid-cols-2 gap-3">
+        <div class="before rounded-xl p-4">
+          <div class="text-[11px] mono uppercase tracking-widest text-red-300/80 mb-2">Before</div>
+          <div class="mono text-[12px] leading-6 text-gray-300">
+            UI calls camera-limit<br/>
+            <span class="text-red-300">count(*) all cameras</span><br/>
+            add-camera route:<br/>
+            <span class="text-red-300">insert — no check</span>
+          </div>
+        </div>
+        <div class="after rounded-xl p-4">
+          <div class="text-[11px] mono uppercase tracking-widest text-mint/80 mb-2">After</div>
+          <div class="mono text-[12px] leading-6 text-gray-300">
+            add-camera route:<br/>
+            <span class="text-mint">assertCanAddCamera(org)</span><br/>
+            count WHERE org_id<br/>
+            then insert
+          </div>
+        </div>
+      </div>
+      <h3 class="text-xs mono uppercase tracking-widest text-gray-500 mt-5 mb-2">Benefits</h3>
+      <ul class="text-sm text-gray-300 space-y-2 leading-relaxed">
+        <li><span class="text-mint mono">locality:</span> the rule "an account caps at N cameras" lives at the one place a camera is born — impossible to bypass.</li>
+        <li><span class="text-mint mono">tests:</span> one test ("11th camera on a 10-cap org → 409") covers it; today it's untestable because the check isn't wired in.</li>
+        <li>kills both live bugs (global count, unauth email) by construction.</li>
+      </ul>
+    </div>
+  </div>
+</article>
+
+<!-- C3 -->
+<article id="c3" class="card rounded-2xl p-6 md:p-8">
+  <div class="flex items-start justify-between gap-4 flex-wrap">
+    <div>
+      <div class="text-xs mono text-gray-500 mb-1">Candidate 3</div>
+      <h2 class="text-2xl font-semibold tracking-tight">Slim the Stripe webhook to <span class="text-mint">one job: ARK credits</span></h2>
+    </div>
+    <span class="b-strong rounded-full px-3 py-1 text-xs mono uppercase tracking-wider">Strong</span>
+  </div>
+  <div class="mt-5 grid md:grid-cols-2 gap-6">
+    <div>
+      <h3 class="text-xs mono uppercase tracking-widest text-gray-500 mb-2">Files</h3>
+      <ul class="text-sm text-gray-300 space-y-1 mono">
+        <li>hs_app/app/api/webhook/stripe/route.ts <span class="text-gray-500">(~540 lines)</span></li>
+        <li>+ the camera Stripe checkout/portal/trial routes</li>
+      </ul>
+      <h3 class="text-xs mono uppercase tracking-widest text-gray-500 mt-5 mb-2">Problem</h3>
+      <p class="text-sm text-gray-300 leading-relaxed">
+        One file carries two unrelated jobs. <strong class="text-mint">Keep:</strong> <span class="mono">checkout.session.completed</span> →
+        <span class="mono">handleCreditPackPurchase</span> (gated on <span class="mono">ark_credits</span> metadata), refunds, disputes — the API credit path.
+        <strong class="text-red-300">Remove (per decision):</strong> <span class="mono">customer.subscription.*</span>, <span class="mono">invoice.*</span>, and the
+        <span class="mono">mode==='subscription'</span> branch that syncs <span class="mono">subscriptions.camera_limit</span>. Cameras are invoiced manually now.
+      </p>
+      <h3 class="text-xs mono uppercase tracking-widest text-gray-500 mt-5 mb-2">Solution</h3>
+      <p class="text-sm text-gray-300 leading-relaxed">
+        Delete the camera-subscription handlers + <span class="mono">syncSubscriptionToSupabase</span>/<span class="mono">handlePaymentSucceeded</span>, and the camera
+        checkout/portal/trial routes. The webhook collapses to a single responsibility with a tiny interface: <em>"a paid credit-pack session grants credits to an org."</em>
+        The split is already clean — <span class="mono">ark_credits</span> is checked <em>first</em> (line 400), so removal touches zero credit lines.
+      </p>
+    </div>
+    <div>
+      <div class="grid grid-cols-2 gap-3">
+        <div class="before rounded-xl p-4">
+          <div class="text-[11px] mono uppercase tracking-widest text-red-300/80 mb-2">Before — 17 event cases</div>
+          <div class="mono text-[11px] leading-5 text-gray-300">
+            checkout.* <span class="text-mint">(credits)</span><br/>
+            charge.refund/dispute <span class="text-mint">(credits)</span><br/>
+            <span class="text-red-300">customer.subscription.* ×6</span><br/>
+            <span class="text-red-300">invoice.* ×6</span><br/>
+            <span class="text-red-300">payment_intent.* / customer.*</span>
+          </div>
+        </div>
+        <div class="after rounded-xl p-4">
+          <div class="text-[11px] mono uppercase tracking-widest text-mint/80 mb-2">After — one job</div>
+          <div class="mono text-[11px] leading-5 text-gray-300">
+            checkout.session.completed<br/>
+            charge.refunded<br/>
+            charge.dispute.*<br/>
+            <span class="text-mint">→ grant / revoke credits</span>
+          </div>
+        </div>
+      </div>
+      <h3 class="text-xs mono uppercase tracking-widest text-gray-500 mt-5 mb-2">Benefits</h3>
+      <ul class="text-sm text-gray-300 space-y-2 leading-relaxed">
+        <li><span class="text-mint mono">deletion test (inverse):</span> removing the camera half shrinks the interface to one verb — the remainder is unambiguously a "credits" module.</li>
+        <li><span class="text-mint mono">locality:</span> no future reader wonders whether a subscription event still moves a camera limit.</li>
+        <li>removes a whole class of Stripe state (subscription lifecycle) you no longer reason about.</li>
+      </ul>
+    </div>
+  </div>
+  <div class="mt-6 rounded-xl border p-4" style="border-color:#1f7a5e;background:#0f1f18">
+    <div class="text-[11px] mono uppercase tracking-widest text-mint mb-2">Revenue-safety note</div>
+    <p class="text-sm text-gray-300">The developer-API Stripe path (checkout → <span class="mono">grant_credits</span>, refund/dispute → <span class="mono">revoke_credits</span>) is <strong>fully preserved</strong>. This candidate only removes the camera-subscription billing you've decided to drop.</p>
+  </div>
+</article>
+
+<!-- C4 -->
+<article id="c4" class="card rounded-2xl p-6 md:p-8">
+  <div class="flex items-start justify-between gap-4 flex-wrap">
+    <div>
+      <div class="text-xs mono text-gray-500 mb-1">Candidate 4</div>
+      <h2 class="text-2xl font-semibold tracking-tight">Access gate = <span class="text-mint">org membership</span>, not a live Stripe call</h2>
+    </div>
+    <span class="b-worth rounded-full px-3 py-1 text-xs mono uppercase tracking-wider">Worth exploring</span>
+  </div>
+  <div class="mt-5 grid md:grid-cols-2 gap-6">
+    <div>
+      <h3 class="text-xs mono uppercase tracking-widest text-gray-500 mb-2">Files</h3>
+      <ul class="text-sm text-gray-300 space-y-1 mono">
+        <li>hs_app/app/api/auth/check-access/route.ts</li>
+        <li>hs_app/lib/hooks/useAccessControl.ts</li>
+        <li>hs_app/middleware.ts</li>
+      </ul>
+      <h3 class="text-xs mono uppercase tracking-widest text-gray-500 mt-5 mb-2">Problem</h3>
+      <p class="text-sm text-gray-300 leading-relaxed">
+        App access is decided by <span class="mono">isAdmin || hasActiveStripeSubscription</span>, where the second term is a
+        <strong class="text-red-300">synchronous Stripe API call with a 10s timeout</strong> on the dashboard hot path. When Stripe is slow the UI must
+        retry with backoff; the gate depends on an external vendor for every session. With manual invoicing there's no subscription to check anyway.
+      </p>
+      <h3 class="text-xs mono uppercase tracking-widest text-gray-500 mt-5 mb-2">Solution</h3>
+      <p class="text-sm text-gray-300 leading-relaxed">
+        Access = "the WorkOS user resolves to an org" (invite-only already enforces who can authenticate). Gate becomes a single
+        <span class="mono text-mint">resolveAccount()</span> lookup (Candidate 1) — local, fast, no Stripe. Camera <em>capacity</em> (limit 0 vs N) is separate from
+        <em>access</em>. Admins stay via role/allowlist.
+      </p>
+    </div>
+    <div>
+      <div class="pill rounded-xl p-5">
+        <div class="text-[11px] mono uppercase tracking-widest text-gray-500 mb-3">Latency &amp; failure mode</div>
+        <div class="space-y-3 text-sm">
+          <div class="flex items-center justify-between"><span class="text-gray-400">Before</span><span class="mono text-red-300">Stripe call · ≤10s · vendor-dependent</span></div>
+          <div class="h-px bg-edge"></div>
+          <div class="flex items-center justify-between"><span class="text-gray-400">After</span><span class="mono text-mint">1 indexed row read · &lt;20ms · local</span></div>
+        </div>
+        <p class="mt-4 text-xs text-gray-400 leading-relaxed">Removes the only third-party dependency from the login hot path and the whole "entitlement check unavailable / retry" UI branch.</p>
+      </div>
+      <h3 class="text-xs mono uppercase tracking-widest text-gray-500 mt-5 mb-2">Benefits</h3>
+      <ul class="text-sm text-gray-300 space-y-2 leading-relaxed">
+        <li><span class="text-mint mono">leverage:</span> access + entitlement answered by the same module.</li>
+        <li><span class="text-mint mono">tests:</span> "user with no org → denied; user in org → allowed" is a pure unit test, no Stripe mock.</li>
+      </ul>
+    </div>
+  </div>
+</article>
+
+<!-- C5 -->
+<article id="c5" class="card rounded-2xl p-6 md:p-8">
+  <div class="flex items-start justify-between gap-4 flex-wrap">
+    <div>
+      <div class="text-xs mono text-gray-500 mb-1">Candidate 5</div>
+      <h2 class="text-2xl font-semibold tracking-tight">Make <span class="text-mint">RLS</span> the enforcement seam, not per-route key choice</h2>
+    </div>
+    <span class="b-worth rounded-full px-3 py-1 text-xs mono uppercase tracking-wider">Worth exploring</span>
+  </div>
+  <div class="mt-5 grid md:grid-cols-2 gap-6">
+    <div>
+      <h3 class="text-xs mono uppercase tracking-widest text-gray-500 mb-2">Files</h3>
+      <ul class="text-sm text-gray-300 space-y-1 mono">
+        <li>hs_app/lib/supabase.ts <span class="text-gray-500">(anon vs service-role)</span></li>
+        <li>13+ routes using service-role + in-code membership checks</li>
+        <li>Supabase RLS policies (not in repo — audit needed)</li>
+      </ul>
+      <h3 class="text-xs mono uppercase tracking-widest text-gray-500 mt-5 mb-2">Problem</h3>
+      <p class="text-sm text-gray-300 leading-relaxed">
+        Tenant isolation is enforced <strong>in application code</strong>: most routes use the service-role client (RLS bypassed) and re-check
+        <span class="mono">org membership</span> by hand. The anon-client routes (<span class="mono">camera-names</span>, <span class="mono">camera-limit</span>) assume RLS
+        policies exist — none are in the repo. Today's <span class="mono text-red-300">401 incident</span> showed how fragile the key path is. A forgotten in-code
+        check or a misconfigured policy fails <em>open</em>.
+      </p>
+      <h3 class="text-xs mono uppercase tracking-widest text-gray-500 mt-5 mb-2">Solution</h3>
+      <p class="text-sm text-gray-300 leading-relaxed">
+        Codify org-scoped RLS policies as migrations (the seam), so isolation holds even if a route forgets a check or a key leaks. Reserve service-role for
+        genuine cross-tenant work (webhooks). Add policy tests. Document the rule in <span class="mono">CONTEXT.md</span>.
+      </p>
+    </div>
+    <div>
+      <div class="before rounded-xl p-4">
+        <div class="text-[11px] mono uppercase tracking-widest text-red-300/80 mb-2">Before — isolation in code</div>
+        <div class="mono text-[12px] leading-6 text-gray-300">service-role (RLS off)<br/>+ if(member) check ×13<br/><span class="text-red-300">miss one → leak</span></div>
+      </div>
+      <div class="after rounded-xl p-4 mt-3">
+        <div class="text-[11px] mono uppercase tracking-widest text-mint/80 mb-2">After — isolation in DB</div>
+        <div class="mono text-[12px] leading-6 text-gray-300">RLS policy: org_id ∈ my orgs<br/>routes inherit it<br/><span class="text-mint">fail closed by default</span></div>
+      </div>
+      <p class="mt-3 text-xs text-gray-400">Bigger change; sequence it after the account unification so policies target a single org seam.</p>
+    </div>
+  </div>
+</article>
+
+<!-- C6 -->
+<article id="c6" class="card rounded-2xl p-6 md:p-8">
+  <div class="flex items-start justify-between gap-4 flex-wrap">
+    <div>
+      <div class="text-xs mono text-gray-500 mb-1">Candidate 6</div>
+      <h2 class="text-2xl font-semibold tracking-tight">Retire the legacy <span class="text-mint">customers</span> table into <span class="text-mint">organizations</span></h2>
+    </div>
+    <span class="b-spec rounded-full px-3 py-1 text-xs mono uppercase tracking-wider">Speculative</span>
+  </div>
+  <div class="mt-5 grid md:grid-cols-2 gap-6">
+    <div>
+      <h3 class="text-xs mono uppercase tracking-widest text-gray-500 mb-2">Files / tables</h3>
+      <ul class="text-sm text-gray-300 space-y-1 mono">
+        <li>customers (max_cameras, api_key, organization)</li>
+        <li>honour_agent_settings.customer_id → org_id</li>
+        <li>agents.customer_id / agent_cameras.customer_id</li>
+      </ul>
+      <h3 class="text-xs mono uppercase tracking-widest text-gray-500 mt-5 mb-2">Problem</h3>
+      <p class="text-sm text-gray-300 leading-relaxed">
+        Three account-ish entities coexist: <span class="mono">customers</span> (legacy sales record, has an unused <span class="mono">max_cameras=5</span>),
+        <span class="mono">subscriptions</span> (Stripe), <span class="mono">organizations</span> (WorkOS). Cameras carry <em>both</em> <span class="mono">customer_id</span>
+        and <span class="mono">org_id</span>. This dual identity is a standing source of "which id do I use here?" friction.
+      </p>
+      <h3 class="text-xs mono uppercase tracking-widest text-gray-500 mt-5 mb-2">Solution</h3>
+      <p class="text-sm text-gray-300 leading-relaxed">
+        Once Account (C1) is the single seam, migrate Genetec settings + agent/camera links onto <span class="mono">org_id</span> and drop <span class="mono">customer_id</span>
+        + the <span class="mono">customers</span>/<span class="mono">subscriptions</span> tables (or freeze them read-only as history).
+      </p>
+    </div>
+    <div>
+      <div class="rounded-xl border border-edge bg-ink p-4">
+        <div class="text-[11px] mono uppercase tracking-widest text-gray-500 mb-2">Deletion test</div>
+        <p class="text-sm text-gray-300">Delete <span class="mono">customers</span> → <span class="mono">max_cameras</span> becomes <span class="mono">organizations.camera_limit</span> (C2), Genetec creds move to org. Complexity concentrates onto one entity → worth doing, but only <strong>after</strong> C1/C2 land. Do not start here.</p>
+      </div>
+    </div>
+  </div>
+</article>
+
+<!-- TOP RECOMMENDATION -->
+<section class="rounded-2xl p-6 md:p-8" style="background:linear-gradient(180deg,#0f1f18,#0a0b0d);border:1px solid #1f7a5e">
+  <div class="text-xs mono uppercase tracking-[0.3em] text-mint mb-3">Top recommendation</div>
+  <h2 class="text-2xl md:text-3xl font-semibold tracking-tight">Start with Candidate&nbsp;1 — the Account module — then 2 → 3 → 4.</h2>
+  <p class="mt-4 text-gray-300 max-w-3xl leading-relaxed">
+    Everything else hangs off "which account is this?". The API side already has the deep, race-safe answer (<span class="mono text-mint">resolveOrg</span>);
+    promoting it to a shared <span class="text-mint">Account</span> seam keyed by the WorkOS org is the smallest change that makes the camera side
+    correct <em>and</em> unifies both products onto one entity. With that seam in place: <span class="mono">camera_limit</span> enforcement (C2) becomes a one-liner at
+    the add path, the webhook slim-down (C3) is pure deletion, and the access gate (C4) drops its Stripe dependency for free.
+  </p>
+  <div class="mt-6">
+    <div class="text-[11px] mono uppercase tracking-widest text-gray-500 mb-3">Suggested build order</div>
+    <div class="flex flex-wrap items-center gap-2 mono text-sm">
+      <span class="b-strong rounded-lg px-3 py-2">1 · Account seam</span>
+      <span class="text-mint">→</span>
+      <span class="b-strong rounded-lg px-3 py-2">2 · camera_limit at add</span>
+      <span class="text-mint">→</span>
+      <span class="b-strong rounded-lg px-3 py-2">3 · slim webhook</span>
+      <span class="text-mint">→</span>
+      <span class="b-worth rounded-lg px-3 py-2">4 · org-based access</span>
+      <span class="text-gray-600">→</span>
+      <span class="b-worth rounded-lg px-3 py-2">5 · RLS seam</span>
+      <span class="text-gray-600">→</span>
+      <span class="b-spec rounded-lg px-3 py-2">6 · retire customers</span>
+    </div>
+  </div>
+  <p class="mt-6 text-sm text-gray-400">Each step is TDD-able through the Account interface with a <span class="mono">FakeAccountStore</span> — no Supabase or Stripe needed to test entitlement logic. Decisions to record as ADR-0004: <em>WorkOS org = the account</em>; <em>camera_limit is manual/invoiced</em>; <em>API credits stay Stripe</em>; <em>limit is per-org</em>.</p>
+</section>
+
+</main>
+
+<footer class="max-w-6xl mx-auto px-6 pb-16 text-xs text-gray-600 mono">
+  Generated by improve-codebase-architecture · vocabulary: module / interface / seam / adapter / depth / deletion-test ·
+  domain: CONTEXT.md + ADR-0001..0003 · read-only analysis, nothing written to the repo.
+</footer>
+
+</body>
+</html>

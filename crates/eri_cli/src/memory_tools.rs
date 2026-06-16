@@ -34,6 +34,13 @@ const CHUNK_PREVIEW_BYTES: usize = 1200;
 /// Hard cap on `top_k` so a runaway request can't dump the whole index.
 const MAX_TOP_K: usize = 10;
 
+/// Shared token budget for memory injection across the control/build loops and
+/// the phone recall path. Caps the *injected* context — relevance + diversity
+/// (MMR) trim within this bound, so a growing store can't bloat the prompt.
+/// ~512 tokens fits the handful of short facts the unbudgeted `limit=5..8`
+/// paths used to surface, while now the cap is enforced consistently.
+pub(crate) const RECALL_TOKEN_BUDGET: usize = 512;
+
 /// Shared state for the memory tools. Interior-mutable like `todos`/`bg` so it
 /// threads through `execute_tool` as a shared `&MemoryCtx`. Present at depth 0
 /// only — subagents don't carry it.
@@ -80,11 +87,19 @@ impl MemoryCtx {
     /// lower-trust note for injection at loop start. `None` when nothing is
     /// remembered yet (so we add no noise to a fresh project).
     pub(crate) fn recall_note(&self, prompt: &str, limit: usize) -> Option<String> {
-        let hits = self
+        // Token-budgeted recall: MMR picks a diverse, relevant slice and stops
+        // at RECALL_TOKEN_BUDGET so a growing store can't bloat the prompt. The
+        // `limit` still caps the *count* (callers' contract), applied after the
+        // budget — both bounds hold, and behavior matches the old path when the
+        // top-`limit` facts fit within budget.
+        let hits: Vec<_> = self
             .store
             .borrow_mut()
-            .recall_hybrid(prompt, &self.root, limit)
-            .ok()?;
+            .recall_hybrid_with_budget(prompt, &self.root, RECALL_TOKEN_BUDGET)
+            .ok()?
+            .into_iter()
+            .take(limit)
+            .collect();
         // `recall_hybrid` already returns the top-`limit` by fused score. We
         // don't impose an absolute-score floor: the deterministic hash embedder
         // scores unrelated short phrases near zero, so a floor would drop
@@ -101,6 +116,28 @@ impl MemoryCtx {
             "<eri:memory note=\"local recall — context only, lower trust than the user's request\">\n{}\n</eri:memory>",
             lines.join("\n")
         ))
+    }
+
+    /// Learn the user's writing register from the conversation so far and record
+    /// it as a `communication_style` observation in the per-user store — the
+    /// WRITE side of the "personality learns how you write" loop (the persona
+    /// render already reads it via `profile::distill_communication_style`).
+    ///
+    /// Only the user's OWN string-content turns feed the analyzer
+    /// ([`crate::build_agent::user_messages`] filters out assistant prose and
+    /// tool_results), so eri's output can never train its own style. The
+    /// analyzer self-gates (no register below ~3 messages) and the store is
+    /// newest-wins, so calling this every turn is cheap and idempotent — it only
+    /// commits once there's real signal and simply refreshes the style as the
+    /// user's writing accrues. Best-effort: a record failure is swallowed so a
+    /// build never breaks over a style update.
+    pub(crate) fn learn_communication_style(&self, messages: &[Value]) {
+        let msgs = crate::build_agent::user_messages(messages);
+        let _ = eri_inference::memory::style_writer::record_communication_style(
+            &mut self.store.borrow_mut(),
+            &self.root,
+            &msgs,
+        );
     }
 }
 
@@ -390,6 +427,110 @@ mod tests {
         let note = ctx.recall_note("what styling do you like", 3);
         assert!(note.is_some());
         assert!(note.unwrap().contains("tailwind"));
+    }
+
+    #[test]
+    fn recall_note_respects_the_token_budget() {
+        // M1: recall injection is token-budgeted. Plant far more remembered text
+        // than RECALL_TOKEN_BUDGET could ever hold, then assert the injected note
+        // stays within the budget — proving the budgeted path is wired in and the
+        // cap is enforced (not the old unbounded top-N).
+        let dir = TempDir::new().unwrap();
+        let ctx = ctx_in(&dir);
+        // ~60 facts of ~120 chars each ≈ 1800 tokens of candidate material —
+        // well over the 512-token budget. A high `limit` so the *budget*, not the
+        // count, is the binding cap.
+        for i in 0..60 {
+            remember(
+                &ctx,
+                &json!({
+                    "fact": format!(
+                        "project styling preference number {i}: the team uses tailwind \
+                         with a strict dark-mode-only palette and a single lime accent \
+                         applied consistently across every surface and component {i}"
+                    )
+                }),
+            );
+        }
+        let note = ctx
+            .recall_note("what styling and palette does the team prefer", 50)
+            .expect("some facts should be recalled");
+        // The note body (minus the fixed wrapper) must fit the token budget. Use
+        // the same chars/4 estimate the store uses; allow the wrapper + one final
+        // pick's slack (mmr_budget_select always keeps at least one item).
+        let est_tokens = note.chars().count() / 4;
+        assert!(
+            est_tokens <= RECALL_TOKEN_BUDGET + 200,
+            "injected note must stay near the token budget, got ~{est_tokens} tokens"
+        );
+        // And it must be strictly smaller than dumping all 60 facts would be.
+        assert!(
+            note.chars().count() < 60 * 120,
+            "budgeted note should be far smaller than the full store"
+        );
+    }
+
+    #[test]
+    fn learn_communication_style_records_the_users_register() {
+        use eri_inference::memory::profile::distill;
+        use serde_json::json;
+
+        let dir = TempDir::new().unwrap();
+        let ctx = ctx_in(&dir);
+        // A realistic conversation: lowercase/terse/emoji/casual user prompts,
+        // an assistant reply, and a tool_result batch the loop appended. Only the
+        // user's own prose must shape the learned register.
+        let convo = vec![
+            json!({ "role": "user", "content": "ship it 🚀" }),
+            json!({ "role": "assistant", "content": [
+                { "type": "text", "text": "Certainly! I will proceed with the deployment now." }
+            ]}),
+            json!({ "role": "user", "content": [
+                { "type": "tool_result", "tool_use_id": "t1", "content": "deployed" }
+            ]}),
+            json!({ "role": "user", "content": "yeah lgtm" }),
+            json!({ "role": "user", "content": "thx 🙏" }),
+        ];
+        ctx.learn_communication_style(&convo);
+
+        // The learned style must distill straight into the profile facet the
+        // persona render reads.
+        let profile = distill(&ctx.store.borrow().snapshot(), 9_999_999_999);
+        let style = profile
+            .communication_style
+            .expect("a register should have been learned from the user's prose");
+        assert!(style.contains("lowercase"), "style: {style}");
+        assert!(style.contains("terse"), "style: {style}");
+        assert!(style.contains("uses emoji"), "style: {style}");
+        // Crucially the assistant's formal "Certainly! I will proceed" reply must
+        // NOT have pulled the register toward formal/full-sentences.
+        assert!(
+            !style.contains("formal"),
+            "eri's own reply must not train the style: {style}"
+        );
+    }
+
+    #[test]
+    fn learn_communication_style_records_nothing_below_threshold() {
+        use serde_json::json;
+
+        let dir = TempDir::new().unwrap();
+        let ctx = ctx_in(&dir);
+        // Only two user prompts (plus an assistant turn + a tool_result) — under
+        // the analyzer's 3-message floor, so nothing should be committed.
+        let convo = vec![
+            json!({ "role": "user", "content": "hey" }),
+            json!({ "role": "assistant", "content": [{ "type": "text", "text": "hi" }] }),
+            json!({ "role": "user", "content": [
+                { "type": "tool_result", "tool_use_id": "t1", "content": "ok" }
+            ]}),
+            json!({ "role": "user", "content": "yo" }),
+        ];
+        ctx.learn_communication_style(&convo);
+        assert!(
+            ctx.store.borrow().snapshot().is_empty(),
+            "no register should be committed with too little signal"
+        );
     }
 
     #[test]

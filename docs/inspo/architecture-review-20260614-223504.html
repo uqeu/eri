@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ARK · RunPod GPU-Worker Architecture Review</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body{background:#0a0b0d;color:#e6e9ee;font-family:ui-sans-serif,system-ui}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .num{font-variant-numeric:tabular-nums}
+  .card{background:#121417;border:1px solid #23272e}
+  .b-strong{background:#0f2e24;color:#3ce8b2;border:1px solid #1f7a5e}
+  .b-worth{background:#2a2410;color:#e8d23c;border:1px solid #7a6b1f}
+  .b-spec{background:#1a1d22;color:#9aa3af;border:1px solid #3a3f47}
+  .before{background:#1a1012;border:1px solid #4a2226}
+  .after{background:#0f1f18;border:1px solid #1f7a5e}
+  .pill{background:#1a1d22;border:1px solid #2a2f37}
+  a{color:#3ce8b2}
+  .mint{color:#3ce8b2}.red{color:#ff8a8a}.amber{color:#e8d23c}
+</style>
+</head>
+<body>
+<header class="max-w-6xl mx-auto px-6 pt-14 pb-8">
+  <div class="mint mono text-xs tracking-[0.3em] uppercase mb-3">Architecture Review · RunPod GPU-worker build</div>
+  <h1 class="text-4xl md:text-5xl font-semibold tracking-tight">Is the RunPod build sound?</h1>
+  <p class="mt-5 text-lg text-gray-400 max-w-3xl leading-relaxed">
+    Short answer: <strong class="text-gray-200">the model roster is right and the plan is sound</strong> — but
+    <strong class="text-gray-200">the inference seam isn't ready to package yet.</strong> There are <span class="red">two parallel
+    pipelines</span>, the API tier <span class="red">loads torch/ths in-process</span>, weights resolve by <span class="red">machine-specific
+    path literals</span>, and the worker <span class="red">silently runs random weights</span> if a file is missing. Fix those four and
+    the RunPod packaging becomes clean.
+  </p>
+  <div class="mt-6 flex flex-wrap gap-2 text-xs mono">
+    <span class="pill rounded-full px-3 py-1">5 candidates</span>
+    <span class="pill rounded-full px-3 py-1">3 <span class="mint">Strong</span></span>
+    <span class="pill rounded-full px-3 py-1">2 <span class="amber">Worth exploring</span></span>
+    <span class="pill rounded-full px-3 py-1">verdict: sound, after 3 fixes</span>
+  </div>
+</header>
+
+<section class="max-w-6xl mx-auto px-6 pb-10">
+  <div class="card rounded-2xl p-6 md:p-8">
+    <h2 class="text-sm mono uppercase tracking-widest text-gray-500 mb-5">The shape today — two pipelines, a heavy API tier, path-literal weights</h2>
+    <div class="grid md:grid-cols-2 gap-5">
+      <div class="before rounded-xl p-5">
+        <div class="text-xs mono uppercase tracking-widest text-red-300/80 mb-3">Inference runs in two places</div>
+        <div class="mono text-[13px] leading-7">
+          <span class="text-gray-200">cloud/stage2/worker.py</span> <span class="text-gray-500">(SQS)</span><br/>
+          → detection_stack → WM → gate → VLM<br/><br/>
+          <span class="text-gray-200">ark/api/inference.py · EngineInference</span><br/>
+          → <span class="red">loads ths + WM IN-PROCESS</span><br/>
+          → narrator via ARK_GEMMA_ENDPOINT
+        </div>
+        <div class="mt-3 text-xs text-red-300/70">Two implementations of "run the pipeline" → drift. And the API tier pulls torch/ths into the CPU host.</div>
+      </div>
+      <div class="after rounded-xl p-5">
+        <div class="text-xs mono uppercase tracking-widest text-mint/80 mb-3">What RunPod wants</div>
+        <div class="mono text-[13px] leading-7">
+          <span class="text-gray-200">API tier (CPU)</span> → HTTP →<br/>
+          <span class="mint">GPU worker (RunPod)</span><br/>
+          &nbsp;&nbsp;↳ ONE pipeline module<br/>
+          &nbsp;&nbsp;↳ vLLM: 26B-A4B + LoRA + &lt;|think|&gt;<br/>
+          &nbsp;&nbsp;↳ verify weights at boot
+        </div>
+        <div class="mt-3 text-xs text-mint/70">One inference seam, one pipeline, the API tier stays light, the worker owns the GPU.</div>
+      </div>
+    </div>
+    <div class="mt-6 grid grid-cols-4 gap-4 text-center">
+      <div class="pill rounded-xl p-4"><div class="text-3xl num red">2</div><div class="text-xs text-gray-400 mt-1">parallel pipelines<br/><span class="mono text-gray-600">worker.py · EngineInference</span></div></div>
+      <div class="pill rounded-xl p-4"><div class="text-3xl num red">0</div><div class="text-xs text-gray-400 mt-1">RunPod handlers exist<br/><span class="mono text-gray-600">no serverless entry yet</span></div></div>
+      <div class="pill rounded-xl p-4"><div class="text-3xl num amber">4</div><div class="text-xs text-gray-400 mt-1">machine-path / filename<br/>hardcodes</div></div>
+      <div class="pill rounded-xl p-4"><div class="text-3xl num red">1</div><div class="text-xs text-gray-400 mt-1">silent random-init<br/><span class="mono text-gray-600">WM gate = noise</span></div></div>
+    </div>
+  </div>
+</section>
+
+<main class="max-w-6xl mx-auto px-6 space-y-8 pb-16">
+
+<article class="card rounded-2xl p-6 md:p-8">
+  <div class="flex items-start justify-between gap-4 flex-wrap">
+    <div><div class="text-xs mono text-gray-500 mb-1">Candidate 1</div>
+      <h2 class="text-2xl font-semibold tracking-tight">Split <span class="mint">EngineInference</span>: API tier calls the worker over HTTP</h2></div>
+    <span class="b-strong rounded-full px-3 py-1 text-xs mono uppercase tracking-wider">Strong</span>
+  </div>
+  <div class="mt-5 grid md:grid-cols-2 gap-6">
+    <div>
+      <h3 class="text-xs mono uppercase tracking-widest text-gray-500 mb-2">Files</h3>
+      <ul class="text-sm text-gray-300 space-y-1 mono">
+        <li>ark/api/inference.py (EngineInference)</li>
+        <li>ark/api/server.py · DEPLOY.md</li>
+        <li>cloud/stage2/worker.py</li>
+      </ul>
+      <h3 class="text-xs mono uppercase tracking-widest text-gray-500 mt-5 mb-2">Problem</h3>
+      <p class="text-sm text-gray-300 leading-relaxed">
+        <span class="mono">EngineInference</span> loads the ths detector stack + World Model <strong class="text-red-300">in-process</strong> and only the
+        narrator goes over HTTP. So the "light CPU API tier" (api.honoursystem.ca) would actually need torch + ths + a GPU — defeating the
+        two-tier design in <span class="mono">DEPLOY.md</span>. The seam (<span class="mono">InferenceBackend.analyze</span>) is good; the prod adapter is in the wrong process.
+      </p>
+      <h3 class="text-xs mono uppercase tracking-widest text-gray-500 mt-5 mb-2">Solution</h3>
+      <p class="text-sm text-gray-300 leading-relaxed">
+        Add a thin <span class="mono text-mint">HttpEngineInference</span> adapter: the API tier POSTs the analyze request to the RunPod worker and
+        returns its JSON. The heavy <span class="mono">EngineInference</span> becomes the <em>worker's</em> implementation, not the API's. Same
+        <span class="mono">InferenceBackend</span> interface — now with two adapters (Fake + Http) at the API tier, and the engine one living on the GPU.
+      </p>
+    </div>
+    <div>
+      <div class="grid grid-cols-2 gap-3">
+        <div class="before rounded-xl p-4"><div class="text-[11px] mono uppercase tracking-widest text-red-300/80 mb-2">Before</div>
+          <div class="mono text-[12px] leading-6 text-gray-300">API host imports<br/>ths + torch + WM<br/><span class="red">= GPU on the API tier</span></div></div>
+        <div class="after rounded-xl p-4"><div class="text-[11px] mono uppercase tracking-widest text-mint/80 mb-2">After</div>
+          <div class="mono text-[12px] leading-6 text-gray-300">API → HTTP → worker<br/>API host = fastapi+httpx<br/><span class="mint">GPU only on RunPod</span></div></div>
+      </div>
+      <h3 class="text-xs mono uppercase tracking-widest text-gray-500 mt-5 mb-2">Benefits</h3>
+      <ul class="text-sm text-gray-300 space-y-2 leading-relaxed">
+        <li><span class="mint mono">leverage:</span> the API tier deploys as the light image we already wrote — no torch.</li>
+        <li><span class="mint mono">locality:</span> all GPU concerns live in the worker; the API never changes when the engine does.</li>
+        <li><span class="mint mono">tests:</span> Fake at the API tier (done), the engine tested on the worker — the HTTP seam is the contract.</li>
+      </ul>
+    </div>
+  </div>
+</article>
+
+<article class="card rounded-2xl p-6 md:p-8">
+  <div class="flex items-start justify-between gap-4 flex-wrap">
+    <div><div class="text-xs mono text-gray-500 mb-1">Candidate 2</div>
+      <h2 class="text-2xl font-semibold tracking-tight">One <span class="mint">pipeline</span> module behind both the SQS worker and the API</h2></div>
+    <span class="b-strong rounded-full px-3 py-1 text-xs mono uppercase tracking-wider">Strong</span>
+  </div>
+  <div class="mt-5 grid md:grid-cols-2 gap-6">
+    <div>
+      <h3 class="text-xs mono uppercase tracking-widest text-gray-500 mb-2">Files</h3>
+      <ul class="text-sm text-gray-300 space-y-1 mono">
+        <li>cloud/stage2/worker.py · detection_stack.py</li>
+        <li>ark/api/inference.py (EngineInference)</li>
+        <li>engine/world_model/v3/loop.py</li>
+      </ul>
+      <h3 class="text-xs mono uppercase tracking-widest text-gray-500 mt-5 mb-2">Problem</h3>
+      <p class="text-sm text-gray-300 leading-relaxed">
+        "Run detectors → World Model → gate → VLM" is implemented <strong class="text-red-300">twice</strong> — once in the SQS
+        <span class="mono">worker.py</span>, once in <span class="mono">EngineInference</span>. Two copies drift: a gate tweak or a new detector has to be made in
+        both, and the RunPod worker would be a third copy.
+      </p>
+      <h3 class="text-xs mono uppercase tracking-widest text-gray-500 mt-5 mb-2">Solution</h3>
+      <p class="text-sm text-gray-300 leading-relaxed">
+        Extract one <span class="mono text-mint">analyze_clip(frames, opts) → Alert</span> pipeline module. The SQS worker, the API's engine adapter,
+        and the new RunPod handler all call it. <strong>Deletion test:</strong> delete it and the pipeline logic reappears in 3 callers — it earns its keep.
+      </p>
+    </div>
+    <div>
+      <div class="before rounded-xl p-4"><div class="text-[11px] mono uppercase tracking-widest text-red-300/80 mb-2">Before — 2 (soon 3) copies</div>
+        <div class="mono text-[12px] leading-6 text-gray-300">worker.py: detect→WM→gate→vlm<br/>EngineInference: detect→WM→gate→vlm<br/>RunPod handler: …copy again?</div></div>
+      <div class="after rounded-xl p-4 mt-3"><div class="text-[11px] mono uppercase tracking-widest text-mint/80 mb-2">After — one module</div>
+        <div class="mono text-[12px] leading-6 text-gray-300">analyze_clip()<br/>↑ worker · ↑ API · ↑ RunPod<br/><span class="mint">one place to change the gate</span></div></div>
+    </div>
+  </div>
+</article>
+
+<article class="card rounded-2xl p-6 md:p-8">
+  <div class="flex items-start justify-between gap-4 flex-wrap">
+    <div><div class="text-xs mono text-gray-500 mb-1">Candidate 3</div>
+      <h2 class="text-2xl font-semibold tracking-tight">A <span class="mint">WeightResolver</span> + fail-closed boot verify (no path literals, no silent random-init)</h2></div>
+    <span class="b-strong rounded-full px-3 py-1 text-xs mono uppercase tracking-wider">Strong</span>
+  </div>
+  <div class="mt-5 grid md:grid-cols-2 gap-6">
+    <div>
+      <h3 class="text-xs mono uppercase tracking-widest text-gray-500 mb-2">Files</h3>
+      <ul class="text-sm text-gray-300 space-y-1 mono">
+        <li>engine/vlm/weights_manifest.py (E4B path)</li>
+        <li>engine/world_model/v3/loop.py (load_or_initialize)</li>
+        <li>ark/forensic/grounding.py (Eagle path)</li>
+        <li>ark/redaction/redact.py (abs paths)</li>
+      </ul>
+      <h3 class="text-xs mono uppercase tracking-widest text-gray-500 mt-5 mb-2">Problem</h3>
+      <p class="text-sm text-gray-300 leading-relaxed">
+        Weights resolve by <strong class="text-red-300">machine-specific literals</strong>: <span class="mono">data/models/gemma/google_gemma-4-E4B-it</span>,
+        <span class="mono">/Users/khai/Desktop/Eagle/Embodied</span>, hardcoded redaction paths. And the WM loader looks for
+        <span class="mono">world_model_v3.pth</span> while the trained file is <span class="mono">world_model_latest.pth</span> — a miss means it
+        <strong class="text-red-300">serves random weights with only a WARNING</strong> (the threat gate becomes noise). On RunPod none of those Mac paths exist.
+      </p>
+      <h3 class="text-xs mono uppercase tracking-widest text-gray-500 mt-5 mb-2">Solution</h3>
+      <p class="text-sm text-gray-300 leading-relaxed">
+        One <span class="mono text-mint">WeightResolver</span>: every model resolved by a key → (HF id | registry path | env override), no literals. Plus a
+        <span class="mono text-mint">verify_weights()</span> gate the worker runs at boot that <strong>refuses traffic</strong> unless every required weight is present,
+        the right variant, and (for WM) non-random. Silent degradation → loud startup failure.
+      </p>
+    </div>
+    <div>
+      <div class="rounded-xl border border-edge p-4" style="background:#0f1f18;border:1px solid #1f7a5e">
+        <div class="text-[11px] mono uppercase tracking-widest mint mb-2">The safety win</div>
+        <p class="text-sm text-gray-300">Today a renamed checkpoint = a threat gate quietly outputting noise in production. <strong>verify_weights</strong> turns that into "the worker won't start," which is exactly what you want for a safety system.</p>
+      </div>
+      <h3 class="text-xs mono uppercase tracking-widest text-gray-500 mt-5 mb-2">Benefits</h3>
+      <ul class="text-sm text-gray-300 space-y-2 leading-relaxed">
+        <li><span class="mint mono">leverage:</span> the same image runs on any box — paths come from config.</li>
+        <li><span class="mint mono">locality:</span> "what weights does ARK need" answered in one manifest.</li>
+        <li><span class="mint mono">safety:</span> no silent random-init, no missing-model surprises mid-incident.</li>
+      </ul>
+    </div>
+  </div>
+</article>
+
+<article class="card rounded-2xl p-6 md:p-8">
+  <div class="flex items-start justify-between gap-4 flex-wrap">
+    <div><div class="text-xs mono text-gray-500 mb-1">Candidate 4</div>
+      <h2 class="text-2xl font-semibold tracking-tight">VLM serving = one seam; dev vs prod = adapters; thinking + safety centralized</h2></div>
+    <span class="b-worth rounded-full px-3 py-1 text-xs mono uppercase tracking-wider">Worth exploring</span>
+  </div>
+  <div class="mt-5 grid md:grid-cols-2 gap-6">
+    <div>
+      <h3 class="text-xs mono uppercase tracking-widest text-gray-500 mb-2">Files</h3>
+      <ul class="text-sm text-gray-300 space-y-1 mono">
+        <li>engine/vlm/{weights_manifest,gemma_runner,backends,llm_backend}.py</li>
+        <li>engine/vlm/prompts.py (SYSTEM_PROMPT)</li>
+      </ul>
+      <h3 class="text-xs mono uppercase tracking-widest text-gray-500 mt-5 mb-2">Problem</h3>
+      <p class="text-sm text-gray-300 leading-relaxed">
+        The VLM has a clean HTTP seam (<span class="mono">backends.py</span> already parses a <span class="mono">thinking</span> trace ✅), but the <strong class="text-red-300">dev path
+        (E4B / MLX / GGUF)</strong> and the <strong>prod path (vLLM 26B-A4B)</strong> are tangled across four files, and <span class="mono">&lt;|think|&gt;</span> isn't in the
+        system prompt — so thinking (the proactive moat) won't actually fire unless it's added.
+      </p>
+      <h3 class="text-xs mono uppercase tracking-widest text-gray-500 mt-5 mb-2">Solution</h3>
+      <p class="text-sm text-gray-300 leading-relaxed">
+        One <span class="mono text-mint">VlmBackend</span> seam, two adapters: <span class="mono">local-dev</span> (MLX/llama.cpp, E4B) and <span class="mono">prod</span> (vLLM HTTP, 26B-A4B-it).
+        Centralize the <span class="mono">&lt;|think|&gt;</span> enablement + the safety-framed prompt so dev and prod can't diverge, with a <span class="mono">thinking_token_budget</span>
+        for the officer fast-path.
+      </p>
+    </div>
+    <div>
+      <div class="pill rounded-xl p-5">
+        <div class="text-[11px] mono uppercase tracking-widest text-gray-500 mb-3">Already right</div>
+        <ul class="text-sm text-gray-300 space-y-2">
+          <li>✅ <span class="mono">thinking</span> trace plumbed (backends.py)</li>
+          <li>✅ OpenAI-style HTTP seam (vLLM/llama.cpp swap freely)</li>
+          <li>✅ safety-framed SYSTEM_PROMPT exists</li>
+        </ul>
+        <div class="text-[11px] mono uppercase tracking-widest text-gray-500 mt-4 mb-2">To add</div>
+        <ul class="text-sm text-gray-300 space-y-2">
+          <li>⊕ <span class="mono">&lt;|think|&gt;</span> in the served prompt</li>
+          <li>⊕ prod adapter pinned to 26B-A4B-it</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</article>
+
+<article class="card rounded-2xl p-6 md:p-8">
+  <div class="flex items-start justify-between gap-4 flex-wrap">
+    <div><div class="text-xs mono text-gray-500 mb-1">Candidate 5</div>
+      <h2 class="text-2xl font-semibold tracking-tight">Serverless cold-start vs warm — don't put the officer path on a cold 16 GB model</h2></div>
+    <span class="b-worth rounded-full px-3 py-1 text-xs mono uppercase tracking-wider">Worth exploring</span>
+  </div>
+  <div class="mt-5 grid md:grid-cols-2 gap-6">
+    <div>
+      <h3 class="text-xs mono uppercase tracking-widest text-gray-500 mb-2">Problem</h3>
+      <p class="text-sm text-gray-300 leading-relaxed">
+        A RunPod <em>serverless</em> worker loading a 15-16 GB AWQ model + detectors has a multi-minute cold start. The architecture's
+        <span class="mono">&lt;2 s officer path</span> can't live on that. The spec already splits this — <strong class="text-gray-200">RunPod serverless for offline/batch,
+        AWS ca-central warm GPU for real-time/Canadian</strong> — so the plan is sound <em>if</em> we honor the split.
+      </p>
+      <h3 class="text-xs mono uppercase tracking-widest text-gray-500 mt-5 mb-2">Solution</h3>
+      <p class="text-sm text-gray-300 leading-relaxed">
+        Package <strong>offline</strong> (annotate-a-clip, forensic search, redact) for RunPod serverless — cold start is fine for batch. Keep
+        <strong>real-time + officer</strong> on the always-warm GPU (with the idle-CPU auto-terminate alarm). Use a RunPod
+        <span class="mono">active worker</span> / min-instances if you want warm offline too, at standing cost.
+      </p>
+    </div>
+    <div>
+      <div class="before rounded-xl p-4"><div class="text-[11px] mono uppercase tracking-widest text-red-300/80 mb-2">Wrong</div>
+        <div class="mono text-[12px] leading-6 text-gray-300">officer alert →<br/>cold serverless →<br/><span class="red">2-5 min to first token</span></div></div>
+      <div class="after rounded-xl p-4 mt-3"><div class="text-[11px] mono uppercase tracking-widest text-mint/80 mb-2">Right</div>
+        <div class="mono text-[12px] leading-6 text-gray-300">offline clip → RunPod serverless<br/>officer/real-time → warm AWS<br/><span class="mint">latency matches the path</span></div></div>
+    </div>
+  </div>
+</article>
+
+<section class="rounded-2xl p-6 md:p-8" style="background:linear-gradient(180deg,#0f1f18,#0a0b0d);border:1px solid #1f7a5e">
+  <div class="text-xs mono uppercase tracking-[0.3em] mint mb-3">Top recommendation</div>
+  <h2 class="text-2xl md:text-3xl font-semibold tracking-tight">Yes, RunPod is sound — but do C1 + C2 + C3 first, then build the handler.</h2>
+  <p class="mt-4 text-gray-300 max-w-3xl leading-relaxed">
+    The packaging only works once the pipeline is a <strong>single module</strong> (C2) reached through a <strong>single HTTP inference seam</strong>
+    (C1), with <strong>config-resolved, boot-verified weights</strong> (C3). Then the RunPod handler is a thin wrapper around
+    <span class="mono">analyze_clip()</span>, the API tier stays light, and the worker can never serve random or wrong weights. C4 (thinking +
+    26B-A4B) and C5 (cold vs warm) ride along.
+  </p>
+  <div class="mt-6 flex flex-wrap items-center gap-2 mono text-sm">
+    <span class="b-strong rounded-lg px-3 py-2">1 · HTTP inference seam</span><span class="mint">→</span>
+    <span class="b-strong rounded-lg px-3 py-2">2 · one pipeline module</span><span class="mint">→</span>
+    <span class="b-strong rounded-lg px-3 py-2">3 · WeightResolver + verify</span><span class="mint">→</span>
+    <span class="b-worth rounded-lg px-3 py-2">4 · VLM dev/prod adapters + &lt;|think|&gt;</span><span class="text-gray-600">→</span>
+    <span class="b-worth rounded-lg px-3 py-2">5 · offline serverless / warm real-time</span><span class="text-gray-600">→</span>
+    <span class="b-spec rounded-lg px-3 py-2">RunPod handler (thin)</span>
+  </div>
+  <p class="mt-6 text-sm text-gray-400">Verdict: the <strong>models we're uploading are correct</strong> (per the verified roster) and the <strong>two-tier plan is right</strong>. The risk isn't <em>what</em> we upload — it's that the inference code isn't packaged as one clean seam yet. Fix C1-C3 and the build is solid.</p>
+</section>
+</main>
+<footer class="max-w-6xl mx-auto px-6 pb-16 text-xs text-gray-600 mono">improve-codebase-architecture · read-only · vocabulary: module/interface/seam/adapter/depth/deletion-test · domain: CONTEXT.md + ADR-0001..0004 + project_runpod_vlm_truth</footer>
+</body></html>

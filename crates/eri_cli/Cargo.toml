@@ -32,6 +32,7 @@ eri_agent = { path = "../eri_agent" }
 eri_apply = { path = "../eri_apply" }
 eri_caveman = { path = "../eri_caveman" }
 eri_core.workspace = true
+eri_coreutils = { path = "../eri_coreutils" }
 eri_git = { path = "../eri_git" }
 eri_hooks = { path = "../eri_hooks" }
 eri_index = { path = "../eri_index", default-features = false }

@@ -249,6 +249,7 @@ mod tests {
                     frame: [0.0, 0.0, 1.0, 1.0],
                 })
                 .collect(),
+            screen: None,
         }
     }
 

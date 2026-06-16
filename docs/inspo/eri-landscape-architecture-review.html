@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>eri — Landscape Architecture Review · SOTA check</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body{background:#0a0c0f;color:#e8ebef}
+  .card{background:#12161b;border:1px solid #222a32}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .b-strong{background:#16361f;color:#5ee08a;border:1px solid #2a6b41}
+  .b-worth{background:#3a2f12;color:#e6c25e;border:1px solid #6b5a2a}
+  .b-spec{background:#2a2230;color:#c79de6;border:1px solid #5a3a6b}
+  .b-ship{background:#3a1416;color:#ff8a8a;border:1px solid #7a2a2a}
+  .before{border-left:3px solid #6b3a3a}
+  .after{border-left:3px solid #2a6b41}
+  code{color:#9ad}
+  h1,h2,h3{letter-spacing:-0.01em}
+  .pill{font-size:11px;font-weight:600;padding:2px 8px;border-radius:6px}
+</style>
+</head>
+<body class="max-w-5xl mx-auto px-6 py-10">
+
+<header class="mb-8">
+  <div class="text-xs uppercase tracking-widest text-neutral-500 mb-2">eri · whole-landscape architecture review · 2026-06-12</div>
+  <h1 class="text-3xl font-semibold">Is eri SOTA software? — the honest read</h1>
+  <p class="mt-4 text-neutral-300 max-w-3xl leading-relaxed">
+    Four read-only passes over the landscape: the <b>brain</b> (router + inference + local engine), the <b>agent harness</b>
+    (build + control), the <b>workspace macro-structure</b> (30+ crates), and the <b>cloud + surfaces</b> (proxy, auth, app, IDE).
+    Verdict up front, then the deepening candidates.
+  </p>
+</header>
+
+<!-- Verdict -->
+<section class="card rounded-xl p-6 mb-8">
+  <h2 class="text-xl font-semibold mb-3">The verdict</h2>
+  <div class="text-sm text-neutral-300 space-y-3 leading-relaxed">
+    <p><b class="text-emerald-300">The design is genuinely SOTA-competitive.</b> The agent <em>seams</em> (the new provider-agnostic
+    <span class="mono">ControlTurn</span>, local-first routing, the full safety layer in <span class="mono">control_safety.rs</span>) are
+    architecturally <em>cleaner than bolting a local model onto a cloud pipeline</em> — ahead of Cursor/Goose in the control path. The
+    workspace has <b>no dependency cycles</b>, domain-aligned crates, and a small reusable agent SDK with Python/Node FFI bindings.
+    That's a real foundation, not a prototype.</p>
+    <p><b class="text-amber-300">But it is not yet SOTA at deployment scale.</b> Three structural truths hold it back: the sidecar
+    (<span class="mono">eri_coreutils</span>) is a <em>monolithic hub</em> importing ~15 domain crates; on-device inference is
+    <em>duplicated and only half-wired</em> (two Ollama paths, <span class="mono">LocalProvider</span> not yet in the brain loop); and the
+    <em>build loop is still welded to Claude</em> while control already proved the seam that frees it. None are fatal — all are the
+    "make the good design reach everywhere" kind of work.</p>
+    <p><b class="text-rose-300">The launch gate is not architecture — it's signing.</b> Two independent passes confirmed: the macOS app
+    is <span class="mono">codesign --sign -</span> (ad-hoc) with no notarization and no real <span class="mono">.dmg</span>. Gatekeeper
+    blocks it on any other Mac. That's the #1 thing between "great codebase" and "a stranger can run it."</p>
+  </div>
+</section>
+
+<h2 class="text-lg font-semibold text-neutral-400 mb-4 mt-10">Strong candidates (do these)</h2>
+
+<!-- 1 build_agent seam -->
+<section class="card rounded-xl p-6 mb-6">
+  <div class="flex items-center justify-between mb-2">
+    <h3 class="text-lg font-semibold">1 · Lift the build loop onto the ControlTurn seam (a <span class="mono">BuildTurn</span>)</h3>
+    <span class="pill b-strong">Strong</span>
+  </div>
+  <p class="text-sm text-neutral-300 mb-2"><span class="text-neutral-500">Files:</span> <span class="mono">build_agent.rs:216-223, ~510</span> · mirrors the seam already in <span class="mono">control_turn.rs</span></p>
+  <p class="text-sm text-neutral-300 mb-3">
+    <span class="text-neutral-500">Problem:</span> <span class="mono">control_agent</span> just got a provider-agnostic seam (Claude + local, unit-testable, local-first).
+    <span class="mono">build_agent</span> still calls <span class="mono">signed_in_client()</span> → <span class="mono">post_stream</span> to Claude only — it
+    can't reach on-device models and can't be unit-tested without a cloud login. The request-shaping / streaming / tool-parse code is nearly identical to what control already abstracted.
+    <span class="text-neutral-500">Solution:</span> extract a <span class="mono">BuildTurn</span> seam and drive the build loop through a vec of engines, exactly like <span class="mono">drive_control_loop</span>.
+    <span class="text-neutral-500">Why first:</span> highest leverage / lowest risk — the pattern is proven this session, the payoff is "eri builds offline" + full test isolation.
+  </p>
+</section>
+
+<!-- 2 unify local inference -->
+<section class="card rounded-xl p-6 mb-6">
+  <div class="flex items-center justify-between mb-2">
+    <h3 class="text-lg font-semibold">2 · Unify the two on-device inference paths + wire <span class="mono">LocalProvider</span> into the brain loop</h3>
+    <span class="pill b-strong">Strong</span>
+  </div>
+  <p class="text-sm text-neutral-300 mb-2"><span class="text-neutral-500">Files:</span> <span class="mono">eri_tab/src/lib.rs</span> (FIM Ollama/llama.cpp) vs <span class="mono">eri_inference/providers/local.rs</span> (chat Ollama) · <span class="mono">brain_iteration.rs</span> (Local → UnsupportedModel)</p>
+  <p class="text-sm text-neutral-300 mb-3">
+    <span class="text-neutral-500">Problem:</span> two independent systems manage local models, hitting the same Ollama server with two clients + duplicate download logic, and the general brain loop still
+    rejects <span class="mono">ModelChoice::Local</span>. The published roadmap (<span class="mono">docs/architecture/local-engine-tier.md</span>) literally lists this as the missing seam.
+    <span class="text-neutral-500">Solution:</span> one <span class="mono">LocalInferenceEngine</span> trait both paths share (FIM = a system-prompt specialisation), and make <span class="mono">ModelChoice::Local</span> executable in the brain loop.
+    <span class="text-neutral-500">Payoff:</span> the local-first promise becomes real everywhere, not just control.
+  </p>
+</section>
+
+<!-- 3 coreutils hub -->
+<section class="card rounded-xl p-6 mb-6">
+  <div class="flex items-center justify-between mb-2">
+    <h3 class="text-lg font-semibold">3 · Break the <span class="mono">eri_coreutils</span> dependency star</h3>
+    <span class="pill b-strong">Strong</span>
+  </div>
+  <p class="text-sm text-neutral-300 mb-2"><span class="text-neutral-500">Files:</span> <span class="mono">eri_coreutils/src/services/mod.rs</span> (30+ handlers), <span class="mono">lib.rs</span> (JSON-RPC dispatch) · 15 domain-crate deps · ~14k lines</p>
+  <p class="text-sm text-neutral-300 mb-3">
+    <span class="text-neutral-500">Problem:</span> the sidecar imports nearly every domain crate (inference, router, apply, tab, index, rules, skills, hooks, mcp, review, codemaps, git, voice…). Every new feature triggers a
+    workspace-wide rebuild; it's a monolith pretending to be a platform — the single largest coupling risk.
+    <span class="text-neutral-500">Solution:</span> a service-loader seam (trait-object handlers that register on load) so heavy services (brain, iterate, mcp) become separate crates.
+    <span class="text-neutral-500">Note:</span> biggest long-term risk, but a bigger lift — start by extracting the 3 heaviest to prove the pattern.
+  </p>
+</section>
+
+<!-- 4 signing -->
+<section class="card rounded-xl p-6 mb-6">
+  <div class="flex items-center justify-between mb-2">
+    <h3 class="text-lg font-semibold">4 · Code signing + notarization + real installer (the launch gate)</h3>
+    <span class="pill b-ship">Strong · ship-blocker</span>
+  </div>
+  <p class="text-sm text-neutral-300 mb-2"><span class="text-neutral-500">Files:</span> <span class="mono">scripts/build_eri_agent_manager.sh</span> (<span class="mono">codesign --sign -</span> ad-hoc), <span class="mono">ide/release.sh</span> (checksums only), <span class="mono">website/app/download/</span> → <span class="mono">/api/download/macos</span></p>
+  <p class="text-sm text-neutral-300 mb-3">
+    <span class="text-neutral-500">Problem:</span> ad-hoc signing + no notarization = Gatekeeper rejects the app on any fresh Mac; nothing real is served at the download endpoint. <em>Not an architecture flaw — a missing pipeline.</em>
+    <span class="text-neutral-500">Solution:</span> Developer-ID sign (<span class="mono">--options runtime</span>) → <span class="mono">notarytool</span> → <span class="mono">stapler</span> → build a <span class="mono">.dmg</span> → wire the download route, in CI. <span class="text-neutral-500">Needs your Apple Developer cert.</span>
+  </p>
+</section>
+
+<!-- 5 control server token -->
+<section class="card rounded-xl p-6 mb-6">
+  <div class="flex items-center justify-between mb-2">
+    <h3 class="text-lg font-semibold">5 · Harden the loopback control server's token handoff</h3>
+    <span class="pill b-strong">Strong · security</span>
+  </div>
+  <p class="text-sm text-neutral-300 mb-2"><span class="text-neutral-500">Files:</span> <span class="mono">scripts/eri_control_server.swift:469-495</span> (token → stdout), <span class="mono">:423-436</span> (bearer check)</p>
+  <p class="text-sm text-neutral-300 mb-3">
+    <span class="text-neutral-500">Problem:</span> the all-powerful control token is printed to <b>stdout</b> (any process inheriting it, or a writable log, sees it) with no rate-limit / replay guard. Loopback + bearer is good; stdout delivery is the soft spot.
+    <span class="text-neutral-500">Solution:</span> hand the token over a 0600 temp file / UNIX socket instead of stdout; add a simple per-process rate limit. <span class="text-neutral-500">Cheap, closes a local priv-esc path.</span>
+  </p>
+</section>
+
+<h2 class="text-lg font-semibold text-neutral-400 mb-3 mt-10">Worth exploring (debt, not blockers)</h2>
+<section class="card rounded-xl p-5 mb-8">
+  <ul class="text-sm text-neutral-300 space-y-2 list-disc pl-5">
+    <li><b><span class="mono">execute_tool</span> 9-arg god-function</b> (<span class="mono">build_agent.rs:884</span>) → bundle todos/bg/mem into a <span class="mono">ToolContext</span>. <span class="pill b-worth">Worth</span></li>
+    <li><b>Shallow <span class="mono">Instrumentation</span>/<span class="mono">SearchProvider</span> traits</b> (<span class="mono">brain_iteration.rs:107-131</span>) → collapse into one <span class="mono">CallContext</span>; they exist only to satisfy test stubs. <span class="pill b-worth">Worth</span></li>
+    <li><b>Edit-vs-chat branch duplication</b> (<span class="mono">brain_iteration.rs:262-395</span>) → an <span class="mono">IntentDispatcher</span>. <span class="pill b-worth">Worth</span></li>
+    <li><b>Domain workflows mixed into <span class="mono">eri_inference</span></b> (20 modules: pr/personas/social/bug_finder…) → feature crates over a pure LLM core. <span class="pill b-worth">Worth</span></li>
+    <li><b>Token metering split across 3 files</b> (<span class="mono">proxy.ts</span>/<span class="mono">quota.ts</span>/<span class="mono">cost_guard.ts</span>) → one accounting service; flag fallback-estimate bills. <span class="pill b-worth">Worth</span></li>
+    <li><b>Stringly-typed Rust↔Swift↔web wire contract</b> → a schema (proto/OpenAPI) + generated stubs + a wire-version header. <span class="pill b-spec">Speculative</span></li>
+    <li><b>Router has no feedback loop</b> — heuristic only; nothing closes wrong-classification / over-escalation back into the thresholds. The <span class="mono">eri_graph</span> sink (added this session) is where that loop attaches. <span class="pill b-worth">Worth</span></li>
+  </ul>
+</section>
+
+<section class="card rounded-xl p-6 mb-8 border-emerald-800/40">
+  <h2 class="text-xl font-semibold mb-3">Top recommendation</h2>
+  <p class="text-sm text-neutral-300 leading-relaxed">
+    For <b>shipping</b>: candidate <b>4 (signing/notarization)</b> is the only thing that turns this from "great repo" into "installable product" — do it the moment you have the Apple cert.
+    For <b>architecture/SOTA</b>: candidate <b>1 (BuildTurn seam)</b> is the highest-leverage next move — it extends the exact seam we proved this session to the build loop, makes builds local-capable and testable, and is low-risk because the pattern already exists. Then <b>2 (unify local inference)</b> makes "local-first" true everywhere.
+    Candidate <b>3 (decouple coreutils)</b> is the biggest long-term win but the largest lift — schedule it once 1+2 land. <b>5</b> is a cheap security fix to slot in anytime.
+  </p>
+  <p class="text-sm text-neutral-400 mt-3">Sequence: <span class="mono">4 (ship) ‖ 1 (BuildTurn) → 2 (unify local) → 5 (token) → 3 (decouple)</span></p>
+</section>
+
+<footer class="text-xs text-neutral-600 pb-10">
+  Read-only review, 4 parallel passes. Foundation: 30+ crates, no dependency cycles, agent SDK with FFI. Workspace currently green (80 test bins, eri_cli 219).
+</footer>
+</body>
+</html>

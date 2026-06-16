@@ -131,6 +131,25 @@ pub(crate) fn tool_allowed(tool: &str, allowed: &Option<Vec<String>>) -> bool {
     })
 }
 
+/// Extract only the USER's own typed messages from a conversation, in order.
+///
+/// A user turn is `{ "role": "user", "content": "<text>" }` — a real prompt the
+/// person typed. A user turn whose `content` is an **array** is a `tool_result`
+/// batch the loop appended (not the person's writing), so it is skipped; so are
+/// all assistant turns. This is the load-bearing "only the user's text feeds the
+/// style learner" filter: nothing eri produced — assistant prose or tool output —
+/// can leak into the learned register. Pure + unit-tested.
+pub(crate) fn user_messages(messages: &[Value]) -> Vec<&str> {
+    messages
+        .iter()
+        .filter(|m| m.get("role").and_then(Value::as_str) == Some("user"))
+        // Only string content is the person's prose; an array is tool_results.
+        .filter_map(|m| m.get("content").and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
 /// The *eri context window* for a plan tier: the token ceiling the context
 /// pipeline compacts the conversation toward before each cloud call. Lower
 /// tiers get a smaller window (more compaction, fewer tokens spent); `None`
@@ -467,6 +486,15 @@ async fn drive_build_loop(
         {
             system.push(json!({ "type": "text", "text": note }));
         }
+        // Learn the user's writing register from their OWN messages so eri
+        // mirrors how they write (the "personality learns how you write" loop).
+        // Fires once per drive on the user-prompt-bearing history already in
+        // `messages`; the analyzer self-gates (no style below ~3 messages) and
+        // the store is newest-wins, so this is cheap to call every turn and only
+        // commits a register once there's real signal. Best-effort: a failure
+        // never blocks the build. Only string-content user turns feed it — never
+        // eri's replies, never tool_results.
+        ctx.learn_communication_style(messages);
     }
     // Per-loop task checklist (todo_write / todo_read).
     let todos: RefCell<Vec<TodoItem>> = RefCell::new(Vec::new());
@@ -1647,9 +1675,9 @@ mod bash_tests {
     #[test]
     fn build_system_adds_style_block_for_non_builder() {
         let dir = tempfile::tempdir().unwrap();
-        // Builder: persona block + confidentiality guardrail + tool-invisibility.
+        // Builder: persona + confidentiality guardrail + tool-invisibility + human voice.
         let base = build_system(dir.path(), SystemStyle::Builder);
-        assert_eq!(base.len(), 3);
+        assert_eq!(base.len(), 4);
         assert_eq!(
             base[1]["text"].as_str().unwrap(),
             eri_inference::brand::GUARDRAIL,
@@ -1660,15 +1688,58 @@ mod bash_tests {
             eri_inference::brand::TOOL_INVISIBILITY,
             "every agent gets the tool-invisibility directive"
         );
-        // Reviewer: persona + guardrail + invisibility + a style directive block.
+        assert_eq!(
+            base[3]["text"].as_str().unwrap(),
+            eri_inference::brand::HUMAN_VOICE,
+            "every agent gets the human-voice directive"
+        );
+        // Reviewer: persona + guardrail + invisibility + human voice + style directive.
         let reviewed = build_system(dir.path(), SystemStyle::Reviewer);
-        assert_eq!(reviewed.len(), 4);
+        assert_eq!(reviewed.len(), 5);
         assert!(
-            reviewed[3]["text"]
+            reviewed[4]["text"]
                 .as_str()
                 .unwrap()
                 .contains("OUTPUT STYLE: REVIEWER")
         );
+    }
+
+    #[test]
+    fn user_messages_takes_only_the_persons_own_prose() {
+        // A realistic conversation: user prompt, assistant text + tool_use, the
+        // loop's tool_result batch (role "user", array content), then a second
+        // user prompt. Only the two typed prompts must come back — never eri's
+        // reply, never the tool_result the loop appended.
+        let convo = vec![
+            json!({ "role": "user", "content": "  ship it 🚀  " }),
+            json!({ "role": "assistant", "content": [
+                { "type": "text", "text": "On it." },
+                { "type": "tool_use", "id": "t1", "name": "write_file", "input": {} }
+            ]}),
+            json!({ "role": "user", "content": [
+                { "type": "tool_result", "tool_use_id": "t1", "content": "wrote 10 bytes" }
+            ]}),
+            json!({ "role": "user", "content": "yeah lgtm" }),
+            // Blank/whitespace-only user turns carry no signal and are dropped.
+            json!({ "role": "user", "content": "   " }),
+        ];
+        let msgs = user_messages(&convo);
+        assert_eq!(
+            msgs,
+            vec!["ship it 🚀", "yeah lgtm"],
+            "only the user's typed, trimmed prose — no assistant text, no tool_result, no blanks"
+        );
+    }
+
+    #[test]
+    fn user_messages_is_empty_without_any_user_prose() {
+        let convo = vec![
+            json!({ "role": "assistant", "content": [{ "type": "text", "text": "hi" }] }),
+            json!({ "role": "user", "content": [
+                { "type": "tool_result", "tool_use_id": "t1", "content": "ok" }
+            ]}),
+        ];
+        assert!(user_messages(&convo).is_empty());
     }
 
     #[test]
@@ -2330,6 +2401,9 @@ fn build_system(root: &Path, style: SystemStyle) -> Vec<Value> {
         // never sees; eri reports results in its own voice, never naming MCP /
         // Composio / a connector. Shared with the control loop via one constant.
         json!({ "type": "text", "text": eri_inference::brand::TOOL_INVISIBILITY }),
+        // Human voice — eri talks like a real person (no AI tells) and mirrors
+        // this user's register. Shared with the control loop via one constant.
+        json!({ "type": "text", "text": eri_inference::brand::HUMAN_VOICE }),
     ];
     if let Some(directive) = style.directive() {
         blocks.push(json!({

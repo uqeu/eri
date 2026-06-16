@@ -44,11 +44,12 @@ Add a **fifth tier** to the ADR-0003 infrastructure: **eri's own always-warm GPU
    real via the bi-temporal memory engine + token-budgeted MMR recall). Per-user LoRA adapters
    hot-swapped via vLLM multi-LoRA come later (Phase 4), once behavioural data exists. The
    self-improvement objective is **KTO** (learns from binary kept/edited/rejected signals).
-6. **⚠️ Training-data provenance (binding legal constraint).** **Never distill Claude or GPT-4**
-   to train eri's model — both ban industrial distillation (Feb 2026 ToS). **eri's own
-   Claude-on-CLI traces must NOT be recycled into training data.** The teacher for any
-   synthetic data is a **permissive model — DeepSeek-R1 or a large Qwen.** Provenance, not the
-   dataset's license tag, is the gate.
+6. **⚠️ Training approach + provenance (binding).** eri does **NOT distill any teacher** — not
+   Claude/GPT (ToS; both ban industrial distillation, Feb 2026), and not even a permissive teacher.
+   The student (eri-brain) is trained **directly on data**: clean-provenance existing datasets
+   (human-written or open-model-generated) + **eri-specific examples we author ourselves**.
+   **eri's own Claude-on-CLI traces are walled off from training.** Provenance, not the dataset's
+   license tag, is the gate. (Details: docs/architecture/personalization-learning-loop.md.)
 
 ## Consequences
 

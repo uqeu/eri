@@ -50,8 +50,8 @@ pub fn builtin_templates() -> Vec<TemplateEntry> {
         TemplateEntry {
             slug: "saas-next".into(),
             display_name: "SaaS — Next.js".into(),
-            description:
-                "Full-stack SaaS starter with auth, billing, and DB ready out of the box.".into(),
+            description: "Full-stack SaaS starter with auth, billing, and DB ready out of the box."
+                .into(),
             family: "next".into(),
             stack: vec![
                 "Next.js 15".into(),
@@ -141,7 +141,11 @@ pub fn builtin_templates() -> Vec<TemplateEntry> {
             display_name: "Eri workbench extension".into(),
             description: "Agent surface extension with a typed command bridge.".into(),
             family: "eri-workbench".into(),
-            stack: vec!["Agent surface".into(), "TypeScript".into(), "esbuild".into()],
+            stack: vec![
+                "Agent surface".into(),
+                "TypeScript".into(),
+                "esbuild".into(),
+            ],
         },
     ]
 }

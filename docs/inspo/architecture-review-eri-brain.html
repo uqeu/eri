@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>eri-brain architecture review — deepening lens</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({startOnLoad:true,theme:'dark'});</script>
+<style>
+  body{background:#0b0d10;color:#e6e8eb}
+  code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .card{background:#13161b;border:1px solid #232a33;border-radius:14px}
+  .badge{font-size:11px;letter-spacing:.04em;padding:2px 8px;border-radius:999px;font-weight:600}
+  .b-strong{background:#0f2e1c;color:#5ee9a4;border:1px solid #1d5b3a}
+  .b-explore{background:#2a230c;color:#f0c662;border:1px solid #5b4a1d}
+  .b-spec{background:#241327;color:#d68be6;border:1px solid #54275b}
+  .b-pass{background:#0f2530;color:#6fd0e6;border:1px solid #1d4a5b}
+  .b-fail{background:#2e1313;color:#f08a8a;border:1px solid #5b1d1d}
+  .fp{color:#9aa3ad}
+  pre{background:#0e1115;border:1px solid #1d2530;border-radius:10px;padding:10px;overflow:auto;font-size:12.5px}
+  .ba{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  @media(max-width:820px){.ba{grid-template-columns:1fr}}
+  h2{scroll-margin-top:80px}
+  a{color:#7fb4ff}
+</style>
+</head>
+<body class="leading-relaxed">
+<div class="max-w-5xl mx-auto px-5 py-10">
+
+<header class="mb-8">
+  <div class="text-sm fp">Architecture review · deepening lens · review-only</div>
+  <h1 class="text-3xl font-bold mt-1">eri-brain engine seam, intent router &amp; Composio session</h1>
+  <div class="fp text-sm mt-2">Branch <code>feat/computer-control-p0</code> · range <code>9a38acf1cd..150297bd60</code> ·
+  10 commits · +2,393 / −106. Vocabulary from CONTEXT.md, ADR-0004, personalization-learning-loop.md.</div>
+</header>
+
+<section class="card p-5 mb-8">
+  <h2 class="text-xl font-semibold mb-2">Lens primer</h2>
+  <p class="text-sm fp">A <b>module</b> = interface + implementation. <b>Depth</b> = much behavior behind a small interface.
+  The <b>deletion test</b>: delete the module — does complexity vanish (pass-through, shallow) or reappear across N callers (earns its keep)?
+  The interface is the test surface.</p>
+</section>
+
+<section class="card p-5 mb-8">
+  <h2 class="text-xl font-semibold mb-3">The seam, today</h2>
+  <div class="mermaid">
+flowchart TD
+  subgraph entry["entry paths"]
+    EX["eri &lt;NL&gt; (External)"] --> CI["classify_intent (intent.rs)"]
+    CI -->|Build| BL["drive_build_loop"]
+    CI -->|Control| CL["drive_control_loop"]
+    CI -->|Answer/Chat| ASK["agent::ask"]
+  end
+  BL --> BT["BuildTurn trait"]
+  CL --> CT["ControlTurn trait"]
+  BT --> EB1["EriBrainBuildTurn"]
+  BT --> LB["LocalBuildTurn (Ollama)"]
+  BT --> CB["ClaudeBuildTurn (cloud)"]
+  CT --> EB2["EriBrainControlTurn"]
+  CT --> LC["LocalControlTurn (Ollama)"]
+  CT --> CC["ClaudeControlTurn (cloud)"]
+  EB1 --> OAI["openai_turn.rs (shared wire)"]
+  EB2 --> OAI
+  BL --> LM["load_mcp → mcp_vars_with_session → composio_session"]
+  LM --> CFG["eri_mcp config: builtin composio = $&#123;COMPOSIO_MCP_URL&#125;"]
+  </div>
+  <p class="text-sm fp mt-3">Two parallel seams (<code>BuildTurn</code>, <code>ControlTurn</code>) share one wire-translation module
+  (<code>openai_turn.rs</code>). eri-brain is engine #0 in both. <code>build_agent.rs</code> owns MCP loading, Composio session minting,
+  tool dispatch, and system assembly around the build seam.</p>
+</section>
+
+<!-- TOP RECOMMENDATION -->
+<section class="card p-5 mb-8" style="border-color:#1d5b3a">
+  <div class="flex items-center gap-3 mb-2">
+    <span class="badge b-strong">TOP RECOMMENDATION</span>
+    <h2 class="text-xl font-semibold">Extract one shared <code>EngineTurn</code> core — the two eri-brain adapters are 90% copy-paste</h2>
+  </div>
+  <p class="text-sm">The OpenAI <i>wire</i> is already shared (<code>openai_turn.rs</code>, deep — keep). But <code>EriBrainBuildTurn</code>
+  and <code>EriBrainControlTurn</code> independently re-implement the same <b>HTTP execution</b>: <code>from_env</code> reading the same 3 env vars,
+  <code>new</code> trimming + appending <code>OPENAI_CHAT_PATH</code>, the same <code>post().bearer_auth().send()</code>, the same
+  status/JSON/empty-turn error ladder. Only the final container (<code>Turn</code> vs <code>TurnOutput</code>) differs — exactly the seam the module
+  doc <i>claims</i> is centralized but isn't. Same duplication for the <code>select_*_turn_with</code> ordering and the <code>Local*Turn</code> pair.</p>
+  <div class="ba mt-3">
+    <div><div class="fp text-xs mb-1">BEFORE — duplicated executor (build_turn.rs:340-390 ≈ control_turn.rs:511-559)</div>
+    <pre>// build_turn.rs
+let mut req = client.post(&endpoint).json(&body);
+if let Some(k)=&api_key { req=req.bearer_auth(k); }
+let resp = req.send().await.map_err(|e| Hard(...))?;
+if !resp.status().is_success() {...}
+let v = resp.json().await.map_err(...)?;
+let turn = eri_brain_turn(&v);   // → Turn
+if turn.content.is_empty() {Hard(...)}
+
+// control_turn.rs  (same 18 lines, anyhow instead of BuildTurnError,
+// parse_openai_response → TurnOutput)</pre></div>
+    <div><div class="fp text-xs mb-1">AFTER — one executor, two thin mappers</div>
+    <pre>// openai_turn.rs
+pub async fn execute_openai(
+    client,&endpoint,&api_key,&body
+) -> Result&lt;OpenAiTurn, OpenAiError&gt; { /* the 18 lines, once */ }
+
+// build_turn.rs
+let raw = execute_openai(..).await.map_err(to_build_err)?;
+Ok(openai_to_turn(raw))          // pure, already tested
+// control_turn.rs
+let raw = execute_openai(..).await?;
+Ok(openai_to_turn_output(raw))   // pure, already tested</pre></div>
+  </div>
+  <p class="text-sm mt-3"><b>Deletion test:</b> the wire module passes today (delete it → both adapters re-grow JSON-shape knowledge).
+  But the <i>executor</i> duplication fails the test in the other direction: a fix to one (timeout, retry, auth-header rename, streaming)
+  must be hand-mirrored to the other or they drift. Centralizing the HTTP call deepens the seam the docs already promise.</p>
+</section>
+
+<h2 class="text-2xl font-bold mb-4">Candidates</h2>
+
+<!-- C1 -->
+<section class="card p-5 mb-6">
+  <div class="flex items-center gap-3 mb-1">
+    <span class="badge b-strong">STRONG</span>
+    <h3 class="text-lg font-semibold">C1 · Shared OpenAI executor (see Top Rec)</h3>
+  </div>
+  <div class="fp text-xs mb-2">build_turn.rs:340-390 · control_turn.rs:511-559 · openai_turn.rs (host the executor)</div>
+  <p class="text-sm"><b>Problem:</b> wire translation is shared and deep; the HTTP <i>call</i> + error ladder is copy-pasted across the two adapters and will drift.
+  <br><b>Deepening:</b> move the request/send/decode into <code>openai_turn.rs</code> as one async <code>execute_openai</code>; adapters keep only the
+  <code>Turn</code>/<code>TurnOutput</code> mapping (already pure-tested). Same applies to <code>Local*Turn</code>.</p>
+</section>
+
+<!-- C2 -->
+<section class="card p-5 mb-6">
+  <div class="flex items-center gap-3 mb-1">
+    <span class="badge b-strong">STRONG</span>
+    <h3 class="text-lg font-semibold">C2 · <code>composio_session</code> + <code>${COMPOSIO_MCP_URL}</code> indirection earns its keep — but session lifecycle is leaky</h3>
+  </div>
+  <div class="fp text-xs mb-2">composio_session.rs:45 · build_agent.rs:2076 (mcp_vars_with_session) · eri_mcp/config.rs:245 (builtin)</div>
+  <p class="text-sm"><b>Verdict on the var-indirection:</b> it <b>earns its keep</b>. The single <code>${COMPOSIO_MCP_URL}</code> placeholder + fail-closed
+  <code>expand_vars</code> means a minted session, a cloud-relayed session, or "skip composio entirely" are all one config path with one code path —
+  delete it and the mint/relay/skip branches reappear in <code>load_mcp</code>. Fail-closed is correct: <code>parse_session_url</code> → <code>None</code> →
+  var unset → server skipped (config.rs:255). Good.</p>
+  <p class="text-sm mt-2"><b>Problem (lifecycle):</b> the session is minted fresh on <b>every depth-0 run</b> (<code>mcp_vars_with_session</code> POSTs a new
+  <code>trs_…</code> each launch unless the env var is pre-set). No reuse, no TTL awareness, no expiry handling: a long build whose session expires mid-run
+  gets opaque per-tool failures ("that step couldn't be completed") with no re-mint. See stress risk S1.</p>
+  <div class="ba mt-2">
+    <div><div class="fp text-xs mb-1">BEFORE</div>
+    <pre>// every run: new session, no cache, no expiry path
+mcp_vars_with_session() {
+  if env COMPOSIO_MCP_URL set -> use it
+  else mint via POST (new trs_ each time)
+}</pre></div>
+    <div><div class="fp text-xs mb-1">AFTER (deepening)</div>
+    <pre>// session as a small typed value w/ minted_at;
+// cache on disk under .eri, reuse until ~TTL,
+// re-mint on 401/expired tool error mid-run.
+struct ToolRouterSession{ url:String, minted_at:Instant }</pre></div>
+  </div>
+</section>
+
+<!-- C3 -->
+<section class="card p-5 mb-6">
+  <div class="flex items-center gap-3 mb-1">
+    <span class="badge b-explore">WORTH EXPLORING</span>
+    <h3 class="text-lg font-semibold">C3 · <code>intent.rs</code> is a clean seam — but the keyword pile has real misroutes</h3>
+  </div>
+  <div class="fp text-xs mb-2">intent.rs:62 (classify_intent) · eri_cli.rs:998 (dispatch_external)</div>
+  <p class="text-sm"><b>Verdict on the seam:</b> the <code>&amp;str → Intent</code> signature is genuinely deep + correct as an upgrade seam — dispatch only
+  knows <code>Intent</code>, the eri-brain classifier can swap the body with no call-site change (the doc's stated contract holds). <b>Keep the seam.</b></p>
+  <p class="text-sm mt-2"><b>Problem (the body):</b> ordered keyword heuristics over-fire. Concrete misroutes the tests don't cover:</p>
+  <ul class="text-sm list-disc ml-6 mt-1 space-y-1">
+    <li><code>"delete all my files"</code> / <code>"close my bank account"</code> → no control/build verb, no connector → <b>Answer</b> (tool-capable). A destructive
+      imperative lands in the path that has connector tools. (See S2 — this is the highest-stakes misroute.)</li>
+    <li><code>"add a meeting tomorrow"</code> → <code>add</code> is a Build verb; <code>meeting</code> isn't in ARTIFACTS → falls through; but <code>"add a calendar event"</code>
+      hits Build's <code>add</code>+? no artifact → Answer, while <code>"create an event"</code> → <code>create</code> is Build verb, <code>event</code> not artifact → Answer. Fragile, order-dependent.</li>
+    <li><code>"open Spotify"</code> (no second action word) → APP_VERBS has <code>open</code> → Control ✓, but <code>"play despacito"</code> → <code>play</code> ✓ Control;
+      <code>"summarize my slack"</code> deliberately stays Answer (good) — yet <code>"search my slack"</code> hits the APP_NAMES+<code>search</code> rule → <b>Control</b>, not Answer.</li>
+  </ul>
+  <p class="text-sm mt-2"><b>Deepening:</b> keep the seam; make the <i>fallback safer</i> (route ambiguous-but-imperative to a confirm rather than silently to Answer),
+  and add a thin "destructive verb" guard that biases to Control's gated path (which has the confirm/denylist) rather than the ungated Answer path.</p>
+</section>
+
+<!-- C4 -->
+<section class="card p-5 mb-6">
+  <div class="flex items-center gap-3 mb-1">
+    <span class="badge b-explore">WORTH EXPLORING</span>
+    <h3 class="text-lg font-semibold">C4 · <code>build_agent.rs</code> is becoming a god-object (2,506 lines)</h3>
+  </div>
+  <div class="fp text-xs mb-2">build_agent.rs — load_mcp:2103, mcp_vars_with_session:2076, call_mcp_tool:2162, execute_tool:900, build_system:2251, run_bash:1268, drive_build_loop:352</div>
+  <p class="text-sm"><b>Deletion test:</b> mixed. The <i>loop</i> (<code>drive_build_loop</code>) earns its keep. But the file also owns: MCP wiring + Composio session,
+  the entire local tool executor (fs/git/bash/todo/subagent), path-jail, secret-env stripping, system assembly, and proxy-error mapping. These are independent
+  concerns sharing a file only by history. Against the project's own "200-400 lines typical, 800 max" rule it's 3× over.</p>
+  <p class="text-sm mt-2"><b>Deepening (low-risk, mechanical):</b> lift cohesive groups behind small interfaces — <code>mcp.rs</code> (load_mcp / mcp_vars / call_mcp_tool /
+  mcp_tool_specs), <code>tools/exec.rs</code> (the <code>execute_tool</code> match + fs/git/bash), <code>system.rs</code> (build_system + brand wiring). Each is a deeper module:
+  the loop calls <code>execute_tool(...)</code> and <code>load_mcp(...)</code> without seeing 1,600 lines. No behavior change; pure relocation behind existing call shapes.</p>
+</section>
+
+<!-- C5 -->
+<section class="card p-5 mb-6">
+  <div class="flex items-center gap-3 mb-1">
+    <span class="badge b-strong">STRONG</span>
+    <h3 class="text-lg font-semibold">C5 · Two escalation policies for one concept — unify the engine-ladder driver</h3>
+  </div>
+  <div class="fp text-xs mb-2">build_agent.rs:508-553 (per-turn retry from engine[0]) · control_agent.rs:1165-1188 (sticky engine_idx)</div>
+  <p class="text-sm"><b>Problem:</b> the build loop re-tries <code>engines</code> from index 0 <i>every turn</i> (so after a transient eri-brain failure it goes back to eri-brain
+  next turn). The control loop uses a <b>sticky <code>engine_idx</code></b> — once escalated to Claude it never returns to eri-brain for the rest of the run. Same domain
+  concept ("escalate engines for one turn / one goal"), two divergent hand-rolled policies. This is a silent behavioral fork: the cost/latency profile of a build vs a
+  control run differs for reasons no one chose.</p>
+  <div class="ba mt-2">
+    <div><div class="fp text-xs mb-1">BEFORE — build: retry from 0 each turn</div>
+    <pre>for (i,engine) in engines.iter().enumerate(){
+  match engine.run(..).await { Ok=>break,
+    Hard(e)=> if i+1&lt;len {continue} else {return Err}}}
+// next turn: starts again at engines[0]</pre></div>
+    <div><div class="fp text-xs mb-1">BEFORE — control: sticky idx</div>
+    <pre>let turn = engines[engine_idx];
+match turn.run(..).await { Err=> {
+  if idx+1&lt;len { engine_idx+=1; continue }
+  return Err } }
+// once escalated, stays escalated</pre></div>
+  </div>
+  <p class="text-sm mt-2"><b>Deepening:</b> one <code>EngineLadder</code> (or a shared function) with an explicit, documented policy (sticky vs per-turn) chosen on purpose and shared by both
+  loops. Then a future "remember eri-brain just failed, skip it this run" decision lives in one place — and the falling-Claude-share metric the learning loop depends on
+  is measured consistently across surfaces.</p>
+</section>
+
+<!-- C6 -->
+<section class="card p-5 mb-6">
+  <div class="flex items-center gap-3 mb-1">
+    <span class="badge b-pass">PASSES DELETION TEST</span>
+    <h3 class="text-lg font-semibold">C6 · <code>brand::TOOL_INVISIBILITY</code> / <code>GUARDRAIL</code> — keep as-is</h3>
+  </div>
+  <div class="fp text-xs mb-2">brand.rs:17,41 · build_agent.rs:2262-2266 · control_agent.rs:1277-1281</div>
+  <p class="text-sm">One constant, two call sites, both verified by tests (incl. control_turn.rs:865 locking that the guardrail survives Ollama lowering). Deleting it
+  re-grows the prompt text in both loops and risks divergence. <b>Deep, correct, leave it.</b> Minor note: invisibility is <i>prompt-side only</i> — <code>call_mcp_tool</code>
+  (build) neutralizes error text, but <code>ERI_DEBUG</code> output still prints "MCP"/server names (acceptable: debug-gated).</p>
+</section>
+
+<!-- STRESS -->
+<section class="card p-5 mb-6" style="border-color:#5b1d1d">
+  <h2 class="text-xl font-semibold mb-3">Correctness / stress risks</h2>
+  <ul class="text-sm space-y-3">
+    <li><span class="badge b-fail">HIGH</span> <b>S2 · destructive prompt → ungated Answer path.</b> <code>classify_intent</code> sends
+      <code>"delete all my files"</code>, <code>"wipe my downloads"</code> (no control/build verb, no connector keyword) to <b>Answer</b> (<code>agent::ask</code>),
+      which carries connector + (potentially) MCP tools and is <i>not</i> behind the control confirm/denylist gate. The safe default ("ambiguous → Answer") is unsafe
+      for destructive imperatives. <span class="fp">intent.rs:103, eri_cli.rs:1025.</span> Mitigation: a destructive-verb guard that routes to the gated Control path.</li>
+    <li><span class="badge b-fail">MED</span> <b>S1 · Tool Router session expiry mid-run.</b> Session minted once per run, no TTL/re-mint. If Composio expires
+      <code>trs_…</code> during a long loop, every meta-tool call returns the neutral failure with no recovery; the model may loop retrying. <span class="fp">composio_session.rs, build_agent.rs:2076.</span></li>
+    <li><span class="badge b-fail">MED</span> <b>S3 · eri-brain tool-call id collision risk.</b> <code>parse_openai_tool_call</code> synthesizes <code>eri-brain-{i}</code> when a server omits ids
+      (openai_turn.rs:229); <code>parse_local_tool_calls</code> uses <code>local-{i}</code>. In the <i>control</i> loop these ids are <b>not</b> threaded back as
+      <code>tool_call_id</code> (control results are role-based), so it's latent there; but in the <i>build</i> loop the eri-brain path round-trips ids through
+      <code>to_openai_messages</code> — a server that emits duplicate/empty ids across turns could mis-pair <code>tool_result</code>s. Add a uniqueness/sequence guard.</li>
+    <li><span class="badge b-fail">MED</span> <b>S4 · empty-turn → escalate can mask a working-but-terse engine.</b> Both eri-brain adapters treat "no text and no tool calls" as
+      <code>Hard</code>/escalate (build_turn.rs:382, control_turn.rs:545). A model that legitimately answers with an empty string + <code>stop_reason:end_turn</code>
+      (e.g. an acknowledged no-op) is forced to escalate to Claude — burning tokens and inflating Claude-share, the exact metric the moat is measured by.</li>
+    <li><span class="badge b-fail">LOW</span> <b>S5 · build eri-brain ignores <code>stop_reason</code> from the wire.</b> <code>eri_brain_turn</code> derives stop_reason purely from
+      "did it call tools" (build_turn.rs:411), discarding any real <code>finish_reason</code>/<code>length</code> the server sent — so a truncated eri-brain build turn
+      is reported as a clean <code>end_turn</code>, unlike the Claude path which narrates max_tokens (build_agent.rs:567).</li>
+    <li><span class="badge b-fail">LOW</span> <b>S6 · <code>strip_json_comments</code> ignores strings-with-<code>//</code>.</b> Documented as "naive, doesn't track markers inside strings"
+      (config.rs:330). A URL like <code>"https://x"</code> inside a value is fine (it's in-string and skipped), but a <code>/* */</code> sequence inside a string value would be
+      mangled. Edge-case, low likelihood for mcp.json shapes — noted, not blocking.</li>
+    <li><span class="badge b-pass">OK</span> <b>No unwrap/panic landmines in the new code.</b> <code>chosen.expect(...)</code> (build_agent.rs:552) is justified by the loop invariant;
+      <code>create_tool_router_session</code> and the wire parsers are exhaustively <code>Option</code>/<code>Result</code> with fail-closed defaults. Secret hygiene is good
+      (api_key never logged; bearer via <code>bearer_auth</code>; <code>is_secret_env</code> strips <code>ERI_*</code>/provider keys before bash).</li>
+  </ul>
+</section>
+
+<section class="card p-5 mb-6">
+  <h2 class="text-xl font-semibold mb-3">Speculative</h2>
+  <div class="flex items-center gap-3 mb-1">
+    <span class="badge b-spec">SPECULATIVE</span><span class="text-sm font-semibold">SP1 · fold <code>BuildTurn</code> + <code>ControlTurn</code> into one <code>EngineTurn&lt;Out&gt;</code></span>
+  </div>
+  <p class="text-sm fp">The two traits differ only in output type (<code>Turn</code> vs <code>TurnOutput</code>) and one error enum. A generic
+  <code>trait EngineTurn{type Out; async fn run(...)->Result&lt;Self::Out,EngineError&gt;}</code> plus the shared executor (C1) would make eri-brain/local/Claude
+  literally one set of adapters. High blast radius, defer until C1+C5 land and prove the shapes converge.</p>
+</section>
+
+<footer class="fp text-xs mt-10 border-t border-[#232a33] pt-4">
+  Generated for review only — no source files were modified. Vocabulary per CONTEXT.md / ADR-0004. ADR decisions (GPU tier, model-agnostic endpoint, KTO, provenance) not re-litigated.
+</footer>
+</div>
+</body>
+</html>

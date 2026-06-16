@@ -35,7 +35,11 @@ pub struct Suggestion {
 /// "After `current`, you usually do X." Counts the successors of `current` in the
 /// ordered `history` and returns the dominant one — `None` if `current` was seen
 /// followed by something too few times to trust.
-pub fn suggest_after(history: &[String], current: &str, min_observations: usize) -> Option<Suggestion> {
+pub fn suggest_after(
+    history: &[String],
+    current: &str,
+    min_observations: usize,
+) -> Option<Suggestion> {
     let mut successors: HashMap<&str, usize> = HashMap::new();
     for pair in history.windows(2) {
         if pair[0] == current {
@@ -67,7 +71,11 @@ pub fn most_common(history: &[String], min_count: usize) -> Option<Suggestion> {
     if count < min_count {
         return None;
     }
-    let confidence = if total == 0 { 0.0 } else { count as f32 / total as f32 };
+    let confidence = if total == 0 {
+        0.0
+    } else {
+        count as f32 / total as f32
+    };
     Some(Suggestion {
         action: best.to_string(),
         reason: format!("you do this often ({count} of your last {total} actions)"),
@@ -102,9 +110,12 @@ mod tests {
     fn suggest_after_finds_the_dominant_successor() {
         // After "open Cursor" the user opened Spotify twice, Slack once.
         let history = h(&[
-            "open Cursor", "open Spotify",
-            "open Cursor", "open Spotify",
-            "open Cursor", "open Slack",
+            "open Cursor",
+            "open Spotify",
+            "open Cursor",
+            "open Spotify",
+            "open Cursor",
+            "open Slack",
         ]);
         let s = suggest_after(&history, "open Cursor", MIN_OBSERVATIONS).unwrap();
         assert_eq!(s.action, "open Spotify");
@@ -135,10 +146,7 @@ mod tests {
 
     #[test]
     fn proactive_prefers_a_confident_sequential_pattern() {
-        let history = h(&[
-            "open Cursor", "open Spotify",
-            "open Cursor", "open Spotify",
-        ]);
+        let history = h(&["open Cursor", "open Spotify", "open Cursor", "open Spotify"]);
         let s = proactive_suggestion(&history, Some("open Cursor")).unwrap();
         assert_eq!(s.action, "open Spotify");
         assert!(s.confidence >= MIN_CONFIDENCE);

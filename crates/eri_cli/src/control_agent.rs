@@ -47,6 +47,13 @@ pub struct ScreenGraph {
     pub app: String,
     pub window: String,
     pub elements: Vec<AxElement>,
+    /// Screen bounds `[x, y, w, h]` in macOS points for the display the
+    /// elements live on. Optional + `#[serde(default)]` so older snapshots (and
+    /// the dry-run/mock bridges) that don't carry it deserialize unchanged.
+    /// Used ONLY to normalise the AX pixel frames into the gaze point's `[0,1]`
+    /// space for [`crate::gaze_focus`]; absent → no gaze-focus block.
+    #[serde(default)]
+    pub screen: Option<[f32; 4]>,
 }
 
 impl ScreenGraph {
@@ -81,6 +88,19 @@ pub enum ControlAction {
     OpenApp(String),
     QuitApp(String),
     Wait(u64),
+    /// Scroll the focused view. `direction` is up/down/left/right; `amount` is a
+    /// relative click/notch count (positive). Navigation, not destructive.
+    Scroll { direction: String, amount: i64 },
+    /// Press-drag-release from one point to another — moving a slider, a file,
+    /// selecting a range. Reversible navigation, but flows through the gate like
+    /// any pointer action so the remote channel can still confirm it.
+    Drag { from: ClickTarget, to: ClickTarget },
+    /// Right-click (secondary click) to open a context menu.
+    RightClick(ClickTarget),
+    /// Double-click (open/activate).
+    DoubleClick(ClickTarget),
+    /// Move the pointer to a coordinate without clicking (hover).
+    MouseMove(f32, f32),
 }
 
 impl ControlAction {
@@ -94,7 +114,17 @@ impl ControlAction {
             ControlAction::QuitApp(_) => true,
             ControlAction::Key(combo) => is_destructive_combo(combo),
             ControlAction::Type(text) => looks_destructive(text),
-            _ => false,
+            // Pointer/navigation actions are not destructive on their own; they
+            // still flow through the gate so the remote channel can confirm them.
+            ControlAction::Observe
+            | ControlAction::Click(_)
+            | ControlAction::OpenApp(_)
+            | ControlAction::Wait(_)
+            | ControlAction::Scroll { .. }
+            | ControlAction::Drag { .. }
+            | ControlAction::RightClick(_)
+            | ControlAction::DoubleClick(_)
+            | ControlAction::MouseMove(..) => false,
         }
     }
 
@@ -108,7 +138,11 @@ impl ControlAction {
             return true;
         }
         match self {
-            ControlAction::Click(ClickTarget::Element(label)) => looks_outward_facing(label),
+            ControlAction::Click(ClickTarget::Element(label))
+            | ControlAction::RightClick(ClickTarget::Element(label))
+            | ControlAction::DoubleClick(ClickTarget::Element(label)) => {
+                looks_outward_facing(label)
+            }
             _ => false,
         }
     }
@@ -127,7 +161,20 @@ impl ControlAction {
             ControlAction::Type(text) if looks_destructive(text) => {
                 Some(Permission::DestructiveCommands)
             }
-            _ => None,
+            // Everything else (incl. the pointer/navigation actions) has no
+            // grantable permission category — it either isn't risky, or it's a
+            // refusal that can't be granted away.
+            ControlAction::Observe
+            | ControlAction::Click(_)
+            | ControlAction::Type(_)
+            | ControlAction::Key(_)
+            | ControlAction::OpenApp(_)
+            | ControlAction::Wait(_)
+            | ControlAction::Scroll { .. }
+            | ControlAction::Drag { .. }
+            | ControlAction::RightClick(_)
+            | ControlAction::DoubleClick(_)
+            | ControlAction::MouseMove(..) => None,
         }
     }
 
@@ -138,7 +185,16 @@ impl ControlAction {
     pub fn target_app(&self) -> Option<&str> {
         match self {
             ControlAction::OpenApp(a) | ControlAction::QuitApp(a) => Some(a.as_str()),
-            _ => None,
+            ControlAction::Observe
+            | ControlAction::Click(_)
+            | ControlAction::Type(_)
+            | ControlAction::Key(_)
+            | ControlAction::Wait(_)
+            | ControlAction::Scroll { .. }
+            | ControlAction::Drag { .. }
+            | ControlAction::RightClick(_)
+            | ControlAction::DoubleClick(_)
+            | ControlAction::MouseMove(..) => None,
         }
     }
 
@@ -153,7 +209,22 @@ impl ControlAction {
             ControlAction::OpenApp(a) => format!("open {a}"),
             ControlAction::QuitApp(a) => format!("quit {a}"),
             ControlAction::Wait(ms) => format!("wait {ms}ms"),
+            ControlAction::Scroll { direction, amount } => format!("scroll {direction} {amount}"),
+            ControlAction::Drag { from, to } => {
+                format!("drag from {} to {}", describe_target(from), describe_target(to))
+            }
+            ControlAction::RightClick(t) => format!("right-click {}", describe_target(t)),
+            ControlAction::DoubleClick(t) => format!("double-click {}", describe_target(t)),
+            ControlAction::MouseMove(x, y) => format!("move mouse to ({x:.0}, {y:.0})"),
         }
+    }
+}
+
+/// A short phrase for a click target, shared by the pointer-action descriptions.
+fn describe_target(t: &ClickTarget) -> String {
+    match t {
+        ClickTarget::Element(id) => format!("element {id}"),
+        ClickTarget::Coord(x, y) => format!("({x:.0}, {y:.0})"),
     }
 }
 
@@ -165,11 +236,45 @@ pub trait ControlBridge: Send + Sync {
     /// Capture the screen as a base64 PNG (raw — caller must redact before any
     /// cloud send).
     async fn capture(&self) -> Result<String>;
+    /// The user's latest gaze point (normalised `[0,1]`), if the bridge has one.
+    ///
+    /// This is the SEAM that lets gaze enter the control loop. Default `None`:
+    /// a bridge with no eye-tracking feed behaves exactly as before (no
+    /// gaze-focus block). The macOS app — which owns the gaze tracker AND the
+    /// AX snapshot — is what overrides this to supply live gaze; until it does,
+    /// every bridge returns `None`. Best-effort context, never load-bearing:
+    /// the loop never blocks on it and treats any error as "no gaze".
+    ///
+    /// [user]/app-side follow-up: feed live gaze (answer `{"kind":"gaze"}` with
+    /// the latest normalised point; see [`crate::gaze_focus`]).
+    async fn gaze(&self) -> Option<eri_coreutils::services::gaze::GazePoint> {
+        None
+    }
     async fn click(&self, target: &ClickTarget) -> Result<String>;
     async fn type_text(&self, text: &str) -> Result<String>;
     async fn key(&self, combo: &str) -> Result<String>;
     async fn open_app(&self, name: &str) -> Result<String>;
     async fn quit_app(&self, name: &str) -> Result<String>;
+    /// Scroll the focused view. Default: unsupported (override per bridge).
+    async fn scroll(&self, _direction: &str, _amount: i64) -> Result<String> {
+        anyhow::bail!("scroll not supported by this bridge")
+    }
+    /// Press-drag-release between two points. Default: unsupported.
+    async fn drag(&self, _from: &ClickTarget, _to: &ClickTarget) -> Result<String> {
+        anyhow::bail!("drag not supported by this bridge")
+    }
+    /// Secondary (right) click. Default: unsupported.
+    async fn right_click(&self, _target: &ClickTarget) -> Result<String> {
+        anyhow::bail!("right-click not supported by this bridge")
+    }
+    /// Double click. Default: unsupported.
+    async fn double_click(&self, _target: &ClickTarget) -> Result<String> {
+        anyhow::bail!("double-click not supported by this bridge")
+    }
+    /// Move the pointer without clicking. Default: unsupported.
+    async fn mouse_move(&self, _x: f32, _y: f32) -> Result<String> {
+        anyhow::bail!("move-mouse not supported by this bridge")
+    }
 }
 
 /// Outcome of submitting an action to the gate.
@@ -370,6 +475,27 @@ async fn apply(bridge: &dyn ControlBridge, action: &ControlAction) -> Result<Str
         ControlAction::OpenApp(a) => bridge.open_app(a).await,
         ControlAction::QuitApp(a) => bridge.quit_app(a).await,
         ControlAction::Wait(ms) => Ok(format!("waited {ms}ms")),
+        ControlAction::Scroll { direction, amount } => bridge.scroll(direction, *amount).await,
+        ControlAction::Drag { from, to } => bridge.drag(from, to).await,
+        ControlAction::RightClick(t) => bridge.right_click(t).await,
+        ControlAction::DoubleClick(t) => bridge.double_click(t).await,
+        ControlAction::MouseMove(x, y) => bridge.mouse_move(*x, *y).await,
+    }
+}
+
+/// Parse an element-id-or-coordinates target from a JSON object. Shared by the
+/// click/right_click/double_click/drag tools so the target shape can't drift
+/// between them. `what` names the caller for a clear error.
+fn parse_click_target(input: &Value, what: &str) -> Result<ClickTarget> {
+    if let Some(id) = input.get("element").and_then(Value::as_str) {
+        Ok(ClickTarget::Element(id.to_string()))
+    } else if let (Some(x), Some(y)) = (
+        input.get("x").and_then(Value::as_f64),
+        input.get("y").and_then(Value::as_f64),
+    ) {
+        Ok(ClickTarget::Coord(x as f32, y as f32))
+    } else {
+        Err(anyhow!("{what} needs `element` or `x`+`y`"))
     }
 }
 
@@ -378,16 +504,44 @@ pub fn parse_action(name: &str, input: &Value) -> Result<ControlAction> {
     let s = |k: &str| input.get(k).and_then(Value::as_str).map(str::to_string);
     match name {
         "screen_observe" => Ok(ControlAction::Observe),
-        "click" => {
-            if let Some(id) = s("element") {
-                Ok(ControlAction::Click(ClickTarget::Element(id)))
-            } else if let (Some(x), Some(y)) = (
+        "click" => parse_click_target(input, "click").map(ControlAction::Click),
+        "right_click" => parse_click_target(input, "right_click").map(ControlAction::RightClick),
+        "double_click" => parse_click_target(input, "double_click").map(ControlAction::DoubleClick),
+        "scroll" => {
+            let direction = s("direction").ok_or_else(|| anyhow!("scroll needs `direction`"))?;
+            let direction = direction.to_lowercase();
+            if !matches!(direction.as_str(), "up" | "down" | "left" | "right") {
+                return Err(anyhow!(
+                    "scroll `direction` must be up/down/left/right, got {direction:?}"
+                ));
+            }
+            let amount = input
+                .get("amount")
+                .and_then(Value::as_i64)
+                .ok_or_else(|| anyhow!("scroll needs integer `amount`"))?;
+            if amount <= 0 {
+                return Err(anyhow!("scroll `amount` must be positive, got {amount}"));
+            }
+            Ok(ControlAction::Scroll { direction, amount })
+        }
+        "drag" => {
+            let from = input
+                .get("from")
+                .ok_or_else(|| anyhow!("drag needs `from`"))?;
+            let to = input.get("to").ok_or_else(|| anyhow!("drag needs `to`"))?;
+            Ok(ControlAction::Drag {
+                from: parse_click_target(from, "drag `from`")?,
+                to: parse_click_target(to, "drag `to`")?,
+            })
+        }
+        "move_mouse" => {
+            if let (Some(x), Some(y)) = (
                 input.get("x").and_then(Value::as_f64),
                 input.get("y").and_then(Value::as_f64),
             ) {
-                Ok(ControlAction::Click(ClickTarget::Coord(x as f32, y as f32)))
+                Ok(ControlAction::MouseMove(x as f32, y as f32))
             } else {
-                Err(anyhow!("click needs `element` or `x`+`y`"))
+                Err(anyhow!("move_mouse needs `x`+`y`"))
             }
         }
         "type" => s("text")
@@ -411,7 +565,19 @@ pub fn parse_action(name: &str, input: &Value) -> Result<ControlAction> {
 
 /// The control tool specs advertised to the model. Accessibility-first: the
 /// description steers the model to `screen_observe` then click elements by id.
+/// The coding-environment tools ([`crate::coding_control`]) are appended so the
+/// model can drive a code editor (open files, run palette commands, steer the
+/// AI chat) on top of the primitive computer-control surface.
 pub fn tool_specs() -> Vec<Value> {
+    let mut specs = primitive_tool_specs();
+    specs.extend(crate::coding_control::coding_tool_specs());
+    specs
+}
+
+/// The primitive computer-control tools (observe/click/type/key/…). Kept as its
+/// own function so [`tool_specs`] can layer the coding tools on top without this
+/// list growing a coding concern.
+fn primitive_tool_specs() -> Vec<Value> {
     vec![
         json!({
             "name": "screen_observe",
@@ -479,6 +645,80 @@ pub fn tool_specs() -> Vec<Value> {
                 "properties": { "ms": { "type": "integer" } }
             }
         }),
+        json!({
+            "name": "scroll",
+            "description": "Scroll the focused view to bring offscreen content into view. Use after screen_observe shows what you need isn't visible yet.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "direction": { "type": "string", "enum": ["up", "down", "left", "right"] },
+                    "amount": { "type": "integer", "description": "How far to scroll (positive). Roughly notches/clicks." }
+                },
+                "required": ["direction", "amount"]
+            }
+        }),
+        json!({
+            "name": "drag",
+            "description": "Press, move, and release the pointer from one point to another — to move a slider, drag a file, or select a range. Give from and to as an element id or x,y.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "from": {
+                        "type": "object",
+                        "properties": {
+                            "element": { "type": "string", "description": "Element id from screen_observe." },
+                            "x": { "type": "number" },
+                            "y": { "type": "number" }
+                        }
+                    },
+                    "to": {
+                        "type": "object",
+                        "properties": {
+                            "element": { "type": "string", "description": "Element id from screen_observe." },
+                            "x": { "type": "number" },
+                            "y": { "type": "number" }
+                        }
+                    }
+                },
+                "required": ["from", "to"]
+            }
+        }),
+        json!({
+            "name": "right_click",
+            "description": "Right-click (secondary click) a UI element by its id, or x,y coordinates, to open its context menu.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "element": { "type": "string", "description": "Element id from screen_observe." },
+                    "x": { "type": "number" },
+                    "y": { "type": "number" }
+                }
+            }
+        }),
+        json!({
+            "name": "double_click",
+            "description": "Double-click a UI element by its id, or x,y coordinates, to open or activate it.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "element": { "type": "string", "description": "Element id from screen_observe." },
+                    "x": { "type": "number" },
+                    "y": { "type": "number" }
+                }
+            }
+        }),
+        json!({
+            "name": "move_mouse",
+            "description": "Move the pointer to screen coordinates x,y without clicking — e.g. to hover and reveal something.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "x": { "type": "number" },
+                    "y": { "type": "number" }
+                },
+                "required": ["x", "y"]
+            }
+        }),
     ]
 }
 
@@ -537,6 +777,14 @@ pub async fn execute_tool_calls(
             });
             continue;
         }
+        // Coding-environment tools (`editor_*`): a single tool call lowers to a
+        // sequence of primitive actions (Key/Type), each run THROUGH the same
+        // gate — so a palette command typing something destructive still trips
+        // the content-aware risk check. One tool_result summarises the sequence.
+        if crate::coding_control::is_coding_tool(name) {
+            run_coding_tool(bridge, gate, confirm, id, name, input, &mut out).await;
+            continue;
+        }
         let action = match parse_action(name, input) {
             Ok(a) => a,
             Err(e) => {
@@ -592,6 +840,85 @@ pub async fn execute_tool_calls(
         }
     }
     out
+}
+
+/// Execute one coding-environment tool call: parse it, lower it to its primitive
+/// action sequence, and run each primitive through the gate in order. The whole
+/// sequence collapses into a single `tool_result` for the model. Sequencing is
+/// strict: if any primitive is refused or the user declines a confirmation, the
+/// REMAINING keystrokes are dropped — half a sequence (e.g. ⌘P with no path) is
+/// safer than blindly continuing to type into the wrong place.
+async fn run_coding_tool(
+    bridge: &dyn ControlBridge,
+    gate: &ControlGate,
+    confirm: &mut dyn FnMut(&str, Option<crate::control_safety::Permission>) -> bool,
+    id: &str,
+    name: &str,
+    input: &Value,
+    out: &mut StepOutcome,
+) {
+    let coding = match crate::coding_control::parse_coding_action(name, input) {
+        Ok(c) => c,
+        Err(e) => {
+            out.log.push(format!("bad coding tool {name}: {e}"));
+            out.results
+                .push(tool_result(id, &format!("error: {e}"), true));
+            return;
+        }
+    };
+    let mut step_results: Vec<String> = Vec::new();
+    for action in coding.lower() {
+        match gate.submit(bridge, &action).await {
+            Ok(Disposition::Executed(result)) => {
+                out.log.push(format!("{} -> {result}", action.describe()));
+                step_results.push(result);
+            }
+            Ok(Disposition::Refused(message)) => {
+                // A boundary inside the sequence (e.g. a destructive palette
+                // command). Hand back and abandon the rest — don't keep typing.
+                out.log
+                    .push(format!("refused: {} — {message}", coding.describe()));
+                out.results.push(tool_result(
+                    id,
+                    &format!("REFUSED (hand back to the user): {message}"),
+                    false,
+                ));
+                return;
+            }
+            Ok(Disposition::NeedsConfirmation(desc)) => {
+                if confirm(&desc, action.permission()) {
+                    match gate.confirm(bridge, &action).await {
+                        Ok(result) => {
+                            out.log.push(format!("confirmed: {desc} -> {result}"));
+                            step_results.push(result);
+                        }
+                        Err(e) => {
+                            out.log.push(format!("confirm failed: {e}"));
+                            out.results
+                                .push(tool_result(id, &format!("error: {e}"), true));
+                            return;
+                        }
+                    }
+                } else {
+                    out.log.push(format!("declined: {desc}"));
+                    out.results
+                        .push(tool_result(id, "user declined this action", false));
+                    return;
+                }
+            }
+            Err(e) => {
+                out.log.push(format!("{} failed: {e}", coding.describe()));
+                out.results
+                    .push(tool_result(id, &format!("error: {e}"), true));
+                return;
+            }
+        }
+    }
+    out.results.push(tool_result(
+        id,
+        &format!("{} ({})", coding.describe(), step_results.join("; ")),
+        false,
+    ));
 }
 
 fn tool_result(id: &str, content: &str, is_error: bool) -> Value {
@@ -698,6 +1025,7 @@ impl ControlBridge for DryRunBridge {
             app: "(dry-run: no live screen access)".into(),
             window: String::new(),
             elements: Vec::new(),
+            screen: None,
         })
     }
     async fn capture(&self) -> Result<String> {
@@ -718,6 +1046,21 @@ impl ControlBridge for DryRunBridge {
     async fn quit_app(&self, name: &str) -> Result<String> {
         Ok(format!("DRY RUN: would quit {name}"))
     }
+    async fn scroll(&self, direction: &str, amount: i64) -> Result<String> {
+        Ok(format!("DRY RUN: would scroll {direction} {amount}"))
+    }
+    async fn drag(&self, from: &ClickTarget, to: &ClickTarget) -> Result<String> {
+        Ok(format!("DRY RUN: would drag {from:?} -> {to:?}"))
+    }
+    async fn right_click(&self, target: &ClickTarget) -> Result<String> {
+        Ok(format!("DRY RUN: would right-click {target:?}"))
+    }
+    async fn double_click(&self, target: &ClickTarget) -> Result<String> {
+        Ok(format!("DRY RUN: would double-click {target:?}"))
+    }
+    async fn mouse_move(&self, x: f32, y: f32) -> Result<String> {
+        Ok(format!("DRY RUN: would move mouse to ({x:.0}, {y:.0})"))
+    }
 }
 
 /// Serialize an action to the wire JSON the actuation server understands.
@@ -737,7 +1080,35 @@ pub fn action_to_wire(action: &ControlAction) -> Value {
         ControlAction::OpenApp(a) => json!({ "kind": "open_app", "name": a }),
         ControlAction::QuitApp(a) => json!({ "kind": "quit_app", "name": a }),
         ControlAction::Wait(ms) => json!({ "kind": "wait", "ms": ms }),
+        ControlAction::Scroll { direction, amount } => {
+            json!({ "kind": "scroll", "direction": direction, "amount": amount })
+        }
+        ControlAction::Drag { from, to } => {
+            json!({ "kind": "drag", "from": target_to_wire(from), "to": target_to_wire(to) })
+        }
+        ControlAction::RightClick(t) => merge_kind("right_click", target_to_wire(t)),
+        ControlAction::DoubleClick(t) => merge_kind("double_click", target_to_wire(t)),
+        ControlAction::MouseMove(x, y) => json!({ "kind": "move_mouse", "x": x, "y": y }),
     }
+}
+
+/// Serialize a click target to its wire fields (`{"element": id}` or
+/// `{"x":..,"y":..}`). Used inside drag's nested from/to and by right/double
+/// click (merged with a `kind`).
+fn target_to_wire(t: &ClickTarget) -> Value {
+    match t {
+        ClickTarget::Element(id) => json!({ "element": id }),
+        ClickTarget::Coord(x, y) => json!({ "x": x, "y": y }),
+    }
+}
+
+/// Merge a `kind` discriminator into a target's wire object so right/double
+/// click serialize like `click` does (flat element-or-coords + a kind).
+fn merge_kind(kind: &str, mut target: Value) -> Value {
+    if let Some(obj) = target.as_object_mut() {
+        obj.insert("kind".to_string(), json!(kind));
+    }
+    target
 }
 
 /// Parse the actuation server's reply for a non-snapshot action: `{"result"}`
@@ -806,6 +1177,10 @@ impl ControlBridge for LoggingBridge<'_> {
     async fn capture(&self) -> Result<String> {
         self.inner.capture().await
     }
+    async fn gaze(&self) -> Option<eri_coreutils::services::gaze::GazePoint> {
+        // Read-only ambient context — forwarded unrecorded, like snapshot.
+        self.inner.gaze().await
+    }
     async fn click(&self, target: &ClickTarget) -> Result<String> {
         let result = self.inner.click(target).await?;
         self.record(ControlAction::Click(target.clone()));
@@ -829,6 +1204,37 @@ impl ControlBridge for LoggingBridge<'_> {
     async fn quit_app(&self, name: &str) -> Result<String> {
         let result = self.inner.quit_app(name).await?;
         self.record(ControlAction::QuitApp(name.to_string()));
+        Ok(result)
+    }
+    async fn scroll(&self, direction: &str, amount: i64) -> Result<String> {
+        let result = self.inner.scroll(direction, amount).await?;
+        self.record(ControlAction::Scroll {
+            direction: direction.to_string(),
+            amount,
+        });
+        Ok(result)
+    }
+    async fn drag(&self, from: &ClickTarget, to: &ClickTarget) -> Result<String> {
+        let result = self.inner.drag(from, to).await?;
+        self.record(ControlAction::Drag {
+            from: from.clone(),
+            to: to.clone(),
+        });
+        Ok(result)
+    }
+    async fn right_click(&self, target: &ClickTarget) -> Result<String> {
+        let result = self.inner.right_click(target).await?;
+        self.record(ControlAction::RightClick(target.clone()));
+        Ok(result)
+    }
+    async fn double_click(&self, target: &ClickTarget) -> Result<String> {
+        let result = self.inner.double_click(target).await?;
+        self.record(ControlAction::DoubleClick(target.clone()));
+        Ok(result)
+    }
+    async fn mouse_move(&self, x: f32, y: f32) -> Result<String> {
+        let result = self.inner.mouse_move(x, y).await?;
+        self.record(ControlAction::MouseMove(x, y));
         Ok(result)
     }
 }
@@ -912,6 +1318,61 @@ impl ControlBridge for HttpBridge {
     async fn quit_app(&self, name: &str) -> Result<String> {
         self.act(&ControlAction::QuitApp(name.to_string())).await
     }
+    async fn scroll(&self, direction: &str, amount: i64) -> Result<String> {
+        self.act(&ControlAction::Scroll {
+            direction: direction.to_string(),
+            amount,
+        })
+        .await
+    }
+    async fn drag(&self, from: &ClickTarget, to: &ClickTarget) -> Result<String> {
+        self.act(&ControlAction::Drag {
+            from: from.clone(),
+            to: to.clone(),
+        })
+        .await
+    }
+    async fn right_click(&self, target: &ClickTarget) -> Result<String> {
+        self.act(&ControlAction::RightClick(target.clone())).await
+    }
+    async fn double_click(&self, target: &ClickTarget) -> Result<String> {
+        self.act(&ControlAction::DoubleClick(target.clone())).await
+    }
+    async fn mouse_move(&self, x: f32, y: f32) -> Result<String> {
+        self.act(&ControlAction::MouseMove(x, y)).await
+    }
+    /// Ask the app for the user's latest gaze point. Best-effort: any transport
+    /// error or a reply without a usable point yields `None` (the loop then
+    /// runs with no gaze-focus block, exactly as before). Never propagates an
+    /// error — gaze is ambient context, not a step the loop depends on.
+    async fn gaze(&self) -> Option<eri_coreutils::services::gaze::GazePoint> {
+        let reply = self.post(json!({ "kind": "gaze" })).await.ok()?;
+        parse_wire_gaze(&reply)
+    }
+}
+
+/// Parse a gaze reply: `{"gaze": {"x", "y", "confidence", "ts_ms"}}`.
+///
+/// Returns `None` for an error reply, a missing/empty `gaze` object, or any
+/// malformed point — gaze is best-effort, so a bad reply is simply "no gaze"
+/// rather than a hard error. `confidence`/`ts_ms` default to sane values so the
+/// app only has to send `x`/`y` at minimum.
+pub fn parse_wire_gaze(reply: &Value) -> Option<eri_coreutils::services::gaze::GazePoint> {
+    use eri_coreutils::services::gaze::GazePoint;
+    let g = reply.get("gaze")?;
+    if g.is_null() {
+        return None;
+    }
+    let x = g.get("x").and_then(Value::as_f64)?;
+    let y = g.get("y").and_then(Value::as_f64)?;
+    let confidence = g.get("confidence").and_then(Value::as_f64).unwrap_or(1.0);
+    let ts_ms = g.get("ts_ms").and_then(Value::as_u64).unwrap_or(0);
+    Some(GazePoint {
+        x,
+        y,
+        confidence,
+        ts_ms,
+    })
 }
 
 /// Build the lower-trust context notes injected into the control loop: (a)
@@ -921,7 +1382,8 @@ impl ControlBridge for HttpBridge {
 async fn context_blocks(goal: &str, bridge: &dyn ControlBridge, workspace: &Path) -> Vec<String> {
     let mut blocks = Vec::new();
     if let Ok(mut store) = MemoryStore::open()
-        && let Ok(hits) = store.recall_hybrid(goal, workspace, 5)
+        && let Ok(hits) =
+            store.recall_hybrid_with_budget(goal, workspace, crate::memory_tools::RECALL_TOKEN_BUDGET)
     {
         let lines: Vec<String> = hits
             .into_iter()
@@ -942,6 +1404,14 @@ async fn context_blocks(goal: &str, bridge: &dyn ControlBridge, workspace: &Path
             blocks.push(format!(
                 "<eri:awareness note=\"on screen now — context only\">\n{note}\n</eri:awareness>"
             ));
+        }
+        // Gaze-focus: if the app is feeding a gaze point, fuse it with this same
+        // snapshot to name WHAT the user is looking at, so deictic commands
+        // ("click that", "what's this") resolve to the focused element. Reuses
+        // the AX snapshot we already fetched — one extra (best-effort) gaze read.
+        // No gaze (or no screen bounds) → no focus block, loop behaves as today.
+        if let Some(note) = crate::gaze_focus::focus_note(bridge.gaze().await, &graph) {
+            blocks.push(note);
         }
     }
     blocks
@@ -1029,6 +1499,9 @@ fn canonical_app(target: &str) -> Option<String> {
         "photos" => "Photos",
         "cursor" => "Cursor",
         "vscode" | "vs code" | "code" | "visual studio code" => "Visual Studio Code",
+        // Anthropic's desktop app (hosts Claude Code); "claude code" is the same
+        // surface eri steers via the coding-control tools.
+        "claude" | "claude code" | "claude desktop" => "Claude",
         "xcode" => "Xcode",
         "settings" | "system settings" | "system preferences" => "System Settings",
         _ => return None,
@@ -1274,7 +1747,12 @@ pub(crate) async fn drive_control_loop(
         }
         messages.push(json!({ "role": "assistant", "content": out.assistant_content }));
 
-        if !out.wants_tools {
+        // A turn is an answer (not an actuation) when the model doesn't want
+        // tools — OR when it claims to but hands back no tool calls. The latter
+        // is malformed: executing it would push `{role:"user", content:[]}`, an
+        // empty user turn that confuses the next model call. Treat it as the
+        // assistant's final text instead of spinning on nothing.
+        if !out.wants_tools || out.tool_calls.is_empty() {
             return Ok(ControlRun {
                 text: final_text,
                 usage,
@@ -1293,6 +1771,16 @@ pub(crate) async fn drive_control_loop(
         let executed = execute_tool_calls(bridge, gate, confirm, &out.tool_calls).await;
         for line in &executed.log {
             let _ = writeln!(stdout, "[eri] {line}");
+        }
+        // Never push an empty user turn: if execution produced no results (e.g.
+        // every call was filtered/dropped), there's nothing for the model to
+        // react to — finish with the assistant's text rather than a malformed
+        // `{role:"user", content:[]}` message.
+        if executed.results.is_empty() {
+            return Ok(ControlRun {
+                text: final_text,
+                usage,
+            });
         }
         messages.push(json!({ "role": "user", "content": executed.results }));
         if executed.done {
@@ -1353,6 +1841,9 @@ pub async fn run_control_agent(
         // never sees; eri reports results in its own voice, never naming MCP /
         // Composio / a connector. Shared with the build loop via one constant.
         json!({ "type": "text", "text": eri_inference::brand::TOOL_INVISIBILITY }),
+        // Human voice — eri talks like a real person (no AI tells) and mirrors
+        // this user's register. Shared with the build loop via one constant.
+        json!({ "type": "text", "text": eri_inference::brand::HUMAN_VOICE }),
     ];
     // Inject local context so eri acts informed + frugal: (a) remembered facts
     // relevant to this goal (mem0-style hybrid recall, 0 model tokens), and
@@ -1441,6 +1932,41 @@ mod tests {
             self.calls.lock().unwrap().push(format!("quit:{name}"));
             Ok(format!("quit {name}"))
         }
+        async fn scroll(&self, direction: &str, amount: i64) -> Result<String> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(format!("scroll:{direction}:{amount}"));
+            Ok("scrolled".into())
+        }
+        async fn drag(&self, from: &ClickTarget, to: &ClickTarget) -> Result<String> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(format!("drag:{from:?}->{to:?}"));
+            Ok("dragged".into())
+        }
+        async fn right_click(&self, target: &ClickTarget) -> Result<String> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(format!("right_click:{target:?}"));
+            Ok("right-clicked".into())
+        }
+        async fn double_click(&self, target: &ClickTarget) -> Result<String> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(format!("double_click:{target:?}"));
+            Ok("double-clicked".into())
+        }
+        async fn mouse_move(&self, x: f32, y: f32) -> Result<String> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(format!("mouse_move:{x},{y}"));
+            Ok("moved".into())
+        }
     }
 
     fn graph() -> ScreenGraph {
@@ -1463,6 +1989,7 @@ mod tests {
                     frame: [0.0, 0.0, 5.0, 5.0],
                 },
             ],
+            screen: None,
         }
     }
 
@@ -2258,6 +2785,56 @@ mod tests {
         assert_eq!(logs[0].tool_names, vec!["open_app"]);
     }
 
+    /// Helper: a turn that *claims* it wants tools but hands back an empty
+    /// tool-call list — the malformed shape C1 guards against.
+    fn empty_tool_call_turn(text: &str) -> crate::control_turn::TurnOutput {
+        crate::control_turn::TurnOutput {
+            assistant_content: json!([{ "type": "text", "text": text }]),
+            text: text.into(),
+            tool_calls: vec![],
+            wants_tools: true,
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn loop_terminates_cleanly_on_wants_tools_with_no_calls() {
+        // C1: wants_tools=true but tool_calls is empty must NOT push an empty
+        // `{role:"user", content:[]}` turn or spin — it's an answer turn. The
+        // loop returns the assistant text, actuates nothing, and never panics.
+        let bridge = MockBridge::with_snapshot(graph());
+        let gate = ControlGate::default();
+        let mut confirm = |_: &str, _: Option<crate::control_safety::Permission>| true;
+        let stub = StubTurn::new(
+            "local",
+            // Only ONE turn is queued. If the guard failed and the loop pushed an
+            // empty user turn + looped, it would pop a second (absent) turn and
+            // error "stub turn exhausted" instead of returning cleanly.
+            vec![Ok(empty_tool_call_turn("Nothing to do here."))],
+        );
+        let sink = RecordingSink::default();
+        let system = vec![json!({ "type": "text", "text": "sys" })];
+        let tools = json!(tool_specs());
+        let out = drive_control_loop(
+            &[&stub],
+            &bridge,
+            &gate,
+            &mut confirm,
+            &sink,
+            &system,
+            &tools,
+            "do nothing",
+            8,
+        )
+        .await
+        .unwrap();
+        assert_eq!(out.text, "Nothing to do here.");
+        // No actuation happened.
+        assert!(bridge.calls().is_empty());
+        // Exactly one turn ran — the loop did not spin on the empty call set.
+        assert_eq!(sink.logs().len(), 1);
+    }
+
     #[tokio::test]
     async fn instrumentation_attributes_each_turn_to_the_engine_that_ran_it() {
         // The correctness gap the sink seam closes: when local fails and the
@@ -2509,7 +3086,8 @@ mod tests {
     #[test]
     fn tool_specs_cover_the_action_surface() {
         let specs = tool_specs();
-        assert_eq!(specs.len(), 8);
+        // 13 primitive computer-control tools + 6 coding-environment tools.
+        assert_eq!(specs.len(), 19);
         let names: Vec<&str> = specs
             .iter()
             .map(|s| s.get("name").and_then(Value::as_str).unwrap())
@@ -2523,8 +3101,559 @@ mod tests {
             "open_app",
             "quit_app",
             "wait",
+            "scroll",
+            "drag",
+            "right_click",
+            "double_click",
+            "move_mouse",
+            // Coding-environment surface, layered on top.
+            "editor_open_file",
+            "editor_command",
+            "editor_steer_agent",
+            "editor_accept_suggestion",
+            "editor_reject_suggestion",
+            "editor_save",
         ] {
             assert!(names.contains(&expected), "missing tool spec {expected}");
         }
+    }
+
+    #[test]
+    fn parse_action_handles_the_human_pointer_actions() {
+        assert_eq!(
+            parse_action("scroll", &json!({ "direction": "down", "amount": 5 })).unwrap(),
+            ControlAction::Scroll {
+                direction: "down".into(),
+                amount: 5
+            }
+        );
+        // direction is normalized to lowercase.
+        assert_eq!(
+            parse_action("scroll", &json!({ "direction": "UP", "amount": 2 })).unwrap(),
+            ControlAction::Scroll {
+                direction: "up".into(),
+                amount: 2
+            }
+        );
+        assert_eq!(
+            parse_action(
+                "drag",
+                &json!({ "from": { "element": "a" }, "to": { "x": 9.0, "y": 3.0 } })
+            )
+            .unwrap(),
+            ControlAction::Drag {
+                from: ClickTarget::Element("a".into()),
+                to: ClickTarget::Coord(9.0, 3.0)
+            }
+        );
+        assert_eq!(
+            parse_action("right_click", &json!({ "element": "e1" })).unwrap(),
+            ControlAction::RightClick(ClickTarget::Element("e1".into()))
+        );
+        assert_eq!(
+            parse_action("double_click", &json!({ "x": 1.0, "y": 2.0 })).unwrap(),
+            ControlAction::DoubleClick(ClickTarget::Coord(1.0, 2.0))
+        );
+        assert_eq!(
+            parse_action("move_mouse", &json!({ "x": 4.0, "y": 8.0 })).unwrap(),
+            ControlAction::MouseMove(4.0, 8.0)
+        );
+    }
+
+    #[test]
+    fn parse_action_rejects_malformed_pointer_actions() {
+        // scroll: missing/bad direction, missing/non-positive amount.
+        assert!(parse_action("scroll", &json!({ "amount": 3 })).is_err());
+        assert!(parse_action("scroll", &json!({ "direction": "sideways", "amount": 3 })).is_err());
+        assert!(parse_action("scroll", &json!({ "direction": "down" })).is_err());
+        assert!(parse_action("scroll", &json!({ "direction": "down", "amount": 0 })).is_err());
+        // drag: missing from/to, or a target with neither element nor coords.
+        assert!(parse_action("drag", &json!({ "from": { "element": "a" } })).is_err());
+        assert!(
+            parse_action("drag", &json!({ "from": {}, "to": { "element": "b" } })).is_err()
+        );
+        // right/double click + move_mouse need a real target.
+        assert!(parse_action("right_click", &json!({})).is_err());
+        assert!(parse_action("double_click", &json!({})).is_err());
+        assert!(parse_action("move_mouse", &json!({ "x": 1.0 })).is_err());
+    }
+
+    #[test]
+    fn describe_renders_clear_phrases_for_pointer_actions() {
+        assert_eq!(
+            ControlAction::Scroll {
+                direction: "down".into(),
+                amount: 5
+            }
+            .describe(),
+            "scroll down 5"
+        );
+        assert_eq!(
+            ControlAction::Drag {
+                from: ClickTarget::Element("foo".into()),
+                to: ClickTarget::Coord(10.0, 20.0)
+            }
+            .describe(),
+            "drag from element foo to (10, 20)"
+        );
+        assert_eq!(
+            ControlAction::RightClick(ClickTarget::Element("foo".into())).describe(),
+            "right-click element foo"
+        );
+        assert_eq!(
+            ControlAction::DoubleClick(ClickTarget::Coord(3.0, 4.0)).describe(),
+            "double-click (3, 4)"
+        );
+        assert_eq!(
+            ControlAction::MouseMove(7.0, 9.0).describe(),
+            "move mouse to (7, 9)"
+        );
+    }
+
+    #[test]
+    fn pointer_actions_are_not_risky_locally() {
+        // Navigation/pointer ops carry no per-action confirm at the keyboard.
+        for a in [
+            ControlAction::Scroll {
+                direction: "down".into(),
+                amount: 3,
+            },
+            ControlAction::Drag {
+                from: ClickTarget::Coord(0.0, 0.0),
+                to: ClickTarget::Coord(1.0, 1.0),
+            },
+            ControlAction::RightClick(ClickTarget::Element("e1".into())),
+            ControlAction::DoubleClick(ClickTarget::Element("e1".into())),
+            ControlAction::MouseMove(1.0, 2.0),
+        ] {
+            assert!(!a.is_risky(), "should not gate locally: {}", a.describe());
+            assert!(a.permission().is_none());
+            assert!(a.target_app().is_none());
+        }
+    }
+
+    #[test]
+    fn remote_gate_treats_outward_facing_right_and_double_click_as_risky() {
+        // Right/double-clicking a "Send"/"Delete" element is bounced over the
+        // unattended remote channel, just like a left click.
+        assert!(ControlAction::RightClick(ClickTarget::Element("Delete".into())).is_risky_remote());
+        assert!(
+            ControlAction::DoubleClick(ClickTarget::Element("Send draft".into())).is_risky_remote()
+        );
+        // A benign element is not.
+        assert!(!ControlAction::DoubleClick(ClickTarget::Element("Notes".into())).is_risky_remote());
+    }
+
+    #[tokio::test]
+    async fn gate_executes_pointer_actions_through_the_mock_bridge() {
+        let bridge = MockBridge::default();
+        let gate = ControlGate::default();
+        let actions = [
+            ControlAction::Scroll {
+                direction: "down".into(),
+                amount: 4,
+            },
+            ControlAction::Drag {
+                from: ClickTarget::Element("a".into()),
+                to: ClickTarget::Element("b".into()),
+            },
+            ControlAction::RightClick(ClickTarget::Element("e1".into())),
+            ControlAction::DoubleClick(ClickTarget::Coord(5.0, 6.0)),
+            ControlAction::MouseMove(1.0, 2.0),
+        ];
+        for a in &actions {
+            // None are refused or held — they execute immediately.
+            assert!(matches!(
+                gate.submit(&bridge, a).await.unwrap(),
+                Disposition::Executed(_)
+            ));
+        }
+        assert_eq!(
+            bridge.calls(),
+            vec![
+                "scroll:down:4",
+                "drag:Element(\"a\")->Element(\"b\")",
+                "right_click:Element(\"e1\")",
+                "double_click:Coord(5.0, 6.0)",
+                "mouse_move:1,2",
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn logging_bridge_records_pointer_mutations() {
+        // The trust layer captures the new pointer actions too.
+        let inner = MockBridge::default();
+        let log = Arc::new(Mutex::new(ActionLog::default()));
+        let bridge = LoggingBridge::new(&inner, Arc::clone(&log));
+        bridge.scroll("down", 3).await.unwrap();
+        bridge
+            .drag(
+                &ClickTarget::Element("a".into()),
+                &ClickTarget::Coord(1.0, 2.0),
+            )
+            .await
+            .unwrap();
+        bridge.right_click(&ClickTarget::Element("e1".into())).await.unwrap();
+        bridge.double_click(&ClickTarget::Element("e2".into())).await.unwrap();
+        bridge.mouse_move(7.0, 8.0).await.unwrap();
+        let trail = log.lock().unwrap().trail();
+        assert_eq!(trail.len(), 5, "all five pointer mutations are recorded");
+        assert!(trail[0].contains("scroll down 3"));
+        assert!(trail[1].contains("drag from"));
+        assert!(trail[2].contains("right-click"));
+        assert!(trail[3].contains("double-click"));
+        assert!(trail[4].contains("move mouse"));
+    }
+
+    #[test]
+    fn pointer_actions_wire_roundtrip_matches_the_app_contract() {
+        // The Rust↔macOS-app contract for the new actions (the follow-up the app
+        // side must implement).
+        assert_eq!(
+            action_to_wire(&ControlAction::Scroll {
+                direction: "down".into(),
+                amount: 5
+            }),
+            json!({ "kind": "scroll", "direction": "down", "amount": 5 })
+        );
+        assert_eq!(
+            action_to_wire(&ControlAction::Drag {
+                from: ClickTarget::Element("a".into()),
+                to: ClickTarget::Coord(9.0, 3.0)
+            }),
+            json!({ "kind": "drag", "from": { "element": "a" }, "to": { "x": 9.0, "y": 3.0 } })
+        );
+        assert_eq!(
+            action_to_wire(&ControlAction::RightClick(ClickTarget::Element("e1".into()))),
+            json!({ "kind": "right_click", "element": "e1" })
+        );
+        assert_eq!(
+            action_to_wire(&ControlAction::DoubleClick(ClickTarget::Coord(5.0, 6.0))),
+            json!({ "kind": "double_click", "x": 5.0, "y": 6.0 })
+        );
+        assert_eq!(
+            action_to_wire(&ControlAction::MouseMove(4.0, 8.0)),
+            json!({ "kind": "move_mouse", "x": 4.0, "y": 8.0 })
+        );
+    }
+
+    #[tokio::test]
+    async fn executor_runs_pointer_tool_calls_end_to_end() {
+        // From model tool-call JSON all the way through parse → gate → bridge.
+        let bridge = MockBridge::with_snapshot(graph());
+        let gate = ControlGate::default();
+        let mut confirm = |_: &str, _: Option<crate::control_safety::Permission>| true;
+        let calls = vec![
+            (
+                "1".into(),
+                "scroll".into(),
+                json!({ "direction": "down", "amount": 3 }),
+            ),
+            ("2".into(), "right_click".into(), json!({ "element": "e1" })),
+            ("3".into(), "done".into(), json!({})),
+        ];
+        let out = execute_tool_calls(&bridge, &gate, &mut confirm, &calls).await;
+        assert!(out.done);
+        assert_eq!(
+            bridge.calls(),
+            vec!["scroll:down:3", "right_click:Element(\"e1\")"]
+        );
+        assert!(!out.results[0]["is_error"].as_bool().unwrap_or(false));
+    }
+
+    /// A bridge that supplies BOTH a snapshot (with screen bounds) and a live
+    /// gaze point — the shape the macOS app will have once it feeds gaze. Lets
+    /// us assert the loop's assembled context actually grows a focus block.
+    struct GazingBridge {
+        graph: ScreenGraph,
+        gaze: Option<eri_coreutils::services::gaze::GazePoint>,
+    }
+
+    #[async_trait::async_trait]
+    impl ControlBridge for GazingBridge {
+        async fn snapshot(&self) -> Result<ScreenGraph> {
+            Ok(self.graph.clone())
+        }
+        async fn capture(&self) -> Result<String> {
+            Ok("ZmFrZS1wbmc=".into())
+        }
+        async fn gaze(&self) -> Option<eri_coreutils::services::gaze::GazePoint> {
+            self.gaze
+        }
+        async fn click(&self, _t: &ClickTarget) -> Result<String> {
+            Ok("clicked".into())
+        }
+        async fn type_text(&self, _text: &str) -> Result<String> {
+            Ok("typed".into())
+        }
+        async fn key(&self, _combo: &str) -> Result<String> {
+            Ok("pressed".into())
+        }
+        async fn open_app(&self, name: &str) -> Result<String> {
+            Ok(format!("opened {name}"))
+        }
+        async fn quit_app(&self, name: &str) -> Result<String> {
+            Ok(format!("quit {name}"))
+        }
+    }
+
+    fn gazing_graph() -> ScreenGraph {
+        ScreenGraph {
+            app: "Mail".into(),
+            window: "Inbox".into(),
+            elements: vec![AxElement {
+                id: "send".into(),
+                role: "button".into(),
+                label: "Send".into(),
+                actionable: true,
+                frame: [100.0, 100.0, 200.0, 50.0], // normalised x∈[.1,.3] y∈[.1,.15]
+            }],
+            screen: Some([0.0, 0.0, 1000.0, 1000.0]),
+        }
+    }
+
+    #[tokio::test]
+    async fn context_blocks_include_focus_when_gaze_present() {
+        // Gaze inside "Send" → the assembled system context grows a focus block.
+        let bridge = GazingBridge {
+            graph: gazing_graph(),
+            gaze: Some(eri_coreutils::services::gaze::GazePoint {
+                x: 0.2,
+                y: 0.12,
+                confidence: 1.0,
+                ts_ms: 0,
+            }),
+        };
+        let ws = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let blocks = context_blocks("send the email", &bridge, &ws).await;
+        assert!(
+            blocks.iter().any(|b| b.contains("<eri:focus")
+                && b.contains("You're looking at: button \"Send\" (id send)")),
+            "expected a gaze-focus block, got: {blocks:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn context_blocks_omit_focus_when_no_gaze() {
+        // No gaze (the default seam state) → no focus block, exactly as before.
+        let bridge = GazingBridge {
+            graph: gazing_graph(),
+            gaze: None,
+        };
+        let ws = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let blocks = context_blocks("send the email", &bridge, &ws).await;
+        assert!(
+            !blocks.iter().any(|b| b.contains("<eri:focus")),
+            "no gaze must mean no focus block, got: {blocks:?}"
+        );
+    }
+
+    // ───────────────────── coding-environment control ─────────────────────
+
+    #[tokio::test]
+    async fn coding_open_file_lowers_to_quick_open_path_enter_through_the_gate() {
+        // editor_open_file tool JSON → lowered primitives → gate → bridge. The
+        // ordering (⌘P, then the path, then Enter) is the load-bearing contract.
+        let bridge = MockBridge::default();
+        let gate = ControlGate::default();
+        let mut confirm = |_: &str, _: Option<crate::control_safety::Permission>| true;
+        let calls = vec![(
+            "1".into(),
+            "editor_open_file".into(),
+            json!({ "path": "src/main.rs" }),
+        )];
+        let out = execute_tool_calls(&bridge, &gate, &mut confirm, &calls).await;
+        assert_eq!(
+            bridge.calls(),
+            vec!["key:cmd+p", "type:src/main.rs", "key:enter"],
+            "open_file must emit quick-open, the path, then submit, in order"
+        );
+        // One tool_result summarises the whole sequence, not an error.
+        assert_eq!(out.results.len(), 1);
+        assert!(!out.results[0]["is_error"].as_bool().unwrap_or(false));
+    }
+
+    #[tokio::test]
+    async fn coding_command_and_steer_agent_emit_their_palette_sequences() {
+        let bridge = MockBridge::default();
+        let gate = ControlGate::default();
+        let mut confirm = |_: &str, _: Option<crate::control_safety::Permission>| true;
+        let calls = vec![
+            (
+                "1".into(),
+                "editor_command".into(),
+                json!({ "command": "Format Document" }),
+            ),
+            (
+                "2".into(),
+                "editor_steer_agent".into(),
+                json!({ "prompt": "write a test for parse_action" }),
+            ),
+        ];
+        let _ = execute_tool_calls(&bridge, &gate, &mut confirm, &calls).await;
+        assert_eq!(
+            bridge.calls(),
+            vec![
+                "key:cmd+shift+p",
+                "type:Format Document",
+                "key:enter",
+                "key:cmd+l",
+                "type:write a test for parse_action",
+                "key:enter",
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn coding_accept_reject_save_emit_single_keys() {
+        let bridge = MockBridge::default();
+        let gate = ControlGate::default();
+        let mut confirm = |_: &str, _: Option<crate::control_safety::Permission>| true;
+        let calls = vec![
+            ("1".into(), "editor_accept_suggestion".into(), json!({})),
+            ("2".into(), "editor_reject_suggestion".into(), json!({})),
+            ("3".into(), "editor_save".into(), json!({})),
+        ];
+        let _ = execute_tool_calls(&bridge, &gate, &mut confirm, &calls).await;
+        assert_eq!(
+            bridge.calls(),
+            vec!["key:cmd+enter", "key:esc", "key:cmd+s"]
+        );
+    }
+
+    #[tokio::test]
+    async fn benign_editor_command_executes_without_confirmation() {
+        // A normal palette command ("Run Tests") is navigation/typing — it runs
+        // straight through, no confirm prompt.
+        let bridge = MockBridge::default();
+        let gate = ControlGate::default();
+        let mut confirm = |_: &str, _: Option<crate::control_safety::Permission>| {
+            panic!("benign editor command must not ask for confirmation")
+        };
+        let calls = vec![(
+            "1".into(),
+            "editor_command".into(),
+            json!({ "command": "Run Tests" }),
+        )];
+        let out = execute_tool_calls(&bridge, &gate, &mut confirm, &calls).await;
+        assert_eq!(
+            bridge.calls(),
+            vec!["key:cmd+shift+p", "type:Run Tests", "key:enter"]
+        );
+        assert!(!out.results[0]["is_error"].as_bool().unwrap_or(false));
+    }
+
+    #[tokio::test]
+    async fn destructive_editor_command_still_trips_the_risk_gate() {
+        // A palette command whose typed text looks destructive ("rm -rf") MUST
+        // still flow through the content-aware risk check: the ⌘⇧P keystroke runs,
+        // but the Type("rm -rf ...") step is held for confirmation. With the user
+        // declining, the rest of the sequence (Enter) is dropped.
+        let bridge = MockBridge::default();
+        let gate = ControlGate::default();
+        let mut declined: Option<String> = None;
+        let mut confirm = |desc: &str, _: Option<crate::control_safety::Permission>| {
+            declined = Some(desc.to_string());
+            false // user says no
+        };
+        let calls = vec![(
+            "1".into(),
+            "editor_command".into(),
+            json!({ "command": "rm -rf node_modules" }),
+        )];
+        let out = execute_tool_calls(&bridge, &gate, &mut confirm, &calls).await;
+        // ⌘⇧P opened the palette; the destructive Type was held and declined, so
+        // Enter never ran. The dangerous keystroke was never actuated.
+        assert_eq!(
+            bridge.calls(),
+            vec!["key:cmd+shift+p"],
+            "destructive typing must be gated, not actuated"
+        );
+        assert!(
+            declined.is_some_and(|d| d.contains("rm -rf")),
+            "the destructive text is what was held for confirmation"
+        );
+        let content = out.results[0]["content"].as_str().unwrap_or("");
+        assert!(content.contains("declined"), "got: {content}");
+    }
+
+    #[tokio::test]
+    async fn destructive_steer_agent_prompt_is_refused_or_gated() {
+        // Steering the editor's AI with a prompt carrying a destructive command
+        // ("DROP TABLE users") must also pass the risk gate on the Type step.
+        let bridge = MockBridge::default();
+        let gate = ControlGate::default();
+        let mut held = false;
+        let mut confirm = |_: &str, _: Option<crate::control_safety::Permission>| {
+            held = true;
+            false
+        };
+        let calls = vec![(
+            "1".into(),
+            "editor_steer_agent".into(),
+            json!({ "prompt": "run DROP TABLE users; for me" }),
+        )];
+        let _ = execute_tool_calls(&bridge, &gate, &mut confirm, &calls).await;
+        assert!(held, "the destructive prompt text must be gated");
+        assert_eq!(
+            bridge.calls(),
+            vec!["key:cmd+l"],
+            "only the chat-open keystroke ran before the gate held the prompt"
+        );
+    }
+
+    #[tokio::test]
+    async fn malformed_coding_tool_is_an_error_not_a_panic() {
+        // Missing required field → a clean error tool_result, no actuation.
+        let bridge = MockBridge::default();
+        let gate = ControlGate::default();
+        let mut confirm = |_: &str, _: Option<crate::control_safety::Permission>| true;
+        let calls = vec![("1".into(), "editor_open_file".into(), json!({}))];
+        let out = execute_tool_calls(&bridge, &gate, &mut confirm, &calls).await;
+        assert!(out.results[0]["is_error"].as_bool().unwrap());
+        assert!(bridge.calls().is_empty());
+    }
+
+    #[tokio::test]
+    async fn loop_drives_a_coding_tool_end_to_end_with_no_cloud_client() {
+        // Model-driven path: a stubbed engine emits editor_open_file then done.
+        // The tool JSON flows through the gate to the bridge as the right
+        // keystroke sequence, entirely through the ControlTurn seam (no network).
+        let bridge = MockBridge::with_snapshot(graph());
+        let gate = ControlGate::default();
+        let mut confirm = |_: &str, _: Option<crate::control_safety::Permission>| true;
+        let stub = StubTurn::new(
+            "local",
+            vec![
+                Ok(tool_call_turn(
+                    "t1",
+                    "editor_open_file",
+                    json!({ "path": "Cargo.toml" }),
+                )),
+                Ok(done_turn("Opened Cargo.toml.")),
+            ],
+        );
+        let sink = RecordingSink::default();
+        let system = vec![json!({ "type": "text", "text": "sys" })];
+        let tools = json!(tool_specs());
+        let out = drive_control_loop(
+            &[&stub],
+            &bridge,
+            &gate,
+            &mut confirm,
+            &sink,
+            &system,
+            &tools,
+            "open Cargo.toml in the editor",
+            8,
+        )
+        .await
+        .unwrap();
+        assert_eq!(out.text, "Opened Cargo.toml.");
+        assert_eq!(
+            bridge.calls(),
+            vec!["key:cmd+p", "type:Cargo.toml", "key:enter"]
+        );
     }
 }

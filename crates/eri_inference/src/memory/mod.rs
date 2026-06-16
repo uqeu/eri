@@ -10,6 +10,7 @@
 //!   - `"fact"` — explicit `/remember <text>`
 //!   - `"edit_accepted"` / `"edit_rejected"` — diff-review outcomes
 //!   - `"voice_pattern"` — voice cadence signals (Phase 8b)
+//!   - `"communication_style"` — the learned writing register (`style_writer`)
 //!
 //! Pattern extraction (priority 1 system-prompt injection) is implemented
 //! as a simple recency-+-frequency rank over the observations until the
@@ -30,6 +31,7 @@ pub mod eventtime;
 pub mod keys;
 pub mod profile;
 pub mod profile_sync;
+pub mod style_writer;
 pub mod sync;
 
 /// An observation's lifecycle/visibility — one state, so the old
@@ -1196,7 +1198,11 @@ mod tests {
             .find(|o| o.kind == consolidation::SEMANTIC_KIND)
             .expect("a semantic rollup is visible");
         assert!(rollup.body.contains("accepts"), "rollup: {}", rollup.body);
-        assert!(rollup.body.contains("src/components"), "rollup: {}", rollup.body);
+        assert!(
+            rollup.body.contains("src/components"),
+            "rollup: {}",
+            rollup.body
+        );
         // History is preserved in the raw store for sync + future bi-temporal.
         assert_eq!(
             store
@@ -1269,12 +1275,18 @@ mod tests {
         assert!(!o.is_valid_at(50), "not yet learned");
         assert!(o.is_valid_at(100), "valid from its learned_at (inclusive)");
         assert!(o.is_valid_at(150), "valid mid-interval");
-        assert!(!o.is_valid_at(200), "invalid once superseded (exclusive end)");
+        assert!(
+            !o.is_valid_at(200),
+            "invalid once superseded (exclusive end)"
+        );
         assert!(!o.is_valid_at(300), "invalid after");
 
         // Active (never superseded) → always valid once learned.
         let still_valid = obs("fact", 100);
-        assert!(still_valid.is_valid_at(999), "open-ended fact is always valid after learn");
+        assert!(
+            still_valid.is_valid_at(999),
+            "open-ended fact is always valid after learn"
+        );
 
         // Legacy: superseded with no recorded valid_to → never valid at any point
         // (we can't date its invalidation, so we don't resurrect it into history).
@@ -1337,7 +1349,9 @@ mod tests {
         std::fs::create_dir_all(&ws_b).unwrap();
         let mut store = MemoryStore::open_at(dir.path().join("memory.json")).unwrap();
         store.insert("fact", &ws_a, "global truth").unwrap();
-        store.insert("control_turn", &ws_a, "local-to-a action").unwrap();
+        store
+            .insert("control_turn", &ws_a, "local-to-a action")
+            .unwrap();
 
         // From workspace B: the fact crosses over, the workspace-local turn does not.
         for hit in [
@@ -1351,7 +1365,10 @@ mod tests {
                 .collect(),
         ] {
             let bodies: Vec<String> = hit.into_iter().map(|o| o.body).collect();
-            assert!(bodies.iter().any(|b| b.contains("global truth")), "fact is global");
+            assert!(
+                bodies.iter().any(|b| b.contains("global truth")),
+                "fact is global"
+            );
             assert!(
                 !bodies.iter().any(|b| b.contains("local-to-a")),
                 "workspace-local obs must not leak across workspaces"
@@ -1367,7 +1384,11 @@ mod tests {
         let mut o = obs("fact", 1);
         // Active → none of the three keys present (all skip_serializing_if).
         let j = serde_json::to_value(&o).unwrap();
-        assert!(j.get("superseded").is_none() && j.get("consolidated").is_none() && j.get("valid_to").is_none());
+        assert!(
+            j.get("superseded").is_none()
+                && j.get("consolidated").is_none()
+                && j.get("valid_to").is_none()
+        );
 
         o.visibility = Visibility::Superseded { valid_to: Some(42) };
         let j = serde_json::to_value(&o).unwrap();
@@ -1397,7 +1418,10 @@ mod tests {
             parse(r#","valid_to":99"#).visibility,
             Visibility::Superseded { valid_to: Some(99) }
         );
-        assert_eq!(parse(r#","consolidated":true"#).visibility, Visibility::Consolidated);
+        assert_eq!(
+            parse(r#","consolidated":true"#).visibility,
+            Visibility::Consolidated
+        );
         assert_eq!(parse("").visibility, Visibility::Active);
     }
 
@@ -1454,7 +1478,12 @@ mod tests {
     fn valid_from_round_trips_on_the_wire_only_when_set() {
         let mut o = obs("fact", 1);
         // Default None → key absent (no bloat for the common case).
-        assert!(serde_json::to_value(&o).unwrap().get("valid_from").is_none());
+        assert!(
+            serde_json::to_value(&o)
+                .unwrap()
+                .get("valid_from")
+                .is_none()
+        );
         o.valid_from = Some(77);
         let j = serde_json::to_value(&o).unwrap();
         assert_eq!(j["valid_from"], serde_json::json!(77));

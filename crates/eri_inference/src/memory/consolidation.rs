@@ -102,9 +102,9 @@ fn cluster_indices(indices: &[usize], obs: &[Observation]) -> Vec<Vec<usize>> {
     let mut clusters: Vec<Vec<usize>> = Vec::new();
     'next: for &i in indices {
         for cluster in clusters.iter_mut() {
-            let joins = cluster
-                .iter()
-                .any(|&j| embeddings::cosine(&obs[i].embedding, &obs[j].embedding) > CLUSTER_THRESHOLD);
+            let joins = cluster.iter().any(|&j| {
+                embeddings::cosine(&obs[i].embedding, &obs[j].embedding) > CLUSTER_THRESHOLD
+            });
             if joins {
                 cluster.push(i);
                 continue 'next;
@@ -221,9 +221,24 @@ mod tests {
     #[test]
     fn clusters_of_three_similar_edits_become_one_semantic_fact() {
         let obs = vec![
-            ep("edit_accepted", 1, "w", r#"{"path":"src/components/Header.tsx","summary":"adjust layout"}"#),
-            ep("edit_accepted", 2, "w", r#"{"path":"src/components/Footer.tsx","summary":"adjust layout"}"#),
-            ep("edit_accepted", 3, "w", r#"{"path":"src/components/Nav.tsx","summary":"adjust layout"}"#),
+            ep(
+                "edit_accepted",
+                1,
+                "w",
+                r#"{"path":"src/components/Header.tsx","summary":"adjust layout"}"#,
+            ),
+            ep(
+                "edit_accepted",
+                2,
+                "w",
+                r#"{"path":"src/components/Footer.tsx","summary":"adjust layout"}"#,
+            ),
+            ep(
+                "edit_accepted",
+                3,
+                "w",
+                r#"{"path":"src/components/Nav.tsx","summary":"adjust layout"}"#,
+            ),
         ];
         let plan = plan_consolidation(&obs);
         assert_eq!(plan.new_facts.len(), 1, "one cluster → one rollup");
@@ -232,17 +247,33 @@ mod tests {
         assert!(body.contains("accepts"), "verb from kind: {body}");
         assert!(body.contains("src/components"), "modal dir: {body}");
         assert!(body.contains("3×"), "occurrence count: {body}");
-        assert_eq!(plan.new_facts[0].ts_ms, 3, "rollup is as-of the newest episode");
+        assert_eq!(
+            plan.new_facts[0].ts_ms, 3,
+            "rollup is as-of the newest episode"
+        );
     }
 
     #[test]
     fn fewer_than_three_episodes_are_not_consolidated() {
         let obs = vec![
-            ep("edit_accepted", 1, "w", r#"{"path":"src/a.tsx","summary":"x"}"#),
-            ep("edit_accepted", 2, "w", r#"{"path":"src/b.tsx","summary":"x"}"#),
+            ep(
+                "edit_accepted",
+                1,
+                "w",
+                r#"{"path":"src/a.tsx","summary":"x"}"#,
+            ),
+            ep(
+                "edit_accepted",
+                2,
+                "w",
+                r#"{"path":"src/b.tsx","summary":"x"}"#,
+            ),
         ];
         let plan = plan_consolidation(&obs);
-        assert!(plan.new_facts.is_empty(), "two episodes is coincidence, not a pattern");
+        assert!(
+            plan.new_facts.is_empty(),
+            "two episodes is coincidence, not a pattern"
+        );
     }
 
     #[test]
@@ -250,15 +281,49 @@ mod tests {
         // Same workspace + similar text, but opposite signals — they must stay
         // in separate kind-groups so the rollup verb is never ambiguous.
         let obs = vec![
-            ep("edit_accepted", 1, "w", r#"{"path":"src/a.tsx","summary":"layout tweak"}"#),
-            ep("edit_accepted", 2, "w", r#"{"path":"src/b.tsx","summary":"layout tweak"}"#),
-            ep("edit_accepted", 3, "w", r#"{"path":"src/c.tsx","summary":"layout tweak"}"#),
-            ep("edit_rejected", 4, "w", r#"{"path":"src/d.tsx","summary":"layout tweak"}"#),
-            ep("edit_rejected", 5, "w", r#"{"path":"src/e.tsx","summary":"layout tweak"}"#),
-            ep("edit_rejected", 6, "w", r#"{"path":"src/f.tsx","summary":"layout tweak"}"#),
+            ep(
+                "edit_accepted",
+                1,
+                "w",
+                r#"{"path":"src/a.tsx","summary":"layout tweak"}"#,
+            ),
+            ep(
+                "edit_accepted",
+                2,
+                "w",
+                r#"{"path":"src/b.tsx","summary":"layout tweak"}"#,
+            ),
+            ep(
+                "edit_accepted",
+                3,
+                "w",
+                r#"{"path":"src/c.tsx","summary":"layout tweak"}"#,
+            ),
+            ep(
+                "edit_rejected",
+                4,
+                "w",
+                r#"{"path":"src/d.tsx","summary":"layout tweak"}"#,
+            ),
+            ep(
+                "edit_rejected",
+                5,
+                "w",
+                r#"{"path":"src/e.tsx","summary":"layout tweak"}"#,
+            ),
+            ep(
+                "edit_rejected",
+                6,
+                "w",
+                r#"{"path":"src/f.tsx","summary":"layout tweak"}"#,
+            ),
         ];
         let plan = plan_consolidation(&obs);
-        assert_eq!(plan.new_facts.len(), 2, "one accept rollup + one reject rollup");
+        assert_eq!(
+            plan.new_facts.len(),
+            2,
+            "one accept rollup + one reject rollup"
+        );
         assert!(plan.new_facts.iter().any(|f| f.body.contains("accepts")));
         assert!(plan.new_facts.iter().any(|f| f.body.contains("rejects")));
     }
@@ -266,28 +331,59 @@ mod tests {
     #[test]
     fn already_consolidated_episodes_are_skipped() {
         let mut obs = vec![
-            ep("edit_accepted", 1, "w", r#"{"path":"src/a.tsx","summary":"x"}"#),
-            ep("edit_accepted", 2, "w", r#"{"path":"src/b.tsx","summary":"x"}"#),
-            ep("edit_accepted", 3, "w", r#"{"path":"src/c.tsx","summary":"x"}"#),
+            ep(
+                "edit_accepted",
+                1,
+                "w",
+                r#"{"path":"src/a.tsx","summary":"x"}"#,
+            ),
+            ep(
+                "edit_accepted",
+                2,
+                "w",
+                r#"{"path":"src/b.tsx","summary":"x"}"#,
+            ),
+            ep(
+                "edit_accepted",
+                3,
+                "w",
+                r#"{"path":"src/c.tsx","summary":"x"}"#,
+            ),
         ];
         for o in &mut obs {
             o.visibility = Visibility::Consolidated;
         }
         let plan = plan_consolidation(&obs);
-        assert!(plan.new_facts.is_empty(), "consolidated episodes never re-roll");
+        assert!(
+            plan.new_facts.is_empty(),
+            "consolidated episodes never re-roll"
+        );
     }
 
     #[test]
     fn voice_patterns_fall_back_to_medoid_summary() {
         let obs = vec![
-            ep("voice_pattern", 1, "w", "speaks in short bursts then pauses"),
-            ep("voice_pattern", 2, "w", "speaks in short bursts then pauses"),
+            ep(
+                "voice_pattern",
+                1,
+                "w",
+                "speaks in short bursts then pauses",
+            ),
+            ep(
+                "voice_pattern",
+                2,
+                "w",
+                "speaks in short bursts then pauses",
+            ),
             ep("voice_pattern", 3, "w", "speaks in short bursts and pauses"),
         ];
         let plan = plan_consolidation(&obs);
         assert_eq!(plan.new_facts.len(), 1);
         let body = &plan.new_facts[0].body;
-        assert!(body.contains("short bursts"), "medoid body surfaced: {body}");
+        assert!(
+            body.contains("short bursts"),
+            "medoid body surfaced: {body}"
+        );
         assert!(body.contains("recurring, 3×"), "count appended: {body}");
     }
 }

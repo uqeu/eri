@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>eri — Architecture Review · new-feature code</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({ startOnLoad: true, theme: "dark", securityLevel: "loose" });</script>
+<style>
+  body{background:#0a0c0f;color:#e8ebef}
+  .card{background:#12161b;border:1px solid #222a32}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .b-strong{background:#16361f;color:#5ee08a;border:1px solid #2a6b41}
+  .b-worth{background:#3a2f12;color:#e6c25e;border:1px solid #6b5a2a}
+  .b-spec{background:#2a2230;color:#c79de6;border:1px solid #5a3a6b}
+  .before{border-left:3px solid #6b3a3a}
+  .after{border-left:3px solid #2a6b41}
+  code{color:#9ad}
+  .pill{font-size:11px;font-weight:600;padding:2px 9px;border-radius:6px}
+  h1,h2,h3{letter-spacing:-0.01em}
+</style>
+</head>
+<body class="max-w-5xl mx-auto px-6 py-10">
+
+<header class="mb-8">
+  <div class="text-xs uppercase tracking-widest text-neutral-500 mb-2">eri · architecture review · 2026-06-12 · new-feature code</div>
+  <h1 class="text-3xl font-semibold">Where this session's features piled up</h1>
+  <p class="mt-4 text-neutral-300 max-w-3xl leading-relaxed">
+    Scope: the code shipped today — trust layer (<span class="mono">action_log.rs</span> + <span class="mono">LoggingBridge</span>),
+    proactive (<span class="mono">proactive.rs</span>), voice→control (<span class="mono">voice_control.rs</span> + the Swift wiring),
+    and the always-on overlay (overlay UI + the <span class="mono">NSPanel</span> host + the settings recorder). The Rust additions are
+    clean, tested seams. The friction concentrated on the <em>Swift side</em>, where every new feature attached to one controller.
+  </p>
+</header>
+
+<!-- Candidate 1 -->
+<section class="card rounded-xl p-6 mb-7">
+  <div class="flex items-center justify-between mb-2">
+    <h2 class="text-xl font-semibold">1 · <span class="mono">AgentManagerController</span> has become the everything-object</h2>
+    <span class="pill b-strong">Strong</span>
+  </div>
+  <p class="text-sm text-neutral-400 mb-3"><span class="text-neutral-500">Files:</span> <span class="mono">scripts/eri_agent_manager.swift</span> — 1319 lines, one class, a 37-case bridge switch</p>
+  <p class="text-sm text-neutral-300 mb-3 leading-relaxed">
+    <span class="text-neutral-500">Problem:</span> one controller now owns <b>seven unrelated domains</b> — the WKWebView, voice
+    (<span class="mono">startVoiceListening</span>/<span class="mono">beginRecognition</span>/<span class="mono">teardownAudio</span>),
+    computer-control (<span class="mono">startControl</span>/control server/panic-stop), the overlay
+    (<span class="mono">buildOverlay</span>/<span class="mono">toggleOverlay</span>/<span class="mono">resizeOverlay</span>/hotkey),
+    TTS (<span class="mono">speak</span>), sidecars, git/workspace, and indexed sources. Each feature I added this session bolted on
+    more state (<span class="mono">overlayPanel</span>, <span class="mono">speechSynth</span>, <span class="mono">voiceControlMode</span>…)
+    and more switch cases. Nothing is independently testable; a change to voice risks the overlay because they share one object's state.
+    <span class="text-neutral-500">Deletion test:</span> deleting the class doesn't move complexity, it scatters it — but it's the
+    <em>wrong</em> kind of "earning its keep": it concentrates <em>unrelated</em> things, which is a god-object, not a deep module.
+  </p>
+  <p class="text-sm text-neutral-300 mb-4 leading-relaxed">
+    <span class="text-neutral-500">Solution:</span> extract focused controllers — <span class="mono">VoiceController</span>,
+    <span class="mono">OverlayController</span>, <span class="mono">ControlController</span> — each owning its own state + window/audio,
+    behind a tiny interface (<span class="mono">handle(command,payload)</span> or typed methods). The <span class="mono">Bridge</span>
+    routes to the right one. <span class="text-neutral-500">Leverage:</span> the overlay can be reasoned about (and unit-tested with a
+    fake bridge) without the voice/audio machinery in scope; <span class="text-neutral-500">locality:</span> voice bugs live in one
+    ~200-line file, not a 1300-line blast radius.
+  </p>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="before rounded-lg p-4 bg-[#16191e]">
+      <div class="text-xs uppercase tracking-wide text-rose-300/70 mb-2">Before — one object, 7 domains</div>
+      <pre class="mermaid">flowchart TD
+  B[Bridge: 37-case switch] --> C[AgentManagerController<br/>1319 lines]
+  C --- v[voice + audio]
+  C --- o[overlay + hotkey]
+  C --- k[control + server]
+  C --- t[TTS]
+  C --- s[sidecars]
+  C --- g[git/workspace]
+  C --- x[sources]</pre>
+    </div>
+    <div class="after rounded-lg p-4 bg-[#141a16]">
+      <div class="text-xs uppercase tracking-wide text-emerald-300/70 mb-2">After — bridge routes to focused controllers</div>
+      <pre class="mermaid">flowchart TD
+  B[Bridge] --> R{route}
+  R --> V[VoiceController]
+  R --> O[OverlayController]
+  R --> K[ControlController]
+  R --> A[AppShell: webview/git/sources]
+  V -.fake bridge.-> Vt[unit-testable]
+  O -.fake bridge.-> Ot[unit-testable]</pre>
+    </div>
+  </div>
+</section>
+
+<!-- Candidate 2 -->
+<section class="card rounded-xl p-6 mb-7">
+  <div class="flex items-center justify-between mb-2">
+    <h2 class="text-xl font-semibold">2 · The bridge dispatch is a stringly-typed 37-case switch</h2>
+    <span class="pill b-worth">Worth exploring</span>
+  </div>
+  <p class="text-sm text-neutral-400 mb-3"><span class="text-neutral-500">Files:</span> <span class="mono">eri_agent_manager.swift</span> <span class="mono">handle(command:payload:)</span> · <span class="mono">manager.js</span> <span class="mono">LOCAL_ONLY</span> + dispatch switch</p>
+  <p class="text-sm text-neutral-300 mb-3 leading-relaxed">
+    <span class="text-neutral-500">Problem:</span> every feature adds a <code>case "setVoiceControl"</code> / <code>"toggleOverlay"</code>
+    / <code>"setOverlayHotkey"</code> string on the Swift side AND a matching string on the JS side, by hand, with no shared contract.
+    A typo or a JS/Swift drift fails silently (the command just does nothing). This is the same stringly-typed wire the landscape
+    review flagged, now growing with each feature.
+    <span class="text-neutral-500">Solution:</span> a single source-of-truth command list (a generated or shared enum) and, on the
+    Swift side, a registry where each controller <em>registers</em> the commands it handles instead of one mega-switch. Pairs naturally
+    with Candidate 1 (each extracted controller owns its commands). <span class="text-neutral-500">Locality:</span> a feature's command,
+    handler, and JS caller are defined together, not in three drifting places.
+  </p>
+</section>
+
+<!-- Candidate 3 -->
+<section class="card rounded-xl p-6 mb-7">
+  <div class="flex items-center justify-between mb-2">
+    <h2 class="text-xl font-semibold">3 · The action log grows unbounded</h2>
+    <span class="pill b-worth">Worth exploring · correctness</span>
+  </div>
+  <p class="text-sm text-neutral-400 mb-3"><span class="text-neutral-500">Files:</span> <span class="mono">action_log.rs</span> (no cap) · cf. <span class="mono">eri_inference/memory/mod.rs</span> <span class="mono">cap_observations</span></p>
+  <p class="text-sm text-neutral-300 mb-3 leading-relaxed">
+    <span class="text-neutral-500">Problem:</span> every actuation appends to <span class="mono">control-actions.json</span> forever;
+    nothing trims it. Over weeks of use the file (and the undo/history scan) grows without bound — the exact churn the memory store
+    already solved with <span class="mono">cap_observations</span> (cap at N, trim oldest, preserve pinned). The trust layer has the
+    same need and no cap.
+    <span class="text-neutral-500">Solution:</span> a <span class="mono">cap</span> on <span class="mono">ActionLog</span> (e.g. last
+    500 actions, trim oldest on <span class="mono">save</span>), mirroring the memory store. Cheap, and it keeps undo/history fast.
+    <span class="text-neutral-500">Leverage:</span> one place owns "how much history eri keeps," consistent with how it owns memory.
+  </p>
+</section>
+
+<!-- Candidate 4 -->
+<section class="card rounded-xl p-6 mb-7">
+  <div class="flex items-center justify-between mb-2">
+    <h2 class="text-xl font-semibold">4 · Three parallel turn-seams that haven't met</h2>
+    <span class="pill b-spec">Speculative</span>
+  </div>
+  <p class="text-sm text-neutral-400 mb-3"><span class="text-neutral-500">Files:</span> <span class="mono">control_turn.rs</span> (ControlTurn), <span class="mono">build_turn.rs</span> (BuildTurn), <span class="mono">eri_inference/llm_provider.rs</span> (LlmProvider)</p>
+  <p class="text-sm text-neutral-300 mb-3 leading-relaxed">
+    <span class="text-neutral-500">Problem:</span> eri now has three "one turn of a model" seams — control (tool-use), build (tool-use),
+    brain (text). They share local-first selection, escalation, and the Ollama transport, but evolved separately (the BuildTurn commit
+    itself noted they're "structurally similar, different return shapes"). Reuse already leaks across them (<span class="mono">build_turn</span>
+    imports control's <span class="mono">to_local_messages</span>/<span class="mono">parse_local_tool_calls</span>).
+    <span class="text-neutral-500">Solution:</span> a shared <span class="mono">LocalToolTurn</span> core the control + build adapters both
+    wrap, so escalation/selection/transport live once. <span class="text-neutral-500">Caveat:</span> premature today — the return-shape
+    divergence is real and unifying now risks a leaky abstraction. Revisit once a third tool-using surface appears, or when CandleTransport
+    lands and both want the same in-process path.
+  </p>
+</section>
+
+<section class="card rounded-xl p-6 mb-8 border-emerald-800/40">
+  <h2 class="text-xl font-semibold mb-3">Top recommendation</h2>
+  <p class="text-sm text-neutral-300 leading-relaxed">
+    <b>Candidate 1 (split <span class="mono">AgentManagerController</span>)</b> is the one that matters. It's the only thing in today's
+    code that got <em>worse</em> with each feature, not better: voice, overlay, control, and TTS all share one 1300-line object's state,
+    so nothing on the Swift side is testable and every change has a wide blast radius. Extracting <span class="mono">OverlayController</span>
+    and <span class="mono">VoiceController</span> first (the two newest, most self-contained domains) is the highest-leverage, lowest-risk
+    cut, and it sets up Candidate 2 (each controller owns its commands). <b>Candidate 3</b> is a cheap correctness win to slot in anytime
+    (it's ~15 lines, mirroring a pattern eri already has). Candidate 4 is a note for later, not now.
+  </p>
+</section>
+
+<footer class="text-xs text-neutral-600 pb-10">
+  Scope: code shipped 2026-06-12 (trust / proactive / voice / overlay / settings). The Rust seams are clean + tested; the friction is the
+  Swift controller's growth. eri_cli 257 tests green, app builds clean.
+</footer>
+</body>
+</html>

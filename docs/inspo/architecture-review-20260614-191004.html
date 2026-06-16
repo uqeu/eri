@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Architecture review — deep memory engine slices</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({ startOnLoad: true, theme: "dark" });</script>
+<style>
+  body { background:#0b0f0c; }
+  .lime { color:#bef264; }
+  .card { background:#11161200; border:1px solid #1f2a20; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .badge { font-size:11px; letter-spacing:.04em; text-transform:uppercase; }
+  .before { border-left:3px solid #f87171; }
+  .after { border-left:3px solid #bef264; }
+  .flow { font-family: ui-monospace, monospace; font-size:12px; line-height:1.5; }
+</style>
+</head>
+<body class="text-zinc-200">
+<div class="max-w-5xl mx-auto px-6 py-12">
+
+  <header class="mb-12">
+    <div class="badge lime mb-2">architecture review · 2026-06-14</div>
+    <h1 class="text-3xl font-semibold text-white">Deep memory engine — slices 3, 4, 6</h1>
+    <p class="text-zinc-400 mt-3 leading-relaxed">
+      Three commits since <span class="mono">951dbe5bb4</span>: episodic→semantic
+      <strong>consolidation</strong>, <strong>bi-temporal facts</strong>, and the
+      cloud <strong>recall_memory</strong> tool. All green (81 Rust memory tests,
+      website tsc + 2 tsx suites, workspace clippy clean). This review asks the
+      harder question the tests can't: are the <em>methods</em> SOTA-correct and
+      properly seamed, or just passing? Verdict up front — <span class="lime">the
+      cores are deep and correct; the cross-device <em>relay</em> has a seam gap
+      that makes the bi-temporal payoff interface-only today.</span>
+    </p>
+  </header>
+
+  <!-- VERDICT STRIP -->
+  <div class="grid grid-cols-3 gap-3 mb-12">
+    <div class="card rounded-lg p-4">
+      <div class="text-2xl">🟢</div>
+      <div class="text-white font-medium mt-1">Consolidation</div>
+      <div class="text-zinc-400 text-sm">plan/apply split is clean + deep. No notes.</div>
+    </div>
+    <div class="card rounded-lg p-4">
+      <div class="text-2xl">🟡</div>
+      <div class="text-white font-medium mt-1">Bi-temporal</div>
+      <div class="text-zinc-400 text-sm">correct, but <span class="mono">valid_from</span> collapsed into <span class="mono">ts_ms</span>; no caller for <span class="mono">recall_as_of</span>.</div>
+    </div>
+    <div class="card rounded-lg p-4">
+      <div class="text-2xl">🔴</div>
+      <div class="text-white font-medium mt-1">Recall relay</div>
+      <div class="text-zinc-400 text-sm">computer side has no recall adapter — lands in the actuation agent.</div>
+    </div>
+  </div>
+
+  <!-- CANDIDATE A -->
+  <section class="card rounded-xl p-6 mb-8">
+    <div class="flex items-center justify-between">
+      <h2 class="text-xl font-semibold text-white">A · The Remote turn has no recall adapter</h2>
+      <span class="badge bg-red-500/15 text-red-300 px-2 py-1 rounded">Strong</span>
+    </div>
+    <p class="text-zinc-500 text-sm mono mt-1">website/lib/agent/run_core.ts · lib/imessage/inbound.ts · crates/eri_cli/src/remote.rs · crates/eri_inference/src/memory/mod.rs</p>
+
+    <div class="mt-4 space-y-3 text-zinc-300 leading-relaxed">
+      <p><span class="lime font-medium">Problem.</span> The <span class="mono">recall_memory</span>
+      tool, <span class="mono">buildRecallGoal()</span>, and <span class="mono">MemoryStore::recall_as_of()</span>
+      are three pieces meant to connect end-to-end — phone asks → command queue →
+      computer searches Tier-B → texts back. But the <strong>Remote turn</strong>
+      dispatcher (<span class="mono">remote.rs:154</span>) runs <em>every</em> goal
+      through <span class="mono">run_control_agent</span> — the actuation loop that
+      clicks and types. There is no branch that recognizes a recall goal and runs a
+      <em>pure recall</em>. So a "Search my memory and text me back…" goal is handed
+      to an agent built to <em>do</em>, not to <em>answer</em>; it happens to have
+      <span class="mono">recall_hybrid</span> injected as context
+      (<span class="mono">control_agent.rs:923</span>) and may improvise an answer, but
+      that's luck, not design.</p>
+      <p>Two corroborating dead-ends: <span class="mono">recall_as_of</span> has
+      <strong>no production caller</strong> (only the def + tests), and
+      <strong>nothing parses the natural-language <span class="mono">as_of</span></strong>
+      ("last Tuesday") into a millisecond instant. The bi-temporal "what was true when"
+      capability is fully built at the <em>interface</em> (tool param → goal prose →
+      a tested store method) but the adapter that closes the loop doesn't exist.</p>
+      <p><span class="lime font-medium">Solution.</span> Make <em>kind of Remote turn</em>
+      a real seam. The command-queue payload (or a goal prefix) carries whether this is
+      a <span class="mono">Control</span> turn or a <span class="mono">Recall</span> turn.
+      remote.rs routes Recall to a small recall adapter: parse the optional time scope →
+      ms, call <span class="mono">recall_as_of</span> (or <span class="mono">recall_hybrid</span>
+      when no scope), format the hits, return them as the relayed text. The actuation
+      agent stays the Control adapter. Two adapters behind one dispatch = a real seam.</p>
+      <p><span class="lime font-medium">Benefits.</span> The deletion test passes hard:
+      delete the recall adapter and the feature silently degrades to "the actuation agent
+      maybe answers" — which is exactly today's latent bug. Locality: time-parsing +
+      recall ranking + relay formatting live in one place instead of being smeared across
+      a prose goal string and an actuation agent's improvisation. Leverage: a Recall turn
+      is cheap (no control gate, no risky-action confirmation, no HttpBridge) — faster and
+      safer than routing recall through the full control stack. And <span class="mono">recall_as_of</span>
+      finally has the caller that justifies its existence.</p>
+    </div>
+
+    <div class="grid grid-cols-2 gap-4 mt-6">
+      <div class="before rounded-lg p-4 bg-red-500/5">
+        <div class="badge text-red-300 mb-2">Before — one path, hope</div>
+        <div class="flow text-zinc-400">
+          recall_memory → buildRecallGoal<br/>
+          &nbsp;&nbsp;↓ (prose: "…as it was last month")<br/>
+          command queue<br/>
+          &nbsp;&nbsp;↓<br/>
+          remote.rs → <span class="text-red-300">run_control_agent</span><br/>
+          &nbsp;&nbsp;&nbsp;&nbsp;(actuation loop, clicks/types)<br/>
+          &nbsp;&nbsp;&nbsp;&nbsp;recall_hybrid injected as ctx<br/>
+          &nbsp;&nbsp;&nbsp;&nbsp;<span class="text-red-300">as_of prose ignored</span><br/>
+          &nbsp;&nbsp;&nbsp;&nbsp;<span class="text-red-300">recall_as_of never called</span><br/>
+          &nbsp;&nbsp;↓<br/>
+          maybe-an-answer → phone
+        </div>
+      </div>
+      <div class="after rounded-lg p-4 bg-lime-500/5">
+        <div class="badge lime mb-2">After — typed turn, dedicated adapter</div>
+        <div class="flow text-zinc-300">
+          recall_memory → goal{kind:Recall, query, as_of}<br/>
+          &nbsp;&nbsp;↓<br/>
+          command queue (typed)<br/>
+          &nbsp;&nbsp;↓<br/>
+          remote.rs dispatch<br/>
+          &nbsp;&nbsp;├─ Control → run_control_agent<br/>
+          &nbsp;&nbsp;└─ <span class="lime">Recall → recall adapter</span><br/>
+          &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;parse as_of → ms<br/>
+          &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="lime">recall_as_of / recall_hybrid</span><br/>
+          &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;format hits<br/>
+          &nbsp;&nbsp;↓<br/>
+          real remembered answer → phone
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CANDIDATE B -->
+  <section class="card rounded-xl p-6 mb-8">
+    <div class="flex items-center justify-between">
+      <h2 class="text-xl font-semibold text-white">B · Recall scope+visibility filter duplicated five times</h2>
+      <span class="badge bg-amber-500/15 text-amber-300 px-2 py-1 rounded">Worth exploring</span>
+    </div>
+    <p class="text-zinc-500 text-sm mono mt-1">crates/eri_inference/src/memory/mod.rs — recall, recall_semantic, recall_hybrid, recall_as_of, top_patterns</p>
+
+    <div class="mt-4 space-y-3 text-zinc-300 leading-relaxed">
+      <p><span class="lime font-medium">Problem.</span> Five read methods each open with the
+      same scope+visibility predicate —
+      <span class="mono">(o.workspace_hash == hash || o.kind == "fact") &amp;&amp; o.is_active()</span>
+      — then diverge only in how they <em>rank</em>. The scope rule ("facts are global,
+      everything else is workspace-scoped") and the visibility rule (active / valid-at) have
+      <strong>no single point of control</strong>: change either and you grep-edit five sites
+      (mod.rs:352, 441, 472, 492, 531). This is a shallow seam — the duplicated lines are the
+      interface, repeated.</p>
+      <p><span class="lime font-medium">Solution.</span> Extract one
+      <span class="mono">candidates(workspace, TemporalScope) -&gt; Vec&lt;&amp;Observation&gt;</span>
+      where <span class="mono">TemporalScope</span> is <span class="mono">Now</span> (is_active) or
+      <span class="mono">AsOf(ms)</span> (is_valid_at). Each ranker consumes the candidate set and
+      only owns its scoring. Note this is <em>orthogonal</em> to candidate A — it deepens the
+      store's read surface regardless of the relay.</p>
+      <p><span class="lime font-medium">Benefits.</span> The scope rule and the bi-temporal
+      visibility rule become testable once, in one place — today they're implicitly re-tested
+      through five rankers. Adding a sixth ranker (e.g. a Letta core-block reader, slice 5)
+      costs a scoring function, not another copy of the filter. Leverage rises; the rankers
+      shrink to what's actually distinct about them.</p>
+    </div>
+
+    <div class="grid grid-cols-2 gap-4 mt-6">
+      <div class="before rounded-lg p-4 bg-red-500/5">
+        <div class="badge text-red-300 mb-2">Before — filter copied per ranker</div>
+        <div class="flow text-zinc-400">
+          recall()&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;→ [filter] → recency<br/>
+          recall_semantic → [filter] → cosine<br/>
+          recall_hybrid&nbsp;&nbsp;→ [filter] → fusion<br/>
+          recall_as_of&nbsp;&nbsp;&nbsp;→ [filter'] → recency<br/>
+          top_patterns&nbsp;&nbsp;→ [filter] → recency<br/>
+          <span class="text-red-300 mt-2 inline-block">[filter] = same 1 line × 5</span>
+        </div>
+      </div>
+      <div class="after rounded-lg p-4 bg-lime-500/5">
+        <div class="badge lime mb-2">After — one candidate seam</div>
+        <div class="flow text-zinc-300">
+          <span class="lime">candidates(ws, scope)</span><br/>
+          &nbsp;&nbsp;↑ ↑ ↑ ↑ ↑<br/>
+          recency · cosine · fusion · recency · recency<br/>
+          <span class="lime mt-2 inline-block">scope rule + visibility: one place</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CANDIDATE C -->
+  <section class="card rounded-xl p-6 mb-8">
+    <div class="flex items-center justify-between">
+      <h2 class="text-xl font-semibold text-white">C · Observation is accreting visibility booleans</h2>
+      <span class="badge bg-amber-500/15 text-amber-300 px-2 py-1 rounded">Worth exploring</span>
+    </div>
+    <p class="text-zinc-500 text-sm mono mt-1">crates/eri_inference/src/memory/mod.rs — Observation, is_active, is_valid_at, supersede_similar_facts</p>
+
+    <div class="mt-4 space-y-3 text-zinc-300 leading-relaxed">
+      <p><span class="lime font-medium">Problem.</span> Three fields now encode "should I show
+      this": <span class="mono">superseded: bool</span>, <span class="mono">consolidated: bool</span>,
+      <span class="mono">valid_to: Option&lt;u64&gt;</span> — plus the implicit
+      <span class="mono">kind == "tombstone"</span>. <span class="mono">superseded</span> is a
+      <em>denormalized shadow</em> of <span class="mono">valid_to.is_some()</span> (the slice-4
+      commit says so). Illegal combinations are representable
+      (<span class="mono">superseded=false, valid_to=Some(..)</span>), and the visibility logic is
+      split between <span class="mono">is_active</span> and <span class="mono">is_valid_at</span>.</p>
+      <p class="text-amber-200/90 bg-amber-500/10 border border-amber-500/20 rounded p-3 text-sm">
+        ⚠ Tension with the live-data decision: <span class="mono">superseded</span> is on the wire
+        (synced Tier-B blobs already carry it). A <span class="mono">VisibilityState</span> enum is a
+        wire-format change. Surfaced because the smell is real and slice 5 (core/archival tiers) will
+        add <em>another</em> state — better to settle the shape before the third flag, not after.
+      </p>
+      <p><span class="lime font-medium">Solution.</span> Replace the flags with one
+      <span class="mono">VisibilityState { Active, Superseded{valid_to}, Consolidated, Tombstone(id) }</span>.
+      <span class="mono">is_active()</span> = <span class="mono">matches!(Active)</span>;
+      <span class="mono">is_valid_at()</span> branches on <span class="mono">Superseded{valid_to}</span>.
+      A custom serde (de)serialize preserves the existing on-wire <span class="mono">superseded</span>/<span class="mono">valid_to</span>
+      keys so synced blobs still read — back-compat without the redundant field in the struct.</p>
+      <p><span class="lime font-medium">Benefits.</span> Illegal states become unrepresentable;
+      the slice-5 core/archival tiers slot in as enum variants instead of a fourth boolean. Visibility
+      lives in one match, not two predicates + a free function that mutates two fields in lockstep
+      (supersede_similar_facts:654).</p>
+    </div>
+  </section>
+
+  <!-- CANDIDATE D -->
+  <section class="card rounded-xl p-6 mb-10">
+    <div class="flex items-center justify-between">
+      <h2 class="text-xl font-semibold text-white">D · <span class="mono">valid_from</span> collapsed into <span class="mono">ts_ms</span> — model + vocabulary drift</h2>
+      <span class="badge bg-zinc-500/20 text-zinc-300 px-2 py-1 rounded">Speculative</span>
+    </div>
+    <p class="text-zinc-500 text-sm mono mt-1">CONTEXT.md "Bi-temporal fact" · crates/eri_inference/src/memory/mod.rs Observation</p>
+
+    <div class="mt-4 space-y-3 text-zinc-300 leading-relaxed">
+      <p><span class="lime font-medium">Problem.</span> CONTEXT.md defines a Bi-temporal fact as
+      carrying <span class="mono">valid_from</span> / <span class="mono">valid_to</span> +
+      <span class="mono">learned_at</span> — <em>two</em> timelines (event vs transaction). The slice
+      ships one explicit field (<span class="mono">valid_to</span>) and collapses
+      <span class="mono">valid_from = learned_at = ts_ms</span>. For v1 that's defensible (no event-time
+      extraction yet), but it means a fact learned <em>today</em> about a <em>past</em> event ("I moved
+      to NYC last year") has <span class="mono">valid_from = today</span> — so a true
+      <span class="mono">recall_as_of(last_year)</span> would miss it. The capability is "bi-temporal-ready",
+      not bi-temporal; the ubiquitous-language term currently over-promises.</p>
+      <p><span class="lime font-medium">Solution.</span> Either (a) add
+      <span class="mono">valid_from: Option&lt;u64&gt;</span> defaulting to <span class="mono">ts_ms</span>,
+      so future event-time extraction has a home and <span class="mono">is_valid_at</span> reads
+      <span class="mono">valid_from..valid_to</span> honestly; or (b) record the v1 simplification in
+      CONTEXT.md + the Observation doc so the vocabulary matches the code. Cheap insurance: do (b) now,
+      (a) when an event-time extractor lands.</p>
+      <p><span class="lime font-medium">Benefits.</span> Keeps the ubiquitous language honest — a future
+      explorer reading "Bi-temporal fact" won't assume an event-start timeline that isn't there. Low
+      urgency: nothing today extracts event-time, so the gap is latent.</p>
+    </div>
+  </section>
+
+  <!-- TOP REC -->
+  <section class="rounded-xl p-6 border border-lime-500/30 bg-lime-500/5">
+    <div class="badge lime mb-2">Top recommendation</div>
+    <h2 class="text-xl font-semibold text-white">Start with A — the Remote turn recall adapter.</h2>
+    <p class="text-zinc-300 mt-3 leading-relaxed">
+      A is the only candidate that's a <em>functional</em> gap rather than hygiene: without it, the
+      recall_memory tool ships but the deep-recall + bi-temporal "what was true when" experience doesn't
+      actually work end-to-end — it degrades to the actuation agent improvising. It also retroactively
+      justifies <span class="mono">recall_as_of</span> (today caller-less) and is the natural place the
+      <span class="mono">as_of</span>→ms parse lives. B and C are real but safe to defer; B pairs well
+      with slice 5 (a new ranker/tier would otherwise copy the filter a sixth time), and C is best done
+      <em>before</em> slice 5 adds a fourth state. D is a one-line doc fix now, a field later.
+    </p>
+    <p class="text-zinc-500 text-sm mt-4">Cores reviewed as correct &amp; deep: consolidation plan/apply
+      split, MMR+budget selection, supersession-as-invalidation, the E2E relay decision (ADR-0001/0002).
+      No re-litigation of those.</p>
+  </section>
+
+  <p class="text-zinc-600 text-xs mt-10 mono">Report: this file. Nothing written to the repo. Pick a candidate to grill, or say "none — just wanted the read."</p>
+
+</div>
+</body>
+</html>

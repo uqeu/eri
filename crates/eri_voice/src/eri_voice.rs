@@ -222,6 +222,11 @@ pub struct VoiceCapture {
 mod engine;
 pub use engine::{VoiceConfig, VoiceEngine, VoiceSink};
 
+pub mod converse;
+pub use converse::{
+    Conversation, ConverseEnd, ConverseError, Responder, Speaker, Transcriber, is_stop_word,
+};
+
 pub mod dictation;
 
 impl VoiceCapture {

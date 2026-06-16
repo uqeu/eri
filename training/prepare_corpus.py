@@ -225,12 +225,6 @@ def split_train_valid(records: list[dict], valid_frac: float, seed: int) -> tupl
 _SF = {"human": "user", "user": "user", "gpt": "assistant", "assistant": "assistant",
        "tool": "tool", "function": "tool", "system": "system"}
 
-# Source-substring DENYLIST for the Tulu-3 mixture (in addition to OFF_LIMITS): GPT/Claude-distilled
-# or frontier-provenance slices that must never enter the corpus. Matched case-insensitively as a
-# substring against the row's `source` column.
-_TULU_DENY = ("no_robots", "no-robots", "wildchat", "sharegpt", "gpt", "openai", "chatgpt",
-              "claude", "anthropic", "alpaca", "wizardlm", "evol_instruct", "ultrachat", "orca")
-
 
 def _msgs_from_role_content(items, role_key, content_key) -> list | None:
     """Generic [{role_key, content_key}, ...] -> eri messages via _SF. None if nothing mapped.
@@ -282,106 +276,121 @@ def conv_dolly(record: dict) -> dict | None:
                          {"role": "assistant", "content": str(resp)}]}
 
 
-def conv_tulu(record: dict) -> dict | None:
-    """tulu-3-sft {id, messages, source} -> messages, EXCLUDING GPT/Claude-distilled slices.
+def conv_magpie(record: dict) -> dict | None:
+    """Magpie-Qwen2.5-Pro {instruction, response, ...quality} -> [user, assistant].
 
-    Keep only human / open-model sources (filter on the `source` column via _TULU_DENY)."""
-    src = str(record.get("source", "")).lower()
-    if any(bad in src for bad in _TULU_DENY):
-        return None
-    return {"messages": m} if (m := _msgs_from_role_content(record.get("messages"), "role", "content")) else None
+    Self-synthesized by Qwen2.5-72B-Instruct. The clean {instruction, response} pair is the
+    canonical turn; the quality fields (input_quality / instruct_reward / lengths) are consumed by
+    the quality selector, not the converter. Falls back to the `conversations` (from/value) list if
+    the flat pair is absent."""
+    instr, resp = record.get("instruction"), record.get("response")
+    if isinstance(instr, str) and instr.strip() and isinstance(resp, str) and resp.strip():
+        return {"messages": [{"role": "user", "content": instr},
+                             {"role": "assistant", "content": resp}]}
+    m = _msgs_from_role_content(record.get("conversations"), "from", "value")
+    return {"messages": m} if m else None
 
 
-def conv_glaive(record: dict) -> dict | None:
-    """glaive-function-calling-v2 {system, chat} -> messages (+ parsed tool calls/results).
+def conv_nemotron_agentic(record: dict) -> dict | None:
+    """Nemotron-Agentic-v1 {messages, tools, ...} -> eri messages + top-level tools.
 
-    `chat` is a STRING with USER: / ASSISTANT: / FUNCTION RESPONSE: markers; assistant turns may
-    embed `<functioncall> {json}` (name+arguments). We split on the markers, and for an assistant
-    turn carrying a functioncall emit a structured tool_call (arguments as a JSON string)."""
-    chat = record.get("chat")
-    if not isinstance(chat, str) or not chat.strip():
+    Rows are already in near-native eri shape: a `messages` list with role/content, assistant
+    `tool_calls` (function.name + JSON-string arguments) and `tool` replies carrying
+    `tool_call_id`, plus a top-level `tools` array. We keep only the mlx-recognized message keys
+    (dropping NVIDIA's extra `reasoning_content`) and re-key tool_calls into the canonical
+    {id, type, function:{name, arguments}} form, ensuring `arguments` is a JSON *string*."""
+    raw_msgs = record.get("messages")
+    if not isinstance(raw_msgs, list) or not raw_msgs:
         return None
     msgs: list[dict] = []
-    system = record.get("system")
-    if isinstance(system, str) and system.strip():
-        msgs.append({"role": "system", "content": system.replace("SYSTEM:", "", 1).strip()})
-
-    # tokenize on the role markers, preserving which marker started each chunk
-    parts = re.split(r"(USER:|ASSISTANT:|FUNCTION RESPONSE:)", chat)
-    cur_role = None
-    tc_counter = 0
-    for tok in parts:
-        t = tok.strip()
-        if tok in ("USER:", "ASSISTANT:", "FUNCTION RESPONSE:"):
-            cur_role = {"USER:": "user", "ASSISTANT:": "assistant",
-                        "FUNCTION RESPONSE:": "tool"}[tok]
+    for m in raw_msgs:
+        if not isinstance(m, dict):
             continue
-        if cur_role is None or not t:
+        role = _SF.get(str(m.get("role", "")).strip().lower())
+        if not role:
             continue
-        t = t.replace("<|endoftext|>", "").strip()
-        if not t:
-            continue
-        if cur_role == "assistant":
-            fc = re.search(r"<functioncall>\s*(\{.*\})", t, re.DOTALL)
-            if fc:
-                raw = fc.group(1).strip().rstrip("<|endoftext|>").strip()
-                try:
-                    call = json.loads(raw)
-                    args = call.get("arguments")
-                    if not isinstance(args, str):
-                        args = json.dumps(args or {}, ensure_ascii=False)
-                    else:
-                        json.loads(args)  # validate it parses; leave as-is if so
-                    tc_counter += 1
-                    msgs.append({"role": "assistant", "content": "", "tool_calls": [{
-                        "id": f"call_{tc_counter}", "type": "function",
-                        "function": {"name": call.get("name", "unknown"), "arguments": args}}]})
+        out: dict = {"role": role}
+        content = m.get("content")
+        out["content"] = content if isinstance(content, str) else ""
+        tcs = m.get("tool_calls")
+        if role == "assistant" and isinstance(tcs, list) and tcs:
+            norm_tcs = []
+            for i, tc in enumerate(tcs, start=1):
+                fn = (tc.get("function") or {}) if isinstance(tc, dict) else {}
+                name = fn.get("name")
+                if not name:
                     continue
-                except (json.JSONDecodeError, TypeError):
-                    pass  # malformed call -> fall through to plain assistant text
-            msgs.append({"role": "assistant", "content": t})
-        elif cur_role == "tool":
-            # glaive doesn't carry an explicit id; bind to the most recent assistant tool_call.
-            tcid = None
-            for prev in reversed(msgs):
-                if prev.get("tool_calls"):
-                    tcid = prev["tool_calls"][0]["id"]
-                    break
-            msgs.append({"role": "tool", "tool_call_id": tcid or f"call_{tc_counter or 1}",
-                         "content": t})
-        else:  # user
-            msgs.append({"role": "user", "content": t})
-    return {"messages": msgs} if msgs else None
-
-
-def conv_toolace(record: dict) -> dict | None:
-    """ToolACE {system, conversations:[{from,value}]} -> messages (+ system folded in)."""
-    msgs = _msgs_from_role_content(record.get("conversations"), "from", "value") or []
-    system = record.get("system")
-    if isinstance(system, str) and system.strip():
-        msgs = [{"role": "system", "content": system}] + msgs
-    return {"messages": msgs} if msgs else None
-
-
-def conv_hermes(record: dict) -> dict | None:
-    """hermes-function-calling-v1 {conversations:[{from,value}], tools} -> messages + tools.
-
-    The system turn already embeds the <tools> block; keep the top-level `tools` array too when it
-    is a list of tool schemas (mlx_lm reads a top-level `tools`)."""
-    msgs = _msgs_from_role_content(record.get("conversations"), "from", "value")
+                args = fn.get("arguments")
+                args = args if isinstance(args, str) else json.dumps(args or {}, ensure_ascii=False)
+                norm_tcs.append({"id": tc.get("id") or f"call_{i}", "type": "function",
+                                 "function": {"name": name, "arguments": args}})
+            if norm_tcs:
+                out["tool_calls"] = norm_tcs
+        if role == "tool":
+            tcid = m.get("tool_call_id")
+            out["tool_call_id"] = tcid if tcid else f"call_{len(msgs) + 1}"
+        msgs.append(out)
     if not msgs:
         return None
     rec: dict = {"messages": msgs}
     tools = record.get("tools")
     if isinstance(tools, list) and tools:
         rec["tools"] = tools
-    elif isinstance(tools, str) and tools.strip():
-        try:
-            parsed = json.loads(tools)
-            if isinstance(parsed, list) and parsed:
-                rec["tools"] = parsed
-        except json.JSONDecodeError:
-            pass
+    return rec
+
+
+def conv_reasoning_messages(record: dict) -> dict | None:
+    """Reasoning-axis datasets (Mixture-of-Thoughts, Nemotron-Post-Training) -> eri messages.
+
+    Both ship a `messages` list whose assistant turns embed a <think>...</think> reasoning trace
+    followed by the final answer; Nemotron-Post additionally carries assistant `tool_calls` and a
+    top-level/`metadata.tools` schema list. We pass the messages through (keeping reasoning traces
+    in assistant content — that's the training signal), re-keying any tool_calls/tool replies into
+    the canonical shape, and surface a top-level `tools` array when present."""
+    raw_msgs = record.get("messages")
+    if not isinstance(raw_msgs, list) or not raw_msgs:
+        return None
+    msgs: list[dict] = []
+    for m in raw_msgs:
+        if not isinstance(m, dict):
+            continue
+        role = _SF.get(str(m.get("role", "")).strip().lower())
+        if not role:
+            continue
+        out: dict = {"role": role}
+        content = m.get("content")
+        out["content"] = content if isinstance(content, str) else ""
+        tcs = m.get("tool_calls")
+        if role == "assistant" and isinstance(tcs, list) and tcs:
+            norm_tcs = []
+            for i, tc in enumerate(tcs, start=1):
+                fn = (tc.get("function") or {}) if isinstance(tc, dict) else {}
+                name = fn.get("name")
+                if not name:
+                    continue
+                args = fn.get("arguments")
+                args = args if isinstance(args, str) else json.dumps(args or {}, ensure_ascii=False)
+                norm_tcs.append({"id": tc.get("id") or f"call_{i}", "type": "function",
+                                 "function": {"name": name, "arguments": args}})
+            if norm_tcs:
+                out["tool_calls"] = norm_tcs
+        if role == "tool":
+            tcid = m.get("tool_call_id")
+            out["tool_call_id"] = tcid if tcid else f"call_{len(msgs) + 1}"
+        # an assistant turn must have content or tool_calls; drop empty stragglers
+        if role == "assistant" and not out["content"] and not out.get("tool_calls"):
+            continue
+        msgs.append(out)
+    if not msgs or not any(m["role"] == "assistant" for m in msgs):
+        return None
+    rec: dict = {"messages": msgs}
+    tools = record.get("tools")
+    if not (isinstance(tools, list) and tools):
+        md = _maybe_json(record.get("metadata"))
+        if isinstance(md, dict):
+            tools = md.get("tools")
+    if isinstance(tools, list) and tools:
+        rec["tools"] = tools
     return rec
 
 
@@ -507,17 +516,21 @@ def _maybe_json(v):
 
 
 # hf_id -> converter. Tools-bearing datasets map their tools into a top-level `tools` array.
+# (The GPT/Claude-tainted glaive / hermes / ToolACE / tulu-3 datasets were dropped 2026-06-15 and
+# moved to OFF_LIMITS; nemotron-agentic + magpie + the reasoning axis replace them.)
 OPEN_CONVERTERS = {
     "OpenAssistant/oasst2": conv_oasst2,
     "databricks/databricks-dolly-15k": conv_dolly,
-    "allenai/tulu-3-sft-mixture": conv_tulu,
-    "glaiveai/glaive-function-calling-v2": conv_glaive,
-    "Team-ACE/ToolACE": conv_toolace,
-    "NousResearch/hermes-function-calling-v1": conv_hermes,
+    "Magpie-Align/Magpie-Qwen2.5-Pro-300K-Filtered": conv_magpie,
+    "nvidia/Nemotron-Agentic-v1": conv_nemotron_agentic,
     "Salesforce/xlam-function-calling-60k": conv_xlam,
+    "MadeAgents/xlam-irrelevance-7.5k": conv_xlam,  # same {query,tools,answers}; restraint branch
     "nvidia/When2Call": conv_when2call,
     "google/Synthetic-Persona-Chat": conv_persona,
     "HuggingFaceTB/everyday-conversations-llama3.1-2k": conv_everyday,
+    # reasoning axis: both ship a `messages` list with <think> traces
+    "open-r1/Mixture-of-Thoughts": conv_reasoning_messages,
+    "nvidia/Nemotron-Post-Training-Dataset-v1": conv_reasoning_messages,
 }
 
 
@@ -580,7 +593,32 @@ def _iter_dataset(load_dataset, entry: dict, n_per: int):
     if entry["hf_id"] == "OpenAssistant/oasst2":
         yield from _oasst_pairs(stream, n_per)
         return
-    yield from stream
+    yield from _safe_iter(stream)
+
+
+def _safe_iter(iterable, max_consecutive_errors: int = 50):
+    """Wrap a (possibly streaming) iterable so a row that fails to decode/cast is SKIPPED rather
+    than killing the whole dataset.
+
+    HF `datasets` streaming applies an Arrow cast per example; a dataset with a heterogeneous nested
+    struct column (e.g. Nemotron-Agentic's free-form `tools` JSON-Schema) raises `TypeError:
+    Couldn't cast ...` mid-iteration, which otherwise aborts the entire dataset. We swallow the
+    per-row failure and continue; if the stream is permanently broken (keeps raising), we bail after
+    `max_consecutive_errors` consecutive failures so we never spin forever."""
+    it = iter(iterable)
+    errs = 0
+    while True:
+        try:
+            row = next(it)
+        except StopIteration:
+            return
+        except Exception:  # a single undecodable/uncastable row — skip, don't kill the dataset
+            errs += 1
+            if errs >= max_consecutive_errors:
+                return
+            continue
+        errs = 0
+        yield row
 
 
 def _convert_and_gate(raw, converter, entry: dict, idx_hint: int) -> dict | None:
@@ -611,6 +649,144 @@ def _entry_off_limits(entry: dict, off_low: set) -> bool:
         str(entry.get("hf_id", "")).strip().lower().split("/")[-1],
     }
     return bool(cand & off_low)
+
+
+# --------------------------------------------------------------------------- #
+# QUALITY SELECTION — pool > score > diversify > pick best-N (stdlib-only)
+#
+# Instead of taking the first N convertible rows, the blend pools POOL_FACTOR*N candidates per
+# dataset, scores each by a per-ROLE heuristic, drops near-duplicates, and keeps the top N. This
+# trades a little extra streaming for a markedly cleaner slice (well-formed tool calls, balanced
+# restraint labels, reasoning traces with a real answer, not-too-short/long chat).
+# --------------------------------------------------------------------------- #
+POOL_FACTOR = 4  # stream up to POOL_FACTOR * n_per candidates, then keep the best n_per
+
+
+def _assistant_text(mlx: dict) -> str:
+    return " ".join(m.get("content") or "" for m in mlx["messages"] if m.get("role") == "assistant")
+
+
+def _all_text(mlx: dict) -> str:
+    return " ".join(m.get("content") or "" for m in mlx["messages"] if isinstance(m.get("content"), str))
+
+
+def _has_valid_tool_calls(mlx: dict) -> bool:
+    """At least one assistant turn carries a parseable tool_call (name + JSON-string arguments)."""
+    for m in mlx["messages"]:
+        for tc in m.get("tool_calls") or []:
+            fn = (tc.get("function") or {})
+            if fn.get("name") and isinstance(fn.get("arguments"), str):
+                try:
+                    json.loads(fn["arguments"])
+                    return True
+                except json.JSONDecodeError:
+                    return False
+    return False
+
+
+def _length_score(n_chars: int, lo: int, hi: int) -> float:
+    """1.0 inside [lo, hi]; linearly decays outside. Penalizes too-short and too-long replies."""
+    if n_chars <= 0:
+        return 0.0
+    if lo <= n_chars <= hi:
+        return 1.0
+    if n_chars < lo:
+        return max(0.0, n_chars / lo)
+    return max(0.1, hi / n_chars)  # long isn't worthless, just less preferred
+
+
+def score_candidate(role: str, raw: dict, mlx: dict) -> float:
+    """Per-role quality score in roughly [0, 1.5]. Higher = keep. Uses the raw row's native quality
+    signals where available (Magpie rewards, oasst rank), else structural heuristics on the MLX
+    record. Pure + stdlib-only."""
+    asst = _assistant_text(mlx)
+    n_turns = len(mlx["messages"])
+
+    if role == "tools":
+        # prefer rows that actually exercise a well-formed tool call, plus enough context
+        s = 1.0 if _has_valid_tool_calls(mlx) else 0.2
+        s += 0.2 * min(n_turns, 5) / 5  # multi-turn agentic trajectories slightly preferred
+        if mlx.get("tools"):
+            s += 0.1  # carries a tool schema
+        return s
+
+    if role == "restraint":
+        # the right action is to NOT call a tool: reward a clean no-call answer; downrank stray calls
+        called = _has_valid_tool_calls(mlx)
+        s = 0.3 if called else 1.0
+        s += _length_score(len(asst), 20, 400) * 0.3  # a real clarifying reply, not empty/rambling
+        return s
+
+    if role == "reasoning":
+        # reward a visible reasoning trace AND a final answer of reasonable length
+        has_trace = "<think>" in asst or "</think>" in asst or len(asst) > 600
+        # strip the think block to estimate the FINAL answer length
+        final = re.sub(r"<think>.*?</think>", "", asst, flags=re.DOTALL).strip()
+        s = (0.8 if has_trace else 0.2) + (0.5 if len(final) >= 20 else 0.0)
+        return s
+
+    if role == "persona":
+        # warmth/texting register: adequate multi-turn length, not a one-liner
+        s = 0.4 + 0.4 * min(n_turns, 6) / 6
+        s += _length_score(len(_all_text(mlx)), 60, 1500) * 0.3
+        return s
+
+    # chat (default): prefer native quality signals, else reasonable-length single reply
+    iq = str(raw.get("input_quality", "")).lower()
+    reward = raw.get("instruct_reward")
+    s = 0.5
+    if iq in ("good", "excellent", "average", "high"):
+        s += {"excellent": 0.5, "high": 0.5, "good": 0.4, "average": 0.2}.get(iq, 0.2)
+    if isinstance(reward, (int, float)):
+        s += max(0.0, min(0.3, reward / 20.0))  # Magpie instruct_reward (~ -10..10) -> small boost
+    rank = raw.get("rank")  # oasst-style: 0 = top-ranked accepted reply
+    if isinstance(rank, int):
+        s += 0.3 if rank == 0 else 0.1
+    s += _length_score(len(asst), 40, 2500) * 0.4
+    return s
+
+
+def _dedup_key(mlx: dict) -> str:
+    """Near-duplicate key over the WHOLE turn: user prefix + assistant text + tool-call fingerprint
+    + turn count. Cheap, stdlib-only.
+
+    Keying on assistant text alone silently collapses every tool-call row to one key — their
+    assistant content is empty (the call lives in `tool_calls`), so a whole tool/restraint dataset
+    would dedup down to a single example. Including the user turn and the tool-call names/args keeps
+    distinct tool calls (and distinct prompts behind a canned restraint reply) as distinct examples,
+    while still collapsing rows that are genuinely identical in both prompt and answer."""
+    parts = [str(len(mlx["messages"]))]
+    for m in mlx["messages"]:
+        if m.get("role") == "user" and isinstance(m.get("content"), str):
+            parts.append("u:" + re.sub(r"\s+", " ", m["content"]).strip()[:80].lower())
+            break
+    asst = re.sub(r"<think>.*?</think>", "", _assistant_text(mlx), flags=re.DOTALL)
+    parts.append("a:" + re.sub(r"\s+", " ", asst).strip()[:120].lower())
+    names = []
+    for m in mlx["messages"]:
+        for tc in m.get("tool_calls") or []:
+            fn = tc.get("function") or {}
+            names.append(f"{fn.get('name')}:{str(fn.get('arguments'))[:60]}")
+    if names:
+        parts.append("t:" + ",".join(names))
+    return "|".join(parts)
+
+
+def _select_best(scored: list[tuple[float, dict]], n_per: int) -> list[dict]:
+    """Drop near-duplicates (first/highest-scored occurrence wins), then keep the top n_per by score.
+    `scored` is a list of (score, mlx_record). Deterministic: stable sort by -score."""
+    scored.sort(key=lambda sm: sm[0], reverse=True)
+    seen: set = set()
+    picked: list[dict] = []
+    for _score, mlx in scored:
+        k = _dedup_key(mlx)
+        if k in seen:
+            continue
+        seen.add(k)
+        picked.append(mlx)
+        if len(picked) >= n_per:
+            break
+    return picked
 
 
 def blend_open_datasets(root: Path, n_per: int) -> list[dict]:
@@ -644,17 +820,23 @@ def blend_open_datasets(root: Path, n_per: int) -> list[dict]:
         if gate_key in seen_pair:
             continue  # xlam appears twice (tools + restraint); convert once per (split, role)
         seen_pair.add(gate_key)
+        role = entry.get("role", "chat")
         try:
-            taken = 0
-            for i, raw in enumerate(_iter_dataset(load_dataset, entry, n_per)):
+            # Pool POOL_FACTOR*n_per candidates, score by role, dedup, keep the best n_per.
+            pool_target = max(n_per, POOL_FACTOR * n_per)
+            scored: list[tuple[float, dict]] = []
+            for i, raw in enumerate(_iter_dataset(load_dataset, entry, pool_target)):
                 mlx = _convert_and_gate(raw, converter, entry, i)
                 if mlx is not None:
-                    out.append(mlx)
-                    taken += 1
-                if taken >= n_per:
+                    scored.append((score_candidate(role, raw if isinstance(raw, dict) else {}, mlx),
+                                   mlx))
+                if len(scored) >= pool_target:
                     break
-            note = "" if taken else "  (0 — schema/filter yielded nothing)"
-            print(f"  --with-open: {entry['name']}: {taken} rows{note}", file=sys.stderr)
+            picked = _select_best(scored, n_per)
+            out.extend(picked)
+            note = "" if picked else "  (0 — schema/filter yielded nothing)"
+            print(f"  --with-open: {entry['name']}: {len(picked)} rows "
+                  f"(pooled {len(scored)}, role={role}){note}", file=sys.stderr)
         except Exception as e:  # gated/network/schema issues must not kill the run
             gated = " [gated — set HF_TOKEN + accept terms]" if entry.get("gated") else ""
             print(f"  --with-open: SKIP {entry.get('name')} ({type(e).__name__}: "
@@ -907,44 +1089,47 @@ def self_test() -> bool:
     check(roles(d) == ["user", "assistant"] and "C" in d["messages"][0]["content"],
           "conv_dolly: folds context into user turn")
 
-    # tulu: deny GPT-distilled source, keep open source
-    check(conv_tulu({"source": "ai2-adapt-dev/oasst1_converted",
-                     "messages": [{"role": "user", "content": "x"},
-                                  {"role": "assistant", "content": "y"}]}) is not None,
-          "conv_tulu: keeps open-model source")
-    check(conv_tulu({"source": "HuggingFaceH4/no_robots",
-                     "messages": [{"role": "user", "content": "x"}]}) is None,
-          "conv_tulu: drops no_robots (OFF_LIMITS slice)")
-    check(conv_tulu({"source": "some/sharegpt_gpt4_slice",
-                     "messages": [{"role": "user", "content": "x"}]}) is None,
-          "conv_tulu: drops gpt/sharegpt-distilled slice")
+    # magpie: flat instruction/response -> [user, assistant]; conversations fallback
+    mg = conv_magpie({"instruction": "Q", "response": "A", "input_quality": "good"})
+    check(roles(mg) == ["user", "assistant"] and mg["messages"][1]["content"] == "A",
+          "conv_magpie: instruction/response -> [user, assistant]")
+    mg2 = conv_magpie({"conversations": [{"from": "human", "value": "q"},
+                                         {"from": "gpt", "value": "a"}]})
+    check(roles(mg2) == ["user", "assistant"], "conv_magpie: conversations fallback")
+    check(conv_magpie({"instruction": "", "response": ""}) is None, "conv_magpie: empty -> skip")
 
-    # glaive: string chat with a functioncall -> structured tool_call + tool reply
-    glaive_chat = ("USER: rate? \n\nASSISTANT: <functioncall> {\"name\": \"get_rate\", "
-                   "\"arguments\": \"{\\\"a\\\": 1}\"} <|endoftext|>\n\n"
-                   "FUNCTION RESPONSE: {\"rate\": 5}\n\nASSISTANT: It's 5. <|endoftext|>")
-    g = conv_glaive({"system": "SYSTEM: helper", "chat": glaive_chat})
-    check(roles(g) == ["system", "user", "assistant", "tool", "assistant"],
-          f"conv_glaive: marker parse -> system/user/asst/tool/asst (got {roles(g)})")
-    asst_tc = g["messages"][2]
-    check(bool(asst_tc.get("tool_calls")) and asst_tc["tool_calls"][0]["function"]["name"] == "get_rate",
-          "conv_glaive: <functioncall> -> structured tool_call")
-    check(g["messages"][3].get("tool_call_id") == asst_tc["tool_calls"][0]["id"],
-          "conv_glaive: tool reply bound to the tool_call id")
+    # nemotron-agentic: native messages + structured tool_calls + tool reply + tools passthrough
+    na = conv_nemotron_agentic({
+        "messages": [
+            {"role": "system", "content": "policy"},
+            {"role": "user", "content": "update my order"},
+            {"role": "assistant", "content": "", "reasoning_content": "drop me",
+             "tool_calls": [{"id": "tc1", "type": "function",
+                             "function": {"name": "auth", "arguments": "{\"id\": \"X\"}"}}]},
+            {"role": "tool", "tool_call_id": "tc1", "content": "{\"ok\": true}"},
+            {"role": "assistant", "content": "Done.", "reasoning_content": "drop me"},
+        ],
+        "tools": [{"type": "function", "function": {"name": "auth", "parameters": {}}}]})
+    check(roles(na) == ["system", "user", "assistant", "tool", "assistant"],
+          f"conv_nemotron_agentic: native messages (got {roles(na)})")
+    na_tc = na["messages"][2]
+    check(bool(na_tc.get("tool_calls")) and na_tc["tool_calls"][0]["function"]["name"] == "auth",
+          "conv_nemotron_agentic: structured tool_call kept")
+    check("reasoning_content" not in na_tc, "conv_nemotron_agentic: drops reasoning_content")
+    check(na["messages"][3].get("tool_call_id") == "tc1" and isinstance(na.get("tools"), list),
+          "conv_nemotron_agentic: tool reply id + top-level tools")
 
-    # toolace: conversations + system fold
-    t = conv_toolace({"system": "expert", "conversations": [
-        {"from": "user", "value": "go"}, {"from": "assistant", "value": "[API()]"},
-        {"from": "tool", "value": "[]"}]})
-    check(roles(t) == ["system", "user", "assistant", "tool"], "conv_toolace: from->role + system")
-
-    # hermes: conversations + top-level tools passthrough
-    h = conv_hermes({"conversations": [{"from": "system", "value": "fc"},
-                                       {"from": "human", "value": "q"},
-                                       {"from": "gpt", "value": "a"}],
-                     "tools": [{"type": "function", "function": {"name": "f", "parameters": {}}}]})
-    check(roles(h) == ["system", "user", "assistant"] and isinstance(h.get("tools"), list) and bool(h["tools"]),
-          "conv_hermes: messages + tools passthrough")
+    # reasoning: messages with a <think> trace -> passthrough; tools from metadata
+    rsn = conv_reasoning_messages({
+        "messages": [{"role": "user", "content": "solve it"},
+                     {"role": "assistant", "content": "<think>step</think>The answer is 5."}],
+        "metadata": "{\"tools\": [{\"type\": \"function\", \"function\": {\"name\": \"f\"}}]}"})
+    check(roles(rsn) == ["user", "assistant"] and "<think>" in rsn["messages"][1]["content"],
+          "conv_reasoning_messages: keeps reasoning trace")
+    check(isinstance(rsn.get("tools"), list) and bool(rsn["tools"]),
+          "conv_reasoning_messages: tools lifted from metadata")
+    check(conv_reasoning_messages({"messages": [{"role": "user", "content": "hi"}]}) is None,
+          "conv_reasoning_messages: no assistant turn -> skip")
 
     # xlam: answers -> tool_call(s); empty answers -> restraint
     x = conv_xlam({"query": "do it", "tools": "[{\"name\": \"f\"}]",
@@ -983,7 +1168,7 @@ def self_test() -> bool:
 
     # every converter output (with meta) passes the validation gate
     gate_ok = True
-    for rec in (d, t, h, x, xr, w_tc, w_d, w_c, p, e, g,
+    for rec in (d, mg, mg2, na, rsn, x, xr, w_tc, w_d, w_c, p, e,
                 conv_oasst2({"prompter": "hi", "assistant": "hello"})):
         obj = dict(rec)
         obj["meta"] = {"provenance": "open-model", "source": "test"}
@@ -994,8 +1179,57 @@ def self_test() -> bool:
             print(f"    gate reject: {ex}", file=sys.stderr)
     check(gate_ok, "converters: all sample outputs pass validate.validate_message_obj")
 
-    # registry covers every USABLE manifest hf_id (sanity: 10 converters wired)
-    check(len(OPEN_CONVERTERS) == 10, f"registry: 10 converters wired (got {len(OPEN_CONVERTERS)})")
+    # --- quality selection: scoring + dedup + best-N pick ---
+    # restraint scorer prefers a no-call answer over a stray tool_call
+    tool_call_mlx = {"messages": [{"role": "user", "content": "q"},
+                                  {"role": "assistant", "content": "", "tool_calls": [
+                                      {"function": {"name": "f", "arguments": "{}"}}]}]}
+    no_call_mlx = {"messages": [{"role": "user", "content": "q"},
+                                {"role": "assistant", "content": "I can't do that with these tools."}]}
+    check(score_candidate("restraint", {}, no_call_mlx) > score_candidate("restraint", {}, tool_call_mlx),
+          "score: restraint prefers no-call answer")
+    # tools scorer prefers a valid tool_call over none
+    check(score_candidate("tools", {}, tool_call_mlx) > score_candidate("tools", {}, no_call_mlx),
+          "score: tools prefers a valid tool_call")
+    # reasoning scorer prefers a trace + final answer
+    rsn_good = {"messages": [{"role": "user", "content": "q"},
+                             {"role": "assistant", "content": "<think>work</think>The answer is 42."}]}
+    rsn_bad = {"messages": [{"role": "user", "content": "q"},
+                            {"role": "assistant", "content": "42"}]}
+    check(score_candidate("reasoning", {}, rsn_good) > score_candidate("reasoning", {}, rsn_bad),
+          "score: reasoning prefers trace + answer")
+    # chat scorer rewards native quality signals
+    chat_hi = {"messages": [{"role": "user", "content": "q"},
+                            {"role": "assistant", "content": "x" * 200}]}
+    check(score_candidate("chat", {"input_quality": "excellent", "instruct_reward": 8.0}, chat_hi)
+          > score_candidate("chat", {"input_quality": "low"}, chat_hi),
+          "score: chat rewards native quality signals")
+    # dedup + best-N: rows identical in prompt+answer collapse; top scores win
+    dup_a = {"messages": [{"role": "user", "content": "same q"}, {"role": "assistant", "content": "Same opening line here."}]}
+    dup_b = {"messages": [{"role": "user", "content": "same q"}, {"role": "assistant", "content": "Same opening line here."}]}
+    uniq = {"messages": [{"role": "user", "content": "other q"}, {"role": "assistant", "content": "A different reply entirely."}]}
+    picked = _select_best([(1.0, dup_a), (0.5, dup_b), (0.9, uniq)], n_per=5)
+    check(len(picked) == 2, f"select: identical prompt+answer collapsed (got {len(picked)})")
+    picked2 = _select_best([(0.1, uniq), (0.9, dup_a)], n_per=1)
+    check(picked2 == [dup_a], "select: top score wins under cap")
+    # tool-call rows have EMPTY assistant content — keyed by their calls + prompt, NOT collapsed
+    # (this is the bug that silently shrank xlam/when2call to ~1 row each).
+    def _tcrow(name, u):
+        return {"messages": [{"role": "user", "content": u},
+                             {"role": "assistant", "content": "",
+                              "tool_calls": [{"function": {"name": name, "arguments": "{}"}}]}]}
+    picked_tc = _select_best([(1.0, _tcrow("a", "q1")), (0.9, _tcrow("b", "q2")),
+                              (0.8, _tcrow("c", "q3"))], n_per=5)
+    check(len(picked_tc) == 3, f"select: tool-call rows kept distinct despite empty content (got {len(picked_tc)})")
+    # restraint: a canned no-call reply across DIFFERENT prompts is kept (distinct user turns)
+    def _resrow(u):
+        return {"messages": [{"role": "user", "content": u},
+                             {"role": "assistant", "content": "I can't do that with these tools."}]}
+    picked_res = _select_best([(1.0, _resrow("weather?")), (0.9, _resrow("stock price?"))], n_per=5)
+    check(len(picked_res) == 2, f"select: canned restraint reply kept across prompts (got {len(picked_res)})")
+
+    # registry covers every USABLE manifest hf_id (sanity: 11 converters wired)
+    check(len(OPEN_CONVERTERS) == 11, f"registry: 11 converters wired (got {len(OPEN_CONVERTERS)})")
 
     return ok
 

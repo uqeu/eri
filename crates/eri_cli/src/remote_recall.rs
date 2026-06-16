@@ -94,12 +94,24 @@ pub fn format_recall(query: &str, hits: &[Observation]) -> String {
 pub fn run_recall(goal_json: &str, now_ms: u64) -> (&'static str, Option<String>, Option<String>) {
     let spec: RecallSpec = match serde_json::from_str(goal_json) {
         Ok(s) => s,
-        Err(_) => return ("error", Some("that memory lookup was malformed".into()), None),
+        Err(_) => {
+            return (
+                "error",
+                Some("that memory lookup was malformed".into()),
+                None,
+            );
+        }
     };
     let user_id = config::load().ok().and_then(|c| c.user_id);
     let mut store = match MemoryStore::open_for(user_id.as_deref()) {
         Ok(s) => s,
-        Err(_) => return ("error", Some("couldn't open your memory store".into()), None),
+        Err(_) => {
+            return (
+                "error",
+                Some("couldn't open your memory store".into()),
+                None,
+            );
+        }
     };
     let ws = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
 
@@ -110,10 +122,12 @@ pub fn run_recall(goal_json: &str, now_ms: u64) -> (&'static str, Option<String>
     {
         // A parsed time scope → bi-temporal point-in-time recall ("what was true then").
         Some(as_of_ms) => store.recall_as_of(&spec.query, &ws, RECALL_LIMIT, as_of_ms),
-        // No (or unparseable) scope → current-belief hybrid recall.
+        // No (or unparseable) scope → current-belief hybrid recall, token-
+        // budgeted so the phone reply can't balloon as the store grows. The
+        // `RECALL_LIMIT` still caps the count after the budget trims by tokens.
         None => store
-            .recall_hybrid(&spec.query, &ws, RECALL_LIMIT)
-            .map(|v| v.into_iter().map(|(o, _)| o).collect())
+            .recall_hybrid_with_budget(&spec.query, &ws, crate::memory_tools::RECALL_TOKEN_BUDGET)
+            .map(|v| v.into_iter().take(RECALL_LIMIT).map(|(o, _)| o).collect())
             .unwrap_or_default(),
     };
     ("done", Some(format_recall(&spec.query, &hits)), None)
@@ -130,15 +144,27 @@ mod tests {
     fn parses_simple_relative_phrases() {
         assert_eq!(parse_relative_ms("yesterday", NOW), Some(NOW - DAY_MS));
         assert_eq!(parse_relative_ms("last week", NOW), Some(NOW - 7 * DAY_MS));
-        assert_eq!(parse_relative_ms("last month", NOW), Some(NOW - 30 * DAY_MS));
-        assert_eq!(parse_relative_ms("Last Year", NOW), Some(NOW - 365 * DAY_MS));
+        assert_eq!(
+            parse_relative_ms("last month", NOW),
+            Some(NOW - 30 * DAY_MS)
+        );
+        assert_eq!(
+            parse_relative_ms("Last Year", NOW),
+            Some(NOW - 365 * DAY_MS)
+        );
     }
 
     #[test]
     fn parses_n_units_ago() {
         assert_eq!(parse_relative_ms("3 days ago", NOW), Some(NOW - 3 * DAY_MS));
-        assert_eq!(parse_relative_ms("2 weeks ago", NOW), Some(NOW - 14 * DAY_MS));
-        assert_eq!(parse_relative_ms("1 month ago", NOW), Some(NOW - 30 * DAY_MS));
+        assert_eq!(
+            parse_relative_ms("2 weeks ago", NOW),
+            Some(NOW - 14 * DAY_MS)
+        );
+        assert_eq!(
+            parse_relative_ms("1 month ago", NOW),
+            Some(NOW - 30 * DAY_MS)
+        );
     }
 
     #[test]
@@ -165,7 +191,10 @@ mod tests {
 
     #[test]
     fn format_recall_lists_memories() {
-        let out = format_recall("the deal", &[obs("closed the Henderson deal"), obs("price was 40k")]);
+        let out = format_recall(
+            "the deal",
+            &[obs("closed the Henderson deal"), obs("price was 40k")],
+        );
         assert!(out.contains("Here's what I remember"));
         assert!(out.contains("Henderson deal"));
         assert!(out.contains("40k"));

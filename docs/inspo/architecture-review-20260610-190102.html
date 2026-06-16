@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Architecture review (re-run) — eri</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+      mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose" });
+    </script>
+    <style>
+      .deep { background: linear-gradient(135deg, #0f172a, #1e293b); }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+      .lbl { font-size: 10px; letter-spacing: .14em; text-transform: uppercase; }
+      .card-anchor { scroll-margin-top: 1.5rem; }
+      .mermaid { display:flex; justify-content:center; }
+    </style>
+  </head>
+  <body class="bg-stone-50 text-slate-900 font-sans antialiased">
+    <main class="max-w-5xl mx-auto px-6 py-14 space-y-14">
+      <header class="space-y-4">
+        <p class="lbl text-slate-400">Architecture review · re-run · eri · 2026-06-10</p>
+        <h1 class="font-serif text-4xl text-slate-900">Three landed. Now the morph pad needs a capability seam.</h1>
+        <p class="text-sm text-slate-600 max-w-2xl">Judged against the product goal: the <em>morph pad</em> — one glass panel that is eri — must do all six capabilities (Control · Eyes · Voice · Memory · Build · Research) behind clean seams. The inference path got deep last round; the capability path is where the friction moved.</p>
+      </header>
+
+      <!-- Landed -->
+      <section class="rounded-2xl border border-emerald-200 bg-emerald-50/60 p-7 space-y-4">
+        <p class="lbl text-emerald-700">Verified landed — 3/3</p>
+        <div class="grid md:grid-cols-3 gap-4">
+          <div class="rounded-xl bg-white border border-emerald-100 p-4">
+            <p class="text-emerald-700 text-sm font-semibold">② Loop assembly</p>
+            <p class="text-xs text-slate-600 mt-1"><span class="mono">context_target</span> is a field; <span class="mono">window_for(tier)</span> + <span class="mono">for_run</span> factory; chat/build/headless route through it. Per-tier eri context window is real.</p>
+          </div>
+          <div class="rounded-xl bg-white border border-emerald-100 p-4">
+            <p class="text-emerald-700 text-sm font-semibold">① Provider acquisition</p>
+            <p class="text-xs text-slate-600 mt-1"><span class="mono">resolve_provider(services, choice)</span> seam; review + voice_route both on it. No env-only reconstructions left.</p>
+          </div>
+          <div class="rounded-xl bg-white border border-emerald-100 p-4">
+            <p class="text-emerald-700 text-sm font-semibold">③ Legacy dispatcher</p>
+            <p class="text-xs text-slate-600 mt-1">34-arm reject list → one <span class="mono">_</span> wildcard. New commands no longer touch the shadow.</p>
+          </div>
+        </div>
+        <p class="text-xs text-emerald-700/80">No new shallowness introduced. The inference path is measurably deeper.</p>
+      </section>
+
+      <section id="candidates" class="space-y-12">
+
+        <!-- ============ CANDIDATE A — the big one ============ -->
+        <article id="a" class="card-anchor rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+          <div class="px-7 pt-7 pb-5 space-y-4">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800">Strong</span>
+              <span class="text-[11px] font-medium px-2.5 py-1 rounded-full bg-slate-100 text-slate-600">ports &amp; adapters · the product seam</span>
+            </div>
+            <h2 class="font-serif text-2xl">Give the morph pad a Capability seam</h2>
+            <p class="mono text-xs text-slate-500">apps/eri-agent-manager/manager.js (MORPH map, runCommand) · scripts/eri_agent_manager.swift (handle) · crates/eri_coreutils/src/lib.rs (104-arm dispatch) · services/*</p>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-px bg-slate-200 border-y border-slate-200">
+            <div class="bg-white p-5">
+              <p class="lbl text-slate-400 mb-3">Before — one capability, hand-wired 8–15× across 8 files</p>
+              <pre class="mermaid">
+flowchart TB
+  cap([add a capability]) --> j1[manager.js MORPH map]
+  cap --> j2[manager.js runCommand]
+  cap --> css[manager.css data-mode]
+  cap --> html[index.html button/panel]
+  cap --> sw[swift handle  case]
+  cap --> cli[eri_cli Command + dispatch]
+  cap --> rpc[lib.rs eri/.. match arm]
+  cap --> svc[services/x.rs module]
+  classDef leak stroke:#dc2626,stroke-width:2px,fill:#fef2f2;
+  class j1,j2,css,html,sw,cli,rpc,svc leak
+              </pre>
+            </div>
+            <div class="bg-white p-5">
+              <p class="lbl text-slate-400 mb-3">After — register once behind a Capability trait</p>
+              <pre class="mermaid">
+flowchart TB
+  reg[Capability registry\nname -> handler]:::deep
+  reg --> v[Voice]
+  reg --> e[Eyes]
+  reg --> c[Control]
+  reg --> m[Memory]
+  reg --> b[Build]
+  reg --> r[Research]
+  pad[morph pad mode] --> reg
+  classDef deep fill:#0f172a,color:#fff,stroke:#0f172a;
+              </pre>
+              <p class="text-[11px] text-slate-500 mt-3 text-center">mode name = capability name = handler key. One registration, not eight edits.</p>
+            </div>
+          </div>
+
+          <div class="px-7 py-6 grid md:grid-cols-2 gap-6">
+            <div class="space-y-3">
+              <div><p class="lbl text-slate-400">Problem</p><p class="text-sm text-slate-700">There's no capability abstraction. Each of the six is hand-wired at every layer; mode names (<span class="mono">eyes</span>) diverge from handlers (<span class="mono">startGaze</span>), and there's no single place that says "these are eri's capabilities."</p></div>
+              <div><p class="lbl text-slate-400">Solution</p><p class="text-sm text-slate-700">A <span class="mono">Capability</span> trait + registry at the sidecar dispatch (<span class="mono">lib.rs</span>), with one canonical capability id shared by the pad mode, the bridge, and the handler.</p></div>
+            </div>
+            <div class="space-y-3">
+              <p class="lbl text-slate-400">Wins</p>
+              <ul class="text-sm text-slate-700 space-y-1.5">
+                <li class="flex gap-2"><span class="text-emerald-600">↳</span> Adding a capability = one registration</li>
+                <li class="flex gap-2"><span class="text-emerald-600">↳</span> Mode ↔ capability ↔ handler names converge</li>
+                <li class="flex gap-2"><span class="text-emerald-600">↳</span> The pad can enumerate what eri can do</li>
+                <li class="flex gap-2"><span class="text-emerald-600">↳</span> Makes "the pad does everything" real, not aspirational</li>
+              </ul>
+            </div>
+          </div>
+          <div class="px-7 pb-6 text-xs text-slate-500">Deletion test: a registry concentrates the scattered wiring — delete it and the 8-file edit dance returns across every capability. That's the signal it earns its keep.</div>
+        </article>
+
+        <!-- ============ HONESTY CALLOUT ============ -->
+        <article class="rounded-2xl border border-amber-300 bg-amber-50 p-7 space-y-2">
+          <p class="lbl text-amber-700">Honesty check — 5/6 on the pad</p>
+          <h2 class="font-serif text-xl text-amber-900">Research isn't wired to the morph pad yet</h2>
+          <p class="text-sm text-amber-800 max-w-2xl">Control, Eyes, Voice, Memory, and Build all reach a real handler from the pad. <strong>Research is CLI-only</strong> — no morph mode, no Swift case, no pad handler. The "six capabilities" is five on the pad today. The Capability seam above is also the cleanest way to close that gap honestly: register Research once and it lights up in the pad.</p>
+        </article>
+
+        <!-- ============ CANDIDATE B ============ -->
+        <article id="b" class="card-anchor rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+          <div class="px-7 pt-7 pb-5 space-y-4">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-amber-100 text-amber-800">Worth exploring</span>
+              <span class="text-[11px] font-medium px-2.5 py-1 rounded-full bg-slate-100 text-slate-600">delete dead code</span>
+            </div>
+            <h2 class="font-serif text-2xl">Excise the dead Mercury chain</h2>
+            <p class="mono text-xs text-slate-500">eri_cli.rs: run() · run_build() · run_iterate() · build_backend() · stream_iteration() · imports MercuryBackend/MercuryConfig (~180 LOC, all #[allow(dead_code)])</p>
+          </div>
+          <div class="px-7 py-5 grid md:grid-cols-2 gap-6">
+            <div class="space-y-3">
+              <div><p class="lbl text-slate-400">Problem</p><p class="text-sm text-slate-700">The legacy Mercury build path is fully unreachable (only the dead <span class="mono">run()</span> referenced it; <span class="mono">run()</span> now wildcards). It sits behind <span class="mono">#[allow(dead_code)]</span> — dead weight a reader still has to account for.</p></div>
+              <div><p class="lbl text-slate-400">Solution</p><p class="text-sm text-slate-700">Delete the chain + its now-unused imports in one sweep; confirm clippy stays clean.</p></div>
+            </div>
+            <div class="space-y-3">
+              <p class="lbl text-slate-400">Wins</p>
+              <ul class="text-sm text-slate-700 space-y-1.5">
+                <li class="flex gap-2"><span class="text-emerald-600">↳</span> ~180 LOC + dead imports gone</li>
+                <li class="flex gap-2"><span class="text-emerald-600">↳</span> No more <span class="mono">#[allow(dead_code)]</span> to explain</li>
+                <li class="flex gap-2"><span class="text-emerald-600">↳</span> One build path, not two</li>
+              </ul>
+            </div>
+          </div>
+          <div class="px-7 pb-6 text-xs text-slate-500">Deletion test: the literal case — nothing references it; deleting concentrates nothing because it already does nothing.</div>
+        </article>
+
+        <!-- ============ CANDIDATE C ============ -->
+        <article id="c" class="card-anchor rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+          <div class="px-7 pt-7 pb-5 space-y-4">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-slate-200 text-slate-700">Speculative</span>
+              <span class="text-[11px] font-medium px-2.5 py-1 rounded-full bg-slate-100 text-slate-600">narrow the seam</span>
+            </div>
+            <h2 class="font-serif text-2xl">Narrow the <span class="mono text-xl">Services</span> god-object (carried over)</h2>
+            <p class="mono text-xs text-slate-500">crates/eri_coreutils/src/services/mod.rs (14 fields) · lib.rs (104-arm dispatch)</p>
+          </div>
+          <div class="px-7 py-5 grid md:grid-cols-2 gap-6">
+            <div class="space-y-3">
+              <div><p class="lbl text-slate-400">Problem</p><p class="text-sm text-slate-700">14-field registry passed whole into every handler. Still the largest diffuse smell, but the Capability seam (A) is the better lever — design the registry first and the Services slimming falls out of it.</p></div>
+              <div><p class="lbl text-slate-400">Solution</p><p class="text-sm text-slate-700">Let capabilities declare the slice of <span class="mono">Services</span> they need; do it as part of A, incrementally.</p></div>
+            </div>
+            <div class="space-y-3">
+              <p class="lbl text-slate-400">Wins</p>
+              <ul class="text-sm text-slate-700 space-y-1.5">
+                <li class="flex gap-2"><span class="text-emerald-600">↳</span> Handlers testable without the whole registry</li>
+                <li class="flex gap-2"><span class="text-emerald-600">↳</span> Falls out of A for free</li>
+              </ul>
+            </div>
+          </div>
+          <div class="px-7 pb-6 text-xs text-amber-700 bg-amber-50 border-t border-amber-100">Do it with A, not before — designing the Capability seam tells you the right slices.</div>
+        </article>
+
+      </section>
+
+      <!-- Top recommendation -->
+      <section id="top-recommendation">
+        <div class="rounded-2xl deep text-white p-8 space-y-3">
+          <p class="lbl text-emerald-300">Top recommendation</p>
+          <h2 class="font-serif text-3xl"><a href="#a" class="hover:underline">The Capability seam</a></h2>
+          <p class="text-slate-300 text-sm max-w-2xl">This is the architecture that makes the product real: the morph pad is supposed to <em>be</em> eri — one surface that does everything — but today each capability is hand-wired 8–15 places and Research isn't even on the pad. A Capability registry turns "add a capability" into one registration and converges mode ↔ capability ↔ handler names. Pair it with B (delete the dead Mercury chain) as easy cleanup; C (Services slimming) falls out of A. The inference path is already deep — this makes the <em>capability</em> path deep too, which is what the pad needs.</p>
+        </div>
+      </section>
+
+      <footer class="text-xs text-slate-400 pt-2 border-t border-slate-200">
+        Vocabulary per the skill's LANGUAGE.md and the repo's CONTEXT.md (morph pad, capability, eri context window). No interfaces proposed yet; pick a candidate to design.
+      </footer>
+    </main>
+  </body>
+</html>

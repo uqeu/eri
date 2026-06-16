@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>ARK — Architecture Review · deepening opportunities</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>
+  tailwind.config = { darkMode:'class', theme:{ extend:{ colors:{ mint:'#34e29b', agg:'#ff5c5c', inj:'#ffb84d' }, fontFamily:{ mono:['ui-monospace','Menlo','monospace'] } } } };
+</script>
+<style>
+  body{background:#000;color:rgba(255,255,255,.87)}
+  .panel{background:#0e0e10;border:1px solid rgba(255,255,255,.10)}
+  .mut{color:rgba(255,255,255,.55)}.dim{color:rgba(255,255,255,.40)}
+  .mono{font-family:ui-monospace,Menlo,monospace}
+  .badge{font-family:ui-monospace,Menlo,monospace;font-size:11px;letter-spacing:.04em;text-transform:uppercase;border:1px solid;border-radius:999px;padding:3px 9px}
+  .b-strong{color:#34e29b;border-color:#34e29b;background:rgba(52,226,155,.12)}
+  .b-worth{color:#ffb84d;border-color:#ffb84d;background:rgba(255,184,77,.12)}
+  .b-spec{color:rgba(255,255,255,.55);border-color:rgba(255,255,255,.25)}
+  .mermaid{background:#08080a;border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:10px}
+  code{font-family:ui-monospace,Menlo,monospace;color:#9fe7c6;font-size:.85em}
+  h2 .n{font-family:ui-monospace,Menlo,monospace;color:#34e29b;margin-right:10px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:820px){.grid2{grid-template-columns:1fr}}
+  .lab{font-family:ui-monospace,Menlo,monospace;font-size:11px;text-transform:uppercase;letter-spacing:.08em}
+</style>
+</head>
+<body class="font-sans">
+<div class="max-w-5xl mx-auto px-6 py-12">
+
+  <header class="mb-10">
+    <div class="lab mint" style="color:#34e29b">ARK · Architecture Review</div>
+    <h1 class="text-3xl font-semibold mt-2">Deepening opportunities</h1>
+    <p class="mut mt-3 max-w-2xl leading-relaxed">Where ARK's live code is <b>shallow</b> — an interface nearly as complex as the implementation behind it — or where a <b>seam</b> leaks. The aim is testability and AI-navigability: turn many small modules into fewer <b>deep</b> ones. Reviewed the live pipeline only (Stage&nbsp;1/2/3, World&nbsp;Model&nbsp;V3, the narrator, forensic, deviation) — dead/archived dirs excluded.</p>
+    <p class="dim text-sm mt-3 mono">deletion test · a module earns its keep if deleting it makes complexity reappear across N callers, not vanish.</p>
+  </header>
+
+  <!-- CANDIDATE 1 -->
+  <section class="panel rounded-xl p-6 mb-6">
+    <div class="flex items-start justify-between gap-4">
+      <h2 class="text-xl font-semibold"><span class="n">01</span>DetectionStack — a shallow multiplexer over ten detectors</h2>
+      <span class="badge b-strong">Strong</span>
+    </div>
+    <p class="lab dim mt-4">Files</p>
+    <p class="mono text-sm mt-1">cloud/stage2/detection_stack.py:100-552</p>
+    <p class="lab dim mt-4">Problem</p>
+    <p class="mut mt-1 leading-relaxed">One <code>process_clip(frames) → DetectionBundle</code> interface hides ~840 lines: ten detector wrappers (pose, objects, ST-GCN++, gait, posture, micro, hand-object, emotion, gaze, Lumen), ten loaders, an inline Ultralytics adapter, and the per-camera feature toggles scattered across nine call sites. Adding or swapping a detector means editing the stack <i>and</i> the <code>PersonDetection</code> dataclass. Tests must patch both <code>_run_X</code> and <code>_load_X</code>.</p>
+    <p class="lab dim mt-4">Solution</p>
+    <p class="mut mt-1 leading-relaxed">Make each detector a self-contained adapter behind one small interface (<code>load() · process(frames) → modality tokens</code>), registered in a <b>detector registry</b>. <code>process_clip</code> becomes an orchestration loop over the enabled set; feature-toggle logic lives in one place. The caller's interface is unchanged.</p>
+    <p class="lab dim mt-4">Benefits</p>
+    <p class="mut mt-1 leading-relaxed"><b>Locality</b>: each detector's quirks live in one file, not interleaved in an 840-line method. <b>Leverage</b>: swapping Pose / adding a modality is a one-file change. <b>Test surface</b>: one fake adapter tests the orchestration; each adapter tests in isolation.</p>
+    <div class="grid2 mt-5">
+      <div><p class="lab dim mb-1">Before — shallow</p>
+        <pre class="mermaid">flowchart TD
+  W[worker] --> DS[DetectionStack.process_clip]
+  DS --> p[_run_pose+_load]
+  DS --> o[_run_objects+_load]
+  DS --> a[_run_stgcnpp+_load]
+  DS --> g[_run_gait+_load]
+  DS --> e[_run_emotion+_load]
+  DS --> m[_run_micro+_load]
+  DS --> z[_run_gaze+_load]
+  DS --> h[_run_hand_object+_load]
+  DS --> l[_run_lumen+_load]
+  classDef s fill:#1a1a1a,stroke:#ff5c5c,color:#fff;
+  class p,o,a,g,e,m,z,h,l s;</pre></div>
+      <div><p class="lab dim mb-1">After — deep</p>
+        <pre class="mermaid">flowchart TD
+  W2[worker] --> DS2["DetectionStack (orchestration only)"]
+  DS2 --> R[DetectorRegistry]
+  R --> I["Detector protocol\nload · process"]
+  I -.-> ad["pose / gait / gaze / …\n(one adapter per file)"]
+  classDef d fill:#0e2a1e,stroke:#34e29b,color:#fff;
+  class DS2,R,I d;</pre></div>
+    </div>
+  </section>
+
+  <!-- CANDIDATE 2 -->
+  <section class="panel rounded-xl p-6 mb-6">
+    <div class="flex items-start justify-between gap-4">
+      <h2 class="text-xl font-semibold"><span class="n">02</span>The narrator trio — Conductor × GemmaRunner × GemmaVLMService</h2>
+      <span class="badge b-strong">Strong</span>
+    </div>
+    <p class="lab dim mt-4">Files</p>
+    <p class="mono text-sm mt-1">engine/vlm/conductor.py · engine/vlm/gemma_runner.py · engine/vlm/gemma_vlm_service.py</p>
+    <p class="lab dim mt-4">Problem</p>
+    <p class="mut mt-1 leading-relaxed">Three modules each own model load (MLX-vs-transformers), caching, and inference, with overlapping responsibilities and <i>different</i> strategies: GemmaRunner caches by (image,prompt) with a 5&nbsp;s TTL; ConductorBrain (a separate Llama) caches nothing and re-generates live. A caller can't tell when to call <code>GemmaVLMService.analyze_sync</code> vs <code>ConductorBrain.evaluate_window</code>, and neither model is injectable for tests (you mock <code>self._model</code> or trust the heuristic fallback).</p>
+    <p class="lab dim mt-4">Solution</p>
+    <p class="mut mt-1 leading-relaxed">Extract one <code>LlmBackend</code> protocol (<code>generate(prompt, max_tokens) → str</code>) with caching + telemetry built in; have both the Gemma path and the Conductor use it instead of owning model load. Move cooldown/cache tuning into one <code>InferenceScheduler</code>. <span class="dim">Mirrors the clean <code>LlmBrain</code> protocol the forensic stack already uses — this is that pattern, applied to the live narrator.</span></p>
+    <p class="lab dim mt-4">Benefits</p>
+    <p class="mut mt-1 leading-relaxed">One cache strategy (no redundant Conductor calls on identical captions); model swaps (Qwen→Gemma-26B-Thinking) become a backend change; the reasoning logic becomes testable with a fake backend.</p>
+    <div class="grid2 mt-5">
+      <div><p class="lab dim mb-1">Before — three owners</p>
+        <pre class="mermaid">flowchart TD
+  GS[GemmaVLMService\ncooldown+parse] --> GR[GemmaRunner\nload+cache 5s TTL]
+  CB[ConductorBrain\nLlama · no cache] --> ML[(own model load)]
+  GR --> MG[(own model load)]
+  classDef s fill:#1a1a1a,stroke:#ff5c5c,color:#fff;
+  class GS,GR,CB s;</pre></div>
+      <div><p class="lab dim mb-1">After — one seam</p>
+        <pre class="mermaid">flowchart TD
+  GS2[Gemma path] --> B["LlmBackend protocol\ngenerate · cache · telemetry"]
+  CB2[Conductor] --> B
+  B --> S[InferenceScheduler\ncooldown + cache]
+  classDef d fill:#0e2a1e,stroke:#34e29b,color:#fff;
+  class B,S d;</pre></div>
+    </div>
+  </section>
+
+  <!-- CANDIDATE 3 -->
+  <section class="panel rounded-xl p-6 mb-6">
+    <div class="flex items-start justify-between gap-4">
+      <h2 class="text-xl font-semibold"><span class="n">03</span>Sustained-behaviour prompt leaks across the Stage-2 ↔ omni seam</h2>
+      <span class="badge b-worth">Worth exploring</span>
+    </div>
+    <p class="lab dim mt-4">Files</p>
+    <p class="mono text-sm mt-1">cloud/stage2/worker.py:689-696, 873-940 · cloud/stage2/vlm_client.py:286-319 · cloud/omni/engine/alert_schema.py</p>
+    <p class="lab dim mt-4">Problem</p>
+    <p class="mut mt-1 leading-relaxed">The worker reaches across a seam to know narrator concerns: it lazily imports <code>build_sustained_behavior_prompt()</code> from <code>cloud.omni</code>, formats the narration (<code>_format_sustained_narration</code>), and the JSON→<code>SustainedBehaviorFact</code> parsing sits inside the client. The prompt shape lives server-side; the formatting lives in the worker — two places that can drift.</p>
+    <p class="lab dim mt-4">Solution</p>
+    <p class="mut mt-1 leading-relaxed">Give <code>VlmClient</code> a <code>narrate_sustained(crops, context) → SustainedBehaviorFact</code> that owns the prompt, the parse, and the human-readable formatting. The worker supplies only the detector context dict (it already builds one). The omni coupling and the drift both disappear.</p>
+    <p class="lab dim mt-4">Benefits</p>
+    <p class="mut mt-1 leading-relaxed">Prompt changes never touch the worker; the parse is unit-testable in isolation; narration format lives in one place. <span class="dim">Note: I built this seam earlier this session — it works, this is a tidy-up, not a rescue.</span></p>
+  </section>
+
+  <!-- CANDIDATE 4 -->
+  <section class="panel rounded-xl p-6 mb-6">
+    <div class="flex items-start justify-between gap-4">
+      <h2 class="text-xl font-semibold"><span class="n">04</span>ark_deviation — over-split internals, weights hard-coded as Python</h2>
+      <span class="badge b-worth">Worth exploring</span>
+    </div>
+    <p class="lab dim mt-4">Files</p>
+    <p class="mono text-sm mt-1">ark/ark_deviation.py:54-342</p>
+    <p class="lab dim mt-4">Problem</p>
+    <p class="mut mt-1 leading-relaxed"><code>ConceptBottleneck</code> and <code>FreeEnergyComputer</code> are stateless math + ~110 lines of domain-knowledge weight dicts, never used outside <code>ArkDeviationEngine.__init__</code>. The split adds indirection without encapsulation, and the Welford precision-learning is bolted onto the calculator (an optimizer living inside the thing it optimizes). To unit-test concept classification you must build the whole engine.</p>
+    <p class="lab dim mt-4">Solution</p>
+    <p class="mut mt-1 leading-relaxed">Lift the weights to a tunable config (JSON/dataclass), merge the two calculators into one stateless <code>FeatureAnomalyScorer.score(subject, weights) → DeviationResult</code>, and split precision-learning into a <code>PrecisionCalibrator</code> that wraps it.</p>
+    <p class="lab dim mt-4">Benefits</p>
+    <p class="mut mt-1 leading-relaxed">One clear public API; weights an operator can tune without code; scorer + calibrator each test in isolation.</p>
+  </section>
+
+  <!-- CANDIDATE 5 -->
+  <section class="panel rounded-xl p-6 mb-6">
+    <div class="flex items-start justify-between gap-4">
+      <h2 class="text-xl font-semibold"><span class="n">05</span>WorldModelLoopV3 — the four-provider constructor shotgun</h2>
+      <span class="badge b-spec">Speculative</span>
+    </div>
+    <p class="lab dim mt-4">Files</p>
+    <p class="mono text-sm mt-1">engine/world_model/v3/loop.py:79-115</p>
+    <p class="lab dim mt-4">Problem</p>
+    <p class="mut mt-1 leading-relaxed">The constructor takes four optional providers (action / depth / gaze / lumen) each with a <code>Null*Provider</code> default — ignored entirely in the shadow-mode path. A caller reading the signature assumes all four are required; a fifth signal means the constructor grows again.</p>
+    <p class="lab dim mt-4">Solution</p>
+    <p class="mut mt-1 leading-relaxed">Minimal constructor (config, vlm, version); providers via <code>register_provider(...)</code>, validated at <code>step()</code> only when actually needed.</p>
+    <p class="lab dim mt-4">Benefits</p>
+    <p class="mut mt-1 leading-relaxed">A clear "what do I need to run one frame?" contract; shadow mode tests with zero providers; extensible without touching the signature.</p>
+  </section>
+
+  <!-- CANDIDATE 6 -->
+  <section class="panel rounded-xl p-6 mb-6">
+    <div class="flex items-start justify-between gap-4">
+      <h2 class="text-xl font-semibold"><span class="n">06</span>Alert lifecycle ↔ sinks — transitions and durability aren't coordinated</h2>
+      <span class="badge b-worth">Worth exploring</span>
+    </div>
+    <p class="lab dim mt-4">Files</p>
+    <p class="mono text-sm mt-1">cloud/stage2/alert_lifecycle.py · cloud/stage2/worker.py:437-501 · cloud/stage2/sinks/*</p>
+    <p class="lab dim mt-4">Problem</p>
+    <p class="mut mt-1 leading-relaxed">The state machine computes transitions; the worker separately writes them to S3 + Supabase + WebSocket with no atomicity. A Supabase upsert can land while the S3 clip fails; on SQS redelivery the lifecycle is rehydrated from Redis but may be stale. Partial-failure recovery is implicit in the retry path — there's no test for "Supabase ok, S3 failed".</p>
+    <p class="lab dim mt-4">Solution</p>
+    <p class="mut mt-1 leading-relaxed">An <code>AlertEventRepository</code> that owns the machine + sink fan-out as one unit: <code>transition(...) → Result</code> reports which sink failed; or make Supabase the write-ahead source of truth and treat S3/WS as derived views. <span class="dim">Touches durability — change carefully, behind the existing tests first.</span></p>
+    <p class="lab dim mt-4">Benefits</p>
+    <p class="mut mt-1 leading-relaxed">State and persistence stay in sync; partial failure is explicit and testable; no two workers silently advancing one event.</p>
+  </section>
+
+  <!-- WHAT'S GOOD -->
+  <section class="panel rounded-xl p-6 mb-8" style="border-color:rgba(52,226,155,.30)">
+    <h2 class="text-lg font-semibold mb-3" style="color:#34e29b">Already deep — don't break these</h2>
+    <ul class="mut leading-relaxed list-disc pl-5 space-y-1 text-sm">
+      <li><code>cloud/stage2/person_clip.py</code> &amp; <code>relative_anomaly.py</code> — pure, immutable, one job, fully tested. Model depth-to-complexity.</li>
+      <li><code>world_model_client.py</code> — tiny <code>score(tokens) → PersonScore</code> over the V3 forward pass. Clean seam.</li>
+      <li><code>ark/forensic/brain.py</code> (<code>LlmBrain</code> Protocol) &amp; <code>ark_types.py</code> — pluggable, never-raises, exhaustive frozen types.</li>
+      <li><code>conductor.py</code> <code>EntityTracker</code> + <code>EscalationThrottle</code> — tight, deterministic, testable state machines.</li>
+      <li><code>redis_client.py</code> — three disjoint concerns cleanly separated, clear fail-open semantics.</li>
+    </ul>
+  </section>
+
+  <!-- TOP RECOMMENDATION -->
+  <section class="rounded-xl p-6 mb-10" style="background:linear-gradient(180deg,rgba(52,226,155,.10),transparent);border:1px solid rgba(52,226,155,.4)">
+    <div class="lab" style="color:#34e29b">Top recommendation</div>
+    <h2 class="text-2xl font-semibold mt-2">Start with <span style="color:#34e29b">#01 DetectionStack → detector registry</span>.</h2>
+    <p class="mut mt-3 leading-relaxed max-w-2xl">It's the highest-leverage and lowest-risk: the caller interface (<code>process_clip → DetectionBundle</code>) doesn't change, but every future detector swap or addition — and you have many (Pose, gait, a new modality) — becomes a one-file change instead of surgery on an 840-line method. It also unblocks honest per-detector tests. Pair it with <b>#02 (one <code>LlmBackend</code> protocol)</b> next: it kills the narrator-trio confusion and reuses the exact <code>LlmBrain</code> pattern the forensic stack already proved. Defer <b>#06</b> (durability — real but riskier) until there's a failing-case test to anchor it.</p>
+    <p class="dim text-sm mt-4 mono">Re-run this review every 3–4 days; treat the badges as a backlog, not a mandate.</p>
+  </section>
+
+  <footer class="dim text-xs mono border-t border-white/10 pt-5">ARK architecture review · generated by the improve-codebase-architecture skill · live code only (dead/archived dirs excluded) · no repo files were modified.</footer>
+</div>
+<script>mermaid.initialize({startOnLoad:true, theme:'dark', themeVariables:{fontSize:'13px'}});</script>
+</body>
+</html>

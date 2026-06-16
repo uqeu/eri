@@ -27,8 +27,8 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::services::janitor_rules::load_rules as load_janitor_rules;
 use crate::services::Services;
+use crate::services::janitor_rules::load_rules as load_janitor_rules;
 use crate::{DispatchError, SharedTierState};
 
 #[derive(Debug, Deserialize)]
@@ -150,8 +150,7 @@ pub async fn rules(
 ) -> Result<Value, DispatchError> {
     let p: WorkspaceOnly = serde_json::from_value(params)
         .map_err(|e| DispatchError::BadParams(format!("eri/background/rules: {e}")))?;
-    let parsed =
-        load_janitor_rules(&p.workspace).map_err(DispatchError::BadParams)?;
+    let parsed = load_janitor_rules(&p.workspace).map_err(DispatchError::BadParams)?;
     serde_json::to_value(parsed).map_err(|e| DispatchError::Other(e.into()))
 }
 

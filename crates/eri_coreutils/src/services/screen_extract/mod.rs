@@ -33,10 +33,12 @@
 //! never panics.
 
 mod element;
+mod focus;
 mod fuse;
 mod mark;
 
 pub use element::{BBox, ElementSource, ScreenElement};
+pub use focus::{FOCUS_RADIUS_PX, FocusContext, focus_context, focused_element};
 pub use fuse::{DEFAULT_IOU_THRESHOLD, fuse, fuse_with_threshold};
 pub use mark::{Mark, set_of_mark, to_prompt_list};
 
@@ -80,6 +82,14 @@ impl ScreenSnapshot {
             marks,
             prompt_list,
         }
+    }
+
+    /// Resolve which element a gaze point is looking at against this frame's
+    /// fused elements. Thin wrapper over the pure [`focus_context`] so the
+    /// control loop can ask "what is the user looking at?" straight off a
+    /// snapshot. `n` bounds the neighbours returned for deictic disambiguation.
+    pub fn focus_at(&self, gaze: crate::services::gaze::GazePoint, n: usize) -> FocusContext<'_> {
+        focus_context(gaze, &self.elements, n)
     }
 }
 

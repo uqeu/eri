@@ -16,5 +16,6 @@ anyhow.workspace = true
 cpal.workspace = true
 log.workspace = true
 parking_lot.workspace = true
+thiserror.workspace = true
 ureq.workspace = true
 whisper-rs.workspace = true

@@ -166,8 +166,14 @@ mod tests {
     #[test]
     fn extracts_article_and_relative_phrases() {
         assert_eq!(extract_valid_from("a year ago", NOW), Some(NOW - YEAR_MS));
-        assert_eq!(extract_valid_from("yesterday I quit", NOW), Some(NOW - DAY_MS));
-        assert_eq!(extract_valid_from("last month was rough", NOW), Some(NOW - MONTH_MS));
+        assert_eq!(
+            extract_valid_from("yesterday I quit", NOW),
+            Some(NOW - DAY_MS)
+        );
+        assert_eq!(
+            extract_valid_from("last month was rough", NOW),
+            Some(NOW - MONTH_MS)
+        );
     }
 
     #[test]

@@ -29,6 +29,10 @@ struct ProfileBody<'a> {
 struct StaticProfile<'a> {
     facts: &'a [String],
     preferences: &'a [String],
+    /// Learned writing register, omitted until eri has learned one. Rides inside
+    /// the encrypted `profile_enc` blob — no schema change on the cloud side.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    communication_style: Option<&'a str>,
 }
 
 /// Shape a [`Profile`] into the route's JSON body. Pure + unit-tested.
@@ -37,6 +41,7 @@ fn profile_upload_body(profile: &Profile) -> Result<String, SyncError> {
         profile: StaticProfile {
             facts: &profile.facts,
             preferences: &profile.preferences,
+            communication_style: profile.communication_style.as_deref(),
         },
         dynamic_context: &profile.dynamic_context,
     };
@@ -104,6 +109,7 @@ mod tests {
             facts: vec!["name is Khai".into(), "builds eri".into()],
             preferences: vec!["accepts most edits".into()],
             dynamic_context: "Today: shipped the overlay".into(),
+            communication_style: Some("lowercase, terse, casual".into()),
         }
     }
 

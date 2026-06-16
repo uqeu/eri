@@ -34,7 +34,7 @@ use parking_lot::Mutex;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
 use crate::{
-    DEFAULT_FINAL_SILENCE_MS, RING_BUFFER_SECONDS, RingBuffer, Resampler, TARGET_SAMPLE_RATE,
+    DEFAULT_FINAL_SILENCE_MS, RING_BUFFER_SECONDS, Resampler, RingBuffer, TARGET_SAMPLE_RATE,
     TRANSCRIBE_WINDOW_SECONDS, VoiceEvent, ensure_model_available, is_hallucination,
     partial_interval_ms, rms_energy, speech_energy_threshold, trailing_samples,
 };
@@ -414,8 +414,7 @@ fn drive_inference(
             continue;
         }
 
-        let trailing =
-            trailing_samples(&samples, sample_rate as usize * TRANSCRIBE_WINDOW_SECONDS);
+        let trailing = trailing_samples(&samples, sample_rate as usize * TRANSCRIBE_WINDOW_SECONDS);
         let energy = rms_energy(&trailing);
         if energy <= energy_threshold {
             if let Some(previous) = last_partial.take()

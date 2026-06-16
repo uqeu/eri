@@ -183,9 +183,8 @@ pub async fn run(
     let mut ok = false;
 
     while let Some(chunk) = stream.next().await {
-        let bytes = chunk.map_err(|e| {
-            DispatchError::Other(anyhow::anyhow!("ship stream read: {e}"))
-        })?;
+        let bytes =
+            chunk.map_err(|e| DispatchError::Other(anyhow::anyhow!("ship stream read: {e}")))?;
         let text = match std::str::from_utf8(&bytes) {
             Ok(s) => s,
             Err(_) => continue,
@@ -227,18 +226,14 @@ pub async fn run(
                                 totals_cost += cost;
                             }
                             if kind == "checker_done" {
-                                if let Some(text) =
-                                    parsed.get("text").and_then(|v| v.as_str())
-                                {
+                                if let Some(text) = parsed.get("text").and_then(|v| v.as_str()) {
                                     merged_patchset.push_str(text);
                                 }
                             }
                         }
                         "ship_done" => {
                             ok = true;
-                            if let Some(arr) =
-                                parsed.get("survivors").and_then(|v| v.as_array())
-                            {
+                            if let Some(arr) = parsed.get("survivors").and_then(|v| v.as_array()) {
                                 survivors = arr
                                     .iter()
                                     .filter_map(|v| v.as_str().map(str::to_string))
@@ -367,7 +362,10 @@ fn detect_smells(added_line: &str) -> Vec<Smell> {
             message: "Open TODO/FIXME added — flag for follow-up.".into(),
         });
     }
-    if trimmed.contains("console.log(") || trimmed.contains("println!(") || trimmed.contains("print(") {
+    if trimmed.contains("console.log(")
+        || trimmed.contains("println!(")
+        || trimmed.contains("print(")
+    {
         out.push(Smell {
             severity: "warning",
             category: "debug",

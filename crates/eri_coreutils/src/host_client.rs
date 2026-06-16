@@ -716,11 +716,7 @@ mod tests {
     async fn clear_evicts_cached_secret() {
         let cache = SecretCache::new();
         cache
-            .insert(
-                ERI_SESSION_PROVIDER,
-                ERI_SESSION_FIELD,
-                Some("tok".into()),
-            )
+            .insert(ERI_SESSION_PROVIDER, ERI_SESSION_FIELD, Some("tok".into()))
             .await;
         cache.clear(ERI_SESSION_PROVIDER, ERI_SESSION_FIELD).await;
         // With nothing cached and no host/env, eri_session_token returns None.

@@ -40,7 +40,16 @@ pub fn undo_plan_for(action: &ControlAction) -> UndoPlan {
         ControlAction::Type(t) => UndoPlan::Irreversible(format!("typed {t:?}")),
         ControlAction::Click(_) => UndoPlan::Irreversible("a click".to_string()),
         ControlAction::Key(k) => UndoPlan::Irreversible(format!("pressed {k}")),
-        ControlAction::Observe | ControlAction::Wait(_) => UndoPlan::Noop,
+        ControlAction::Scroll { direction, amount } => {
+            UndoPlan::Irreversible(format!("scrolled {direction} {amount}"))
+        }
+        ControlAction::Drag { .. } => UndoPlan::Irreversible("a drag".to_string()),
+        ControlAction::RightClick(_) => UndoPlan::Irreversible("a right-click".to_string()),
+        ControlAction::DoubleClick(_) => UndoPlan::Irreversible("a double-click".to_string()),
+        // Moving the pointer changes no state — nothing to undo (like Observe).
+        ControlAction::Observe | ControlAction::Wait(_) | ControlAction::MouseMove(..) => {
+            UndoPlan::Noop
+        }
     }
 }
 
@@ -182,7 +191,9 @@ impl ActionLog {
 pub fn default_log_path() -> Option<PathBuf> {
     let base = std::env::var_os("XDG_DATA_HOME")
         .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local").join("share")))?;
+        .or_else(|| {
+            std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local").join("share"))
+        })?;
     Some(base.join("eri").join("control-actions.json"))
 }
 
@@ -328,7 +339,12 @@ mod tests {
         let trail = log.trail();
         // The earliest surviving action is #25 (the first 25 were trimmed).
         assert!(trail.first().unwrap().contains("App25"));
-        assert!(trail.last().unwrap().contains(&format!("App{}", MAX_ACTIONS + 24)));
+        assert!(
+            trail
+                .last()
+                .unwrap()
+                .contains(&format!("App{}", MAX_ACTIONS + 24))
+        );
         // Undo still reaches the most recent action.
         assert!(matches!(log.undo_last(), UndoOutcome::Undo(_, _)));
     }

@@ -119,7 +119,9 @@ pub async fn open(params: Value, services: &Services) -> Result<Value, DispatchE
     } else if let Some(url) = parsed.url.as_deref() {
         guard.last_url = Some(url.to_string());
         drop(guard);
-        send_message(&json!({ "type": "load", "url": url })).await.ok();
+        send_message(&json!({ "type": "load", "url": url }))
+            .await
+            .ok();
     }
 
     let guard = services.preview.lock().await;
@@ -309,7 +311,13 @@ async fn port_responds(port: u16) -> bool {
 
 fn sanitize_stem(stem: &str) -> String {
     stem.chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '-'
+            }
+        })
         .take(40)
         .collect::<String>()
         .trim_matches('-')
@@ -374,8 +382,7 @@ fn resolve_binary(explicit: Option<&str>) -> Option<PathBuf> {
 
 fn repo_dev_path() -> PathBuf {
     // crates/eri_coreutils → ../../scripts/eri_preview
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../scripts/eri_preview")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../scripts/eri_preview")
 }
 
 /// Open a fresh UNIX connection, write a single JSON message, close.
@@ -457,12 +464,9 @@ mod tests {
             buf
         });
 
-        send_message_to(
-            &socket_path,
-            &json!({"type": "gaze", "x": 0.42, "y": 0.5}),
-        )
-        .await
-        .unwrap();
+        send_message_to(&socket_path, &json!({"type": "gaze", "x": 0.42, "y": 0.5}))
+            .await
+            .unwrap();
         let buf = server.await.unwrap();
         let line = String::from_utf8(buf).unwrap();
         let parsed: Value = serde_json::from_str(line.trim_end()).unwrap();

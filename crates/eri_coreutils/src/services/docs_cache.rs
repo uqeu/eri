@@ -304,7 +304,11 @@ mod tests {
             snippets.iter().map(|s| s.library.as_str()).collect();
         // Just assert we have at least 15 distinct libraries — the
         // exact count can drift as we add or trim entries.
-        assert!(libs.len() >= 15, "expected at least 15 libs, got {}", libs.len());
+        assert!(
+            libs.len() >= 15,
+            "expected at least 15 libs, got {}",
+            libs.len()
+        );
     }
 
     #[test]
@@ -312,16 +316,17 @@ mod tests {
         assert_eq!(canonical_library("React"), Some("react".to_string()));
         assert_eq!(canonical_library("Next.js"), Some("next".to_string()));
         assert_eq!(canonical_library("Tailwind CSS"), None); // space breaks alias
-        assert_eq!(canonical_library("vercel-ai-sdk"), Some("ai-sdk".to_string()));
+        assert_eq!(
+            canonical_library("vercel-ai-sdk"),
+            Some("ai-sdk".to_string())
+        );
         assert_eq!(canonical_library("not-a-real-lib"), None);
     }
 
     #[tokio::test]
     async fn lookup_returns_hits_for_known_lib() {
         let services = Services::new();
-        let tier_state = std::sync::Arc::new(tokio::sync::Mutex::new(
-            crate::TierState::default(),
-        ));
+        let tier_state = std::sync::Arc::new(tokio::sync::Mutex::new(crate::TierState::default()));
         let params = serde_json::json!({ "library": "react", "limit": 2 });
         let result = lookup(params, &tier_state, &services).await.unwrap();
         let report: LookupReport = serde_json::from_value(result).unwrap();
@@ -332,9 +337,7 @@ mod tests {
     #[tokio::test]
     async fn lookup_returns_miss_for_unknown_lib() {
         let services = Services::new();
-        let tier_state = std::sync::Arc::new(tokio::sync::Mutex::new(
-            crate::TierState::default(),
-        ));
+        let tier_state = std::sync::Arc::new(tokio::sync::Mutex::new(crate::TierState::default()));
         let params = serde_json::json!({ "library": "does-not-exist" });
         let result = lookup(params, &tier_state, &services).await.unwrap();
         let report: LookupReport = serde_json::from_value(result).unwrap();
@@ -345,12 +348,15 @@ mod tests {
     #[tokio::test]
     async fn lookup_filters_by_query_keyword() {
         let services = Services::new();
-        let tier_state = std::sync::Arc::new(tokio::sync::Mutex::new(
-            crate::TierState::default(),
-        ));
+        let tier_state = std::sync::Arc::new(tokio::sync::Mutex::new(crate::TierState::default()));
         let params = serde_json::json!({ "library": "react", "query": "useEffect" });
         let result = lookup(params, &tier_state, &services).await.unwrap();
         let report: LookupReport = serde_json::from_value(result).unwrap();
-        assert!(report.hits.iter().any(|h| h.title.to_lowercase().contains("useeffect")));
+        assert!(
+            report
+                .hits
+                .iter()
+                .any(|h| h.title.to_lowercase().contains("useeffect"))
+        );
     }
 }

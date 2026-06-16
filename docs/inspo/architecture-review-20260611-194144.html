@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Architecture review — eri local-engine integration</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+      mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose" });
+    </script>
+    <style>
+      .deep { background: linear-gradient(135deg,#0f172a,#1e293b); }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+      .lbl { font-size:10px; letter-spacing:.14em; text-transform:uppercase; }
+      .mermaid { display:flex; justify-content:center; }
+      .card-anchor { scroll-margin-top:1.5rem; }
+    </style>
+  </head>
+  <body class="bg-stone-50 text-slate-900 font-sans antialiased">
+    <main class="max-w-5xl mx-auto px-6 py-14 space-y-14">
+      <header class="space-y-4">
+        <p class="lbl text-slate-400">Architecture review · /improve-codebase-architecture · eri · 2026-06-11</p>
+        <h1 class="font-serif text-4xl">The local engine is wired. The flow that matters most can't reach it.</h1>
+        <p class="text-sm text-slate-600 max-w-2xl">The provider seam, the local-first router, and the anti-bloat cap landed clean (and were already verified). This pass looks one layer out — at <em>consumption</em> — and finds the real gap: eri's computer-use loop (where it types and acts for the user, the wedge) is hard-wired to the cloud and never consults the router, so local-first never reaches it, and those calls also never log for self-improvement.</p>
+      </header>
+
+      <section class="rounded-2xl border border-emerald-200 bg-emerald-50/60 p-6 text-xs text-slate-600">
+        <p class="lbl text-emerald-700 mb-2">Fine as-is (don't re-touch)</p>
+        The <span class="mono">LocalProvider</span> → <span class="mono">LocalTransport</span> seam (Ollama now, candle next) is clean + tested. <span class="mono">brain_router::route()</span> classifies and returns <span class="mono">ModelChoice::Local</span> correctly, and <span class="mono">brain_iteration::provider_for</span> resolves + runs it. The friction is purely at the consumption layer.
+      </section>
+
+      <section class="space-y-12">
+
+        <!-- A -->
+        <article id="a" class="card-anchor rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+          <div class="px-7 pt-7 pb-5 space-y-4">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800">Strong</span>
+              <span class="text-[11px] font-medium px-2.5 py-1 rounded-full bg-slate-100 text-slate-600">consumption seam</span>
+            </div>
+            <h2 class="font-serif text-2xl">Route computer-use through the provider seam, not a hard-wired Claude</h2>
+            <p class="mono text-xs text-slate-500">eri_cli/src/control_agent.rs (signed_in_client + fixed model) · eri_cli.rs model_for_mode</p>
+          </div>
+          <div class="grid md:grid-cols-2 gap-px bg-slate-200 border-y border-slate-200">
+            <div class="bg-white p-5">
+              <p class="lbl text-slate-400 mb-3">Before — control bypasses the router</p>
+              <pre class="mermaid">
+flowchart TB
+  G[goal] --> C[run_control_agent\nmodel: &str]
+  C --> P["/api/v1/inference/messages"]:::cloud
+  R[brain_router\nlocal-first]:::dead -. never consulted .- C
+  classDef cloud fill:#fef2f2,stroke:#dc2626;
+  classDef dead fill:#f1f5f9,stroke:#94a3b8,stroke-dasharray:4;
+              </pre>
+              <p class="text-[11px] text-red-600 text-center mt-2">ModelChoice::Local can't reach the wedge</p>
+            </div>
+            <div class="bg-white p-5">
+              <p class="lbl text-slate-400 mb-3">After — control asks the router, escalates</p>
+              <pre class="mermaid">
+flowchart TB
+  G[goal] --> R[router.decide]:::deep
+  R -->|local-capable| L[LocalProvider]:::ok
+  R -->|heavy / low-conf| K[Claude]:::ok
+  L -. self-assess can't .-> K
+  classDef deep fill:#0f172a,color:#fff,stroke:#0f172a;
+  classDef ok fill:#ecfdf5,stroke:#10b981;
+              </pre>
+            </div>
+          </div>
+          <div class="px-7 py-6 grid md:grid-cols-2 gap-6 text-sm text-slate-700">
+            <div><p class="lbl text-slate-400">Problem</p><p><span class="mono">run_control_agent</span> takes a pre-picked <span class="mono">model: &str</span> (from <span class="mono">model_for_mode</span> → always Claude) and posts straight to the proxy. The router, <span class="mono">ModelChoice::Local</span>, and <span class="mono">LOCAL_CAPABLE_INTENTS</span> are never consulted — so the plan's "local-first for computer-use" is architecturally impossible today.</p></div>
+            <div><p class="lbl text-slate-400">Solution / leverage</p><p>Resolve the control model through the same provider seam: a fast local "can I do this step?" → run on the local engine; self-assess/low-confidence → escalate to Claude through eri's same control surface. The wedge gets free, on-device steps; locality lands in one router.</p></div>
+          </div>
+          <div class="px-7 pb-6 text-xs text-slate-500">Deletion test: delete <span class="mono">ModelChoice::Local</span> today and control flow is unchanged — proof the seam isn't consumed where it matters.</div>
+        </article>
+
+        <!-- B -->
+        <article id="b" class="card-anchor rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+          <div class="px-7 pt-7 pb-5 space-y-3">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-amber-100 text-amber-800">Worth exploring</span>
+              <span class="text-[11px] font-medium px-2.5 py-1 rounded-full bg-slate-100 text-slate-600">instrumentation seam</span>
+            </div>
+            <h2 class="font-serif text-2xl">Log every model call — close the self-improvement blind spot</h2>
+            <p class="mono text-xs text-slate-500">iterate.rs GraphInstr (logs) vs control_agent.rs (no instrumentation hook)</p>
+          </div>
+          <div class="px-7 py-5 text-sm text-slate-700">
+            The iterate/brain path wraps calls in <span class="mono">GraphInstr</span> and records every <span class="mono">on_model_call</span> to <span class="mono">eri_graph</span> — the "log" half of the sia loop. But <span class="mono">control_agent</span> has <em>no</em> instrumentation hook, so computer-use calls are invisible. The log→critique→refine loop can never learn whether the local engine is good at control if control isn't recorded. Pairs naturally with A: route control through the instrumented path and both gaps close at once.
+          </div>
+        </article>
+
+        <!-- C -->
+        <article id="c" class="card-anchor rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+          <div class="px-7 pt-7 pb-5 space-y-3">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-slate-200 text-slate-700">Speculative</span>
+              <span class="text-[11px] font-medium px-2.5 py-1 rounded-full bg-slate-100 text-slate-600">delete dead seams</span>
+            </div>
+            <h2 class="font-serif text-2xl">Three intent taxonomies + an orphaned route()</h2>
+            <p class="mono text-xs text-slate-500">brain_router::Intent (live) · eri_router::IntentKind (unused) · eri_inference::intent::Intent (legacy) · eri_router::route() (orphaned)</p>
+          </div>
+          <div class="px-7 py-5 text-sm text-slate-700">
+            <span class="mono">brain_router::Intent</span> is the live taxonomy. <span class="mono">eri_router::IntentKind</span> and <span class="mono">eri_inference::intent::Intent</span> aren't fed to the active routing path, and the older <span class="mono">eri_router::route()</span> (RouteRequest→RouteDecision) is never imported by the brain layer. Deletion test: removing them doesn't break iterate/brain. Low-urgency cleanup — confirm no live caller, then delete or document.
+          </div>
+        </article>
+      </section>
+
+      <section>
+        <div class="rounded-2xl deep text-white p-8 space-y-3">
+          <p class="lbl text-emerald-300">Top recommendation</p>
+          <h2 class="font-serif text-3xl"><a href="#a" class="hover:underline">Route computer-use through the provider seam</a></h2>
+          <p class="text-slate-300 text-sm max-w-2xl">It's the wedge: eri's value is doing things on your machine, and right now every one of those steps is a forced cloud call that the local engine — even when configured — can't take. Fixing the consumption seam makes local-first real where it matters, and folding control through the instrumented path (B) closes the self-improvement blind spot in the same move. C is free cleanup whenever. Note: a full fix touches the control loop's auth/streaming, so it's a focused pass — pairs well with the candle session, since that's when the local engine is actually capable enough for control steps.</p>
+        </div>
+      </section>
+
+      <footer class="text-xs text-slate-400 pt-2 border-t border-slate-200">
+        Vocabulary per LANGUAGE.md + the repo's CONTEXT.md. 3 candidates, ranked. No interfaces proposed yet — pick one to grill.
+      </footer>
+    </main>
+  </body>
+</html>

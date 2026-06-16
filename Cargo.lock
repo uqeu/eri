@@ -990,6 +990,7 @@ dependencies = [
  "eri_apply",
  "eri_caveman",
  "eri_core",
+ "eri_coreutils",
  "eri_git",
  "eri_hooks",
  "eri_index",
@@ -1336,6 +1337,7 @@ dependencies = [
  "cpal",
  "log",
  "parking_lot 0.12.5",
+ "thiserror 1.0.69",
  "ureq 2.12.1",
  "whisper-rs",
 ]

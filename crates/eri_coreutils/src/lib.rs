@@ -686,6 +686,15 @@ async fn dispatch_inner(
         "eri/gaze/status" => services::gaze::status(request.params.clone(), services).await,
         "eri/gaze/calibrate" => services::gaze::calibrate(request.params.clone(), services).await,
 
+        // --- Screen-extractor (computer-use vision; local extract → Claude reasons) ---
+        "eri/screen/start" => {
+            services::screen_extract::start(request.params.clone(), services).await
+        }
+        "eri/screen/stop" => services::screen_extract::stop(request.params.clone(), services).await,
+        "eri/screen/status" => {
+            services::screen_extract::status(request.params.clone(), services).await
+        }
+
         // --- eri.dev account proxy (free tier; user's own data) ---
         "eri/account/usage" => services::account::usage(request.params.clone(), services).await,
         "eri/account/me" => services::account::me(request.params.clone(), services).await,

@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Architecture review — eri</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+      mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose", flowchart: { htmlLabels: true } });
+    </script>
+    <style>
+      .seam { stroke-dasharray: 5 4; }
+      .deep { background: linear-gradient(135deg, #0f172a, #1e293b); }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+      .lbl { font-size: 10px; letter-spacing: .14em; text-transform: uppercase; }
+      .card-anchor { scroll-margin-top: 1.5rem; }
+      .mermaid { display:flex; justify-content:center; }
+    </style>
+  </head>
+  <body class="bg-stone-50 text-slate-900 font-sans antialiased">
+    <main class="max-w-5xl mx-auto px-6 py-14 space-y-14">
+      <!-- Header -->
+      <header class="space-y-5">
+        <p class="lbl text-slate-400">Architecture review · eri · 2026-06-10</p>
+        <h1 class="font-serif text-4xl text-slate-900">Where the inference path is shallow — and where it's already deep</h1>
+        <div class="flex flex-wrap gap-x-6 gap-y-2 text-xs text-slate-500 border-t border-slate-200 pt-4">
+          <span><span class="inline-block w-3 h-3 align-middle border border-slate-400 bg-white"></span> module</span>
+          <span><svg class="inline align-middle" width="26" height="8"><line x1="0" y1="4" x2="26" y2="4" class="seam" stroke="#64748b" stroke-width="1.5"/></svg> seam</span>
+          <span><svg class="inline align-middle" width="26" height="8"><line x1="0" y1="4" x2="26" y2="4" stroke="#dc2626" stroke-width="2"/></svg> leakage / duplication</span>
+          <span><span class="inline-block w-3 h-3 align-middle deep"></span> deep module</span>
+          <span class="ml-auto">benchmark of depth in this repo: <span class="mono text-slate-700">eri_agent::driver</span></span>
+        </div>
+      </header>
+
+      <section id="candidates" class="space-y-12">
+
+        <!-- ============ CANDIDATE 1 ============ -->
+        <article id="c1" class="card-anchor rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+          <div class="px-7 pt-7 pb-5 space-y-4">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800">Strong</span>
+              <span class="text-[11px] font-medium px-2.5 py-1 rounded-full bg-slate-100 text-slate-600">ports &amp; adapters</span>
+            </div>
+            <h2 class="font-serif text-2xl">Deepen provider acquisition into one seam</h2>
+            <p class="mono text-xs text-slate-500">eri_inference/src/llm_provider.rs · services/iterate.rs (collect_provider_keys, private) · services/review.rs · services/voice_route.rs · eri_cli/src/research.rs</p>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-px bg-slate-200 border-y border-slate-200">
+            <div class="bg-white p-5">
+              <p class="lbl text-slate-400 mb-3">Before — 5 sites, 3 shallow reconstructions</p>
+              <pre class="mermaid">
+flowchart TB
+  iterate[iterate.rs] --> ck[collect_provider_keys\nPRIVATE]
+  brain[brain_iteration.rs] --> pk[provider_from_choice_with_keys]
+  ck --> pk
+  review[review.rs] -.dup.-> env1[provider_from_choice\nenv-only]
+  voice[voice_route.rs] -.dup.-> env2[provider_from_choice\nenv-only]
+  research[research.rs] -.dup.-> direct[for_model_with_key\n+ read ANTHROPIC_API_KEY]
+  classDef leak stroke:#dc2626,stroke-width:2px,fill:#fef2f2;
+  class review,voice,research,env1,env2,direct leak
+              </pre>
+            </div>
+            <div class="bg-white p-5">
+              <p class="lbl text-slate-400 mb-3">After — one resolve_provider, three adapters behind it</p>
+              <pre class="mermaid">
+flowchart TB
+  iterate[iterate.rs] --> R
+  brain[brain_iteration.rs] --> R
+  review[review.rs] --> R
+  voice[voice_route.rs] --> R
+  research[research.rs] --> R
+  R[resolve_provider\nservices, choice, tier]:::deep --> byok[BYOK key]
+  R --> proxy[eri.dev proxy]
+  R --> envf[env fallback]
+  classDef deep fill:#0f172a,color:#fff,stroke:#0f172a;
+              </pre>
+            </div>
+          </div>
+
+          <div class="px-7 py-6 grid md:grid-cols-2 gap-6">
+            <div class="space-y-3">
+              <div><p class="lbl text-slate-400">Problem</p><p class="text-sm text-slate-700">Key resolution + routing is rebuilt at each call site; <span class="mono text-xs">collect_provider_keys</span> is private, so review, voice_route and research each read env and construct a provider on their own.</p></div>
+              <div><p class="lbl text-slate-400">Solution</p><p class="text-sm text-slate-700">One <span class="mono text-xs">resolve_provider(services, choice, tier?)</span> seam: BYOK → proxy → env routing and tier gating live behind a tiny interface.</p></div>
+            </div>
+            <div class="space-y-3">
+              <p class="lbl text-slate-400">Wins</p>
+              <ul class="text-sm text-slate-700 space-y-1.5">
+                <li class="flex gap-2"><span class="text-emerald-600">↳</span> 3 shallow reconstructions collapse to 1</li>
+                <li class="flex gap-2"><span class="text-emerald-600">↳</span> One place to mock the provider in tests</li>
+                <li class="flex gap-2"><span class="text-emerald-600">↳</span> web-search bolt-on stops leaking env reads</li>
+                <li class="flex gap-2"><span class="text-emerald-600">↳</span> Tier-aware selection gets a natural home</li>
+              </ul>
+            </div>
+          </div>
+          <div class="px-7 pb-6 text-xs text-slate-500">Deletion test: a real seam — BYOK, proxy and env are three live adapters today, so the seam is earned, not hypothetical.</div>
+        </article>
+
+        <!-- ============ CANDIDATE 2 ============ -->
+        <article id="c2" class="card-anchor rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+          <div class="px-7 pt-7 pb-5 space-y-4">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800">Strong</span>
+              <span class="text-[11px] font-medium px-2.5 py-1 rounded-full bg-slate-100 text-slate-600">in-process</span>
+            </div>
+            <h2 class="font-serif text-2xl">Funnel loop assembly; lift the context target into the interface</h2>
+            <p class="mono text-xs text-slate-500">eri_cli/src/eri_cli.rs (5 LoopOpts sites) · build_agent.rs:45 CONTEXT_TARGET_TOKENS=150_000 · build_agent.rs drive_loop (shape_context)</p>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-px bg-slate-200 border-y border-slate-200">
+            <!-- before: 5 duplicated stacks -->
+            <div class="bg-white p-5">
+              <p class="lbl text-slate-400 mb-4">Before — same LoopOpts built 5×, target hard-coded</p>
+              <div class="space-y-2">
+                <div class="grid grid-cols-5 gap-2">
+                  <div class="text-center"><div class="h-16 border border-slate-300 rounded bg-slate-50 flex items-center justify-center text-[10px] text-slate-500 leading-tight px-1">headless</div></div>
+                  <div class="text-center"><div class="h-16 border border-slate-300 rounded bg-slate-50 flex items-center justify-center text-[10px] text-slate-500 leading-tight px-1">build</div></div>
+                  <div class="text-center"><div class="h-16 border border-slate-300 rounded bg-slate-50 flex items-center justify-center text-[10px] text-slate-500 leading-tight px-1">chat</div></div>
+                  <div class="text-center"><div class="h-16 border border-slate-300 rounded bg-slate-50 flex items-center justify-center text-[10px] text-slate-500 leading-tight px-1">task</div></div>
+                  <div class="text-center"><div class="h-16 border border-slate-300 rounded bg-slate-50 flex items-center justify-center text-[10px] text-slate-500 leading-tight px-1">plan</div></div>
+                </div>
+                <p class="text-center text-[10px] mono text-red-600">each builds LoopOpts{ narrate, style, sandbox, permission }</p>
+                <div class="border-2 border-red-300 rounded bg-red-50 p-2 text-center text-[11px] mono text-red-700">CONTEXT_TARGET_TOKENS = 150_000  ·  const, no per-path override</div>
+              </div>
+            </div>
+            <!-- after: one factory + threaded field -->
+            <div class="bg-white p-5">
+              <p class="lbl text-slate-400 mb-4">After — one factory, target threaded through the config</p>
+              <div class="space-y-3">
+                <div class="grid grid-cols-5 gap-2">
+                  <div class="h-8 border border-slate-200 rounded bg-white flex items-center justify-center text-[9px] text-slate-400">headless</div>
+                  <div class="h-8 border border-slate-200 rounded bg-white flex items-center justify-center text-[9px] text-slate-400">build</div>
+                  <div class="h-8 border border-slate-200 rounded bg-white flex items-center justify-center text-[9px] text-slate-400">chat</div>
+                  <div class="h-8 border border-slate-200 rounded bg-white flex items-center justify-center text-[9px] text-slate-400">task</div>
+                  <div class="h-8 border border-slate-200 rounded bg-white flex items-center justify-center text-[9px] text-slate-400">plan</div>
+                </div>
+                <div class="text-center text-slate-300">↓</div>
+                <div class="deep rounded-lg p-3 text-center">
+                  <p class="text-white text-sm font-medium mono">loop_opts_for(flags, tier)</p>
+                  <p class="text-slate-300 text-[10px] mt-1">context_target = window_for(tier)</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="px-7 py-6 grid md:grid-cols-2 gap-6">
+            <div class="space-y-3">
+              <div><p class="lbl text-slate-400">Problem</p><p class="text-sm text-slate-700">Five call sites assemble the same options by hand, and the compaction budget is a constant baked into <span class="mono text-xs">drive_loop</span> — nothing above the driver can vary it.</p></div>
+              <div><p class="lbl text-slate-400">Solution</p><p class="text-sm text-slate-700">One <span class="mono text-xs">loop_opts_for(...)</span> factory; promote <span class="mono text-xs">context_target</span> to a config field set in that one place.</p></div>
+            </div>
+            <div class="space-y-3">
+              <p class="lbl text-slate-400">Wins</p>
+              <ul class="text-sm text-slate-700 space-y-1.5">
+                <li class="flex gap-2"><span class="text-emerald-600">↳</span> 5 shallow constructions collapse to 1</li>
+                <li class="flex gap-2"><span class="text-emerald-600">↳</span> Per-tier context window becomes a 1-line change</li>
+                <li class="flex gap-2"><span class="text-emerald-600">↳</span> The driver stays deep; only assembly changes</li>
+                <li class="flex gap-2"><span class="text-emerald-600">↳</span> One place to test option resolution</li>
+              </ul>
+            </div>
+          </div>
+          <div class="px-7 pb-6 text-xs text-slate-500">Note: <span class="mono">eri_agent::driver</span> already exposes <span class="mono">LoopConfig.context_target</span> as a field — the const lives one layer up, in <span class="mono">build_agent</span>. This is the exact seam the pricing-honesty work (true per-tier windows) needs.</div>
+        </article>
+
+        <!-- ============ CANDIDATE 3 ============ -->
+        <article id="c3" class="card-anchor rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+          <div class="px-7 pt-7 pb-5 space-y-4">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-amber-100 text-amber-800">Worth exploring</span>
+              <span class="text-[11px] font-medium px-2.5 py-1 rounded-full bg-slate-100 text-slate-600">delete a shallow module</span>
+            </div>
+            <h2 class="font-serif text-2xl">Delete the legacy <span class="mono text-xl">run()</span> shadow dispatcher</h2>
+            <p class="mono text-xs text-slate-500">eri_cli/src/eri_cli.rs · Command (39 variants) · async dispatch() = real · fn run() #[allow(dead_code)] = test-only shadow</p>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-px bg-slate-200 border-y border-slate-200">
+            <div class="bg-white p-5">
+              <p class="lbl text-slate-400 mb-3">Before — every command lives in 3 places</p>
+              <pre class="mermaid">
+flowchart TB
+  C[Command enum\n39 variants] --> D[async dispatch\nreal handlers]
+  C --> R[fn run  dead_code]
+  R --> A[3 real arms\nbuild/iterate/scaffold]
+  R --> X[34 arms reject:\n'requires async dispatcher']
+  classDef leak stroke:#dc2626,stroke-width:2px,fill:#fef2f2;
+  class R,X leak
+              </pre>
+            </div>
+            <div class="bg-white p-5">
+              <p class="lbl text-slate-400 mb-3">After — one dispatcher, two edit sites per command</p>
+              <pre class="mermaid">
+flowchart TB
+  C[Command enum\n39 variants] --> D[async dispatch\nreal handlers]:::deep
+  classDef deep fill:#0f172a,color:#fff,stroke:#0f172a;
+              </pre>
+              <p class="text-[11px] text-slate-500 mt-3 text-center">the 34-arm rejection list disappears; its 3 real arms already exist as <span class="mono">run_build_metered</span> / <span class="mono">run_iterate_metered</span>.</p>
+            </div>
+          </div>
+
+          <div class="px-7 py-6 grid md:grid-cols-2 gap-6">
+            <div class="space-y-3">
+              <div><p class="lbl text-slate-400">Problem</p><p class="text-sm text-slate-700">Adding a command means touching a third site — the dead <span class="mono text-xs">run()</span> rejection list — for zero runtime value (it's <span class="mono text-xs">#[allow(dead_code)]</span>, reachable only from tests).</p></div>
+              <div><p class="lbl text-slate-400">Solution</p><p class="text-sm text-slate-700">Delete <span class="mono text-xs">run()</span> and repoint its few tests at <span class="mono text-xs">dispatch</span>; its 3 real arms duplicate logic that already lives in the metered helpers.</p></div>
+            </div>
+            <div class="space-y-3">
+              <p class="lbl text-slate-400">Wins</p>
+              <ul class="text-sm text-slate-700 space-y-1.5">
+                <li class="flex gap-2"><span class="text-emerald-600">↳</span> 3 edit sites per command → 2</li>
+                <li class="flex gap-2"><span class="text-emerald-600">↳</span> No more silent catch-all rejection list</li>
+                <li class="flex gap-2"><span class="text-emerald-600">↳</span> One dispatcher to read, not two</li>
+              </ul>
+            </div>
+          </div>
+          <div class="px-7 pb-6 text-xs text-slate-500">Deletion test: deleting <span class="mono">run()</span> concentrates nothing — it's a pass-through shadow of <span class="mono">dispatch</span>. That's the signal it should go.</div>
+        </article>
+
+        <!-- ============ CANDIDATE 4 ============ -->
+        <article id="c4" class="card-anchor rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+          <div class="px-7 pt-7 pb-5 space-y-4">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-amber-100 text-amber-800">Worth exploring</span>
+              <span class="text-[11px] font-medium px-2.5 py-1 rounded-full bg-slate-100 text-slate-600">narrow the seam</span>
+            </div>
+            <h2 class="font-serif text-2xl">Narrow the <span class="mono text-xl">Services</span> god-object; thin the shallow adapters</h2>
+            <p class="mono text-xs text-slate-500">eri_coreutils/src/services/mod.rs (Services, 14 fields) · lib.rs dispatch (104 arms) · services/{apply,checkpoints,memory}.rs (shallow)</p>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-px bg-slate-200 border-y border-slate-200">
+            <!-- mass diagram: shallow adapters -->
+            <div class="bg-white p-5">
+              <p class="lbl text-slate-400 mb-4">Before — wide interface, thin body (shallow)</p>
+              <div class="space-y-3">
+                <div class="flex items-end gap-3 justify-center">
+                  <div class="text-center"><div class="w-14 bg-slate-300 rounded-t" style="height:70px"></div><div class="w-14 bg-slate-100 border border-slate-200 rounded-b" style="height:26px"></div><p class="lbl text-slate-400 mt-1">apply</p></div>
+                  <div class="text-center"><div class="w-14 bg-slate-300 rounded-t" style="height:66px"></div><div class="w-14 bg-slate-100 border border-slate-200 rounded-b" style="height:30px"></div><p class="lbl text-slate-400 mt-1">checkpts</p></div>
+                  <div class="text-center"><div class="w-14 bg-slate-300 rounded-t" style="height:64px"></div><div class="w-14 bg-slate-100 border border-slate-200 rounded-b" style="height:34px"></div><p class="lbl text-slate-400 mt-1">memory</p></div>
+                </div>
+                <p class="text-center text-[10px] text-slate-500">grey = serde marshalling (60–80%) · pale = real call into another crate</p>
+                <div class="mt-2 border-2 border-red-300 rounded bg-red-50 p-2 text-center text-[11px] text-red-700">every handler takes <span class="mono">&amp;Arc&lt;Services&gt;</span> (14 fields) — apply/checkpoints/skills never touch it (<span class="mono">_services</span>)</div>
+              </div>
+            </div>
+            <!-- after: deep benchmark contrast -->
+            <div class="bg-white p-5">
+              <p class="lbl text-slate-400 mb-4">After — short interface, deep body (the driver benchmark)</p>
+              <div class="space-y-3">
+                <div class="flex items-end gap-3 justify-center">
+                  <div class="text-center"><div class="w-16 bg-slate-200 rounded-t" style="height:18px"></div><div class="w-16 deep rounded-b" style="height:78px"></div><p class="lbl text-slate-400 mt-1">driver.run</p></div>
+                </div>
+                <p class="text-center text-[10px] text-slate-500"><span class="mono">run(transport, tools, system, messages, cfg, on_text)</span></p>
+                <p class="text-center text-[11px] text-slate-600">swappable <span class="mono">Transport</span> + <span class="mono">ToolBox</span> seams · mock-tested end-to-end · new tool = <span class="mono">register()</span>, 0 driver edits</p>
+                <div class="mt-1 border border-slate-200 rounded bg-slate-50 p-2 text-center text-[11px] text-slate-600">handlers depend on a narrow slice (the field they use), not all 14</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="px-7 py-6 grid md:grid-cols-2 gap-6">
+            <div class="space-y-3">
+              <div><p class="lbl text-slate-400">Problem</p><p class="text-sm text-slate-700">The 104-arm string dispatch is fine (idiomatic JSON-RPC), but <span class="mono text-xs">Services</span> is a 14-field god object passed whole into handlers that use one field, and several adapters (apply, checkpoints, memory) are mostly serde over another crate.</p></div>
+              <div><p class="lbl text-slate-400">Solution</p><p class="text-sm text-slate-700">Let handlers depend on a narrow slice (only what they touch); inline or thin the pass-through adapters. Keep the dispatch shape.</p></div>
+            </div>
+            <div class="space-y-3">
+              <p class="lbl text-slate-400">Wins</p>
+              <ul class="text-sm text-slate-700 space-y-1.5">
+                <li class="flex gap-2"><span class="text-emerald-600">↳</span> Handlers testable without the whole registry</li>
+                <li class="flex gap-2"><span class="text-emerald-600">↳</span> Dead <span class="mono text-xs">_services</span> params disappear</li>
+                <li class="flex gap-2"><span class="text-emerald-600">↳</span> Shallow adapters stop hiding nothing</li>
+              </ul>
+            </div>
+          </div>
+          <div class="px-7 pb-6 text-xs text-amber-700 bg-amber-50 border-t border-amber-100">Caveat: biggest, most diffuse change here — high effort, spread-out locality win. Do it last, incrementally, not as a rewrite.</div>
+        </article>
+
+      </section>
+
+      <!-- Top recommendation -->
+      <section id="top-recommendation">
+        <div class="rounded-2xl deep text-white p-8 space-y-3">
+          <p class="lbl text-emerald-300">Top recommendation</p>
+          <h2 class="font-serif text-3xl"><a href="#c2" class="hover:underline">Funnel loop assembly &amp; lift the context target</a></h2>
+          <p class="text-slate-300 text-sm max-w-2xl">Five hand-built LoopOpts collapse to one factory, and the hard-coded 150K compaction budget becomes a config field set in that one place — which is exactly what makes a <em>true</em> per-tier context window possible. Small, bounded, high locality, and it unblocks the pricing-honesty work. Pair it with <a href="#c1" class="underline decoration-emerald-400">candidate 1 (provider acquisition)</a> — both deepen the same inference call path, and the driver underneath is already deep, so neither touches the hard part.</p>
+        </div>
+      </section>
+
+      <footer class="text-xs text-slate-400 pt-2 border-t border-slate-200">
+        Vocabulary per the skill's LANGUAGE.md — module, interface, implementation, depth, seam, adapter, leverage, locality. No interfaces proposed yet; pick a candidate to design.
+      </footer>
+    </main>
+  </body>
+</html>

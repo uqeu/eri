@@ -77,10 +77,7 @@ struct SetSessionParams {
 
 /// `eri/account/setSession` handler. Stash the active user_id on Services.
 /// Idempotent — re-calling with the same id is a no-op.
-pub async fn set_session(
-    params: Value,
-    services: &Services,
-) -> Result<Value, DispatchError> {
+pub async fn set_session(params: Value, services: &Services) -> Result<Value, DispatchError> {
     let p: SetSessionParams = serde_json::from_value(params)
         .map_err(|e| DispatchError::BadParams(format!("eri/account/setSession: {e}")))?;
     let trimmed = p.user_id.trim();
@@ -94,10 +91,7 @@ pub async fn set_session(
 }
 
 /// `eri/account/clearSession` handler. Drops the cached user_id.
-pub async fn clear_session(
-    _params: Value,
-    services: &Services,
-) -> Result<Value, DispatchError> {
+pub async fn clear_session(_params: Value, services: &Services) -> Result<Value, DispatchError> {
     services.clear_session().await;
     Ok(serde_json::json!({ "ok": true }))
 }
@@ -297,7 +291,11 @@ mod tests {
     fn map_rate_limited_parses_well_formed_envelope() {
         let body = r#"{"error":"rate_limited","tier":"pro","window":"minute","resetAt":"2026-05-26T16:42:00Z"}"#;
         match map_rate_limited(body) {
-            DispatchError::RateLimited { tier, window, reset_at } => {
+            DispatchError::RateLimited {
+                tier,
+                window,
+                reset_at,
+            } => {
                 assert_eq!(tier, "pro");
                 assert_eq!(window, "minute");
                 assert_eq!(reset_at, "2026-05-26T16:42:00Z");
@@ -309,7 +307,11 @@ mod tests {
     #[test]
     fn map_rate_limited_falls_back_on_garbage_body() {
         match map_rate_limited("not json") {
-            DispatchError::RateLimited { tier, window, reset_at } => {
+            DispatchError::RateLimited {
+                tier,
+                window,
+                reset_at,
+            } => {
                 assert_eq!(tier, "free");
                 assert_eq!(window, "minute");
                 assert_eq!(reset_at, "");
@@ -336,7 +338,10 @@ mod tests {
         let result = set_session(params, services.as_ref()).await.unwrap();
         assert_eq!(result, serde_json::json!({ "ok": true }));
         // user_id is trimmed before storage.
-        assert_eq!(services.current_user_id().await.as_deref(), Some("user_abc"));
+        assert_eq!(
+            services.current_user_id().await.as_deref(),
+            Some("user_abc")
+        );
     }
 
     #[tokio::test]
@@ -353,7 +358,9 @@ mod tests {
         let services = Services::new();
         services.set_session_user("user_xyz").await;
         assert!(services.current_user_id().await.is_some());
-        let result = clear_session(serde_json::json!({}), services.as_ref()).await.unwrap();
+        let result = clear_session(serde_json::json!({}), services.as_ref())
+            .await
+            .unwrap();
         assert_eq!(result, serde_json::json!({ "ok": true }));
         assert!(services.current_user_id().await.is_none());
     }

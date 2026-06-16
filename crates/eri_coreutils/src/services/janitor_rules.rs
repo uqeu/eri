@@ -194,10 +194,7 @@ mod tests {
                 pattern: "**/*.sql".into()
             }
         );
-        assert_eq!(
-            parse_trigger("idle:5m"),
-            Trigger::Unknown("idle:5m".into())
-        );
+        assert_eq!(parse_trigger("idle:5m"), Trigger::Unknown("idle:5m".into()));
     }
 
     #[test]

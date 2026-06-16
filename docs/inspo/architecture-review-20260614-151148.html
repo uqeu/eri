@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>eri — Phase 0 memory-sync architecture review</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({ startOnLoad: true, theme: "dark" });</script>
+<style>
+  body { background:#0b0f0e; color:#e7efe9; }
+  .card { background:#111715; border:1px solid #1f2a26; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .lime { color:#b6f400; }
+  .badge-strong { background:#b6f400; color:#0b0f0e; }
+  .badge-worth { background:#1f6feb33; color:#79c0ff; border:1px solid #1f6feb55; }
+  .badge-spec { background:#6e768166; color:#c9d1d9; }
+  .good { color:#3fb950; }
+  .bad { color:#f0883e; }
+  pre { background:#0d1311; border:1px solid #1f2a26; border-radius:8px; padding:12px; overflow:auto; }
+</style>
+</head>
+<body class="max-w-5xl mx-auto px-6 py-10">
+
+<header class="mb-10">
+  <div class="text-sm lime mono">architecture review · 2026-06-14</div>
+  <h1 class="text-3xl font-semibold mt-1">Phase 0 — the memory-sync seam</h1>
+  <p class="text-slate-400 mt-3 leading-relaxed">
+    Reviewing the two-tier memory surface shipped in Phase 0: the Rust
+    <span class="mono lime">eri_inference::memory</span> seam (store · merge · profile · sync)
+    and the cloud Tier-A/Tier-B routes. Vocabulary follows <span class="mono">CONTEXT.md</span>
+    (Tier-A profile, Tier-B blob, K_user/K_server) and respects
+    <span class="mono">docs/adr/0001–0002</span>. The verdict up front: <b>the seam is mostly deep
+    and well-tested</b> — there is exactly one shallow-duplication smell worth fixing
+    <em>before</em> Phase 1 forks it a third time.
+  </p>
+</header>
+
+<section class="card rounded-xl p-6 mb-8">
+  <h2 class="text-xl font-medium mb-4">The seam today</h2>
+  <div class="mermaid">
+flowchart TB
+  subgraph rust["eri_inference::memory (Rust)"]
+    store["MemoryStore\nopen/insert/recall/forget\nsnapshot · apply_merge"]
+    merge["merge_observations\nunion + LWW + tombstones (pure)"]
+    profile["profile::distill\nProfile = facts+prefs+dynamic_context (pure)"]
+    sync["MemorySync\npush/pull/sync"]
+    key["MemoryKey\nHKDF · seal/open AES-256-GCM"]
+    trait["trait SyncTransport"]
+    http["HttpSyncTransport\nureq agent + base + bearer + error"]
+    stub["StubTransport (tests)"]
+  end
+  subgraph cloud["website (cloud)"]
+    rsync["/api/v1/memory/sync\nTier-B dumb storage"]
+    rprof["/api/v1/memory/profile\nTier-A, K_server at-rest"]
+    senc["server_encryption.ts"]
+    pc["profile_contract.ts (pure)"]
+  end
+  store --> merge
+  sync --> trait
+  sync --> key
+  sync --> store
+  trait --> http
+  trait --> stub
+  http --> rsync
+  rprof --> senc
+  rprof --> pc
+  style sync fill:#16241d,stroke:#b6f400
+  style trait fill:#16241d,stroke:#b6f400
+  style http fill:#2a1d16,stroke:#f0883e
+  </div>
+  <p class="text-slate-400 mt-4 text-sm leading-relaxed">
+    <span class="good">Green</span> = the deep, two-adapter seam (<span class="mono">SyncTransport</span>
+    with <span class="mono">Stub</span> + <span class="mono">Http</span> adapters — a <em>real</em> seam, not hypothetical).
+    <span class="bad">Amber</span> = <span class="mono">HttpSyncTransport</span>, which re-implements API plumbing
+    that already exists in <span class="mono">eri_auth::AuthClient</span>.
+  </p>
+</section>
+
+<!-- CANDIDATE 1 -->
+<section class="card rounded-xl p-6 mb-8">
+  <div class="flex items-center justify-between mb-3">
+    <h2 class="text-xl font-medium">1 · An eri API-call seam under the memory transports</h2>
+    <span class="badge-strong text-xs font-bold px-2 py-1 rounded">STRONG</span>
+  </div>
+
+  <div class="text-sm text-slate-300 space-y-3">
+    <p><b class="lime">Files</b> — <span class="mono">crates/eri_inference/src/memory/sync.rs</span>
+    (<span class="mono">HttpSyncTransport</span>), against <span class="mono">crates/eri_auth/src/eri_auth.rs</span>
+    (<span class="mono">AuthClient</span>) and ~12 other ureq call-sites.</p>
+
+    <p><b class="lime">Problem</b> — “how to reach the eri API” — build a ureq agent with the right
+    timeouts, resolve the base URL (<span class="mono">ERI_API_BASE</span>, default
+    <span class="mono">https://eri.dev</span>), attach the <span class="mono">Bearer eri_sk_…</span> header,
+    classify <span class="mono">ureq::Error::Status</span> into a typed error — is knowledge that now lives in
+    <em>each</em> client. <span class="mono">HttpSyncTransport</span> rebuilt it (agent + timeouts + bearer +
+    status match), and it doesn’t even read <span class="mono">ERI_API_BASE</span> (the caller must pass a base,
+    so there are now two ways to discover it). <b>Phase 1’s Tier-A profile push needs the exact same plumbing
+    against <span class="mono">/api/v1/memory/profile</span> — about to be the third copy.</b></p>
+
+    <p><b class="lime">Deletion test</b> — delete <span class="mono">HttpSyncTransport</span>’s agent/base/bearer/error
+    code and the same lines reappear verbatim in the profile transport. Complexity <em>reappears across callers</em>
+    → it was never earning its keep as bespoke code; it wants to be one adapter.</p>
+
+    <p><b class="lime">Solution</b> — a small <span class="mono lime">EriApiClient</span> (owns the agent, base-URL
+    resolution, bearer attachment, status→<span class="mono">SyncError</span> classification) exposing
+    <span class="mono">get(path)</span> / <span class="mono">put_json(path, body)</span>.
+    <span class="mono">SyncTransport</span> stays the domain seam; <span class="mono">HttpSyncTransport</span> becomes a
+    ~10-line adapter over <span class="mono">EriApiClient</span> targeting <span class="mono">/memory/sync</span>, and
+    Phase 1’s <span class="mono">HttpProfileTransport</span> is another ~10-line adapter targeting
+    <span class="mono">/memory/profile</span> — both over one client.</p>
+
+    <p><b class="lime">Benefits</b> — <b>locality</b>: TLS posture, ret/timeout policy, base-URL discovery, and bearer
+    handling change in one place (the security review is auditing exactly these). <b>Leverage</b>: every future eri-API
+    transport is a thin adapter. <b>Test surface</b>: the client’s error-classification is unit-tested once instead of
+    re-proven per transport; the domain seam keeps its <span class="mono">StubTransport</span>.</p>
+  </div>
+
+  <div class="grid grid-cols-2 gap-4 mt-5">
+    <div>
+      <div class="text-xs uppercase tracking-wide text-slate-500 mb-2">Before — shallow, duplicated</div>
+      <pre class="mono text-xs">HttpSyncTransport
+  ├ AgentBuilder + timeouts
+  ├ format!("{base}{SYNC_PATH}")
+  ├ "Bearer {bearer}"
+  └ match Status → SyncError
+
+(Phase 1)
+HttpProfileTransport
+  ├ AgentBuilder + timeouts   ◀ copy
+  ├ format!("{base}{PROF_PATH}")
+  ├ "Bearer {bearer}"          ◀ copy
+  └ match Status → SyncError   ◀ copy</pre>
+    </div>
+    <div>
+      <div class="text-xs uppercase tracking-wide text-slate-500 mb-2">After — one deep client, thin adapters</div>
+      <pre class="mono text-xs">EriApiClient
+  ├ agent + timeouts + ERI_API_BASE
+  ├ bearer attach
+  └ status → SyncError   (tested once)
+
+HttpSyncTransport  = client.get/put "/memory/sync"
+HttpProfileTransport = client.get/put "/memory/profile"
+       ▲ both ~10 lines, no crypto/merge leak</pre>
+    </div>
+  </div>
+  <p class="text-xs text-slate-500 mt-3">Scope guard: keep this <em>inside eri_inference</em> for now — do not yank the
+  other ~10 ureq sites into it in the same change (that’s candidate 2). Just stop the third copy before it’s written.</p>
+</section>
+
+<!-- CANDIDATE 2 -->
+<section class="card rounded-xl p-6 mb-8">
+  <div class="flex items-center justify-between mb-3">
+    <h2 class="text-xl font-medium">2 · Workspace-wide eri-API client consolidation</h2>
+    <span class="badge-worth text-xs font-bold px-2 py-1 rounded">WORTH EXPLORING</span>
+  </div>
+  <div class="text-sm text-slate-300 space-y-3">
+    <p><b class="lime">Files</b> — ~12 ureq agent-builders: <span class="mono">eri_auth, eri_billing, eri_images,
+    eri_index, eri_inference (providers/*, memory/sync), eri_voice, eri_coreutils</span>.</p>
+    <p><b class="lime">Problem</b> — the same agent/base/bearer/error pattern is smeared across the workspace; only
+    <span class="mono">eri_auth</span> reads <span class="mono">ERI_API_BASE</span>, so the others each invent base-URL
+    discovery. This is the full version of candidate 1.</p>
+    <p><b class="lime">Why not now</b> — it crosses 7 crates and the provider clients (Anthropic/Gemini/OpenAI) talk to
+    <em>provider</em> endpoints, not the eri API, so they don’t all belong behind one client. This is a deliberate,
+    separate refactor — candidate 1 is the wedge that proves the shape first. Echoes the “decouple eri_coreutils hub”
+    item from the landscape review.</p>
+  </div>
+</section>
+
+<!-- CANDIDATE 3 -->
+<section class="card rounded-xl p-6 mb-8">
+  <div class="flex items-center justify-between mb-3">
+    <h2 class="text-xl font-medium">3 · What’s already deep — leave it alone</h2>
+    <span class="badge-spec text-xs font-bold px-2 py-1 rounded">AFFIRM</span>
+  </div>
+  <div class="text-sm text-slate-300 space-y-2">
+    <p>Recording these so a future review doesn’t “fix” them:</p>
+    <ul class="list-disc pl-6 space-y-1 text-slate-400">
+      <li><b class="text-slate-200">merge_observations</b> — pure, total, tombstone-aware; the interface (two vecs in,
+      one converged vec out) is far smaller than the LWW+tombstone logic behind it. Deep. Tested directly.</li>
+      <li><b class="text-slate-200">SyncTransport</b> — a real seam (two adapters), carries opaque bytes so crypto +
+      the key never leak across it. The <span class="mono">sync()</span> convenience reuses
+      <span class="mono">apply_merge</span> rather than re-implementing convergence.</li>
+      <li><b class="text-slate-200">profile::distill</b> &amp; <b class="text-slate-200">profile_contract.ts</b> — pure
+      functions with the bytes/now injected; the interface <em>is</em> the test surface. Textbook.</li>
+      <li><b class="text-slate-200">server_encryption.ts</b> — <span class="mono">seal/open</span> take the key
+      explicitly (testable w/o env); <span class="mono">serverKey()</span> fails fast. Deep + pinned by tests.</li>
+    </ul>
+  </div>
+</section>
+
+<section class="card rounded-xl p-6 mb-4 border-l-4" style="border-left-color:#b6f400">
+  <h2 class="text-xl font-medium mb-2">Top recommendation</h2>
+  <p class="text-sm text-slate-300 leading-relaxed">
+    Do <b class="lime">candidate 1</b> now, scoped to <span class="mono">eri_inference</span>, as the first act of
+    Phase 1 — extract <span class="mono">EriApiClient</span> and reshape <span class="mono">HttpSyncTransport</span> into
+    a thin adapter, so the Tier-A profile push lands as a second adapter rather than a third copy. It’s small, it’s
+    local, it keeps the memory seam deep (the plan’s explicit watch-item), and it’s the natural place to apply whatever
+    the security review says about TLS / bearer / base-URL handling — all of which then live in <em>one</em> audited spot.
+    Defer candidate 2; affirm candidate 3.
+  </p>
+</section>
+
+</body>
+</html>

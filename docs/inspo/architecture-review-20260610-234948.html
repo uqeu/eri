@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Architecture review #3 — eri</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+      mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose" });
+    </script>
+    <style>
+      .deep { background: linear-gradient(135deg, #0f172a, #1e293b); }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+      .lbl { font-size: 10px; letter-spacing: .14em; text-transform: uppercase; }
+      .card-anchor { scroll-margin-top: 1.5rem; }
+      .mermaid { display:flex; justify-content:center; }
+    </style>
+  </head>
+  <body class="bg-stone-50 text-slate-900 font-sans antialiased">
+    <main class="max-w-5xl mx-auto px-6 py-14 space-y-14">
+      <header class="space-y-4">
+        <p class="lbl text-slate-400">Architecture review · run #3 · eri · 2026-06-10</p>
+        <h1 class="font-serif text-4xl text-slate-900">The work landed. The new seam is one you just created.</h1>
+        <p class="text-sm text-slate-600 max-w-2xl">Six recent deepenings verified present + wired. The honest news: the biggest remaining lever is <em>tier-data drift</em> — three languages now each hold their own copy of the per-tier numbers — and the Rust "capability registry" I floated last time is <em>not worth doing</em>.</p>
+      </header>
+
+      <!-- Verified -->
+      <section class="rounded-2xl border border-emerald-200 bg-emerald-50/60 p-7 space-y-3">
+        <p class="lbl text-emerald-700">Verified shipped — 6/6, all wired</p>
+        <div class="grid sm:grid-cols-3 gap-3 text-xs text-slate-600">
+          <div class="rounded-xl bg-white border border-emerald-100 p-3"><b class="text-emerald-700">Fast-lane</b> — <span class="mono">fast_route</span>/<span class="mono">canonical_app</span>, 0-token open/quit</div>
+          <div class="rounded-xl bg-white border border-emerald-100 p-3"><b class="text-emerald-700">Two-strike</b> — <span class="mono">StuckGuard</span> stops spin at 3 repeats</div>
+          <div class="rounded-xl bg-white border border-emerald-100 p-3"><b class="text-emerald-700">Feasibility gate</b> — sensitive goal declined before any model call</div>
+          <div class="rounded-xl bg-white border border-emerald-100 p-3"><b class="text-emerald-700">BYOK off</b> — <span class="mono">collect_provider_keys</span> proxy-only by default</div>
+          <div class="rounded-xl bg-white border border-emerald-100 p-3"><b class="text-emerald-700">Context window</b> — <span class="mono">window_for(tier)</span> per plan</div>
+          <div class="rounded-xl bg-white border border-emerald-100 p-3"><b class="text-emerald-700">Cancellation</b> — retractions never reach memory/model</div>
+        </div>
+        <p class="text-xs text-emerald-700/80"><span class="mono">eri_agent::driver</span> remains the depth benchmark (small <span class="mono">run()</span>, Transport/ToolBox seams, mock-tested).</p>
+      </section>
+
+      <section id="candidates" class="space-y-12">
+
+        <!-- A: tier source of truth -->
+        <article id="a" class="card-anchor rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+          <div class="px-7 pt-7 pb-5 space-y-4">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800">Strong</span>
+              <span class="text-[11px] font-medium px-2.5 py-1 rounded-full bg-slate-100 text-slate-600">single source of truth</span>
+            </div>
+            <h2 class="font-serif text-2xl">One tier table, generated into three languages</h2>
+            <p class="mono text-xs text-slate-500">build_agent.rs window_for() · website/lib/tiers.ts · scripts/pricing_model.py</p>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-px bg-slate-200 border-y border-slate-200">
+            <div class="bg-white p-5">
+              <p class="lbl text-slate-400 mb-3">Before — three copies, manual sync</p>
+              <pre class="mermaid">
+flowchart TB
+  R[window_for() Rust\n25K/54K/128K/256K]:::leak
+  T[tiers.ts TS\nbudgets + limits]:::leak
+  P[pricing_model.py\nbudgets + windows]:::leak
+  R -. drift .- T
+  T -. drift .- P
+  P -. drift .- R
+  classDef leak stroke:#dc2626,stroke-width:2px,fill:#fef2f2;
+              </pre>
+              <p class="text-[11px] text-red-600 text-center mt-2">a Rust test passing at 25K can't catch a marketing page that says 30K</p>
+            </div>
+            <div class="bg-white p-5">
+              <p class="lbl text-slate-400 mb-3">After — one table, the rest derive</p>
+              <pre class="mermaid">
+flowchart TB
+  J[tiers.json\nthe one table]:::deep
+  J --> R[window_for Rust]
+  J --> T[tiers.ts]
+  J --> P[pricing_model.py]
+  J --> CI[CI: assert all three agree]
+  classDef deep fill:#0f172a,color:#fff,stroke:#0f172a;
+              </pre>
+            </div>
+          </div>
+
+          <div class="px-7 py-6 grid md:grid-cols-2 gap-6">
+            <div class="space-y-3">
+              <div><p class="lbl text-slate-400">Problem</p><p class="text-sm text-slate-700">Per-tier numbers now live in three places. The billing pass just edited all three by hand — exactly the change that silently drifts (a window, a budget, a price).</p></div>
+              <div><p class="lbl text-slate-400">Solution</p><p class="text-sm text-slate-700">A committed <span class="mono">tiers.json</span>; Rust/TS/Python read it (or a CI check asserts they match before merge).</p></div>
+            </div>
+            <div class="space-y-3">
+              <p class="lbl text-slate-400">Wins</p>
+              <ul class="text-sm text-slate-700 space-y-1.5">
+                <li class="flex gap-2"><span class="text-emerald-600">↳</span> Change a tier in one place, not three</li>
+                <li class="flex gap-2"><span class="text-emerald-600">↳</span> CI catches drift the unit tests can't</li>
+                <li class="flex gap-2"><span class="text-emerald-600">↳</span> The site, the proxy, the CLI can't disagree</li>
+              </ul>
+            </div>
+          </div>
+          <div class="px-7 pb-6 text-xs text-slate-500">Deletion test: a single table concentrates the per-tier truth — without it the same numbers reappear, by hand, in three languages on every pricing change.</div>
+        </article>
+
+        <!-- B: control pipeline -->
+        <article id="b" class="card-anchor rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+          <div class="px-7 pt-7 pb-5 space-y-4">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-amber-100 text-amber-800">Worth exploring</span>
+              <span class="text-[11px] font-medium px-2.5 py-1 rounded-full bg-slate-100 text-slate-600">extract a seam</span>
+            </div>
+            <h2 class="font-serif text-2xl">Lift the control stages out of one long function</h2>
+            <p class="mono text-xs text-slate-500">eri_cli/src/control_agent.rs · run_control_agent (cancellation → feasibility → fast-lane → reasoning loop, all inline)</p>
+          </div>
+          <div class="px-7 py-5 grid md:grid-cols-2 gap-6">
+            <div class="space-y-3">
+              <div><p class="lbl text-slate-400">Problem</p><p class="text-sm text-slate-700"><span class="mono">run_control_agent</span> front-loads four stages inline (~125 lines). It reads fine today, but it's where the next bits accrete — per-tier turn budgets, fallback routing, pointer-style milestones.</p></div>
+              <div><p class="lbl text-slate-400">Solution</p><p class="text-sm text-slate-700">A <span class="mono">ControlPipeline</span> of composable stages (gate → fast-lane → loop), each testable in isolation — the pointer.ai gate→plan→execute shape, now that you have a home for it.</p></div>
+            </div>
+            <div class="space-y-3">
+              <p class="lbl text-slate-400">Wins</p>
+              <ul class="text-sm text-slate-700 space-y-1.5">
+                <li class="flex gap-2"><span class="text-emerald-600">↳</span> Each stage unit-tested, not just integration</li>
+                <li class="flex gap-2"><span class="text-emerald-600">↳</span> Adding a stage is a method, not inline code</li>
+                <li class="flex gap-2"><span class="text-emerald-600">↳</span> Natural home for per-tier turn budgets (a margin leak today — Free burns the same as Pro)</li>
+              </ul>
+            </div>
+          </div>
+        </article>
+
+        <!-- C: delete mercury -->
+        <article id="c" class="card-anchor rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+          <div class="px-7 pt-7 pb-5 space-y-4">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-amber-100 text-amber-800">Worth exploring</span>
+              <span class="text-[11px] font-medium px-2.5 py-1 rounded-full bg-slate-100 text-slate-600">delete dead code</span>
+            </div>
+            <h2 class="font-serif text-2xl">Excise the dead Mercury chain — ~490 LOC, zero callers</h2>
+            <p class="mono text-xs text-slate-500">eri_cli.rs: run() · run_build · run_iterate · build_backend · stream_iteration + MercuryBackend/Config imports</p>
+          </div>
+          <div class="px-7 py-5 text-sm text-slate-700">
+            Confirmed fully unreachable from non-test code (only the dead <span class="mono">run()</span> references it). ~490 lines behind <span class="mono">#[allow(dead_code)]</span>, isolated to one file. Clean sweep: delete the chain + the now-unused imports + the legacy-only tests. Both review passes now agree — <b>do it.</b>
+          </div>
+        </article>
+
+        <!-- Skip these -->
+        <article class="rounded-2xl border border-slate-300 bg-slate-100 p-7 space-y-3">
+          <p class="lbl text-slate-500">Honest: don't bother with these</p>
+          <div class="grid md:grid-cols-2 gap-5 text-sm text-slate-700">
+            <div>
+              <p class="font-semibold text-slate-800">Rust capability registry — skip</p>
+              <p class="text-xs mt-1">The 106-arm <span class="mono">dispatch</span> match is idiomatic JSON-RPC (every LSP looks like this). A <span class="mono">Capability</span> trait + <span class="mono">Arc&lt;dyn&gt;</span> adds allocations + vtable per turn for a compile-time, closed feature set — no payback unless you add live plugin loading. The valuable capability seam was the <em>pad's</em> <span class="mono">CAPABILITIES</span> table, and that's done. (This corrects run #2's top-A framing.)</p>
+            </div>
+            <div>
+              <p class="font-semibold text-slate-800">Services god-object — defer</p>
+              <p class="text-xs mt-1">24 fields, passed whole; a few handlers take <span class="mono">_services</span> they don't use. A real but minor smell. Not worth the two-dispatch-path indirection until it crosses ~40 fields or you add per-handler feature-gating.</p>
+            </div>
+          </div>
+        </article>
+
+      </section>
+
+      <!-- Top recommendation -->
+      <section id="top-recommendation">
+        <div class="rounded-2xl deep text-white p-8 space-y-3">
+          <p class="lbl text-emerald-300">Top recommendation</p>
+          <h2 class="font-serif text-3xl"><a href="#a" class="hover:underline">One tier table, three generated outputs</a></h2>
+          <p class="text-slate-300 text-sm max-w-2xl">You just hand-edited the per-tier numbers in Rust, TypeScript, and Python — that's the seam most likely to bite next, because a passing test in one language can't see a stale number in another. A committed <span class="mono">tiers.json</span> (or a CI equality check) makes the site, the proxy, and the CLI physically unable to disagree about what a plan is. Pair it with C (delete the dead Mercury chain — free cleanup) and keep B (control pipeline) for when per-tier turn budgets land. Skip the Rust capability registry; the match is fine.</p>
+        </div>
+      </section>
+
+      <footer class="text-xs text-slate-400 pt-2 border-t border-slate-200">
+        Vocabulary per the skill's LANGUAGE.md and the repo's CONTEXT.md. Six deepenings verified; three candidates + two honest skips. No interfaces proposed yet.
+      </footer>
+    </main>
+  </body>
+</html>

@@ -96,7 +96,10 @@ impl CommandOutcome {
 /// status + payload + the tokens it cost. A risky action (confirm requested)
 /// ALWAYS becomes `awaiting_confirm` — never reported as `done` — but the tokens
 /// already spent reaching it are still metered. Pure + unit-tested.
-fn outcome(result: Result<control_agent::ControlRun>, confirm_prompt: Option<String>) -> CommandOutcome {
+fn outcome(
+    result: Result<control_agent::ControlRun>,
+    confirm_prompt: Option<String>,
+) -> CommandOutcome {
     // Tokens spent before this point are billed regardless of which branch wins.
     let usage = match &result {
         Ok(run) => run.usage,
@@ -241,7 +244,9 @@ async fn execute(goal: &str, model: &str, approved: bool) -> CommandOutcome {
             // No live actuation endpoint — report rather than silently no-op.
             return CommandOutcome::free(
                 "error",
-                Some("this computer isn't reachable for control (the eri app isn't running)".into()),
+                Some(
+                    "this computer isn't reachable for control (the eri app isn't running)".into(),
+                ),
             );
         }
     };
@@ -290,8 +295,17 @@ mod tests {
         );
         assert_eq!(o.status, "awaiting_confirm");
         assert!(o.result.is_none());
-        assert_eq!(o.confirm_prompt.as_deref(), Some("eri wants to: send an email"));
-        assert_eq!(o.usage, TokenUsage { input: 120, output: 40 });
+        assert_eq!(
+            o.confirm_prompt.as_deref(),
+            Some("eri wants to: send an email")
+        );
+        assert_eq!(
+            o.usage,
+            TokenUsage {
+                input: 120,
+                output: 40
+            }
+        );
     }
 
     #[test]
@@ -300,7 +314,13 @@ mod tests {
         assert_eq!(o.status, "done");
         assert_eq!(o.result.as_deref(), Some("opened Spotify"));
         assert!(o.confirm_prompt.is_none());
-        assert_eq!(o.usage, TokenUsage { input: 200, output: 80 });
+        assert_eq!(
+            o.usage,
+            TokenUsage {
+                input: 200,
+                output: 80
+            }
+        );
     }
 
     #[test]

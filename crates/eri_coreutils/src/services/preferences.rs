@@ -53,9 +53,7 @@ pub async fn load(
 /// from each layer are NOT recursively combined; the workspace
 /// object replaces the user one outright for that key). Returns
 /// `(merged, sources)` where `sources[key] = "user" | "workspace"`.
-pub fn merge_preferences(
-    workspace: &Path,
-) -> (Value, serde_json::Map<String, Value>) {
+pub fn merge_preferences(workspace: &Path) -> (Value, serde_json::Map<String, Value>) {
     let user = read_user_file();
     let project = read_workspace_file(workspace);
     let mut merged = serde_json::Map::new();
@@ -76,7 +74,9 @@ pub fn merge_preferences(
 }
 
 fn read_user_file() -> Value {
-    let Some(home) = std::env::var("HOME").ok().or_else(|| std::env::var("USERPROFILE").ok())
+    let Some(home) = std::env::var("HOME")
+        .ok()
+        .or_else(|| std::env::var("USERPROFILE").ok())
     else {
         return Value::Null;
     };

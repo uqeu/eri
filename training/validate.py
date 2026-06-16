@@ -17,8 +17,9 @@ Checks
     only. Exempt from the "is this real training data?" provenance rule — seeds are Claude-authored
     structural scaffolding (meta.provenance == "seed-template") and are NEVER trained on. Comment
     lines (starting with '#') are allowed and skipped.
-(c) datasets.yaml: every entry has provenance in {human, open-model}, valid role, NONE collide with
-    OFF_LIMITS.  [SKIPPED if pyyaml absent]
+(c) datasets.yaml: every entry has provenance in {human, open-model}, valid role
+    ({chat, tools, restraint, persona, reasoning}), NONE collide with OFF_LIMITS.
+    [SKIPPED if pyyaml absent]
 (d) config.yaml: parses, references a Qwen base model, sane LoRA params.  [SKIPPED if pyyaml absent]
 
 Run:
@@ -49,7 +50,7 @@ HERE = Path(__file__).resolve().parent
 
 VALID_ROLES_MESSAGE = {"system", "user", "assistant", "tool"}
 VALID_PROVENANCE = {"human", "open-model"}
-VALID_DATASET_ROLES = {"chat", "tools", "restraint", "persona"}
+VALID_DATASET_ROLES = {"chat", "tools", "restraint", "persona", "reasoning"}
 
 # Provenance tags for the messages-JSONL records (distinct from the dataset-manifest provenance):
 #   open-model    -> generated fresh by an OPEN model (Kimi/Qwen/DeepSeek) — the real training data.
