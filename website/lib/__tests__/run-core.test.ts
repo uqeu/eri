@@ -54,6 +54,7 @@ import { assembleMessages, buildRecallPayload, buildSystemBlocks, buildSystemPro
   assert.ok(sys.includes("What I know about you"));
   assert.ok(sys.includes("- name is Khai"));
   assert.ok(sys.includes("- builds eri"));
+  assert.ok(sys.includes("How you should behave"), "preferences get the standing-behavior label")
   assert.ok(sys.includes("- accepts most edits"));
   assert.ok(sys.includes("- Today: shipped the overlay"));
   // fenced so the model treats it as context, not instructions
