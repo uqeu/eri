@@ -78,7 +78,7 @@ import { assembleMessages, buildRecallPayload, buildSystemPrompt, currentDateTex
     { communication_style: "lowercase, terse, uses emoji" },
     null,
   );
-  assert.ok(sys.includes("How you write (mirror this): lowercase, terse, uses emoji"));
+  assert.ok(sys.includes("Your typical writing style (reflect on average, with natural variation): lowercase, terse, uses emoji"));
 }
 
 // nowText is injected so eri answers date/time itself instead of dispatching it.

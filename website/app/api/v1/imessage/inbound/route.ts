@@ -27,6 +27,7 @@ import {
   type ToolResult,
 } from "@/lib/agent/connectors";
 import { runVisionTurn } from "@/lib/agent/vision";
+import { analyzeCommunicationStyle } from "@/lib/agent/style";
 import { mapBraveResults, type WebSearchDeps } from "@/lib/agent/web_search";
 import { cancelPending, confirmPending, enqueueCommand } from "@/lib/commands/queue";
 import { handleInbound, type InboundDeps } from "@/lib/imessage/inbound";
@@ -379,6 +380,23 @@ async function loadProfile(
     }
   }
 
+  // Learned communication style: distilled from how the user ACTUALLY writes over
+  // time (their stored messages), so eri reflects their average voice with natural
+  // variation — not a parrot of the latest message. Falls back to the device-synced
+  // style, then null (eri writes naturally until it's learned them).
+  let learnedStyle: string | null = null;
+  try {
+    const styleRows = await sql()<{ content: string }[]>`
+      SELECT content FROM conversation_turns
+      WHERE user_id = ${userId} AND role = 'user'
+      ORDER BY created_at DESC LIMIT 60
+    `;
+    learnedStyle = analyzeCommunicationStyle(styleRows.map((r) => r.content));
+  } catch (e) {
+    logEvent("imessage.style_load_failed", { userId, error: errMsg(e) });
+  }
+  const communicationStyle = learnedStyle ?? syncedProfile?.communication_style ?? null;
+
   // Merge: identity → learned → synced facts (dedup, identity/learned first so the
   // basics always lead). If nothing at all, return null so the persona stands alone.
   const facts = [...identityFacts, ...learnedFacts, ...(syncedProfile?.facts ?? [])];
@@ -396,7 +414,7 @@ async function loadProfile(
     profile: {
       facts: dedupedFacts,
       preferences: syncedProfile?.preferences ?? [],
-      communication_style: syncedProfile?.communication_style ?? null,
+      communication_style: communicationStyle,
     },
     dynamicContext,
   };
