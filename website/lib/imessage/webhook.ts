@@ -57,6 +57,8 @@ export interface InboundMessage {
   messageHandle: string;
   isOutbound: boolean;
   service: string;
+  /** URL of an attached image/media, when Sendblue delivers one (`media_url`). */
+  mediaUrl?: string;
 }
 
 /**
@@ -70,11 +72,16 @@ export function parseInbound(body: unknown): InboundMessage | null {
   const fromNumber = typeof b.from_number === "string" ? b.from_number : null;
   const messageHandle = typeof b.message_handle === "string" ? b.message_handle : null;
   if (!fromNumber || !messageHandle) return null;
+  // `media_url` is optional — present only when the sender attached an image.
+  // A non-empty string sets it; anything else (missing/empty/non-string) leaves
+  // it undefined so the text path stays the default.
+  const mediaUrlRaw = typeof b.media_url === "string" ? b.media_url.trim() : "";
   return {
     fromNumber,
     content: typeof b.content === "string" ? b.content : "",
     messageHandle,
     isOutbound: b.is_outbound === true,
     service: typeof b.service === "string" ? b.service : "iMessage",
+    ...(mediaUrlRaw ? { mediaUrl: mediaUrlRaw } : {}),
   };
 }

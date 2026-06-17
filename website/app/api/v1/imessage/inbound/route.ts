@@ -16,9 +16,17 @@
 // a model failure is already turned into a friendly reply inside handleInbound.
 
 import { NextResponse } from "next/server";
+import { Composio } from "@composio/core";
 import { decryptAtRest } from "@/lib/crypto/server_encryption";
 import { sql } from "@/lib/db";
 import { runAgentTurn, type TierAProfile } from "@/lib/agent/run_core";
+import {
+  CALENDAR_TOOLKIT,
+  GMAIL_TOOLKIT,
+  type ConnectorDeps,
+  type ToolResult,
+} from "@/lib/agent/connectors";
+import { runVisionTurn } from "@/lib/agent/vision";
 import { cancelPending, confirmPending, enqueueCommand } from "@/lib/commands/queue";
 import { handleInbound, type InboundDeps } from "@/lib/imessage/inbound";
 import { consumePairing, normalizeE164, resolveUserByPhone } from "@/lib/imessage/identity";
@@ -133,9 +141,42 @@ function makeDeps(): InboundDeps {
       return enqueued !== null;
     },
     rememberUserFact,
+    connectors: makeConnectorDeps(),
+    runVisionTurn: ({ imageUrl, prompt, system }) => runVisionTurn({ imageUrl, prompt, system }),
     confirmPending,
     cancelPending,
     now: () => Date.now(),
+  };
+}
+
+/**
+ * Wire SQL (active connections) + Composio tool execution behind the ConnectorDeps
+ * seam, so eri can read Gmail/Calendar in-cloud. Same shape as the proactive
+ * cron's signal wiring; the SDK is built per call so a missing key fails at
+ * request time (caught by the connector readers → empty) not at module load.
+ */
+function makeConnectorDeps(): ConnectorDeps {
+  return {
+    activeToolkits: async (userId) => {
+      const rows = await sql()<{ toolkit: string }[]>`
+        SELECT toolkit FROM composio_accounts
+        WHERE user_id = ${userId}
+          AND status = 'active'
+          AND toolkit IN (${GMAIL_TOOLKIT}, ${CALENDAR_TOOLKIT})
+      `;
+      return new Set(rows.map((r) => r.toolkit));
+    },
+    executeTool: async (userId, slug, args) => {
+      const key = process.env.COMPOSIO_API_KEY;
+      if (!key) throw new Error("COMPOSIO_API_KEY is not configured");
+      const composio = new Composio({ apiKey: key });
+      const result = await composio.tools.execute(slug, { userId, arguments: args });
+      return {
+        data: (result?.data ?? {}) as Record<string, unknown>,
+        error: result?.error ?? null,
+        successful: result?.successful === true,
+      } satisfies ToolResult;
+    },
   };
 }
 

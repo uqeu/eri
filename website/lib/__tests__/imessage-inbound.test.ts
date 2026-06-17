@@ -26,6 +26,11 @@ function deps(over: Partial<InboundDeps> = {}): InboundDeps {
     runTurn: async () => ({ text: "**hi**", tokensIn: 10, tokensOut: 5, model: "claude-sonnet-4-6" }),
     enqueueComputerGoal: async () => true,
     rememberUserFact: async () => true,
+    connectors: {
+      activeToolkits: async () => new Set<string>(),
+      executeTool: async () => ({ data: {}, error: null, successful: false }),
+    },
+    runVisionTurn: async () => ({ text: "i see it", tokensIn: 5, tokensOut: 3, model: "claude-sonnet-4-6" }),
     confirmPending: async () => null,
     cancelPending: async () => false,
     now: () => 1000,
@@ -176,6 +181,52 @@ async function run() {
     assert.equal(out.branch, "answered");
     assert.deepEqual(saved, { fact: "Lives in Toronto", kind: "fact" });
     assert.equal(dispatches, 1, "remember_fact did not consume the dispatch slot");
+  }
+
+  // A photo (mediaUrl) routes to the vision turn, not the normal text turn.
+  {
+    let visionImg: string | null = null;
+    let textRan = false;
+    const out = await handleInbound(
+      { ...msg("what's this?"), mediaUrl: "https://cdn.example/x.jpg" },
+      "+1",
+      deps({
+        runVisionTurn: async ({ imageUrl }) => { visionImg = imageUrl; return { text: "looks like a receipt", tokensIn: 9, tokensOut: 6, model: "claude-sonnet-4-6" }; },
+        runTurn: async () => { textRan = true; throw new Error("text turn must not run for a photo"); },
+      }),
+    );
+    assert.equal(out.branch, "answered");
+    assert.equal(visionImg, "https://cdn.example/x.jpg");
+    assert.equal(textRan, false, "photo must skip the text turn");
+    assert.deepEqual(out.replyChunks, ["looks like a receipt"]);
+  }
+
+  // check_email / check_calendar resolve IN-CLOUD this turn (no dispatch), so eri
+  // answers inbox/day questions with the laptop closed.
+  {
+    let dispatches = 0;
+    const out = await handleInbound(
+      msg("anything important in my inbox?"),
+      "+1",
+      deps({
+        connectors: {
+          activeToolkits: async () => new Set(["gmail"]),
+          executeTool: async () => ({
+            data: { messages: [{ from: "boss@co.com", subject: "Q3 numbers", snippet: "need these today" }] },
+            error: null,
+            successful: true,
+          }),
+        },
+        enqueueComputerGoal: async () => { dispatches++; return true; },
+        runTurn: async (input) => {
+          const r = await input.onToolCall!("check_email", {});
+          assert.match(r, /Q3 numbers/);
+          return { text: "boss wants the Q3 numbers today", tokensIn: 8, tokensOut: 6, model: "claude-haiku-4-5-20251001" };
+        },
+      }),
+    );
+    assert.equal(out.branch, "answered");
+    assert.equal(dispatches, 0, "in-cloud read must not dispatch to the computer");
   }
 
   // A natural "go ahead" with a pending confirmation approves it (no model turn).

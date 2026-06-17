@@ -17,9 +17,20 @@ import {
   RECALL_MEMORY_TOOL,
   REMEMBER_FACT_TOOL,
   buildRecallPayload,
+  buildSystemPrompt,
+  currentDateText,
   type TierAProfile,
   type ToolDef,
 } from "@/lib/agent/run_core";
+import {
+  CHECK_CALENDAR_TOOL,
+  CHECK_EMAIL_TOOL,
+  formatEmails,
+  formatEvents,
+  readRecentEmails,
+  readUpcomingEvents,
+  type ConnectorDeps,
+} from "@/lib/agent/connectors";
 import type { CommandKind } from "@/lib/commands/queue";
 import { featureLocked } from "@/lib/feature_gate";
 import { isAffirmation, isNegation } from "@/lib/imessage/affirm";
@@ -102,6 +113,11 @@ export interface InboundDeps {
    *  (learned_facts) so eri knows it on every future text. Returns false on a
    *  storage failure. Completes in-cloud — not a computer dispatch. */
   rememberUserFact(userId: string, fact: string, kind: string): Promise<boolean>;
+  /** In-cloud connector reads (Gmail/Calendar) so eri can answer inbox/day
+   *  questions even with the laptop closed. Same seam shape as proactive SignalDeps. */
+  connectors: ConnectorDeps;
+  /** Answer about a photo the user sent (Claude vision). Single-shot, no tools. */
+  runVisionTurn(input: { imageUrl: string; prompt: string; system: string }): Promise<AgentTurnResultLike>;
   /** Approve the user's latest awaiting-confirm command; returns its goal or null. */
   confirmPending(userId: string): Promise<{ goal: string } | null>;
   /** Cancel the user's latest awaiting-confirm command; true if there was one. */
@@ -155,6 +171,44 @@ export async function handleInbound(
 
   const { profile, dynamicContext } = await deps.loadProfile(user.userId);
   const started = deps.now();
+
+  // A photo → answer about the image directly (Claude vision, single-shot). eri
+  // sees what you sent and replies, instead of "I can't look at images."
+  if (msg.mediaUrl) {
+    try {
+      const turn = await deps.runVisionTurn({
+        imageUrl: msg.mediaUrl,
+        prompt: msg.content,
+        system: buildSystemPrompt(profile, dynamicContext, currentDateText()),
+      });
+      return {
+        replyChunks: formatReply(turn.text),
+        meter: {
+          userId: user.userId,
+          model: turn.model,
+          tokensIn: turn.tokensIn,
+          tokensOut: turn.tokensOut,
+          latencyMs: deps.now() - started,
+          status: "ok",
+        },
+        branch: "answered",
+      };
+    } catch {
+      return {
+        replyChunks: formatReply(REPLY.errored),
+        meter: {
+          userId: user.userId,
+          model: DEFAULT_MODEL,
+          tokensIn: 0,
+          tokensOut: 0,
+          latencyMs: deps.now() - started,
+          status: "error",
+        },
+        branch: "errored",
+      };
+    }
+  }
+
   // At most one computer dispatch per text — a single message rarely needs to
   // queue two independent goals, and it removes the per-turn hop multiplier (H3).
   let dispatched = false;
@@ -167,15 +221,21 @@ export async function handleInbound(
       // Haiku for snappy chat replies (cloud pivot) — heavy work still escalates
       // to the computer via control_computer.
       model: PHONE_REPLY_MODEL,
-      // Three tools: control_computer dispatches an action to the machine;
-      // recall_memory dispatches a deep-memory lookup there; remember_fact saves
-      // a durable fact to cloud-primary memory in-cloud (no dispatch, known on
-      // every future text — laptop open or closed).
-      tools: [CONTROL_COMPUTER_TOOL, RECALL_MEMORY_TOOL, REMEMBER_FACT_TOOL],
+      // Tools split by where they resolve. IN-CLOUD this turn (no computer, not
+      // gated by the single-dispatch guard): remember_fact saves a durable fact;
+      // check_email / check_calendar read Gmail/Calendar server-side so eri can
+      // answer inbox/day questions laptop-closed. DISPATCHED to the machine:
+      // control_computer (an action) and recall_memory (deep Tier-B lookup).
+      tools: [
+        CONTROL_COMPUTER_TOOL,
+        RECALL_MEMORY_TOOL,
+        REMEMBER_FACT_TOOL,
+        CHECK_EMAIL_TOOL,
+        CHECK_CALENDAR_TOOL,
+      ],
       onToolCall: async (name, toolInput) => {
-        // remember_fact runs in-cloud and is independent of the single-dispatch
-        // guard (it doesn't touch the computer), so eri can both save a fact AND
-        // dispatch a task in one turn.
+        // In-cloud tools run regardless of the single-dispatch guard (they don't
+        // touch the computer), so eri can e.g. save a fact AND dispatch in one turn.
         if (name === "remember_fact") {
           const fact = (toolInput as { fact?: unknown })?.fact;
           if (typeof fact !== "string" || !fact.trim()) return "No fact was provided.";
@@ -183,6 +243,12 @@ export async function handleInbound(
           const kind = kindRaw === "preference" ? "preference" : "fact";
           const ok = await deps.rememberUserFact(user.userId, fact.trim(), kind);
           return ok ? "Saved — eri will remember that." : "Couldn't save that just now.";
+        }
+        if (name === "check_email") {
+          return formatEmails(await readRecentEmails(user.userId, deps.connectors));
+        }
+        if (name === "check_calendar") {
+          return formatEvents(await readUpcomingEvents(user.userId, deps.connectors));
         }
         if (dispatched) return "Already dispatched one task for this message; wait for it to finish.";
         // One enqueue path so the cap + single-dispatch guard live in one place;
