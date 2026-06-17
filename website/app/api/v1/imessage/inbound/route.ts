@@ -19,7 +19,7 @@ import { NextResponse } from "next/server";
 import { Composio } from "@composio/core";
 import { decryptAtRest } from "@/lib/crypto/server_encryption";
 import { sql } from "@/lib/db";
-import { runAgentTurn, type TierAProfile } from "@/lib/agent/run_core";
+import { runAgentTurn, type ConversationTurn, type TierAProfile } from "@/lib/agent/run_core";
 import {
   CALENDAR_TOOLKIT,
   GMAIL_TOOLKIT,
@@ -143,10 +143,53 @@ function makeDeps(): InboundDeps {
     rememberUserFact,
     connectors: makeConnectorDeps(),
     runVisionTurn: ({ imageUrl, prompt, system }) => runVisionTurn({ imageUrl, prompt, system }),
+    loadConversation,
+    recordConversation,
     confirmPending,
     cancelPending,
     now: () => Date.now(),
   };
+}
+
+/** How many recent turns to replay as conversation context (bounds tokens). */
+const HISTORY_LIMIT = 16;
+/** Only replay turns from the last few hours — older context isn't this thread. */
+const HISTORY_WINDOW = "6 hours";
+
+/** Load the recent conversation (oldest→newest) so eri remembers the thread. */
+async function loadConversation(userId: string): Promise<ConversationTurn[]> {
+  try {
+    const rows = await sql()<{ role: string; content: string }[]>`
+      SELECT role, content FROM conversation_turns
+      WHERE user_id = ${userId} AND created_at > now() - ${HISTORY_WINDOW}::interval
+      ORDER BY created_at DESC
+      LIMIT ${HISTORY_LIMIT}
+    `;
+    // DB gave newest→oldest; reverse to oldest→newest for the model.
+    return rows
+      .reverse()
+      .map((r) => ({ role: r.role === "assistant" ? "assistant" : "user", content: r.content }));
+  } catch (e) {
+    logEvent("imessage.history_load_failed", { userId, error: errMsg(e) });
+    return [];
+  }
+}
+
+/** Append this exchange to the running conversation. Best-effort — never throws. */
+async function recordConversation(
+  userId: string,
+  userText: string,
+  assistantText: string,
+): Promise<void> {
+  try {
+    await sql()`
+      INSERT INTO conversation_turns (user_id, role, content) VALUES
+        (${userId}, 'user', ${userText}),
+        (${userId}, 'assistant', ${assistantText})
+    `;
+  } catch (e) {
+    logEvent("imessage.history_record_failed", { userId, error: errMsg(e) });
+  }
 }
 
 /**

@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { buildRecallPayload, buildSystemPrompt, currentDateText, extractText, extractToolUses } from "../agent/run_core";
+import { assembleMessages, buildRecallPayload, buildSystemPrompt, currentDateText, extractText, extractToolUses } from "../agent/run_core";
 
 // buildRecallPayload emits the structured {query, as_of} spec the computer parses.
 {
@@ -91,6 +91,26 @@ import { buildRecallPayload, buildSystemPrompt, currentDateText, extractText, ex
   assert.ok(sys2.includes("- name is Khai"));
   // blank nowText is omitted (no dangling "Right now it is .")
   assert.ok(!buildSystemPrompt(null, null, "   ").includes("Right now it is"));
+}
+
+// assembleMessages replays prior turns before the prompt, dropping blanks — so
+// eri isn't a one-off AI (it remembers what was just said).
+{
+  const msgs = assembleMessages(
+    [
+      { role: "assistant", content: "where are you?" },
+      { role: "user", content: "   " }, // blank dropped
+      { role: "user", content: "toronto" },
+    ],
+    "i live there",
+  );
+  assert.equal(msgs.length, 3, "two valid prior turns + current prompt");
+  assert.equal(msgs[0].content, "where are you?");
+  assert.equal(msgs[1].content, "toronto");
+  assert.equal(msgs[2].content, "i live there");
+  assert.equal(msgs[2].role, "user");
+  // No history → just the prompt.
+  assert.deepEqual(assembleMessages(undefined, "hi"), [{ role: "user", content: "hi" }]);
 }
 
 // currentDateText produces a real, non-empty date string (smoke).

@@ -19,6 +19,7 @@ import {
   buildRecallPayload,
   buildSystemPrompt,
   currentDateText,
+  type ConversationTurn,
   type TierAProfile,
   type ToolDef,
 } from "@/lib/agent/run_core";
@@ -102,9 +103,16 @@ export interface InboundDeps {
     dynamicContext: string;
     maxTokens: number;
     model?: string;
+    history?: ConversationTurn[];
     tools?: ToolDef[];
     onToolCall?: (name: string, input: unknown) => Promise<string>;
   }): Promise<AgentTurnResultLike>;
+  /** The recent back-and-forth (oldest→newest) so eri isn't a one-off AI — it
+   *  remembers what it just asked and what you just said. */
+  loadConversation(userId: string): Promise<ConversationTurn[]>;
+  /** Append this exchange (user text + eri's reply) to the running conversation.
+   *  Best-effort — must never throw or block the reply. */
+  recordConversation(userId: string, userText: string, assistantText: string): Promise<void>;
   /** Dispatch a goal to the user's computer (command queue). `kind` selects the
    *  remote turn: "control" (actuation) or "recall" (deep memory lookup, goal is
    *  a JSON spec). Returns false when the user is at the outstanding-command cap. */
@@ -170,6 +178,8 @@ export async function handleInbound(
   }
 
   const { profile, dynamicContext } = await deps.loadProfile(user.userId);
+  // The running conversation so eri remembers what was just said (not a one-off AI).
+  const history = await deps.loadConversation(user.userId);
   const started = deps.now();
 
   // A photo → answer about the image directly (Claude vision, single-shot). eri
@@ -181,6 +191,7 @@ export async function handleInbound(
         prompt: msg.content,
         system: buildSystemPrompt(profile, dynamicContext, currentDateText()),
       });
+      await deps.recordConversation(user.userId, msg.content || "(sent a photo)", turn.text);
       return {
         replyChunks: formatReply(turn.text),
         meter: {
@@ -217,6 +228,7 @@ export async function handleInbound(
       prompt: msg.content,
       profile,
       dynamicContext,
+      history,
       maxTokens: 700,
       // Haiku for snappy chat replies (cloud pivot) — heavy work still escalates
       // to the computer via control_computer.
@@ -276,6 +288,7 @@ export async function handleInbound(
         return `Unknown tool: ${name}`;
       },
     });
+    await deps.recordConversation(user.userId, msg.content, turn.text);
     return {
       replyChunks: formatReply(turn.text),
       meter: {

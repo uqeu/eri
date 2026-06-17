@@ -117,18 +117,42 @@ export function buildRecallPayload(query: string, asOf?: string): string {
   return JSON.stringify({ query, as_of: scope });
 }
 
+/** One prior message in the running conversation (so eri isn't a one-off AI). */
+export interface ConversationTurn {
+  role: "user" | "assistant";
+  content: string;
+}
+
 export interface AgentTurnInput {
   prompt: string;
   profile?: TierAProfile | null;
   dynamicContext?: string | null;
   model?: string;
   maxTokens?: number;
+  /** Prior conversation turns (oldest→newest), replayed before this prompt so eri
+   *  remembers what was just said — it can ask a question and understand the reply. */
+  history?: ConversationTurn[];
   /** Tools the model may call; omit for a plain single-shot answer. */
   tools?: ToolDef[];
   /** Executes a tool the model called; returns the result text fed back. */
   onToolCall?: (name: string, input: unknown) => Promise<string>;
   /** Max model↔tool round-trips before forcing a final answer (budget guard). */
   maxHops?: number;
+}
+
+/**
+ * Assemble the Messages array: prior conversation (oldest→newest) then the
+ * current user prompt. Pure + unit-tested. Blank/whitespace turns are dropped so
+ * a stray empty row can't break the user/assistant alternation.
+ */
+export function assembleMessages(
+  history: ConversationTurn[] | undefined,
+  prompt: string,
+): AnthropicMessage[] {
+  const prior = (history ?? [])
+    .filter((t) => typeof t.content === "string" && t.content.trim().length > 0)
+    .map((t) => ({ role: t.role, content: t.content }));
+  return [...prior, { role: "user", content: prompt }];
 }
 
 export interface AgentTurnResult {
@@ -273,7 +297,7 @@ export async function runAgentTurn(input: AgentTurnInput): Promise<AgentTurnResu
   const model = input.model ?? DEFAULT_MODEL;
   const system = buildSystemPrompt(input.profile, input.dynamicContext, currentDateText());
   const maxHops = input.maxHops ?? DEFAULT_MAX_HOPS;
-  const messages: AnthropicMessage[] = [{ role: "user", content: input.prompt }];
+  const messages: AnthropicMessage[] = assembleMessages(input.history, input.prompt);
 
   let tokensIn = 0;
   let tokensOut = 0;
