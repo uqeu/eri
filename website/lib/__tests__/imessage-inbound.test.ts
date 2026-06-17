@@ -31,6 +31,8 @@ function deps(over: Partial<InboundDeps> = {}): InboundDeps {
       executeTool: async () => ({ data: {}, error: null, successful: false }),
     },
     runVisionTurn: async () => ({ text: "i see it", tokensIn: 5, tokensOut: 3, model: "claude-sonnet-4-6" }),
+    loadConversation: async () => [],
+    recordConversation: async () => {},
     confirmPending: async () => null,
     cancelPending: async () => false,
     now: () => 1000,
@@ -227,6 +229,33 @@ async function run() {
     );
     assert.equal(out.branch, "answered");
     assert.equal(dispatches, 0, "in-cloud read must not dispatch to the computer");
+  }
+
+  // Conversation memory: prior turns are replayed into the turn, and the new
+  // exchange is recorded — so eri isn't a one-off AI (it remembers the thread).
+  {
+    let sawHistory: { role: string; content: string }[] | undefined;
+    let recordedUser = "";
+    let recordedAssistant = "";
+    const out = await handleInbound(
+      msg("toronto"),
+      "+1",
+      deps({
+        loadConversation: async () => [
+          { role: "assistant", content: "where are you?" },
+        ],
+        runTurn: async (input) => {
+          sawHistory = input.history;
+          return { text: "nice, i'll remember you're in toronto", tokensIn: 8, tokensOut: 6, model: "claude-haiku-4-5-20251001" };
+        },
+        recordConversation: async (_u, user, assistant) => { recordedUser = user; recordedAssistant = assistant; },
+      }),
+    );
+    assert.equal(out.branch, "answered");
+    assert.equal(sawHistory?.length, 1, "prior turn must be passed to the model");
+    assert.equal(sawHistory?.[0].content, "where are you?");
+    assert.equal(recordedUser, "toronto");
+    assert.match(recordedAssistant, /toronto/);
   }
 
   // A natural "go ahead" with a pending confirmation approves it (no model turn).
