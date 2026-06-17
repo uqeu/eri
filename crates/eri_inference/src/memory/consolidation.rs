@@ -206,6 +206,7 @@ mod tests {
             embedding: embeddings::embed_text(body),
             valid_from: None,
             visibility: Visibility::Active,
+            ..Default::default()
         }
     }
 

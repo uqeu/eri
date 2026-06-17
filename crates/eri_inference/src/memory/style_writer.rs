@@ -137,6 +137,7 @@ pub fn style_observation(text: &str, ts_ms: u64) -> Observation {
         embedding: Vec::new(),
         valid_from: None,
         visibility: crate::memory::Visibility::Active,
+        ..Default::default()
     }
 }
 

@@ -38,9 +38,10 @@ pub mod sync;
 /// `superseded`/`consolidated`/`valid_to` flag soup can't form illegal
 /// combinations (architecture review C). Tombstones are NOT a variant here:
 /// "is this a tombstone" is a `kind`, orthogonal to lifecycle, checked separately.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub enum Visibility {
     /// Surfaced by recall + the Tier-A profile right now.
+    #[default]
     Active,
     /// Superseded by a newer contradicting fact (mem0/supermemory). Bi-temporal:
     /// `valid_to` is when it stopped being true (Zep/Graphiti event-time end) —
@@ -54,7 +55,7 @@ pub enum Visibility {
     Consolidated,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(from = "ObservationWire", into = "ObservationWire")]
 pub struct Observation {
     pub id: String,
@@ -83,6 +84,17 @@ pub struct Observation {
     /// `superseded`/`consolidated`/`valid_to` wire keys via [`ObservationWire`],
     /// so already-synced Tier-B blobs stay byte-for-byte compatible.
     pub visibility: Visibility,
+    /// Static importance in [0,1], assigned once at write (Generative Agents):
+    /// durable user facts/preferences high, episodic churn low. A standing weight
+    /// in the recall score so important memories outrank merely-recent noise.
+    pub importance: f32,
+    /// How many times recall has SURFACED this memory (MemoryBank reinforcement).
+    /// Grows retention strength `S = 1 + recall_count`, so memories the user keeps
+    /// hitting stop decaying while never-recalled noise fades.
+    pub recall_count: u32,
+    /// When it was last surfaced (unix ms); `None` = never recalled. Drives the
+    /// Ebbinghaus retention term `R = exp(-Δdays / S)`.
+    pub last_recalled_ms: Option<u64>,
 }
 
 /// The on-the-wire shape of an [`Observation`] — the flat fields exactly as they
@@ -107,6 +119,15 @@ struct ObservationWire {
     consolidated: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     valid_to: Option<u64>,
+    // P1 (Generative Agents / MemoryBank): importance + earned-recall. All default
+    // so pre-P1 Tier-B blobs deserialize unchanged; importance is backfilled from
+    // `kind` on load (see From<ObservationWire>) so old memories aren't zeroed out.
+    #[serde(default, skip_serializing_if = "is_zero_f32")]
+    importance: f32,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    recall_count: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    last_recalled_ms: Option<u64>,
 }
 
 impl From<ObservationWire> for Observation {
@@ -122,6 +143,13 @@ impl From<ObservationWire> for Observation {
         } else {
             Visibility::Active
         };
+        // Backfill importance for pre-P1 observations (stored 0.0) from their kind,
+        // so legacy memories get a sensible standing weight instead of zero.
+        let importance = if w.importance > 0.0 {
+            w.importance
+        } else {
+            default_importance(&w.kind, &w.body)
+        };
         Observation {
             id: w.id,
             ts_ms: w.ts_ms,
@@ -131,6 +159,9 @@ impl From<ObservationWire> for Observation {
             embedding: w.embedding,
             valid_from: w.valid_from,
             visibility,
+            importance,
+            recall_count: w.recall_count,
+            last_recalled_ms: w.last_recalled_ms,
         }
     }
 }
@@ -153,12 +184,42 @@ impl From<Observation> for ObservationWire {
             superseded,
             consolidated,
             valid_to,
+            importance: o.importance,
+            recall_count: o.recall_count,
+            last_recalled_ms: o.last_recalled_ms,
         }
     }
 }
 
 fn is_false(b: &bool) -> bool {
     !*b
+}
+
+fn is_zero_f32(f: &f32) -> bool {
+    *f == 0.0
+}
+
+fn is_zero_u32(n: &u32) -> bool {
+    *n == 0
+}
+
+/// Static importance in [0,1] for a memory, by kind + a cheap content cue
+/// (Generative Agents §"importance"). Durable user-chosen memory ranks high;
+/// episodic churn low. Used as the standing weight in the recall score, and to
+/// backfill pre-P1 observations on load.
+fn default_importance(kind: &str, body: &str) -> f32 {
+    let base: f32 = match kind {
+        "fact" | "preference" => 0.8,
+        "habit" | consolidation::SEMANTIC_KIND => 0.7,
+        // Episodic control/screen logs — low standing weight; they earn rank via
+        // recency + reinforcement, not importance.
+        _ => 0.3,
+    };
+    // A first-person durable claim ("I ...", "my ...") is more about-the-user than
+    // a bare log line — a small bump (kept ≤ 1.0).
+    let b = body.to_lowercase();
+    let first_person = b.starts_with("i ") || b.contains(" i ") || b.contains("my ");
+    (base + if first_person { 0.1 } else { 0.0 }).min(1.0)
 }
 
 impl Observation {
@@ -421,7 +482,26 @@ impl MemoryStore {
             embedding: embeddings::embed_text(body),
             valid_from,
             visibility: Visibility::Active,
+            importance: default_importance(kind, body),
+            recall_count: 0,
+            last_recalled_ms: None,
         };
+        // P2 surprise-gated writes (Dong et al.): for high-churn EPISODIC kinds,
+        // skip storing a literal re-log of something recent — re-seeing it instead
+        // REINFORCES the existing memory (recall_count++), which collapses store
+        // bloat without losing signal. User-stated facts/preferences always write
+        // (they may supersede an older value, handled below); fuzzy near-dups are
+        // left for consolidate() to cluster.
+        if !matches!(kind, "fact" | "preference")
+            && let Some(idx) = self.recent_duplicate(body, SURPRISE_WINDOW)
+        {
+            self.file.observations[idx].recall_count =
+                self.file.observations[idx].recall_count.saturating_add(1);
+            self.file.observations[idx].last_recalled_ms = Some(now);
+            let reinforced = self.file.observations[idx].clone();
+            self.save()?;
+            return Ok(reinforced);
+        }
         let cloned = observation.clone();
         // Contradiction/supersession (mem0/supermemory): a new `fact` that's
         // near-identical in meaning to an older fact REPLACES it — mark the old
@@ -441,6 +521,23 @@ impl MemoryStore {
         self.file.observations = capped;
         self.save()?;
         Ok(cloned)
+    }
+
+    /// Index of a recent active observation whose body is byte-identical to
+    /// `body`, scanning only the last `window` observations (the "recent window"
+    /// of Dong et al.). `None` if nothing recent repeats it — i.e. the new write
+    /// is novel enough to keep. Exact match (not fuzzy) on purpose: this gate only
+    /// kills literal re-logs (the real bloat — identical screen/state lines);
+    /// distinct-but-similar episodes are left for [`consolidate`](Self::consolidate)
+    /// to cluster, which it already does. Pure read over the store.
+    fn recent_duplicate(&self, body: &str, window: usize) -> Option<usize> {
+        let n = self.file.observations.len();
+        let start = n.saturating_sub(window);
+        self.file.observations[start..]
+            .iter()
+            .enumerate()
+            .position(|(_, o)| matches!(o.visibility, Visibility::Active) && o.body == body)
+            .map(|p| start + p)
     }
 
     /// Semantic recall (Phase 20). Embeds the query, ranks all
@@ -637,33 +734,10 @@ impl MemoryStore {
         limit: usize,
     ) -> io::Result<Vec<(Observation, f32)>> {
         self.backfill_embeddings()?;
-
         let now = now_ms();
-        let qvec = embeddings::embed_text(query);
-        let qtokens = tokenize(query);
-
-        let mut scored: Vec<(Observation, f32)> = self
-            .candidates(workspace, TemporalScope::Now)
-            .into_iter()
-            .map(|o| {
-                // cosine is [-1,1]; map to [0,1] so the weighted sum is sane.
-                let sem = (embeddings::cosine(&qvec, &o.embedding) + 1.0) / 2.0;
-                let lex = lexical_overlap(&qtokens, &o.body);
-                let rec = recency_score(o.ts_ms, now);
-                // Durable, user-chosen memories get a small standing boost.
-                let kind_boost = match o.kind.as_str() {
-                    "fact" => 0.10,
-                    // A consolidated rollup is a learned, durable pattern — rank it
-                    // alongside explicit preferences, above raw episodic churn.
-                    "preference" | "habit" | consolidation::SEMANTIC_KIND => 0.08,
-                    _ => 0.0,
-                };
-                let score = 0.55 * sem + 0.30 * lex + 0.15 * rec + kind_boost;
-                (o.clone(), score)
-            })
-            .collect();
-        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        let mut scored = self.score_active(query, workspace, now);
         scored.truncate(limit);
+        self.reinforce(&scored, now);
         Ok(scored)
     }
 
@@ -679,9 +753,76 @@ impl MemoryStore {
         workspace: &Path,
         max_tokens: usize,
     ) -> io::Result<Vec<(Observation, f32)>> {
-        // A generous candidate pool; MMR + the budget trim it to what fits.
-        let candidates = self.recall_hybrid(query, workspace, 50)?;
-        Ok(mmr_budget_select(candidates, max_tokens, MMR_LAMBDA))
+        self.backfill_embeddings()?;
+        let now = now_ms();
+        // A generous candidate pool; MMR + the budget trim it to what fits. We
+        // reinforce only the FINAL surfaced slice (not the whole pool), so recall
+        // strength reflects what eri actually showed the user.
+        let mut pool = self.score_active(query, workspace, now);
+        pool.truncate(50);
+        let selected = mmr_budget_select(pool, max_tokens, MMR_LAMBDA);
+        self.reinforce(&selected, now);
+        Ok(selected)
+    }
+
+    /// Score every active candidate with the P1 hybrid ranker and return them
+    /// sorted best-first (no truncation, no mutation). Pure read.
+    ///
+    /// `score = 0.45·sem + 0.25·lex + 0.10·rec + 0.20·(importance·R) + kind_boost`,
+    /// where `R = exp(-Δdays / (1 + recall_count))` is Ebbinghaus retention
+    /// (MemoryBank): a memory's importance term decays with time-since-last-recall
+    /// but each recall raises its strength `S = 1 + recall_count`, so memories the
+    /// user keeps hitting stop decaying while never-recalled noise fades out.
+    fn score_active(&self, query: &str, workspace: &Path, now: u64) -> Vec<(Observation, f32)> {
+        let qvec = embeddings::embed_text(query);
+        let qtokens = tokenize(query);
+        let mut scored: Vec<(Observation, f32)> = self
+            .candidates(workspace, TemporalScope::Now)
+            .into_iter()
+            .map(|o| {
+                // cosine is [-1,1]; map to [0,1] so the weighted sum is sane.
+                let sem = (embeddings::cosine(&qvec, &o.embedding) + 1.0) / 2.0;
+                let lex = lexical_overlap(&qtokens, &o.body);
+                let rec = recency_score(o.ts_ms, now);
+                let strength = 1.0 + o.recall_count as f32;
+                let since = now.saturating_sub(o.last_recalled_ms.unwrap_or(o.ts_ms)) as f32;
+                let days = since / 86_400_000.0;
+                let retention = (-days / strength).exp();
+                let kind_boost = match o.kind.as_str() {
+                    "fact" => 0.10,
+                    "preference" | "habit" | consolidation::SEMANTIC_KIND => 0.08,
+                    _ => 0.0,
+                };
+                let score =
+                    0.45 * sem + 0.25 * lex + 0.10 * rec + 0.20 * (o.importance * retention) + kind_boost;
+                (o.clone(), score)
+            })
+            .collect();
+        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        scored
+    }
+
+    /// Reinforce the memories eri actually surfaced (MemoryBank): bump their
+    /// `recall_count` and stamp `last_recalled_ms`, so used memories strengthen and
+    /// stop decaying. Best-effort persist — a reinforcement save failure must never
+    /// fail the recall itself.
+    fn reinforce(&mut self, surfaced: &[(Observation, f32)], now: u64) {
+        if surfaced.is_empty() {
+            return;
+        }
+        let ids: std::collections::HashSet<&str> =
+            surfaced.iter().map(|(o, _)| o.id.as_str()).collect();
+        let mut changed = false;
+        for o in self.file.observations.iter_mut() {
+            if ids.contains(o.id.as_str()) {
+                o.recall_count = o.recall_count.saturating_add(1);
+                o.last_recalled_ms = Some(now);
+                changed = true;
+            }
+        }
+        if changed {
+            let _ = self.save();
+        }
     }
 
     /// Episodic→semantic consolidation (mem0/supermemory). Distill clusters of
@@ -701,6 +842,7 @@ impl MemoryStore {
         let created = plan.new_facts.len();
         for draft in plan.new_facts {
             let embedding = embeddings::embed_text(&draft.body);
+            let importance = default_importance(consolidation::SEMANTIC_KIND, &draft.body);
             let rollup = Observation {
                 id: new_id(),
                 ts_ms: draft.ts_ms,
@@ -710,6 +852,9 @@ impl MemoryStore {
                 embedding,
                 valid_from: None,
                 visibility: Visibility::Active,
+                importance,
+                recall_count: 0,
+                last_recalled_ms: None,
             };
             // A fresh rollup replaces an older rollup on the same topic, so the
             // profile/recall never carry "accepts edits in src/x (3×)" twice.
@@ -750,6 +895,10 @@ const MMR_LAMBDA: f32 = 0.7;
 /// topic, e.g. "favourite colour is blue" → "…is green" score ~0.80). High
 /// enough that unrelated facts (score ~0) never supersede each other.
 const SUPERSEDE_THRESHOLD: f32 = 0.75;
+
+/// How many of the most-recent observations the surprise gate compares against
+/// for a literal re-log (P2).
+const SURPRISE_WINDOW: usize = 30;
 
 /// Mark existing non-superseded observations of the **same kind** that are
 /// semantically near-identical to `new_fact` as superseded (called before the
@@ -884,6 +1033,7 @@ pub fn tombstone(target_id: &str) -> Observation {
         embedding: Vec::new(),
         valid_from: None,
         visibility: Visibility::Active,
+        ..Default::default()
     }
 }
 
@@ -989,6 +1139,7 @@ mod tests {
             embedding: Vec::new(),
             valid_from: None,
             visibility: Visibility::Active,
+            ..Default::default()
         }
     }
 
@@ -1092,6 +1243,7 @@ mod tests {
                 embedding,
                 valid_from: None,
                 visibility: Visibility::Active,
+                ..Default::default()
             },
             rel,
         )
@@ -1241,6 +1393,49 @@ mod tests {
     }
 
     #[test]
+    fn legacy_wire_backfills_importance_from_kind() {
+        // A pre-P1 Tier-B blob has no importance/recall_count fields — they must
+        // deserialize to a kind-derived importance (not zero), so old memories
+        // keep a sensible standing weight in the new scorer.
+        let json = r#"{"id":"x","ts_ms":1,"kind":"fact","workspace_hash":"","body":"my name is Khai"}"#;
+        let o: Observation = serde_json::from_str(json).unwrap();
+        assert!(o.importance >= 0.8, "a first-person fact backfills high importance");
+        assert_eq!(o.recall_count, 0);
+        assert!(o.last_recalled_ms.is_none());
+    }
+
+    #[test]
+    fn recall_reinforces_surfaced_memories() {
+        // MemoryBank: surfacing a memory raises its recall_count + stamps
+        // last_recalled_ms, so used memories strengthen (and stop decaying).
+        let (dir, mut store) = open_temp();
+        let ws = dir.path();
+        store.insert("fact", ws, "uses rust and cargo").unwrap();
+        let _ = store.recall_hybrid("rust cargo", ws, 5).unwrap();
+        let o = store
+            .all()
+            .into_iter()
+            .find(|o| o.body.contains("rust"))
+            .expect("the fact is in the store");
+        assert_eq!(o.recall_count, 1, "a surfaced memory is reinforced");
+        assert!(o.last_recalled_ms.is_some());
+    }
+
+    #[test]
+    fn exact_relog_is_gated_and_reinforces_instead_of_duplicating() {
+        // P2: a literal re-log of a recent episodic observation isn't stored twice
+        // — it reinforces the existing one (collapses bloat).
+        let (dir, mut store) = open_temp();
+        let ws = dir.path();
+        let body = r#"{"state":"screen shows the dashboard"}"#;
+        store.insert("screen", ws, body).unwrap();
+        store.insert("screen", ws, body).unwrap();
+        let screens: Vec<_> = store.all().into_iter().filter(|o| o.kind == "screen").collect();
+        assert_eq!(screens.len(), 1, "exact re-log is not duplicated");
+        assert_eq!(screens[0].recall_count, 1, "re-seeing reinforces the existing memory");
+    }
+
+    #[test]
     fn supersession_records_valid_to_not_just_a_flag() {
         // Invalidate-not-delete: the older belief keeps its history AND learns
         // *when* it stopped being true (the replacement's learned_at).
@@ -1312,6 +1507,7 @@ mod tests {
             visibility: Visibility::Superseded {
                 valid_to: Some(200),
             },
+            ..Default::default()
         });
         store.file.observations.push(Observation {
             id: "green".into(),
@@ -1322,6 +1518,7 @@ mod tests {
             embedding: Vec::new(),
             valid_from: None,
             visibility: Visibility::Active,
+            ..Default::default()
         });
 
         let at_150 = store.recall_as_of("colour", ws, 5, 150);
@@ -1519,6 +1716,7 @@ mod tests {
             embedding: Vec::new(),
             valid_from: None,
             visibility: Visibility::Active,
+            ..Default::default()
         }
     }
 
@@ -1624,6 +1822,7 @@ mod tests {
             embedding: Vec::new(),
             valid_from: None,
             visibility: Visibility::Active,
+            ..Default::default()
         });
         store.insert("fact", dir.path(), "fresh").unwrap();
         store.prune(RetentionWindow::Day).unwrap();
@@ -1664,6 +1863,7 @@ mod tests {
             embedding: Vec::new(),
             valid_from: None,
             visibility: Visibility::Active,
+            ..Default::default()
         });
         store.insert("fact", dir.path(), "fresh").unwrap();
         store.prune(RetentionWindow::Day).unwrap();
@@ -1729,6 +1929,7 @@ mod tests {
             embedding: Vec::new(),
             valid_from: None,
             visibility: Visibility::Active,
+            ..Default::default()
         });
         let hits = store.recall_semantic("dark themes", dir.path(), 1).unwrap();
         assert_eq!(hits.len(), 1);

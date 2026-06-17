@@ -162,6 +162,7 @@ mod tests {
             embedding: Vec::new(),
             valid_from: None,
             visibility: Visibility::Active,
+            ..Default::default()
         }
     }
 
