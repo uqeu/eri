@@ -33,6 +33,7 @@ import type { WeatherDeps } from "@/lib/agent/weather";
 import { createHash } from "node:crypto";
 import { embedText, normalizeForEmbedding, toPgVectorLiteral } from "@/lib/agent/embeddings";
 import { fuseRRF, RECALL_CANDIDATE_LIMIT } from "@/lib/agent/memory_recall";
+import { rerank } from "@/lib/agent/rerank";
 import { cancelPending, confirmPending, enqueueCommand } from "@/lib/commands/queue";
 import { handleInbound, type InboundDeps } from "@/lib/imessage/inbound";
 import { consumePairing, normalizeE164, resolveUserByPhone } from "@/lib/imessage/identity";
@@ -414,10 +415,13 @@ async function loadProfile(
       ORDER BY created_at DESC LIMIT ${RECALL_CANDIDATE_LIMIT}
     `;
 
-    // Fuse keyword + semantic by rank, then append recent (the final case-
-    // insensitive dedup below collapses any overlap).
+    // Fuse keyword + semantic by rank, then cross-encoder rerank the fused
+    // candidates by TRUE relevance to the message (P5 — biggest quality lever;
+    // graceful no-op without VOYAGE_API_KEY). Append recent after (the final
+    // case-insensitive dedup below collapses any overlap).
     const fused = fuseRRF([lexicalRows.map((r) => r.fact), vectorRows.map((r) => r.fact)]);
-    learnedFacts = [...fused, ...recentRows.map((r) => r.fact)].filter((f) => f.trim());
+    const ranked = q ? await rerank(q, fused, { topK: 12 }) : fused;
+    learnedFacts = [...ranked, ...recentRows.map((r) => r.fact)].filter((f) => f.trim());
   } catch (e) {
     logEvent("imessage.learned_facts_load_failed", { userId, error: errMsg(e) });
   }
