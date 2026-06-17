@@ -328,12 +328,26 @@ async function rememberUserFact(
     // Embed the fact for semantic recall (cached; null if VOYAGE_API_KEY unset /
     // error → stored as NULL, lexical recall still works). `${null}::vector` → NULL.
     const vecLiteral = await cachedEmbedLiteral(fact);
+    // P6 consolidation (mem0/Zep): a newer fact that's semantically near an older
+    // one IN THE SAME CATEGORY is an UPDATE — supersede the old (invalidate, don't
+    // delete) so recall never carries a stale value next to its update. Newer wins.
+    // Cosine distance (<=>) < 0.18 ≈ similarity > 0.82. Skipped without an embedding.
+    if (vecLiteral) {
+      await sql()`
+        UPDATE learned_facts SET superseded_at = now()
+        WHERE user_id = ${userId} AND category = ${category}
+          AND superseded_at IS NULL AND embedding IS NOT NULL
+          AND fact <> ${fact}
+          AND (embedding <=> ${vecLiteral}::vector) < 0.18
+      `;
+    }
     await sql()`
       INSERT INTO learned_facts (user_id, fact, kind, category, source, embedding)
       VALUES (${userId}, ${fact}, ${kind}, ${category}, 'imessage', ${vecLiteral}::vector)
       ON CONFLICT (user_id, fact)
         DO UPDATE SET created_at = now(), kind = EXCLUDED.kind,
-          category = EXCLUDED.category, embedding = EXCLUDED.embedding
+          category = EXCLUDED.category, embedding = EXCLUDED.embedding,
+          superseded_at = NULL
     `;
     return true;
   } catch (e) {
@@ -394,7 +408,7 @@ async function loadProfile(
     const lexicalRows = q
       ? await sql()<{ fact: string }[]>`
           SELECT fact FROM learned_facts
-          WHERE user_id = ${userId}
+          WHERE user_id = ${userId} AND superseded_at IS NULL
             AND fact_tsv @@ websearch_to_tsquery('english', ${q})
           ORDER BY ts_rank(fact_tsv, websearch_to_tsquery('english', ${q})) DESC
           LIMIT ${RECALL_CANDIDATE_LIMIT}
@@ -404,14 +418,14 @@ async function loadProfile(
     const vectorRows = vecLiteral
       ? await sql()<{ fact: string }[]>`
           SELECT fact FROM learned_facts
-          WHERE user_id = ${userId} AND embedding IS NOT NULL
+          WHERE user_id = ${userId} AND superseded_at IS NULL AND embedding IS NOT NULL
           ORDER BY embedding <=> ${vecLiteral}::vector
           LIMIT ${RECALL_CANDIDATE_LIMIT}
         `
       : [];
 
     const recentRows = await sql()<{ fact: string }[]>`
-      SELECT fact FROM learned_facts WHERE user_id = ${userId}
+      SELECT fact FROM learned_facts WHERE user_id = ${userId} AND superseded_at IS NULL
       ORDER BY created_at DESC LIMIT ${RECALL_CANDIDATE_LIMIT}
     `;
 
