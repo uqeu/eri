@@ -31,6 +31,7 @@ function deps(over: Partial<InboundDeps> = {}): InboundDeps {
       executeTool: async () => ({ data: {}, error: null, successful: false }),
     },
     webSearch: { runSearch: async () => [] },
+    weather: { fetchJson: async () => ({}) },
     runVisionTurn: async () => ({ text: "i see it", tokensIn: 5, tokensOut: 3, model: "claude-sonnet-4-6" }),
     loadConversation: async () => [],
     recordConversation: async () => {},

@@ -29,6 +29,7 @@ import {
 import { runVisionTurn } from "@/lib/agent/vision";
 import { analyzeCommunicationStyle } from "@/lib/agent/style";
 import { mapBraveResults, type WebSearchDeps } from "@/lib/agent/web_search";
+import type { WeatherDeps } from "@/lib/agent/weather";
 import { cancelPending, confirmPending, enqueueCommand } from "@/lib/commands/queue";
 import { handleInbound, type InboundDeps } from "@/lib/imessage/inbound";
 import { consumePairing, normalizeE164, resolveUserByPhone } from "@/lib/imessage/identity";
@@ -145,6 +146,7 @@ function makeDeps(): InboundDeps {
     rememberUserFact,
     connectors: makeConnectorDeps(),
     webSearch: makeWebSearchDeps(),
+    weather: makeWeatherDeps(),
     runVisionTurn: ({ imageUrl, prompt, system }) => runVisionTurn({ imageUrl, prompt, system }),
     loadConversation,
     recordConversation,
@@ -160,6 +162,18 @@ function makeDeps(): InboundDeps {
  * API (BRAVE_SEARCH_KEY) as a fallback. Throws if neither is configured/returns —
  * webSearch() catches and tells the user it couldn't search.
  */
+/** Real-time weather via Open-Meteo — free, no API key. Throws on a non-OK
+ *  response so getWeather() converts it to a friendly reason. */
+function makeWeatherDeps(): WeatherDeps {
+  return {
+    fetchJson: async (url) => {
+      const resp = await fetch(url, { headers: { Accept: "application/json" } });
+      if (!resp.ok) throw new Error(`open-meteo ${resp.status}`);
+      return resp.json();
+    },
+  };
+}
+
 function makeWebSearchDeps(): WebSearchDeps {
   return {
     runSearch: async (query, limit) => {
