@@ -30,7 +30,8 @@ import { runVisionTurn } from "@/lib/agent/vision";
 import { analyzeCommunicationStyle } from "@/lib/agent/style";
 import { mapBraveResults, type WebSearchDeps } from "@/lib/agent/web_search";
 import type { WeatherDeps } from "@/lib/agent/weather";
-import { embedText, toPgVectorLiteral } from "@/lib/agent/embeddings";
+import { createHash } from "node:crypto";
+import { embedText, normalizeForEmbedding, toPgVectorLiteral } from "@/lib/agent/embeddings";
 import { fuseRRF, RECALL_CANDIDATE_LIMIT } from "@/lib/agent/memory_recall";
 import { cancelPending, confirmPending, enqueueCommand } from "@/lib/commands/queue";
 import { handleInbound, type InboundDeps } from "@/lib/imessage/inbound";
@@ -284,6 +285,38 @@ function makeConnectorDeps(): ConnectorDeps {
  * upsert on (user_id, fact): re-stating a fact refreshes its recency, never
  * duplicates. Never throws — a failed save becomes a soft "couldn't save".
  */
+/**
+ * Embed text to a pgvector literal, cached by a hash of the normalized text so
+ * identical strings (repeated facts, repeated queries) never re-hit Voyage — a
+ * cache hit is a cheap local SELECT instead of an API round-trip. Returns null
+ * when embeddings are unavailable (no key / error) → lexical-only, never breaks.
+ */
+async function cachedEmbedLiteral(text: string): Promise<string | null> {
+  const norm = normalizeForEmbedding(text);
+  if (!norm) return null;
+  const hash = createHash("sha256").update(norm).digest("hex");
+  try {
+    const hit = await sql()<{ lit: string }[]>`
+      SELECT embedding::text AS lit FROM embedding_cache WHERE text_hash = ${hash}
+    `;
+    if (hit[0]?.lit) return hit[0].lit;
+  } catch (e) {
+    logEvent("imessage.embed_cache_read_failed", { error: errMsg(e) });
+  }
+  const vector = await embedText(norm);
+  if (!vector) return null;
+  const lit = toPgVectorLiteral(vector);
+  try {
+    await sql()`
+      INSERT INTO embedding_cache (text_hash, embedding) VALUES (${hash}, ${lit}::vector)
+      ON CONFLICT (text_hash) DO NOTHING
+    `;
+  } catch (e) {
+    logEvent("imessage.embed_cache_write_failed", { error: errMsg(e) });
+  }
+  return lit;
+}
+
 async function rememberUserFact(
   userId: string,
   fact: string,
@@ -291,10 +324,9 @@ async function rememberUserFact(
   category: string,
 ): Promise<boolean> {
   try {
-    // Embed the fact for semantic recall (null if VOYAGE_API_KEY unset / error →
-    // stored as NULL, lexical recall still works). `${null}::vector` casts to NULL.
-    const vector = await embedText(fact);
-    const vecLiteral = vector ? toPgVectorLiteral(vector) : null;
+    // Embed the fact for semantic recall (cached; null if VOYAGE_API_KEY unset /
+    // error → stored as NULL, lexical recall still works). `${null}::vector` → NULL.
+    const vecLiteral = await cachedEmbedLiteral(fact);
     await sql()`
       INSERT INTO learned_facts (user_id, fact, kind, category, source, embedding)
       VALUES (${userId}, ${fact}, ${kind}, ${category}, 'imessage', ${vecLiteral}::vector)
@@ -356,8 +388,7 @@ async function loadProfile(
   let learnedFacts: string[] = [];
   try {
     const q = query.trim();
-    const queryVec = q ? await embedText(q) : null;
-    const vecLiteral = queryVec ? toPgVectorLiteral(queryVec) : null;
+    const vecLiteral = q ? await cachedEmbedLiteral(q) : null;
 
     const lexicalRows = q
       ? await sql()<{ fact: string }[]>`

@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { assembleMessages, buildRecallPayload, buildSystemPrompt, currentDateText, extractText, extractToolUses } from "../agent/run_core";
+import { assembleMessages, buildRecallPayload, buildSystemBlocks, buildSystemPrompt, currentDateText, extractText, extractToolUses } from "../agent/run_core";
 
 // buildRecallPayload emits the structured {query, as_of} spec the computer parses.
 {
@@ -111,6 +111,19 @@ import { assembleMessages, buildRecallPayload, buildSystemPrompt, currentDateTex
   assert.equal(msgs[2].role, "user");
   // No history → just the prompt.
   assert.deepEqual(assembleMessages(undefined, "hi"), [{ role: "user", content: "hi" }]);
+}
+
+// buildSystemBlocks: stable = persona (cacheable), volatile = time + memory.
+{
+  const empty = buildSystemBlocks(null, null);
+  assert.ok(empty.stable.includes("You are eri"));
+  assert.equal(empty.volatile, "", "no memory/time → empty volatile (persona still cached)");
+
+  const full = buildSystemBlocks({ facts: ["name is Khai"] }, null, "Tuesday, June 17, 2026");
+  assert.ok(full.stable.includes("You are eri"), "persona stays in the stable block");
+  assert.ok(!full.stable.includes("name is Khai"), "user memory must NOT be in the cached block");
+  assert.ok(full.volatile.includes("Right now it is Tuesday, June 17, 2026"));
+  assert.ok(full.volatile.includes("- name is Khai"));
 }
 
 // currentDateText produces a real, non-empty date string (smoke).

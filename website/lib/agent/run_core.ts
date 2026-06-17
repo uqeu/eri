@@ -211,26 +211,43 @@ export function buildSystemPrompt(
   dynamicContext?: string | null,
   nowText?: string | null,
 ): string {
+  const { stable, volatile } = buildSystemBlocks(profile, dynamicContext, nowText);
+  return volatile ? `${stable}\n\n${volatile}` : stable;
+}
+
+/**
+ * Split the system prompt into a STABLE block (the persona — identical across all
+ * turns and users) and a VOLATILE block (this user's time + memory, different
+ * every turn). Anthropic prompt-caching caches the prefix up to a breakpoint, so
+ * caching the stable block (+ the tools that precede it) cuts per-turn input cost
+ * dramatically — whereas caching the whole string (old behavior) never hit because
+ * the injected memory changed each turn. Pure + unit-tested.
+ */
+export function buildSystemBlocks(
+  profile?: TierAProfile | null,
+  dynamicContext?: string | null,
+  nowText?: string | null,
+): { stable: string; volatile: string } {
   const facts = profile?.facts?.filter((f) => f.trim()) ?? [];
   const prefs = profile?.preferences?.filter((p) => p.trim()) ?? [];
   const style = (profile?.communication_style ?? "").trim();
   const dynamic = (dynamicContext ?? "").trim();
   const now = (nowText ?? "").trim();
 
-  const persona = now ? `${BASE_PERSONA}\n\nRight now it is ${now}.` : BASE_PERSONA;
-
-  if (facts.length === 0 && prefs.length === 0 && style === "" && dynamic === "") {
-    return persona;
+  const parts: string[] = [];
+  if (now) parts.push(`Right now it is ${now}.`);
+  if (facts.length > 0 || prefs.length > 0 || style !== "" || dynamic !== "") {
+    const lines: string[] = ["```", "What I know about you:"];
+    for (const f of facts) lines.push(`- ${f}`);
+    for (const p of prefs) lines.push(`- ${p}`);
+    if (style) {
+      lines.push(`- Your typical writing style (reflect on average, with natural variation): ${style}`);
+    }
+    if (dynamic) lines.push(`- ${dynamic}`);
+    lines.push("```");
+    parts.push(lines.join("\n"));
   }
-
-  const lines: string[] = ["```", "What I know about you:"];
-  for (const f of facts) lines.push(`- ${f}`);
-  for (const p of prefs) lines.push(`- ${p}`);
-  if (style) lines.push(`- Your typical writing style (reflect on average, with natural variation): ${style}`);
-  if (dynamic) lines.push(`- ${dynamic}`);
-  lines.push("```");
-
-  return `${persona}\n\n${lines.join("\n")}`;
+  return { stable: BASE_PERSONA, volatile: parts.join("\n\n") };
 }
 
 /**
@@ -302,7 +319,11 @@ export function extractText(content: ContentBlock[] | undefined): string {
  */
 export async function runAgentTurn(input: AgentTurnInput): Promise<AgentTurnResult> {
   const model = input.model ?? DEFAULT_MODEL;
-  const system = buildSystemPrompt(input.profile, input.dynamicContext, currentDateText());
+  const { stable, volatile } = buildSystemBlocks(
+    input.profile,
+    input.dynamicContext,
+    currentDateText(),
+  );
   const maxHops = input.maxHops ?? DEFAULT_MAX_HOPS;
   const messages: AnthropicMessage[] = assembleMessages(input.history, input.prompt);
 
@@ -313,7 +334,8 @@ export async function runAgentTurn(input: AgentTurnInput): Promise<AgentTurnResu
     const body = await callAnthropic({
       model,
       maxTokens: input.maxTokens ?? DEFAULT_MAX_TOKENS,
-      system,
+      systemStable: stable,
+      systemVolatile: volatile,
       messages,
       tools: input.tools,
     });
@@ -345,16 +367,26 @@ export async function runAgentTurn(input: AgentTurnInput): Promise<AgentTurnResu
 async function callAnthropic(args: {
   model: string;
   maxTokens: number;
-  system: string;
+  systemStable: string;
+  systemVolatile: string;
   messages: AnthropicMessage[];
   tools?: ToolDef[];
 }): Promise<AnthropicMessagesResponse> {
+  // Cache the prefix up to the breakpoint: that's tools + the STABLE persona block
+  // (identical every turn), so on a cache hit per-turn input cost drops to ~0.1x.
+  // The volatile block (this turn's memory + time) comes AFTER the breakpoint, so
+  // it stays fresh without busting the cache (the old single-block cache never hit
+  // because the injected memory changed each turn).
+  const system: Array<Record<string, unknown>> = [
+    { type: "text", text: args.systemStable, cache_control: { type: "ephemeral" } },
+  ];
+  if (args.systemVolatile.trim()) {
+    system.push({ type: "text", text: args.systemVolatile });
+  }
   const payload: Record<string, unknown> = {
     model: args.model,
     max_tokens: args.maxTokens,
-    // Cache the system+profile block — identical across a user's texts, so this
-    // cuts per-turn input cost to ~0.1x on cache hits (review M6).
-    system: [{ type: "text", text: args.system, cache_control: { type: "ephemeral" } }],
+    system,
     messages: args.messages,
   };
   if (args.tools?.length) payload.tools = args.tools;
