@@ -401,6 +401,20 @@ async function loadProfile(
   //    prefiltered by user_id so it only scans this person's slice (fast). Degrades
   //    to lexical when no embedding/query (vecLiteral null → vector list empty).
   let learnedFacts: string[] = [];
+  // P3: standing behavior/style preferences are ALWAYS injected (not relevance-
+  // gated) — "no emojis" / "call me X" must apply every turn, not just when the
+  // current message happens to match them.
+  let preferenceFacts: string[] = [];
+  try {
+    const prefRows = await sql()<{ fact: string }[]>`
+      SELECT fact FROM learned_facts
+      WHERE user_id = ${userId} AND superseded_at IS NULL AND kind = 'preference'
+      ORDER BY created_at DESC LIMIT 30
+    `;
+    preferenceFacts = prefRows.map((r) => r.fact).filter((f) => f.trim());
+  } catch (e) {
+    logEvent("imessage.preferences_load_failed", { userId, error: errMsg(e) });
+  }
   try {
     const q = query.trim();
     const vecLiteral = q ? await cachedEmbedLiteral(q) : null;
@@ -485,13 +499,21 @@ async function loadProfile(
     seen.add(k);
     return true;
   });
-  if (dedupedFacts.length === 0 && !syncedProfile && !dynamicContext) {
+  // Behavior preferences (always-on) + any synced ones, deduped.
+  const prefSeen = new Set<string>();
+  const preferences = [...preferenceFacts, ...(syncedProfile?.preferences ?? [])].filter((p) => {
+    const k = p.trim().toLowerCase();
+    if (!k || prefSeen.has(k)) return false;
+    prefSeen.add(k);
+    return true;
+  });
+  if (dedupedFacts.length === 0 && preferences.length === 0 && !syncedProfile && !dynamicContext) {
     return { profile: null, dynamicContext: "" };
   }
   return {
     profile: {
       facts: dedupedFacts,
-      preferences: syncedProfile?.preferences ?? [],
+      preferences,
       communication_style: communicationStyle,
     },
     dynamicContext,
