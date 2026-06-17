@@ -27,12 +27,7 @@ import {
   type ToolResult,
 } from "@/lib/agent/connectors";
 import { runVisionTurn } from "@/lib/agent/vision";
-import {
-  mapBraveResults,
-  mapComposioResults,
-  type SearchHit,
-  type WebSearchDeps,
-} from "@/lib/agent/web_search";
+import { mapBraveResults, type WebSearchDeps } from "@/lib/agent/web_search";
 import { cancelPending, confirmPending, enqueueCommand } from "@/lib/commands/queue";
 import { handleInbound, type InboundDeps } from "@/lib/imessage/inbound";
 import { consumePairing, normalizeE164, resolveUserByPhone } from "@/lib/imessage/identity";
@@ -167,32 +162,24 @@ function makeDeps(): InboundDeps {
 function makeWebSearchDeps(): WebSearchDeps {
   return {
     runSearch: async (query, limit) => {
-      // 1) Composio search — no extra signup, runs on the existing Composio key.
-      const composioKey = process.env.COMPOSIO_API_KEY;
-      if (composioKey) {
-        try {
-          const slug = process.env.COMPOSIO_SEARCH_SLUG || "COMPOSIO_SEARCH_SEARCH";
-          const composio = new Composio({ apiKey: composioKey });
-          const result = await composio.tools.execute(slug, {
-            userId: "eri-web-search",
-            arguments: { query },
-          });
-          const hits: SearchHit[] = mapComposioResults(result);
-          if (hits.length > 0) return hits.slice(0, limit);
-        } catch {
-          // fall through to Brave
-        }
-      }
-      // 2) Brave Search API (free tier 2k/mo).
+      // Brave Search API only — direct, fast, free-tier (the user explicitly does
+      // not want Composio in the search path). Logs the failure cause so a 401/
+      // missing-key shows up in the Vercel log instead of a silent "couldn't search".
       const braveKey = process.env.BRAVE_SEARCH_KEY;
-      if (braveKey) {
-        const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=${limit}`;
-        const resp = await fetch(url, {
-          headers: { "X-Subscription-Token": braveKey, Accept: "application/json" },
-        });
-        if (resp.ok) return mapBraveResults(await resp.json()).slice(0, limit);
+      if (!braveKey) {
+        logEvent("imessage.web_search_unconfigured", {});
+        throw new Error("BRAVE_SEARCH_KEY not set");
       }
-      throw new Error("no web-search backend configured");
+      const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=${limit}`;
+      const resp = await fetch(url, {
+        headers: { "X-Subscription-Token": braveKey, Accept: "application/json" },
+      });
+      if (!resp.ok) {
+        const detail = (await resp.text()).slice(0, 200);
+        logEvent("imessage.web_search_http_error", { status: resp.status, detail });
+        throw new Error(`brave ${resp.status}`);
+      }
+      return mapBraveResults(await resp.json()).slice(0, limit);
     },
   };
 }
