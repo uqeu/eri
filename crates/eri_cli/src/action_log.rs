@@ -156,6 +156,24 @@ impl ActionLog {
         self.records.iter().map(|r| r.description.clone()).collect()
     }
 
+    /// P8 (Meta-Policy Reflexion): action descriptions the user has UNDONE at
+    /// least `threshold` times — the signal that eri should ask before repeating
+    /// them. Distilled from the trail's outcomes (undone flags), deduped. Pure.
+    pub fn cautioned_patterns(&self, threshold: usize) -> Vec<String> {
+        use std::collections::BTreeMap;
+        let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
+        for r in &self.records {
+            if r.undone {
+                *counts.entry(r.description.as_str()).or_insert(0) += 1;
+            }
+        }
+        counts
+            .into_iter()
+            .filter(|(_, n)| *n >= threshold)
+            .map(|(d, _)| d.to_string())
+            .collect()
+    }
+
     pub fn len(&self) -> usize {
         self.records.len()
     }

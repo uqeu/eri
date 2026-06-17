@@ -361,6 +361,12 @@ impl ControlGate {
         {
             return Ok(Disposition::Refused(kind.handback_message().to_string()));
         }
+        // (1.5) P8 learned caution — the user kept UNDOING this exact action, so
+        // eri asks first next time even when it's otherwise allowed (a granted
+        // permission does NOT skip a learned caution). Meta-Policy Reflexion.
+        if !self.auto_confirm && self.permissions.is_cautioned(&action.describe()) {
+            return Ok(Disposition::NeedsConfirmation(action.describe()));
+        }
         // (2) Confirmation — risky unless explicitly permitted. In remote mode
         // (`force_confirm_risky`) the risk bar is stricter (outward-facing clicks
         // too) AND a granted permission does NOT skip the confirm, so an

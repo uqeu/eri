@@ -275,6 +275,11 @@ pub struct PermissionStore {
     /// so permission files written before this field existed still load.
     #[serde(default)]
     denied_apps: BTreeSet<String>,
+    /// P8 (Meta-Policy Reflexion): action descriptions the user has repeatedly
+    /// UNDONE — eri learns to ask first next time, even for otherwise-allowed
+    /// actions. A persistent policy distilled from the action log, not a one-off.
+    #[serde(default)]
+    cautions: BTreeSet<String>,
 }
 
 impl PermissionStore {
@@ -313,7 +318,34 @@ impl PermissionStore {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.granted.is_empty() && self.denied_apps.is_empty()
+        self.granted.is_empty() && self.denied_apps.is_empty() && self.cautions.is_empty()
+    }
+
+    // ── P8: learned cautions (meta-policy reflexion over the action log) ──
+
+    /// Mark an action description as cautioned — eri will ask before doing it,
+    /// even if it's normally allowed, because the user kept undoing it.
+    pub fn add_caution(&mut self, description: &str) {
+        let d = description.trim();
+        if !d.is_empty() {
+            self.cautions.insert(d.to_string());
+        }
+    }
+
+    /// Fold a batch of learned caution patterns in (from the action log). Returns
+    /// how many were newly added, so the caller can persist only when it changed.
+    pub fn absorb_cautions<I: IntoIterator<Item = String>>(&mut self, patterns: I) -> usize {
+        let before = self.cautions.len();
+        for p in patterns {
+            self.add_caution(&p);
+        }
+        self.cautions.len() - before
+    }
+
+    /// Should eri ask before this action (a learned caution)? Exact match on the
+    /// action description (the same `describe()` text recorded in the log).
+    pub fn is_cautioned(&self, description: &str) -> bool {
+        self.cautions.contains(description.trim())
     }
 
     // ── per-app denylist ("don't look at Discord") ──
@@ -473,6 +505,20 @@ mod tests {
     fn missing_permission_file_is_empty_store() {
         let store = PermissionStore::load(Path::new("/nonexistent/eri/perms.json"));
         assert!(store.is_empty());
+    }
+
+    #[test]
+    fn learned_cautions_absorb_dedupe_and_gate_lookup() {
+        let mut store = PermissionStore::default();
+        // Two of the same pattern collapse to one new caution (a set).
+        let added = store.absorb_cautions(vec!["open Safari".into(), "open Safari".into()]);
+        assert_eq!(added, 1);
+        assert!(store.is_cautioned("open Safari"));
+        assert!(store.is_cautioned("  open Safari  "), "trimmed lookup matches");
+        assert!(!store.is_cautioned("open Mail"));
+        assert!(!store.is_empty(), "a caution makes the store non-empty");
+        // Idempotent: re-absorbing the same one adds nothing.
+        assert_eq!(store.absorb_cautions(vec!["open Safari".into()]), 0);
     }
 
     #[test]

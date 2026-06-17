@@ -458,10 +458,46 @@ impl MemoryStore {
         }
     }
 
+    /// Where the single-step rollback snapshot lives (sibling `.bak`).
+    fn bak_path(&self) -> PathBuf {
+        self.path.with_extension("bak")
+    }
+
+    /// P10 (memory rollback): copy the current on-disk store to its `.bak` BEFORE
+    /// a user-meaningful mutation, so [`rollback`](Self::rollback) can restore the
+    /// pre-mutation state ("eri, forget what you just learned"). Best-effort + a
+    /// no-op on first write (nothing to back up); never fails the mutation.
+    fn snapshot_backup(&self) {
+        if self.path.exists() {
+            let _ = fs::copy(&self.path, self.bak_path());
+        }
+    }
+
+    /// Restore the last snapshot taken before a memory mutation — honest single-
+    /// step undo. Returns `Ok(true)` if it rolled back, `Ok(false)` if there's no
+    /// snapshot (nothing to undo). Consumes the snapshot, so you can't rollback
+    /// twice past one step.
+    pub fn rollback(&mut self) -> io::Result<bool> {
+        let bak = self.bak_path();
+        let raw = match fs::read_to_string(&bak) {
+            Ok(r) => r,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(false),
+            Err(e) => return Err(e),
+        };
+        let file: StoreFile = serde_json::from_str(&raw).map_err(|e| {
+            io::Error::new(io::ErrorKind::InvalidData, format!("rollback parse: {e}"))
+        })?;
+        self.file = file;
+        self.save()?;
+        let _ = fs::remove_file(&bak);
+        Ok(true)
+    }
+
     /// Append an observation and persist. v2: the body's hash-embedding
     /// is computed at insert time so semantic recall has the vector
     /// already cached and never pays a recompute cost on the read path.
     pub fn insert(&mut self, kind: &str, workspace: &Path, body: &str) -> io::Result<Observation> {
+        self.snapshot_backup(); // P10: enable rollback of this write
         let now = now_ms();
         // Event-time extraction (bi-temporal): a user-stated fact may describe
         // something that happened in the past ("two years ago I founded …"). Pull
@@ -622,6 +658,7 @@ impl MemoryStore {
     /// later cross-device merge can't resurrect it from a stale copy (ADR-0001).
     /// `"all"` is a nuclear local reset (no tombstones — it's not sync-merged).
     pub fn forget(&mut self, id_or_all: &str) -> io::Result<usize> {
+        self.snapshot_backup(); // P10: a forget is undoable
         let before = self.all().len();
         if id_or_all == "all" {
             self.file.observations.clear();
@@ -1419,6 +1456,21 @@ mod tests {
             .expect("the fact is in the store");
         assert_eq!(o.recall_count, 1, "a surfaced memory is reinforced");
         assert!(o.last_recalled_ms.is_some());
+    }
+
+    #[test]
+    fn rollback_undoes_the_last_memory_write() {
+        // P10: insert A then B, roll back → B is gone, A remains (honest undo).
+        let (dir, mut store) = open_temp();
+        let ws = dir.path();
+        store.insert("fact", ws, "uses rust").unwrap();
+        store.insert("fact", ws, "lives in Toronto").unwrap();
+        assert_eq!(store.all().len(), 2);
+        assert!(store.rollback().unwrap(), "there was a write to undo");
+        let bodies: Vec<_> = store.all().into_iter().map(|o| o.body).collect();
+        assert_eq!(bodies, vec!["uses rust".to_string()], "the last write is undone");
+        // Snapshot is consumed — a second rollback finds nothing.
+        assert!(!store.rollback().unwrap(), "single-step: no double rollback");
     }
 
     #[test]

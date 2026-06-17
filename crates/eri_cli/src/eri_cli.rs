@@ -1558,6 +1558,17 @@ async fn run_control_undo(live: bool, log_path: Option<&std::path::Path>) -> any
                     control_agent::Disposition::Executed(result) => {
                         println!("[eri] undid: {desc} → {result}");
                         let _ = log.save(path); // persist the undone mark
+                        // P8 Meta-Policy Reflexion: if the user keeps undoing the
+                        // same action, learn to ASK before it next time (persist a
+                        // caution the gate consults). Reflect over the trail's
+                        // outcomes; 2 undos of one action is enough signal.
+                        if let Some(perm_path) = control_safety::PermissionStore::default_path() {
+                            let mut perms = control_safety::PermissionStore::load(&perm_path);
+                            if perms.absorb_cautions(log.cautioned_patterns(2)) > 0 {
+                                let _ = perms.save(&perm_path);
+                                println!("[eri] noted — I'll check with you before \"{desc}\" next time.");
+                            }
+                        }
                     }
                     other => {
                         println!("[eri] couldn't complete the undo ({other:?}); trail unchanged.");
