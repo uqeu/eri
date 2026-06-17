@@ -32,6 +32,12 @@ import {
   readUpcomingEvents,
   type ConnectorDeps,
 } from "@/lib/agent/connectors";
+import {
+  WEB_SEARCH_TOOL,
+  formatResults,
+  webSearch,
+  type WebSearchDeps,
+} from "@/lib/agent/web_search";
 import type { CommandKind } from "@/lib/commands/queue";
 import { featureLocked } from "@/lib/feature_gate";
 import { isAffirmation, isNegation } from "@/lib/imessage/affirm";
@@ -131,6 +137,8 @@ export interface InboundDeps {
   /** In-cloud connector reads (Gmail/Calendar) so eri can answer inbox/day
    *  questions even with the laptop closed. Same seam shape as proactive SignalDeps. */
   connectors: ConnectorDeps;
+  /** In-cloud web search so eri can answer real-time/factual questions. */
+  webSearch: WebSearchDeps;
   /** Answer about a photo the user sent (Claude vision). Single-shot, no tools. */
   runVisionTurn(input: { imageUrl: string; prompt: string; system: string }): Promise<AgentTurnResultLike>;
   /** Approve the user's latest awaiting-confirm command; returns its goal or null. */
@@ -251,6 +259,7 @@ export async function handleInbound(
         REMEMBER_FACT_TOOL,
         CHECK_EMAIL_TOOL,
         CHECK_CALENDAR_TOOL,
+        WEB_SEARCH_TOOL,
       ],
       onToolCall: async (name, toolInput) => {
         // In-cloud tools run regardless of the single-dispatch guard (they don't
@@ -271,6 +280,11 @@ export async function handleInbound(
         }
         if (name === "check_calendar") {
           return formatEvents(await readUpcomingEvents(user.userId, deps.connectors));
+        }
+        if (name === "web_search") {
+          const q = (toolInput as { query?: unknown })?.query;
+          if (typeof q !== "string" || !q.trim()) return "No search query was provided.";
+          return formatResults(await webSearch(q.trim(), deps.webSearch));
         }
         if (dispatched) return "Already dispatched one task for this message; wait for it to finish.";
         // One enqueue path so the cap + single-dispatch guard live in one place;

@@ -30,6 +30,7 @@ function deps(over: Partial<InboundDeps> = {}): InboundDeps {
       activeToolkits: async () => new Set<string>(),
       executeTool: async () => ({ data: {}, error: null, successful: false }),
     },
+    webSearch: { runSearch: async () => [] },
     runVisionTurn: async () => ({ text: "i see it", tokensIn: 5, tokensOut: 3, model: "claude-sonnet-4-6" }),
     loadConversation: async () => [],
     recordConversation: async () => {},
@@ -256,6 +257,34 @@ async function run() {
     assert.equal(sawHistory?.[0].content, "where are you?");
     assert.equal(recordedUser, "toronto");
     assert.match(recordedAssistant, /toronto/);
+  }
+
+  // web_search resolves IN-CLOUD this turn (no dispatch) so eri can answer
+  // real-time questions (weather, "google this") directly.
+  {
+    let searched = "";
+    let dispatches = 0;
+    const out = await handleInbound(
+      msg("what's the weather in mississauga?"),
+      "+1",
+      deps({
+        webSearch: {
+          runSearch: async (q) => {
+            searched = q;
+            return [{ title: "Mississauga weather", url: "https://x", snippet: "12°C, cloudy" }];
+          },
+        },
+        enqueueComputerGoal: async () => { dispatches++; return true; },
+        runTurn: async (input) => {
+          const r = await input.onToolCall!("web_search", { query: "mississauga weather" });
+          assert.match(r, /12°C/);
+          return { text: "it's 12 and cloudy in mississauga", tokensIn: 8, tokensOut: 6, model: "claude-haiku-4-5-20251001" };
+        },
+      }),
+    );
+    assert.equal(out.branch, "answered");
+    assert.equal(searched, "mississauga weather");
+    assert.equal(dispatches, 0, "web search must not dispatch to the computer");
   }
 
   // A natural "go ahead" with a pending confirmation approves it (no model turn).

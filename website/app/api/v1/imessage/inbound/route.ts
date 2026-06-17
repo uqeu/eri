@@ -27,6 +27,12 @@ import {
   type ToolResult,
 } from "@/lib/agent/connectors";
 import { runVisionTurn } from "@/lib/agent/vision";
+import {
+  mapBraveResults,
+  mapComposioResults,
+  type SearchHit,
+  type WebSearchDeps,
+} from "@/lib/agent/web_search";
 import { cancelPending, confirmPending, enqueueCommand } from "@/lib/commands/queue";
 import { handleInbound, type InboundDeps } from "@/lib/imessage/inbound";
 import { consumePairing, normalizeE164, resolveUserByPhone } from "@/lib/imessage/identity";
@@ -142,12 +148,52 @@ function makeDeps(): InboundDeps {
     },
     rememberUserFact,
     connectors: makeConnectorDeps(),
+    webSearch: makeWebSearchDeps(),
     runVisionTurn: ({ imageUrl, prompt, system }) => runVisionTurn({ imageUrl, prompt, system }),
     loadConversation,
     recordConversation,
     confirmPending,
     cancelPending,
     now: () => Date.now(),
+  };
+}
+
+/**
+ * Wire the real web search behind the WebSearchDeps seam. Tries Composio's search
+ * tool first (free via existing COMPOSIO_API_KEY usage), then Brave's free-tier
+ * API (BRAVE_SEARCH_KEY) as a fallback. Throws if neither is configured/returns —
+ * webSearch() catches and tells the user it couldn't search.
+ */
+function makeWebSearchDeps(): WebSearchDeps {
+  return {
+    runSearch: async (query, limit) => {
+      // 1) Composio search — no extra signup, runs on the existing Composio key.
+      const composioKey = process.env.COMPOSIO_API_KEY;
+      if (composioKey) {
+        try {
+          const slug = process.env.COMPOSIO_SEARCH_SLUG || "COMPOSIO_SEARCH_SEARCH";
+          const composio = new Composio({ apiKey: composioKey });
+          const result = await composio.tools.execute(slug, {
+            userId: "eri-web-search",
+            arguments: { query },
+          });
+          const hits: SearchHit[] = mapComposioResults(result);
+          if (hits.length > 0) return hits.slice(0, limit);
+        } catch {
+          // fall through to Brave
+        }
+      }
+      // 2) Brave Search API (free tier 2k/mo).
+      const braveKey = process.env.BRAVE_SEARCH_KEY;
+      if (braveKey) {
+        const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=${limit}`;
+        const resp = await fetch(url, {
+          headers: { "X-Subscription-Token": braveKey, Accept: "application/json" },
+        });
+        if (resp.ok) return mapBraveResults(await resp.json()).slice(0, limit);
+      }
+      throw new Error("no web-search backend configured");
+    },
   };
 }
 
