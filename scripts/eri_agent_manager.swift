@@ -253,15 +253,36 @@ final class AgentManagerController: NSObject, NSWindowDelegate, WKNavigationDele
         userContent.addUserScript(bootScript)
 
         webView.navigationDelegate = self
+        webView.setValue(false, forKey: "drawsBackground") // transparent → the glass shows through
+
+        // Real macOS glassmorphism: an NSVisualEffectView (system vibrancy/blur)
+        // behind the transparent web UI. The CSS panels are translucent, so this
+        // live blur of what's behind the window shows through = frosted glass,
+        // NOT a flat dark fill. (The old setup put an opaque webView on an opaque
+        // window — zero glass.)
+        let glass = NSVisualEffectView(frame: rect)
+        glass.material = .underWindowBackground
+        glass.blendingMode = .behindWindow
+        glass.state = .active
+        glass.autoresizingMask = [.width, .height]
+        glass.wantsLayer = true
+        glass.layer?.cornerRadius = 12
+        glass.layer?.masksToBounds = true
+        webView.frame = glass.bounds
         webView.autoresizingMask = [.width, .height]
-        webView.setValue(false, forKey: "drawsBackground")
+        glass.addSubview(webView)
 
         window.title = "Eri"
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
         window.isReleasedWhenClosed = false
-        window.backgroundColor = NSColor(calibratedWhite: 0.035, alpha: 1.0)
-        window.contentView = webView
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        // Drag the window from any non-interactive area (the WKWebView covers the
+        // transparent titlebar under fullSizeContentView, so titlebar-drag alone
+        // fails — this restores moving it).
+        window.isMovableByWindowBackground = true
+        window.contentView = glass
         window.delegate = self
         window.setFrameAutosaveName("eri.agent-manager.window")
     }

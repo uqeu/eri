@@ -7,13 +7,16 @@
 body[data-theme="dark"] {
   color-scheme: dark;
 
-  --bg: #161616;        /* warm near-black ground (Antigravity) */
-  --surface: #1a1a1a;   /* chrome: titlebar, chat */
-  --panel: #1e1e1e;     /* content surface: canvas, cards */
-  --raised: #262626;    /* hover / floating */
-  --input: #222222;
-  --line: #2f2f2f;      /* hairline */
-  --line-soft: #262626;
+  /* GLASS: translucent so the native NSVisualEffectView vibrancy behind the
+     transparent WKWebView shows through = real macOS frosted glass (Apple HIG),
+     not a flat fill. Alpha tuned to keep text legible over the live blur. */
+  --bg: rgba(20, 20, 22, 0.38);      /* faint dark ground — vibrancy reads through */
+  --surface: rgba(28, 28, 31, 0.58); /* chrome: titlebar, chat */
+  --panel: rgba(32, 32, 36, 0.52);   /* content surface: canvas, cards */
+  --raised: rgba(54, 54, 58, 0.62);  /* hover / floating */
+  --input: rgba(44, 44, 48, 0.66);
+  --line: rgba(255, 255, 255, 0.10); /* hairline — light, for glass edges */
+  --line-soft: rgba(255, 255, 255, 0.06);
 
   --text: #e6e6e3;      /* off-white primary */
   --muted: #9a9a96;     /* secondary */

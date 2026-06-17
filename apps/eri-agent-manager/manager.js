@@ -53,7 +53,10 @@ function autosize(el) {
 
 /* ---------------- bridge ---------------- */
 function native(command, payload = {}) {
-  const message = { command, ...payload, mode: state.mode, intent: state.intent };
+  // Defaults FIRST, then spread payload so a caller-provided key (e.g. the actual
+  // `intent`/question for askEri) overrides the global default — the old order
+  // clobbered payload.intent with state.intent, sending an empty prompt to `eri ask`.
+  const message = { command, mode: state.mode, intent: state.intent, ...payload };
   if (window.webkit?.messageHandlers?.eri) {
     window.webkit.messageHandlers.eri.postMessage(message);
   } else {
