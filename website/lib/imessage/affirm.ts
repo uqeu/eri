@@ -23,3 +23,18 @@ export function isAffirmation(text: string): boolean {
 export function isNegation(text: string): boolean {
   return NEGATE.test(text.trim());
 }
+
+// Cues that the user is CORRECTING eri's previous reply (a negative behavioral
+// signal for KTO). Distinct from a bare "no" to a pending confirmation.
+const CORRECTION =
+  /\b(that'?s (wrong|not right|incorrect|not it)|not what i (meant|said|asked)|i meant|i didn'?t (mean|ask)|you'?re wrong|that'?s not what|actually,? (no|that'?s)|wrong answer|incorrect)\b/i;
+
+/**
+ * True when the message reads as a correction of eri's previous answer (a
+ * negative signal — eri got it wrong). Includes a plain negation OR an explicit
+ * correction cue. Used to label the prior reply for the KTO training signal.
+ */
+export function isCorrection(text: string): boolean {
+  const t = text.trim();
+  return isNegation(t) || CORRECTION.test(t);
+}

@@ -35,6 +35,8 @@ function deps(over: Partial<InboundDeps> = {}): InboundDeps {
     runVisionTurn: async () => ({ text: "i see it", tokensIn: 5, tokensOut: 3, model: "claude-sonnet-4-6" }),
     loadConversation: async () => [],
     recordConversation: async () => {},
+    recordSignal: async () => {},
+    rejectRecentSignal: async () => {},
     confirmPending: async () => null,
     cancelPending: async () => false,
     now: () => 1000,
@@ -286,6 +288,33 @@ async function run() {
     assert.equal(out.branch, "answered");
     assert.equal(searched, "mississauga weather");
     assert.equal(dispatches, 0, "web search must not dispatch to the computer");
+  }
+
+  // KTO signal: a normal answer logs a 'kept' signal; a correction flips the prior.
+  {
+    let recordedPrompt = "";
+    let recordedResponse = "";
+    await handleInbound(
+      msg("what's 2+2"),
+      "+1",
+      deps({
+        runTurn: async () => ({ text: "4", tokensIn: 5, tokensOut: 1, model: "claude-haiku-4-5-20251001" }),
+        recordSignal: async (_u, prompt, response) => { recordedPrompt = prompt; recordedResponse = response; },
+      }),
+    );
+    assert.equal(recordedPrompt, "what's 2+2");
+    assert.equal(recordedResponse, "4");
+
+    let rejected = false;
+    await handleInbound(
+      msg("no that's wrong"),
+      "+1",
+      deps({
+        rejectRecentSignal: async () => { rejected = true; },
+        runTurn: async () => ({ text: "ah, it's 5", tokensIn: 5, tokensOut: 3, model: "claude-haiku-4-5-20251001" }),
+      }),
+    );
+    assert.equal(rejected, true, "a correction flips the prior reply's signal to rejected");
   }
 
   // A natural "go ahead" with a pending confirmation approves it (no model turn).
