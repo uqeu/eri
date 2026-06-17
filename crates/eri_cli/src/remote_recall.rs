@@ -99,13 +99,22 @@ pub fn format_recall(query: &str, hits: &[Observation]) -> String {
 /// "nothing on that" answer in [`format_recall`] rather than a dump of the
 /// nearest unrelated observations.
 fn relevant_hits(scored: Vec<(Observation, f32)>) -> Vec<Observation> {
-    scored
+    let mut relevant: Vec<(Observation, f32)> = scored
         .into_iter()
         .filter(|(_, score)| *score >= MIN_RECALL_RELEVANCE)
-        .take(RECALL_LIMIT)
-        .map(|(o, _)| o)
-        .collect()
+        .collect();
+    // Competitive winner (Dong et al.): when the top hit clearly dominates the
+    // runner-up, the query has ONE answer — return just it, so eri replies crisply
+    // ("your email is X") instead of dumping a list. `scored` is sorted desc.
+    if relevant.len() >= 2 && relevant[0].1 >= WINNER_DOMINANCE * relevant[1].1 {
+        relevant.truncate(1);
+    }
+    relevant.into_iter().take(RECALL_LIMIT).map(|(o, _)| o).collect()
 }
+
+/// How far the top hit must beat the runner-up to be returned alone (a single
+/// dominant answer rather than a list).
+const WINNER_DOMINANCE: f32 = 1.3;
 
 /// Run a recall command end-to-end: parse the spec, open the signed-in user's
 /// local store, recall (bi-temporal when a time scope parses, else hybrid), and
@@ -247,6 +256,21 @@ mod tests {
         let kept = relevant_hits(mix);
         assert_eq!(kept.len(), 1);
         assert!(kept[0].body.contains("khai@example.com"));
+    }
+
+    #[test]
+    fn competitive_winner_returns_the_single_dominant_hit() {
+        // Top hit dominates the runner-up (≥1.3×) → return it ALONE (crisp answer).
+        let dominant = vec![
+            (obs("my email is khai@example.com"), 0.92),
+            (obs("recent unrelated note"), 0.55),
+        ];
+        let kept = relevant_hits(dominant);
+        assert_eq!(kept.len(), 1);
+        assert!(kept[0].body.contains("khai@example.com"));
+        // Two close, both-relevant hits → keep both (no single winner).
+        let close = vec![(obs("the deal closed at 40k"), 0.71), (obs("the deal was with Henderson"), 0.66)];
+        assert_eq!(relevant_hits(close).len(), 2);
     }
 
     #[test]
