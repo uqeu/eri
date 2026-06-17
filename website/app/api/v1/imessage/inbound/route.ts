@@ -30,6 +30,8 @@ import { runVisionTurn } from "@/lib/agent/vision";
 import { analyzeCommunicationStyle } from "@/lib/agent/style";
 import { mapBraveResults, type WebSearchDeps } from "@/lib/agent/web_search";
 import type { WeatherDeps } from "@/lib/agent/weather";
+import { embedText, toPgVectorLiteral } from "@/lib/agent/embeddings";
+import { fuseRRF, RECALL_CANDIDATE_LIMIT } from "@/lib/agent/memory_recall";
 import { cancelPending, confirmPending, enqueueCommand } from "@/lib/commands/queue";
 import { handleInbound, type InboundDeps } from "@/lib/imessage/inbound";
 import { consumePairing, normalizeE164, resolveUserByPhone } from "@/lib/imessage/identity";
@@ -289,11 +291,16 @@ async function rememberUserFact(
   category: string,
 ): Promise<boolean> {
   try {
+    // Embed the fact for semantic recall (null if VOYAGE_API_KEY unset / error →
+    // stored as NULL, lexical recall still works). `${null}::vector` casts to NULL.
+    const vector = await embedText(fact);
+    const vecLiteral = vector ? toPgVectorLiteral(vector) : null;
     await sql()`
-      INSERT INTO learned_facts (user_id, fact, kind, category, source)
-      VALUES (${userId}, ${fact}, ${kind}, ${category}, 'imessage')
+      INSERT INTO learned_facts (user_id, fact, kind, category, source, embedding)
+      VALUES (${userId}, ${fact}, ${kind}, ${category}, 'imessage', ${vecLiteral}::vector)
       ON CONFLICT (user_id, fact)
-        DO UPDATE SET created_at = now(), kind = EXCLUDED.kind, category = EXCLUDED.category
+        DO UPDATE SET created_at = now(), kind = EXCLUDED.kind,
+          category = EXCLUDED.category, embedding = EXCLUDED.embedding
     `;
     return true;
   } catch (e) {
@@ -340,38 +347,46 @@ async function loadProfile(
     logEvent("imessage.identity_load_failed", { userId, error: errMsg(e) });
   }
 
-  // 2. Conversational memory, retrieved the "brain sections" way: the facts most
-  //    RELEVANT to what they're saying now (full-text ranked) UNION the most
-  //    recent facts — so the right slice surfaces (talk games → games facts) and
-  //    fresh facts are never missed, while we never dump the whole store.
+  // 2. Conversational memory — HYBRID recall (the SOTA gap fix): lexical (keyword,
+  //    fact_tsv) ∪ semantic (vector cosine) candidates, fused with Reciprocal Rank
+  //    Fusion, plus always-include the most recent facts. So "my dog" surfaces a
+  //    fact about "Bella" (semantic) AND exact keyword hits AND fresh facts —
+  //    prefiltered by user_id so it only scans this person's slice (fast). Degrades
+  //    to lexical when no embedding/query (vecLiteral null → vector list empty).
   let learnedFacts: string[] = [];
   try {
     const q = query.trim();
-    const factRows = await sql()<{ fact: string }[]>`
-      WITH relevant AS (
-        SELECT fact, ts_rank(fact_tsv, websearch_to_tsquery('english', ${q})) AS rank, created_at
-        FROM learned_facts
-        WHERE user_id = ${userId}
-          AND ${q} <> ''
-          AND fact_tsv @@ websearch_to_tsquery('english', ${q})
-        ORDER BY rank DESC
-        LIMIT 24
-      ),
-      recent AS (
-        SELECT fact, 0::real AS rank, created_at
-        FROM learned_facts
-        WHERE user_id = ${userId}
-        ORDER BY created_at DESC
-        LIMIT 24
-      )
-      SELECT DISTINCT ON (fact) fact FROM (
-        SELECT fact, rank, created_at FROM relevant
-        UNION ALL
-        SELECT fact, rank, created_at FROM recent
-      ) merged
-      ORDER BY fact, rank DESC, created_at DESC
+    const queryVec = q ? await embedText(q) : null;
+    const vecLiteral = queryVec ? toPgVectorLiteral(queryVec) : null;
+
+    const lexicalRows = q
+      ? await sql()<{ fact: string }[]>`
+          SELECT fact FROM learned_facts
+          WHERE user_id = ${userId}
+            AND fact_tsv @@ websearch_to_tsquery('english', ${q})
+          ORDER BY ts_rank(fact_tsv, websearch_to_tsquery('english', ${q})) DESC
+          LIMIT ${RECALL_CANDIDATE_LIMIT}
+        `
+      : [];
+
+    const vectorRows = vecLiteral
+      ? await sql()<{ fact: string }[]>`
+          SELECT fact FROM learned_facts
+          WHERE user_id = ${userId} AND embedding IS NOT NULL
+          ORDER BY embedding <=> ${vecLiteral}::vector
+          LIMIT ${RECALL_CANDIDATE_LIMIT}
+        `
+      : [];
+
+    const recentRows = await sql()<{ fact: string }[]>`
+      SELECT fact FROM learned_facts WHERE user_id = ${userId}
+      ORDER BY created_at DESC LIMIT ${RECALL_CANDIDATE_LIMIT}
     `;
-    learnedFacts = factRows.map((r) => r.fact).filter((f) => f.trim());
+
+    // Fuse keyword + semantic by rank, then append recent (the final case-
+    // insensitive dedup below collapses any overlap).
+    const fused = fuseRRF([lexicalRows.map((r) => r.fact), vectorRows.map((r) => r.fact)]);
+    learnedFacts = [...fused, ...recentRows.map((r) => r.fact)].filter((f) => f.trim());
   } catch (e) {
     logEvent("imessage.learned_facts_load_failed", { userId, error: errMsg(e) });
   }
