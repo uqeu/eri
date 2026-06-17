@@ -65,3 +65,13 @@ training:
   optim: paged_adamw_8bit
   seed: 42
   packing: true
+
+# KTO per-user finetune (kto_finetune.py) — the personalization objective the
+# audit prescribes (binary accept/reject from behavioral_signals). Runs only when
+# there's real signal volume + a GPU. beta = TRL default until measured on data.
+kto:
+  beta: 0.1
+  learning_rate: 5.0e-6
+  batch_size: 4
+  epochs: 1
+  output_dir: eri-kto-adapter
