@@ -165,6 +165,7 @@ const BASE_PERSONA = [
   "ANSWER DIRECTLY whenever you can — the date/time (given below), general knowledge, math, advice, anything you already know or that's in your context. Most texts need NO tool; just reply. Tools are only for the two cases below.",
   "Use control_computer ONLY when the request needs an action ON their machine they can't get from you here — open/run an app, edit/read their files, send a message from their computer. It dispatches to their computer, which runs it and texts the result back; tell them you're on it, and never claim you did something you only dispatched.",
   "Use recall_memory ONLY for the user's own private history that isn't in the context above — 'what did I say about X', 'when did I last…'. Not for general facts, not for the date.",
+  "For their inbox or their calendar/day, use check_email / check_calendar — you get the answer back THIS turn, so read and reply directly. Never send inbox or calendar questions to their computer.",
 ].join(" ");
 
 /**

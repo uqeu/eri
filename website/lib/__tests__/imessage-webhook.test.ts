@@ -39,6 +39,27 @@ const SECRET = "s3cret-webhook-token-abcdef0123456789";
   // Our own outbound echoes parse but carry is_outbound=true so the route skips them.
   const echo = parseInbound({ from_number: "+1", message_handle: "h", is_outbound: true });
   assert.equal(echo!.isOutbound, true);
+
+  // No media_url on a text message → mediaUrl stays undefined (text path is default).
+  assert.equal(ok!.mediaUrl, undefined, "text message has no mediaUrl");
+
+  // media_url present → captured onto mediaUrl (photo path), with the caption kept.
+  const withMedia = parseInbound({
+    from_number: "+16475497552",
+    content: "what does this say?",
+    message_handle: "MEDIA-1",
+    media_url: "https://media.sendblue.example/abc.jpg",
+  });
+  assert.ok(withMedia);
+  assert.equal(withMedia!.mediaUrl, "https://media.sendblue.example/abc.jpg");
+  assert.equal(withMedia!.content, "what does this say?", "caption is preserved alongside media");
+
+  // A blank/whitespace media_url is treated as no media (stays undefined).
+  const blankMedia = parseInbound({ from_number: "+1", message_handle: "h2", media_url: "   " });
+  assert.equal(blankMedia!.mediaUrl, undefined, "blank media_url → undefined");
+  // A non-string media_url is ignored too.
+  const badMedia = parseInbound({ from_number: "+1", message_handle: "h3", media_url: 123 });
+  assert.equal(badMedia!.mediaUrl, undefined, "non-string media_url → undefined");
 }
 
 // eslint-disable-next-line no-console
