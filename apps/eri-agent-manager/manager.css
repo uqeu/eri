@@ -10,11 +10,13 @@ body[data-theme="dark"] {
   /* GLASS: translucent so the native NSVisualEffectView vibrancy behind the
      transparent WKWebView shows through = real macOS frosted glass (Apple HIG),
      not a flat fill. Alpha tuned to keep text legible over the live blur. */
-  --bg: rgba(20, 20, 22, 0.38);      /* faint dark ground — vibrancy reads through */
-  --surface: rgba(28, 28, 31, 0.58); /* chrome: titlebar, chat */
-  --panel: rgba(32, 32, 36, 0.52);   /* content surface: canvas, cards */
-  --raised: rgba(54, 54, 58, 0.62);  /* hover / floating */
-  --input: rgba(44, 44, 48, 0.66);
+  /* Lean GLASS: the native NSVisualEffectView blur does the heavy lifting, so the
+     CSS tints stay LOW-alpha — you see the desktop/app behind, frosted. */
+  --bg: rgba(16, 16, 18, 0.12);      /* near-clear ground — mostly the live blur */
+  --surface: rgba(26, 26, 30, 0.30); /* chrome: titlebar, chat — faint tint */
+  --panel: rgba(28, 28, 32, 0.24);   /* content surface: canvas, cards */
+  --raised: rgba(56, 56, 60, 0.40);  /* hover / floating — a touch more */
+  --input: rgba(42, 42, 46, 0.34);
   --line: rgba(255, 255, 255, 0.10); /* hairline — light, for glass edges */
   --line-soft: rgba(255, 255, 255, 0.06);
 
