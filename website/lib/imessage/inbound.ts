@@ -46,7 +46,7 @@ import {
 } from "@/lib/agent/weather";
 import type { CommandKind } from "@/lib/commands/queue";
 import { featureLocked } from "@/lib/feature_gate";
-import { isAffirmation, isNegation } from "@/lib/imessage/affirm";
+import { isAffirmation, isCorrection, isNegation } from "@/lib/imessage/affirm";
 import { formatReply } from "@/lib/imessage/format";
 import { extractPairingCode } from "@/lib/imessage/identity";
 import type { InboundMessage } from "@/lib/imessage/webhook";
@@ -131,6 +131,12 @@ export interface InboundDeps {
   /** Append this exchange (user text + eri's reply) to the running conversation.
    *  Best-effort — must never throw or block the reply. */
   recordConversation(userId: string, userText: string, assistantText: string): Promise<void>;
+  /** Log an eri reply as a behavioral signal (default 'kept') — the KTO dataset.
+   *  Best-effort, never throws. */
+  recordSignal(userId: string, prompt: string, response: string, model: string): Promise<void>;
+  /** The user corrected eri's previous reply → flip the most recent signal to
+   *  'rejected' (a KTO negative). Best-effort, never throws. */
+  rejectRecentSignal(userId: string): Promise<void>;
   /** Dispatch a goal to the user's computer (command queue). `kind` selects the
    *  remote turn: "control" (actuation) or "recall" (deep memory lookup, goal is
    *  a JSON spec). Returns false when the user is at the outstanding-command cap. */
@@ -196,6 +202,12 @@ export async function handleInbound(
     }
   }
 
+  // KTO signal: if this message corrects eri's previous reply, flip that reply's
+  // logged signal to 'rejected' (a training negative). Best-effort, fire-and-forget.
+  if (isCorrection(msg.content)) {
+    void deps.rejectRecentSignal(user.userId);
+  }
+
   if (!(await deps.withinQuota(user.userId, user.tier))) {
     return { replyChunks: [REPLY.overQuota], meter: null, branch: "over_quota" };
   }
@@ -215,6 +227,7 @@ export async function handleInbound(
         system: buildSystemPrompt(profile, dynamicContext, currentDateText()),
       });
       await deps.recordConversation(user.userId, msg.content || "(sent a photo)", turn.text);
+      await deps.recordSignal(user.userId, msg.content || "(photo)", turn.text, turn.model);
       return {
         replyChunks: formatReply(turn.text),
         meter: {
@@ -327,6 +340,7 @@ export async function handleInbound(
       },
     });
     await deps.recordConversation(user.userId, msg.content, turn.text);
+    await deps.recordSignal(user.userId, msg.content, turn.text, turn.model);
     return {
       replyChunks: formatReply(turn.text),
       meter: {

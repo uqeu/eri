@@ -154,10 +154,45 @@ function makeDeps(): InboundDeps {
     runVisionTurn: ({ imageUrl, prompt, system }) => runVisionTurn({ imageUrl, prompt, system }),
     loadConversation,
     recordConversation,
+    recordSignal,
+    rejectRecentSignal,
     confirmPending,
     cancelPending,
     now: () => Date.now(),
   };
+}
+
+/** Log an eri reply as a behavioral signal ('kept') — the KTO dataset. Never throws. */
+async function recordSignal(
+  userId: string,
+  prompt: string,
+  response: string,
+  model: string,
+): Promise<void> {
+  try {
+    await sql()`
+      INSERT INTO behavioral_signals (user_id, prompt, response, signal, model)
+      VALUES (${userId}, ${prompt}, ${response}, 'kept', ${model})
+    `;
+  } catch (e) {
+    logEvent("imessage.signal_record_failed", { userId, error: errMsg(e) });
+  }
+}
+
+/** Flip the user's most recent signal to 'rejected' (they corrected eri). Never throws. */
+async function rejectRecentSignal(userId: string): Promise<void> {
+  try {
+    await sql()`
+      UPDATE behavioral_signals SET signal = 'rejected'
+      WHERE id = (
+        SELECT id FROM behavioral_signals
+        WHERE user_id = ${userId} AND signal = 'kept'
+        ORDER BY created_at DESC LIMIT 1
+      )
+    `;
+  } catch (e) {
+    logEvent("imessage.signal_reject_failed", { userId, error: errMsg(e) });
+  }
 }
 
 /**
