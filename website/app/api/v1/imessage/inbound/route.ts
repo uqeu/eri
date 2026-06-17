@@ -151,10 +151,16 @@ function makeDeps(): InboundDeps {
   };
 }
 
-/** How many recent turns to replay as conversation context (bounds tokens). */
-const HISTORY_LIMIT = 16;
-/** Only replay turns from the last few hours — older context isn't this thread. */
-const HISTORY_WINDOW = "6 hours";
+// Conversation context is two layers (how Claude/ChatGPT don't "lose it"):
+//   1. a GENEROUS recent window replayed verbatim — texts are tiny, so we can
+//      keep hundreds without meaningful cost (≈ a month of normal texting);
+//   2. durable facts (learned_facts) that outlive the window entirely, so the
+//      important things are remembered FOREVER even after a message scrolls off.
+// (Claude-style summarization of truly enormous threads is the next-level add.)
+/** Max recent turns replayed verbatim — high; the durable-facts layer covers the rest. */
+const HISTORY_LIMIT = 300;
+/** Replay window — a month, so eri never forgets a normal-length relationship's thread. */
+const HISTORY_WINDOW = "30 days";
 
 /** Load the recent conversation (oldest→newest) so eri remembers the thread. */
 async function loadConversation(userId: string): Promise<ConversationTurn[]> {
