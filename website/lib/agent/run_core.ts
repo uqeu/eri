@@ -101,6 +101,11 @@ export const REMEMBER_FACT_TOOL: ToolDef = {
         enum: ["fact", "preference"],
         description: "'preference' for how they like things; 'fact' otherwise.",
       },
+      category: {
+        type: "string",
+        description:
+          "The life area this belongs to, lowercase — e.g. work, games, people, family, health, chores, food, travel, finance, hobbies, general. eri groups memory by these so it can recall the right slice later.",
+      },
     },
     required: ["fact"],
   },

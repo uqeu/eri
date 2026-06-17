@@ -234,12 +234,18 @@ function makeConnectorDeps(): ConnectorDeps {
  * upsert on (user_id, fact): re-stating a fact refreshes its recency, never
  * duplicates. Never throws — a failed save becomes a soft "couldn't save".
  */
-async function rememberUserFact(userId: string, fact: string, kind: string): Promise<boolean> {
+async function rememberUserFact(
+  userId: string,
+  fact: string,
+  kind: string,
+  category: string,
+): Promise<boolean> {
   try {
     await sql()`
-      INSERT INTO learned_facts (user_id, fact, kind, source)
-      VALUES (${userId}, ${fact}, ${kind}, 'imessage')
-      ON CONFLICT (user_id, fact) DO UPDATE SET created_at = now(), kind = EXCLUDED.kind
+      INSERT INTO learned_facts (user_id, fact, kind, category, source)
+      VALUES (${userId}, ${fact}, ${kind}, ${category}, 'imessage')
+      ON CONFLICT (user_id, fact)
+        DO UPDATE SET created_at = now(), kind = EXCLUDED.kind, category = EXCLUDED.category
     `;
     return true;
   } catch (e) {
@@ -268,6 +274,7 @@ async function releaseLease(handle: string): Promise<void> {
  */
 async function loadProfile(
   userId: string,
+  query: string,
 ): Promise<{ profile: TierAProfile | null; dynamicContext: string }> {
   // 1. Account identity — always available, cheap, the floor of "knows me".
   const identityFacts: string[] = [];
@@ -285,12 +292,36 @@ async function loadProfile(
     logEvent("imessage.identity_load_failed", { userId, error: errMsg(e) });
   }
 
-  // 2. Conversational memory — newest first, capped so the prompt stays tight.
+  // 2. Conversational memory, retrieved the "brain sections" way: the facts most
+  //    RELEVANT to what they're saying now (full-text ranked) UNION the most
+  //    recent facts — so the right slice surfaces (talk games → games facts) and
+  //    fresh facts are never missed, while we never dump the whole store.
   let learnedFacts: string[] = [];
   try {
+    const q = query.trim();
     const factRows = await sql()<{ fact: string }[]>`
-      SELECT fact FROM learned_facts WHERE user_id = ${userId}
-      ORDER BY created_at DESC LIMIT 40
+      WITH relevant AS (
+        SELECT fact, ts_rank(fact_tsv, websearch_to_tsquery('english', ${q})) AS rank, created_at
+        FROM learned_facts
+        WHERE user_id = ${userId}
+          AND ${q} <> ''
+          AND fact_tsv @@ websearch_to_tsquery('english', ${q})
+        ORDER BY rank DESC
+        LIMIT 24
+      ),
+      recent AS (
+        SELECT fact, 0::real AS rank, created_at
+        FROM learned_facts
+        WHERE user_id = ${userId}
+        ORDER BY created_at DESC
+        LIMIT 24
+      )
+      SELECT DISTINCT ON (fact) fact FROM (
+        SELECT fact, rank, created_at FROM relevant
+        UNION ALL
+        SELECT fact, rank, created_at FROM recent
+      ) merged
+      ORDER BY fact, rank DESC, created_at DESC
     `;
     learnedFacts = factRows.map((r) => r.fact).filter((f) => f.trim());
   } catch (e) {

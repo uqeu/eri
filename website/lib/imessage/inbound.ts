@@ -96,7 +96,13 @@ export interface InboundDeps {
   resolveUserByPhone(e164: string): Promise<ResolvedUser | null>;
   /** True when the user is within quota for an estimated turn. */
   withinQuota(userId: string, tier: string): Promise<boolean>;
-  loadProfile(userId: string): Promise<{ profile: TierAProfile | null; dynamicContext: string }>;
+  /** Build the context for this turn. `query` is the incoming message, used to
+   *  retrieve the most RELEVANT memories (the "brain section" for what they're
+   *  talking about) on top of identity + recent facts. */
+  loadProfile(
+    userId: string,
+    query: string,
+  ): Promise<{ profile: TierAProfile | null; dynamicContext: string }>;
   runTurn(input: {
     prompt: string;
     profile: TierAProfile | null;
@@ -118,9 +124,10 @@ export interface InboundDeps {
    *  a JSON spec). Returns false when the user is at the outstanding-command cap. */
   enqueueComputerGoal(userId: string, goal: string, kind?: CommandKind): Promise<boolean>;
   /** Save a durable fact/preference about the user to cloud-primary memory
-   *  (learned_facts) so eri knows it on every future text. Returns false on a
-   *  storage failure. Completes in-cloud — not a computer dispatch. */
-  rememberUserFact(userId: string, fact: string, kind: string): Promise<boolean>;
+   *  (learned_facts), tagged with a `category` ("brain section") so eri can recall
+   *  the relevant slice later. Returns false on a storage failure. In-cloud — not
+   *  a computer dispatch. */
+  rememberUserFact(userId: string, fact: string, kind: string, category: string): Promise<boolean>;
   /** In-cloud connector reads (Gmail/Calendar) so eri can answer inbox/day
    *  questions even with the laptop closed. Same seam shape as proactive SignalDeps. */
   connectors: ConnectorDeps;
@@ -177,7 +184,7 @@ export async function handleInbound(
     return { replyChunks: [REPLY.overQuota], meter: null, branch: "over_quota" };
   }
 
-  const { profile, dynamicContext } = await deps.loadProfile(user.userId);
+  const { profile, dynamicContext } = await deps.loadProfile(user.userId, msg.content);
   // The running conversation so eri remembers what was just said (not a one-off AI).
   const history = await deps.loadConversation(user.userId);
   const started = deps.now();
@@ -253,7 +260,10 @@ export async function handleInbound(
           if (typeof fact !== "string" || !fact.trim()) return "No fact was provided.";
           const kindRaw = (toolInput as { kind?: unknown })?.kind;
           const kind = kindRaw === "preference" ? "preference" : "fact";
-          const ok = await deps.rememberUserFact(user.userId, fact.trim(), kind);
+          const catRaw = (toolInput as { category?: unknown })?.category;
+          const category =
+            typeof catRaw === "string" && catRaw.trim() ? catRaw.trim().toLowerCase() : "general";
+          const ok = await deps.rememberUserFact(user.userId, fact.trim(), kind, category);
           return ok ? "Saved — eri will remember that." : "Couldn't save that just now.";
         }
         if (name === "check_email") {
