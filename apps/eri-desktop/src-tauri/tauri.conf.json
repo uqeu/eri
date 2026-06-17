@@ -1,0 +1,42 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Eri",
+  "version": "0.1.0",
+  "identifier": "dev.eri.desktop",
+  "build": {
+    "frontendDist": "../ui"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "macOSPrivateApi": true,
+    "windows": [
+      {
+        "title": "Eri",
+        "label": "main",
+        "width": 600,
+        "height": 64,
+        "minWidth": 360,
+        "minHeight": 56,
+        "decorations": false,
+        "transparent": true,
+        "resizable": false,
+        "alwaysOnTop": false,
+        "visible": true,
+        "center": false,
+        "shadow": true,
+        "acceptFirstMouse": true,
+        "contentProtected": false,
+        "titleBarStyle": "Overlay"
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app", "dmg"],
+    "icon": ["icons/icon.png"],
+    "category": "Productivity"
+  }
+}

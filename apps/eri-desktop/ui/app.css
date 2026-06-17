@@ -1,0 +1,134 @@
+/* Eri companion — clean Pluely-style floating glass card.
+   The native NSVisualEffectView (HUD material, applied in Rust via
+   window-vibrancy) IS the glass; the page is transparent and the card tints
+   are LOW-alpha + user-tunable (--glass-opacity), so you see through it while
+   text stays solid. eri brand: monochrome + one lime accent. */
+
+:root {
+  --glass-opacity: 0.62;                 /* tuned live by the transparency slider */
+  --base: 23 23 27;                      /* near-black, faint blue */
+  --surface: rgb(var(--base) / calc(var(--glass-opacity) * 0.92));
+  --panel:   rgb(var(--base) / var(--glass-opacity));
+  --raised:  rgb(54 54 60 / calc(var(--glass-opacity) * 1.15));
+  --input:   rgb(var(--base) / calc(var(--glass-opacity) * 0.7));
+
+  --line: rgba(255, 255, 255, 0.22);
+  --line-soft: rgba(255, 255, 255, 0.10);
+  --ring: 0 0 0 1px rgba(207, 226, 255, 0.22), 0 -0.5px 0 0 rgba(255, 255, 255, 0.6);
+  --shadow: 0 12px 40px rgba(0, 0, 0, 0.42), var(--ring);
+
+  --text: #edeef2;
+  --muted: #b2b3ba;
+  --dim: #898b91;
+  --accent: #d9ff57;
+  --accent-ink: #14180a;
+
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --r: 16px;
+
+  font-family: -apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif;
+}
+
+* { box-sizing: border-box; }
+html, body { width: 100%; height: 100%; margin: 0; background: transparent; overflow: hidden; -webkit-font-smoothing: antialiased; color: var(--text); }
+button { font: inherit; color: inherit; border: 0; background: transparent; cursor: pointer; }
+input { font: inherit; }
+::selection { background: rgba(217, 255, 87, 0.25); }
+
+/* The whole card. Transparent page → only the card paints, floating on the
+   native blur. */
+.card {
+  display: flex; flex-direction: column;
+  width: 100%; min-height: 0;
+  border-radius: var(--r);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+/* ---------- command bar ---------- */
+.bar { display: flex; align-items: center; gap: 10px; height: 56px; padding: 0 10px 0 16px; flex: none; }
+.brand {
+  font-family: "Funnel Display", system-ui, sans-serif;
+  font-weight: 800; font-size: 18px; letter-spacing: -0.05em;
+  color: var(--accent); user-select: none; padding-right: 2px;
+}
+.q {
+  flex: 1; min-width: 0; height: 100%;
+  border: 0; background: transparent; outline: none;
+  color: var(--text); font-size: 14.5px; letter-spacing: -0.01em;
+}
+.q::placeholder { color: var(--dim); }
+.bar-tools { display: flex; align-items: center; gap: 4px; flex: none; }
+
+.ico {
+  display: grid; place-items: center; width: 30px; height: 30px;
+  border-radius: 999px; color: var(--muted);
+  transition: background 130ms var(--ease), color 130ms var(--ease);
+}
+.ico:hover { background: var(--raised); color: var(--text); }
+.ico.is-on { color: var(--accent); background: rgba(217, 255, 87, 0.14); }
+
+.send {
+  display: grid; place-items: center; width: 30px; height: 30px; margin-left: 2px;
+  border-radius: 999px; background: var(--accent); color: var(--accent-ink);
+  transition: transform 140ms var(--ease), background 140ms var(--ease);
+}
+.send:hover { transform: scale(1.06); }
+.send:active { transform: scale(0.96); }
+
+/* ---------- answer panel ---------- */
+.panel { display: none; flex-direction: column; border-top: 1px solid var(--line-soft); background: var(--panel); }
+body[data-state="answering"] .panel,
+body[data-state="answered"] .panel { display: flex; }
+
+.thread {
+  max-height: 440px; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 14px 16px;
+}
+.thread::-webkit-scrollbar { width: 8px; }
+.thread::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.14); border-radius: 999px; }
+
+/* Your question — right-aligned accent bubble (Cluely pattern). */
+.msg-user {
+  align-self: flex-end; max-width: 80%;
+  padding: 7px 12px; border-radius: 14px 14px 4px 14px;
+  background: rgba(217, 255, 87, 0.16); border: 1px solid rgba(217, 255, 87, 0.32);
+  color: var(--text); font-size: 13px; line-height: 1.5; word-break: break-word;
+}
+
+/* eri's reply — clean plain text, left. */
+.answer {
+  font-size: 14px; line-height: 1.62; color: var(--text);
+  white-space: pre-wrap; word-break: break-word;
+}
+.answer:empty::after { content: "Thinking…"; color: var(--dim); }
+
+.ico.close:hover { background: rgba(255, 126, 126, 0.16); color: #ff7e7e; }
+
+.panel-foot { display: flex; align-items: center; justify-content: space-between; padding: 8px 14px 10px; border-top: 1px solid var(--line-soft); }
+.status { font-size: 11.5px; color: var(--dim); }
+.ghost { height: 26px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); font-size: 12px; transition: background 130ms var(--ease), color 130ms; }
+.ghost:hover { background: var(--raised); color: var(--text); }
+
+/* ---------- settings ---------- */
+.settings { display: none; flex-direction: column; border-top: 1px solid var(--line-soft); background: var(--panel); padding: 6px 16px 12px; }
+body[data-settings="open"] .settings { display: flex; }
+.set-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 11px 0; border-bottom: 1px solid var(--line-soft); }
+.set-row:last-child { border-bottom: 0; }
+.set-name { font-size: 13px; color: var(--text); }
+.set-hint { font-size: 11.5px; color: var(--dim); margin-top: 2px; }
+.set-slider { display: flex; align-items: center; gap: 10px; flex: none; }
+.set-slider input[type="range"] { -webkit-appearance: none; appearance: none; width: 120px; height: 4px; border-radius: 999px; background: var(--line); cursor: pointer; }
+.set-slider input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 15px; height: 15px; border-radius: 50%; background: var(--accent); border: 2px solid var(--accent-ink); cursor: pointer; transition: transform 120ms var(--ease); }
+.set-slider input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.12); }
+.set-slider span { min-width: 34px; text-align: right; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+.switch { position: relative; width: 38px; height: 22px; border-radius: 999px; border: 1px solid var(--line); background: var(--raised); flex: none; transition: background 160ms var(--ease), border-color 160ms; }
+.switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--muted); transition: transform 180ms var(--ease), background 160ms; }
+.switch[aria-checked="true"] { background: rgba(217, 255, 87, 0.16); border-color: rgba(217, 255, 87, 0.5); }
+.switch[aria-checked="true"]::after { transform: translateX(16px); background: var(--accent); }
+
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }

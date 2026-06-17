@@ -85,3 +85,6 @@ website/.eri.sqlite-wal
 
 # Fetched fresh on each build via ide/get_repo.sh — never committed.
 ide/vscode/
+
+# GPL reference (study only, never ship in eri)
+pluely-master/

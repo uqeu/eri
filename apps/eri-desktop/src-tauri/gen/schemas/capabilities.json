@@ -1,0 +1,1 @@
+{"default":{"identifier":"default","description":"Eri desktop default capability set (event listen + window control).","local":true,"windows":["main"],"permissions":["core:default","core:event:default","core:window:default","core:webview:default"]}}

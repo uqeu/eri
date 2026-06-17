@@ -8,6 +8,9 @@ exclude = [
     "crates/eri_agent_py",
     # Node native addon cdylib -- same story (napi-rs / dynamic_lookup).
     "crates/eri_agent_node",
+    # Tauri desktop shell -- heavy tauri/wry dep tree; builds on its own dir so
+    # it never slows `cargo test --workspace`.
+    "apps/eri-desktop/src-tauri",
 ]
 members = [
     "crates/eri_auth",
