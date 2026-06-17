@@ -33,6 +33,14 @@ pub struct RecallSpec {
 const DAY_MS: u64 = 24 * 60 * 60 * 1000;
 /// How many memories a phone recall surfaces — a glance, not a dump.
 const RECALL_LIMIT: usize = 8;
+/// Minimum hybrid score for a memory to count as a real answer. The hybrid score
+/// is `0.55·sem + 0.30·lex + 0.15·rec + boost`; a fresh-but-IRRELEVANT observation
+/// scores ~0.42 from RECENCY alone (neutral cosine → sem≈0.5, zero lexical
+/// overlap). Without this floor, an unrelated query ("my email") dumps recent
+/// activity ("control[claude]…", today's deploy chatter) as if it were the answer.
+/// 0.5 demands genuine semantic/lexical signal above the recency baseline; below
+/// it we honestly say "nothing on that" instead of regurgitating noise.
+const MIN_RECALL_RELEVANCE: f32 = 0.5;
 
 /// Map a small, unambiguous set of relative time phrases to a unix-ms instant
 /// (for bi-temporal `recall_as_of`). Deliberately bounded + deterministic — no
@@ -86,6 +94,19 @@ pub fn format_recall(query: &str, hits: &[Observation]) -> String {
     out
 }
 
+/// Keep only hits that clear [`MIN_RECALL_RELEVANCE`] (drop recency-only noise),
+/// then cap to `RECALL_LIMIT`. Pure + tested. An empty result becomes the honest
+/// "nothing on that" answer in [`format_recall`] rather than a dump of the
+/// nearest unrelated observations.
+fn relevant_hits(scored: Vec<(Observation, f32)>) -> Vec<Observation> {
+    scored
+        .into_iter()
+        .filter(|(_, score)| *score >= MIN_RECALL_RELEVANCE)
+        .take(RECALL_LIMIT)
+        .map(|(o, _)| o)
+        .collect()
+}
+
 /// Run a recall command end-to-end: parse the spec, open the signed-in user's
 /// local store, recall (bi-temporal when a time scope parses, else hybrid), and
 /// format. Returns the queue triple `(status, result, confirm_prompt)` like the
@@ -127,7 +148,7 @@ pub fn run_recall(goal_json: &str, now_ms: u64) -> (&'static str, Option<String>
         // `RECALL_LIMIT` still caps the count after the budget trims by tokens.
         None => store
             .recall_hybrid_with_budget(&spec.query, &ws, crate::memory_tools::RECALL_TOKEN_BUDGET)
-            .map(|v| v.into_iter().take(RECALL_LIMIT).map(|(o, _)| o).collect())
+            .map(relevant_hits)
             .unwrap_or_default(),
     };
     ("done", Some(format_recall(&spec.query, &hits)), None)
@@ -205,6 +226,26 @@ mod tests {
         let out = format_recall("unicorns", &[]);
         assert!(out.contains("don't have anything"));
         assert!(out.contains("unicorns"));
+    }
+
+    #[test]
+    fn relevant_hits_drops_recency_only_noise() {
+        // Recency-only matches for an unrelated query score below the floor (~0.42)
+        // → dropped → format_recall then gives the honest "nothing on that" rather
+        // than dumping junk like "control[claude]" / "deploys on vercel".
+        let noise = vec![
+            (obs("control[claude] deploy on vercel"), 0.42),
+            (obs("screen_observe — what's on my screen"), 0.40),
+        ];
+        assert!(relevant_hits(noise).is_empty());
+        // A genuine semantic/lexical match clears the floor and is kept.
+        let mix = vec![
+            (obs("my email is khai@example.com"), 0.72),
+            (obs("recent unrelated activity"), 0.41),
+        ];
+        let kept = relevant_hits(mix);
+        assert_eq!(kept.len(), 1);
+        assert!(kept[0].body.contains("khai@example.com"));
     }
 
     #[test]

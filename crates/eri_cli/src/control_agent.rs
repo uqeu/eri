@@ -907,9 +907,16 @@ async fn run_coding_tool(
                 }
             }
             Err(e) => {
+                // Don't just report "error" — hand the model eri's recovery brain:
+                // look at the screen, diagnose the blocker (frozen / popup / still
+                // working), recover like a person — or STOP and hand back if it's an
+                // API limit or a login prompt eri can't resolve itself.
                 out.log.push(format!("{} failed: {e}", coding.describe()));
-                out.results
-                    .push(tool_result(id, &format!("error: {e}"), true));
+                out.results.push(tool_result(
+                    id,
+                    &crate::coding_agent::recovery_directive(&e.to_string()),
+                    true,
+                ));
                 return;
             }
         }

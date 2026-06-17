@@ -35,6 +35,7 @@ mod build_turn;
 mod chat;
 mod checkpoint;
 mod client;
+mod coding_agent;
 mod commands;
 mod composio;
 mod coding_control;
