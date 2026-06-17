@@ -179,6 +179,20 @@ final class OverlayController {
     }
 }
 
+/// A transparent titlebar drag handle. With `.fullSizeContentView` the WKWebView
+/// covers the titlebar and eats mouse events, so `isMovableByWindowBackground`
+/// alone can't drag the window. This view sits over the NON-interactive center-top
+/// strip and returns `mouseDownCanMoveWindow = true` — the authoritative AppKit way
+/// to make a custom-chrome window draggable without blocking the traffic lights
+/// (left) or the web header buttons (right).
+final class WindowDragView: NSView {
+    override var mouseDownCanMoveWindow: Bool { true }
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        // Grab the event in our frame so the drag works; outside, pass through.
+        return bounds.contains(convert(point, from: superview)) ? self : nil
+    }
+}
+
 final class AgentManagerController: NSObject, NSWindowDelegate, WKNavigationDelegate {
     private let args: LaunchArgs
     private let bridge = Bridge()
@@ -271,6 +285,19 @@ final class AgentManagerController: NSObject, NSWindowDelegate, WKNavigationDele
         webView.frame = glass.bounds
         webView.autoresizingMask = [.width, .height]
         glass.addSubview(webView)
+
+        // Native draggable titlebar strip over the center-top (between the traffic
+        // lights and the web header's right-side buttons), since the WKWebView
+        // covers the transparent titlebar under fullSizeContentView.
+        let drag = WindowDragView()
+        drag.translatesAutoresizingMaskIntoConstraints = false
+        glass.addSubview(drag)
+        NSLayoutConstraint.activate([
+            drag.topAnchor.constraint(equalTo: glass.topAnchor),
+            drag.leadingAnchor.constraint(equalTo: glass.leadingAnchor, constant: 92),
+            drag.trailingAnchor.constraint(equalTo: glass.trailingAnchor, constant: -300),
+            drag.heightAnchor.constraint(equalToConstant: 42),
+        ])
 
         window.title = "Eri"
         window.titleVisibility = .hidden
