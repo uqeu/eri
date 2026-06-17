@@ -38,6 +38,12 @@ import {
   webSearch,
   type WebSearchDeps,
 } from "@/lib/agent/web_search";
+import {
+  WEATHER_TOOL,
+  formatWeather,
+  getWeather,
+  type WeatherDeps,
+} from "@/lib/agent/weather";
 import type { CommandKind } from "@/lib/commands/queue";
 import { featureLocked } from "@/lib/feature_gate";
 import { isAffirmation, isNegation } from "@/lib/imessage/affirm";
@@ -139,6 +145,8 @@ export interface InboundDeps {
   connectors: ConnectorDeps;
   /** In-cloud web search so eri can answer real-time/factual questions. */
   webSearch: WebSearchDeps;
+  /** In-cloud real-time weather (Open-Meteo) — accurate, unlike search snippets. */
+  weather: WeatherDeps;
   /** Answer about a photo the user sent (Claude vision). Single-shot, no tools. */
   runVisionTurn(input: { imageUrl: string; prompt: string; system: string }): Promise<AgentTurnResultLike>;
   /** Approve the user's latest awaiting-confirm command; returns its goal or null. */
@@ -260,6 +268,7 @@ export async function handleInbound(
         CHECK_EMAIL_TOOL,
         CHECK_CALENDAR_TOOL,
         WEB_SEARCH_TOOL,
+        WEATHER_TOOL,
       ],
       onToolCall: async (name, toolInput) => {
         // In-cloud tools run regardless of the single-dispatch guard (they don't
@@ -285,6 +294,11 @@ export async function handleInbound(
           const q = (toolInput as { query?: unknown })?.query;
           if (typeof q !== "string" || !q.trim()) return "No search query was provided.";
           return formatResults(await webSearch(q.trim(), deps.webSearch));
+        }
+        if (name === "get_weather") {
+          const city = (toolInput as { city?: unknown })?.city;
+          if (typeof city !== "string" || !city.trim()) return "No city was provided.";
+          return formatWeather(await getWeather(city.trim(), deps.weather));
         }
         if (dispatched) return "Already dispatched one task for this message; wait for it to finish.";
         // One enqueue path so the cap + single-dispatch guard live in one place;
