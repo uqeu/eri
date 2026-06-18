@@ -329,6 +329,17 @@ fn bridge(app: AppHandle, message: Value) -> Result<(), String> {
 
 /// Find the loopback actuation server binary (built by the eri app build).
 fn control_server_path() -> Option<std::path::PathBuf> {
+    // PREFER the copy bundled next to this executable (inside Eri.app/Contents/MacOS):
+    // sharing the app bundle means it shares the app's Screen-Recording / Accessibility
+    // TCC grant, so granting "Eri" once covers the helper too.
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let bundled = dir.join("eri_control_server");
+            if bundled.exists() {
+                return Some(bundled);
+            }
+        }
+    }
     if let Ok(p) = std::env::var("ERI_CONTROL_SERVER") {
         let pb = std::path::PathBuf::from(p);
         if pb.exists() {

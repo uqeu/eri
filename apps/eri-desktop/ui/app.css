@@ -7,10 +7,12 @@
 :root {
   --glass-opacity: 0.62;                 /* tuned live by the transparency slider */
   --base: 23 23 27;                      /* near-black, faint blue */
-  --surface: rgb(var(--base) / calc(var(--glass-opacity) * 0.92));
-  --panel:   rgb(var(--base) / var(--glass-opacity));
-  --raised:  rgb(54 54 60 / calc(var(--glass-opacity) * 1.15));
-  --input:   rgb(var(--base) / calc(var(--glass-opacity) * 0.7));
+  /* Frosted glass keeps a MINIMUM backing (max floor) so text stays readable even
+     at full transparency — clear glass would make the text vanish. */
+  --surface: rgb(var(--base) / max(0.16, calc(var(--glass-opacity) * 0.92)));
+  --panel:   rgb(var(--base) / max(0.18, var(--glass-opacity)));
+  --raised:  rgb(54 54 60 / calc(var(--glass-opacity) * 1.15 + 0.08));
+  --input:   rgb(var(--base) / calc(var(--glass-opacity) * 0.7 + 0.05));
 
   --line: rgba(255, 255, 255, 0.22);
   --line-soft: rgba(255, 255, 255, 0.10);
@@ -35,9 +37,10 @@
    surface is a soft GREY (not stark white) and rides the transparency slider. */
 :root { --card-border: rgba(255, 255, 255, 0.16); }
 body[data-theme="light"] {
-  --glass-base: 233 233 238;          /* soft grey, not pure white */
-  --surface: rgb(var(--glass-base) / calc(var(--glass-opacity) * 1.05));
-  --panel: rgb(var(--glass-base) / calc(var(--glass-opacity) * 1.15));
+  --glass-base: 236 236 240;          /* soft grey, not pure white */
+  /* Light text is DARK, so it needs a stronger light backing — higher floor. */
+  --surface: rgb(var(--glass-base) / max(0.6, calc(var(--glass-opacity) * 1.05)));
+  --panel: rgb(var(--glass-base) / max(0.66, calc(var(--glass-opacity) * 1.15)));
   --raised: rgba(0, 0, 0, 0.06);
   --input: rgba(0, 0, 0, 0.045);
   --line: rgba(0, 0, 0, 0.12);
@@ -136,6 +139,7 @@ body[data-state="answered"] .panel { display: flex; }
   font-size: 14px; line-height: 1.62; color: var(--text);
   white-space: normal; word-break: break-word;
 }
+.answer:empty { display: none; } /* no empty box before the reply lands */
 /* Typing indicator — a cute rotating word + bouncing dots, instead of the
    robotic "Thinking…". eri's version of Claude's whimsical status words. */
 .typing { display: flex; align-items: center; gap: 9px; color: var(--muted); font-size: 14px; }
@@ -209,3 +213,19 @@ body[data-min="1"] .card:hover { background: var(--raised); }
 .answer strong { font-weight: 650; color: var(--text); }
 .answer em { font-style: italic; }
 .answer code { font-family: "SF Mono", "JetBrains Mono", Menlo, monospace; font-size: 12.5px; padding: 1px 5px; border-radius: 5px; background: rgba(127,127,127,0.18); }
+
+/* Text halo: keeps eri's text readable over a translucent/frosted backing at any
+   transparency. Dark theme = light text + dark halo; light theme = dark text + light halo. */
+body[data-theme="dark"] .answer,
+body[data-theme="dark"] .q,
+body[data-theme="dark"] .set-name,
+body[data-theme="dark"] .set-hint,
+body[data-theme="dark"] .msg-user,
+body[data-theme="dark"] .tword,
+body[data-theme="dark"] .q::placeholder { text-shadow: 0 1px 3px rgba(0, 0, 0, 0.55); }
+body[data-theme="light"] .answer,
+body[data-theme="light"] .q,
+body[data-theme="light"] .set-name,
+body[data-theme="light"] .set-hint,
+body[data-theme="light"] .msg-user,
+body[data-theme="light"] .tword { text-shadow: 0 1px 2px rgba(255, 255, 255, 0.7); }

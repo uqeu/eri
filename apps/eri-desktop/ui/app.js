@@ -9,7 +9,7 @@ const listen = T?.event?.listen;
 
 const $ = (id) => document.getElementById(id);
 const body = document.body;
-const answerEl = $("answer");
+let currentAnswerEl = null; // the answer element for the active turn (created per ask)
 const statusEl = $("status");
 const qEl = $("q");
 
@@ -148,7 +148,7 @@ function onStreamLine(line) {
   }
   if (!out) return;
   answerRaw += (answerRaw ? "\n" : "") + out;
-  answerEl.innerHTML = renderMarkdown(answerRaw);
+  if (currentAnswerEl) currentAnswerEl.innerHTML = renderMarkdown(answerRaw);
   const thread = document.getElementById("thread");
   thread.scrollTop = thread.scrollHeight;
   fit(); // grow the window to fit the streaming answer (rAF-debounced)
@@ -160,25 +160,28 @@ function ask() {
   currentTurn += 1;
   gotStream = false;
   answerRaw = "";
-  answerEl.textContent = "";
-  const userEl = $("msgUser");
-  userEl.textContent = text;
-  userEl.hidden = false;
+  // Append a new turn (your bubble + a fresh answer) to the scrollable log.
+  const thread = $("thread"), typing = $("typing");
+  const u = document.createElement("div"); u.className = "msg-user"; u.textContent = text;
+  const a = document.createElement("div"); a.className = "answer";
+  thread.insertBefore(u, typing);
+  thread.insertBefore(a, typing);
+  currentAnswerEl = a;
   resetStreamFilter();
   body.dataset.state = "answering";
   statusEl.textContent = "";
   showTyping();
   fit();
+  setTimeout(fit, 70); // re-fit once the new turn lays out (kills the void)
   bridge("askEri", { intent: text, turn: currentTurn });
   qEl.value = "";
 }
 
 function newChat() {
   answerRaw = "";
-  answerEl.textContent = "";
-  const userEl = $("msgUser");
-  userEl.textContent = "";
-  userEl.hidden = true;
+  currentAnswerEl = null;
+  const thread = $("thread");
+  thread.querySelectorAll(".msg-user, .answer").forEach((el) => el.remove());
   body.dataset.state = "resting";
   statusEl.textContent = "";
   hideTyping();
@@ -297,7 +300,7 @@ function init() {
     listen("eri-stream", (e) => {
       const p = e.payload || {};
       if (p.turn !== currentTurn) return; // ignore stale events from a previous turn
-      if (!gotStream) { answerRaw = ""; answerEl.textContent = ""; gotStream = true; statusEl.textContent = ""; hideTyping(); }
+      if (!gotStream) { answerRaw = ""; if (currentAnswerEl) currentAnswerEl.textContent = ""; gotStream = true; statusEl.textContent = ""; hideTyping(); }
       onStreamLine(p.line);
     });
     listen("eri-result", (e) => {
@@ -305,7 +308,7 @@ function init() {
       if (p.turn !== currentTurn) return; // a late result from an old turn can't overwrite the new one
       hideTyping();
       statusEl.textContent = p.status === "error" ? "couldn't reach my brain — try again" : "";
-      if (!gotStream) answerEl.textContent = "Hmm, nothing came back. Mind trying that again?";
+      if (!gotStream && currentAnswerEl) currentAnswerEl.textContent = "Hmm, nothing came back. Mind trying that again?";
       body.dataset.state = "answered";
       fit();
     });
