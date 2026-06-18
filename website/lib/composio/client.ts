@@ -24,20 +24,29 @@ export interface ComposioConnection {
   redirectUrl: string;
 }
 
-/** The relevant subset of a Composio catalog item (`toolkits.get({})`). Internal
- *  — mapped to `ToolkitInfo` before leaving the seam. */
+/** The relevant subset of a Composio catalog item from the REST toolkits list.
+ *  Internal — mapped to `ToolkitInfo` before leaving the seam. */
 interface RawToolkit {
   slug: string;
   name: string;
-  isNoAuth?: boolean;
+  no_auth?: boolean;
+  auth_schemes?: string[];
+  composio_managed_auth_schemes?: string[];
   meta?: {
     logo?: string;
     description?: string;
-    categories?: Array<{ slug: string; name: string }>;
+    categories?: Array<{ slug?: string; name: string }>;
   };
 }
 
-/** One app in Composio's catalog (the dynamic connector list — ~900 apps). The
+/** What it takes for a user to connect an app:
+ *  - `managed`     — Composio's OAuth: one click, zero admin setup.
+ *  - `api_key`     — the user pastes their own API key; no admin OAuth app.
+ *  - `custom_oauth`— needs an OAuth app configured in the Composio dashboard.
+ *  - `none`        — no auth required. */
+export type AuthKind = "managed" | "api_key" | "custom_oauth" | "none";
+
+/** One app in Composio's catalog (the dynamic connector list — ~1000 apps). The
  *  per-user connection status is NOT here; it's overlaid from our own DB. */
 export interface ToolkitInfo {
   slug: string;
@@ -45,6 +54,18 @@ export interface ToolkitInfo {
   logo?: string;
   description?: string;
   category?: string;
+  authKind: AuthKind;
+}
+
+/** Classify a catalog item by what connecting it requires. */
+function classifyAuth(t: RawToolkit): AuthKind {
+  if (t.no_auth) return "none";
+  if ((t.composio_managed_auth_schemes ?? []).length > 0) return "managed";
+  const schemes = (t.auth_schemes ?? []).map((s) => s.toUpperCase());
+  if (schemes.some((s) => s.includes("API_KEY") || s.includes("BEARER") || s.includes("TOKEN"))) {
+    return "api_key";
+  }
+  return "custom_oauth";
 }
 
 export interface ComposioClient {
@@ -94,21 +115,36 @@ function composio(): Composio {
  */
 export class ComposioApiClient implements ComposioClient {
   async listToolkits(): Promise<ToolkitInfo[]> {
-    // The whole catalog. The SDK returns an array (or a paginated wrapper across
-    // versions) — handle both, fail-soft to empty.
-    const res = (await composio().toolkits.get({})) as unknown;
-    const items: RawToolkit[] = Array.isArray(res)
-      ? (res as RawToolkit[])
-      : (((res as { items?: RawToolkit[] }).items ?? []) as RawToolkit[]);
-    return items
-      .filter((t) => t.slug && t.name && !t.isNoAuth)
-      .map((t) => ({
-        slug: t.slug,
-        name: t.name,
-        logo: t.meta?.logo,
-        description: t.meta?.description,
-        category: t.meta?.categories?.[0]?.name,
-      }));
+    // Read the catalog from Composio's REST list endpoint directly, paginating
+    // to completion. WHY not the SDK's `toolkits.get({})`: it strips the
+    // auth-scheme fields we need for the "what setup this takes" badge AND
+    // returns only the first page. The SDK still owns connect/status, where it
+    // adds value. Fail-soft: any page error stops with what we have.
+    const key = requireEnv("COMPOSIO_API_KEY");
+    const out: ToolkitInfo[] = [];
+    let cursor: string | null = null;
+    for (let page = 0; page < 25; page++) {
+      const url = new URL("https://backend.composio.dev/api/v3/toolkits");
+      url.searchParams.set("limit", "250");
+      if (cursor) url.searchParams.set("cursor", cursor);
+      const res = await fetch(url, { headers: { "x-api-key": key } });
+      if (!res.ok) break;
+      const body = (await res.json()) as { items?: RawToolkit[]; next_cursor?: string | null };
+      for (const t of body.items ?? []) {
+        if (!t.slug || !t.name) continue;
+        out.push({
+          slug: t.slug,
+          name: t.name,
+          logo: t.meta?.logo,
+          description: t.meta?.description,
+          category: t.meta?.categories?.[0]?.name,
+          authKind: classifyAuth(t),
+        });
+      }
+      cursor = body.next_cursor ?? null;
+      if (!cursor) break;
+    }
+    return out;
   }
 
   async initiateConnection(userId: string, toolkit: string): Promise<ComposioConnection> {
