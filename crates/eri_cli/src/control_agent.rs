@@ -864,6 +864,42 @@ pub(crate) fn mcp_is_outward(tool_name: &str, input: &Value) -> bool {
     OUTWARD.iter().any(|verb| hay.contains(verb))
 }
 
+/// Where a goal can run — the cloud-vs-local routing seam (Phase 5). API-able
+/// work runs server-side and so works **with the computer off** (the phone/cloud
+/// path, via the same connectors); UI work needs the local machine's screen.
+/// `Mixed` needs both (e.g. screenshot a chart locally, then email it via API).
+/// Pure + heuristic; the router / cloud path consults it to decide "can eri do
+/// this without the computer on?". Conservative: unknown → `Local` (don't
+/// promise computer-off work we can't guarantee).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Reach {
+    Api,
+    Local,
+    Mixed,
+}
+
+pub(crate) fn classify_reach(goal: &str) -> Reach {
+    let g = goal.to_lowercase();
+    const API: &[&str] = &[
+        "email", "gmail", "inbox", "calendar", "schedule", "meeting", "invite", "github",
+        "pull request", " pr ", "issue", "slack", "message", "dm ", "notion", "reply", "send",
+        "draft", "linear", "ticket", "spreadsheet", "sheet", "drive", "event", "post ",
+    ];
+    // Concrete screen cues only — avoid broad phrases like "what's on" that also
+    // match "what's on my calendar" (which is API, not local).
+    const LOCAL: &[&str] = &[
+        "screen", "window", "click", "scroll", "this app", "highlight", "the button",
+        "type into", "drag", "cursor", "desktop", "finder", "textedit", "menu bar", "this page",
+    ];
+    let api = API.iter().any(|k| g.contains(k));
+    let local = LOCAL.iter().any(|k| g.contains(k));
+    match (api, local) {
+        (true, true) => Reach::Mixed,
+        (true, false) => Reach::Api,
+        _ => Reach::Local,
+    }
+}
+
 /// Outcome of executing one turn's tool calls.
 #[derive(Debug, Default)]
 pub struct StepOutcome {
@@ -2160,6 +2196,13 @@ pub async fn run_control_agent(
     // Learn-do loop: record what the user asked so future sessions anticipate.
     remember_goal(goal, &workspace);
 
+    // Cloud-vs-local routing signal (Phase 5): whether this goal could run
+    // server-side (computer-off) or needs the local screen. Diagnostic for now;
+    // the phone/cloud path consults the same `classify_reach` seam.
+    if std::env::var_os("ERI_DEBUG").is_some() {
+        eprintln!("[eri] reach={:?} (Api = runnable with the computer off)", classify_reach(goal));
+    }
+
     // API tier: load connector (MCP / Composio Tool Router) tools so this one
     // agentic run can stitch API actions with computer-control ("read this email
     // → screenshot a chart → reply"). Token-frugal — the composio server is a
@@ -3297,6 +3340,22 @@ mod tests {
             *stub.calls.lock().unwrap(),
             vec!["composio__GMAIL_FETCH_EMAILS".to_string()]
         );
+    }
+
+    #[test]
+    fn classify_reach_splits_api_local_and_mixed() {
+        // API-able → runnable with the computer off.
+        assert_eq!(classify_reach("reply to my latest email"), Reach::Api);
+        assert_eq!(classify_reach("what's on my calendar tomorrow"), Reach::Api);
+        // Pure screen work → needs the local machine.
+        assert_eq!(classify_reach("scroll down and click the blue button"), Reach::Local);
+        // Both → mixed (grab locally, send via API).
+        assert_eq!(
+            classify_reach("grab the chart on this screen and email it to Sam"),
+            Reach::Mixed
+        );
+        // Unknown → conservative Local (don't promise computer-off).
+        assert_eq!(classify_reach("do the thing"), Reach::Local);
     }
 
     #[tokio::test]
