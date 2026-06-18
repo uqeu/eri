@@ -21,6 +21,7 @@ const H_SETTINGS = 210;
 let settingsOpen = false;
 let currentTurn = 0;   // every ask() bumps this; stale events from old turns are ignored
 let gotStream = false; // did THIS turn stream any real text?
+let answerRaw = "";    // raw markdown text accumulated for the current answer
 
 // eri's whimsical loading words (à la Claude's "flibbertigibbeting") — never "Thinking".
 const ERI_WORDS = [
@@ -84,6 +85,43 @@ function cleanLine(s) {
     .trim();
 }
 
+function esc(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+// Minimal, SAFE markdown → HTML (escape first, then bold/italic/code/links inline;
+// headings, bullet + numbered lists, and paragraphs block-level). So eri's replies
+// render pretty instead of showing raw ** and 1. markers.
+function inlineMd(s) {
+  return esc(s)
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/(^|[^*])\*([^*\s][^*]*)\*/g, "$1<em>$2</em>")
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, "$1");
+}
+function renderMarkdown(src) {
+  const lines = src.split("\n");
+  let html = "", list = null;
+  const closeList = () => { if (list) { html += `</${list}>`; list = null; } };
+  for (const raw of lines) {
+    const line = raw.replace(/\s+$/, "");
+    const t = line.trim();
+    if (!t) { closeList(); continue; }
+    let m;
+    if ((m = t.match(/^#{1,4}\s+(.*)/))) { closeList(); html += `<h4>${inlineMd(m[1])}</h4>`; continue; }
+    if ((m = t.match(/^(?:[-*•]|\d+[.)])\s+(.*)/))) {
+      const kind = /^\d/.test(t) ? "ol" : "ul";
+      if (list && list !== kind) closeList();
+      if (!list) { html += `<${kind}>`; list = kind; }
+      html += `<li>${inlineMd(m[1])}</li>`;
+      continue;
+    }
+    closeList();
+    html += `<p>${inlineMd(t)}</p>`;
+  }
+  closeList();
+  return html;
+}
+
 function onStreamLine(line) {
   const t = (line || "").trim();
   if (t.includes("<tool_call") || t.startsWith("<tool_response")) { inTool = true; return; }
@@ -109,7 +147,8 @@ function onStreamLine(line) {
     out = cleanLine(t); // model text — strip any mid-line markers/dry-run
   }
   if (!out) return;
-  answerEl.textContent += (answerEl.textContent ? " " : "") + out;
+  answerRaw += (answerRaw ? "\n" : "") + out;
+  answerEl.innerHTML = renderMarkdown(answerRaw);
   const thread = document.getElementById("thread");
   thread.scrollTop = thread.scrollHeight;
   fit(); // grow the window to fit the streaming answer (rAF-debounced)
@@ -120,6 +159,7 @@ function ask() {
   if (!text) return;
   currentTurn += 1;
   gotStream = false;
+  answerRaw = "";
   answerEl.textContent = "";
   const userEl = $("msgUser");
   userEl.textContent = text;
@@ -134,6 +174,7 @@ function ask() {
 }
 
 function newChat() {
+  answerRaw = "";
   answerEl.textContent = "";
   const userEl = $("msgUser");
   userEl.textContent = "";
@@ -165,11 +206,20 @@ function restore() {
 
 /* ---------------- transparency + toggles ---------------- */
 function applyTransparency(pct) {
-  const p = Math.max(0, Math.min(92, Number(pct) || 0));
-  const opacity = Math.max(0.08, (100 - p) / 100);
+  const p = Math.max(0, Math.min(100, Number(pct) || 0));
+  // 100% → opacity 0 = the card BACKGROUND fully vanishes; only text, the accent
+  // button, and the native blur remain. No floor.
+  const opacity = (100 - p) / 100;
   document.documentElement.style.setProperty("--glass-opacity", opacity.toFixed(3));
   $("transparencyVal").textContent = p + "%";
   if (Number($("transparency").value) !== p) $("transparency").value = p;
+}
+
+function applyBlur(px) {
+  const v = Math.max(0, Math.min(40, Number(px) || 0));
+  document.documentElement.style.setProperty("--blur", v + "px");
+  const el = $("blurVal"); if (el) el.textContent = v + "px";
+  const range = $("blur"); if (range && Number(range.value) !== v) range.value = v;
 }
 
 function setToggle(el, on) { el.setAttribute("aria-checked", on ? "true" : "false"); }
@@ -220,6 +270,7 @@ function applyFont(id) {
 function applyTheme(t) {
   body.dataset.theme = t === "light" ? "light" : "dark";
   document.querySelectorAll("#themeSeg .seg-btn").forEach((b) => b.classList.toggle("is-on", b.dataset.theme === body.dataset.theme));
+  bridge("setVibrancy", { light: body.dataset.theme === "light" }); // swap native glass material
 }
 
 function initAppearance() {
@@ -246,7 +297,7 @@ function init() {
     listen("eri-stream", (e) => {
       const p = e.payload || {};
       if (p.turn !== currentTurn) return; // ignore stale events from a previous turn
-      if (!gotStream) { answerEl.textContent = ""; gotStream = true; statusEl.textContent = ""; hideTyping(); }
+      if (!gotStream) { answerRaw = ""; answerEl.textContent = ""; gotStream = true; statusEl.textContent = ""; hideTyping(); }
       onStreamLine(p.line);
     });
     listen("eri-result", (e) => {

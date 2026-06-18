@@ -137,6 +137,7 @@ fn spawn_stream(app: AppHandle, ui_command: String, args: Vec<String>, turn: i64
 /// (live web search), personal recall → `eri memory recall`, everything else →
 /// the warm chat brain. This is why "weather in Toronto" now works.
 enum Query {
+    Vision,
     Research,
     Memory,
     General,
@@ -144,6 +145,16 @@ enum Query {
 
 fn classify_query(text: &str) -> Query {
     let t = text.to_lowercase();
+    // Screen/vision FIRST (before web — "what's on the screen" must look, not search).
+    const VISION: &[&str] = &[
+        "my screen", "the screen", "on screen", "on the screen", "read the screen",
+        "what's on", "whats on", "what is on", "what am i looking", "what do you see",
+        "see my screen", "screen right now", "look at my", "describe my screen",
+        "analyze my screen", "read this", "what's this", "whats this on",
+    ];
+    if VISION.iter().any(|k| t.contains(k)) {
+        return Query::Vision;
+    }
     const MEM: &[&str] = &[
         "remember when", "did i ", "what did i", "when did i", "do i like",
         "my favorite", "what's my", "whats my", "what do i", "have i ",
@@ -187,6 +198,19 @@ fn bridge(app: AppHandle, message: Value) -> Result<(), String> {
                 // Floor at the bar height (56) so the resting card can be tight —
                 // no empty glass strip below it.
                 let _ = w.set_size(tauri::LogicalSize::new(width.max(360.0), height.max(56.0)));
+            }
+            ack("ok");
+        }
+        "setVibrancy" => {
+            // Swap the native glass material with the theme so light mode is a
+            // LIGHT blur (not the dark HUD bleeding through) — this makes
+            // transparency actually work in light mode.
+            // Material is applied ONCE at setup (adaptive Popover). Here we only
+            // flip the window appearance so the same material renders light/dark —
+            // NO re-apply (re-applying was what broke the rounded corners).
+            let light = bool_field(&message, "light");
+            if let Some(w) = &window {
+                let _ = w.set_theme(Some(if light { tauri::Theme::Light } else { tauri::Theme::Dark }));
             }
             ack("ok");
         }
@@ -265,6 +289,8 @@ fn bridge(app: AppHandle, message: Value) -> Result<(), String> {
             } else {
                 // Smart routing so the desktop matches the phone brain.
                 match classify_query(&intent) {
+                    // "read my screen" → eri's control `look` tool (capture + analyze).
+                    Query::Vision => spawn_stream(app, "screenshot".into(), vec!["control".into(), "--live".into(), "--yes".into(), intent], turn),
                     Query::Research => spawn_stream(app, command.clone(), vec!["research".into(), intent], turn),
                     Query::Memory => spawn_stream(app, command.clone(), vec!["memory".into(), "recall".into(), intent], turn),
                     Query::General => {
@@ -441,9 +467,12 @@ fn apply_glass(window: &WebviewWindow) {
     {
         // Real macOS glass — the HUD material is the dark, strongly-blurred
         // translucent surface (the Cluely/Pluely look), with rounded corners.
+        // Popover is appearance-ADAPTIVE (dark frosted in Dark, light frosted in
+        // Light) and rounds cleanly. Applied ONCE here; theme changes only flip
+        // the window appearance (no re-apply, so the rounded corners survive).
         let _ = apply_vibrancy(
             window,
-            NSVisualEffectMaterial::HudWindow,
+            NSVisualEffectMaterial::Popover,
             Some(NSVisualEffectState::Active),
             Some(14.0),
         );

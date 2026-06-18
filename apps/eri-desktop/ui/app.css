@@ -30,22 +30,22 @@
   font-family: var(--ui-font);
 }
 
-/* Light appearance. The native glass behind is a DARK HUD material, so a
-   see-through light card turns muddy — light mode is therefore a clean,
-   near-OPAQUE light surface (not glassy), independent of the transparency
-   slider, with a dark border/shadow so the outline is visible on white. */
+/* Light appearance. The native material is switched to a LIGHT one (setVibrancy
+   in Rust) when Light is chosen, so transparency works in light mode too. The
+   surface is a soft GREY (not stark white) and rides the transparency slider. */
 :root { --card-border: rgba(255, 255, 255, 0.16); }
 body[data-theme="light"] {
-  --surface: rgb(247 247 249 / 0.985);
-  --panel: rgb(252 252 254 / 0.99);
-  --raised: rgba(0, 0, 0, 0.055);
-  --input: rgba(0, 0, 0, 0.04);
+  --glass-base: 233 233 238;          /* soft grey, not pure white */
+  --surface: rgb(var(--glass-base) / calc(var(--glass-opacity) * 1.05));
+  --panel: rgb(var(--glass-base) / calc(var(--glass-opacity) * 1.15));
+  --raised: rgba(0, 0, 0, 0.06);
+  --input: rgba(0, 0, 0, 0.045);
   --line: rgba(0, 0, 0, 0.12);
   --line-soft: rgba(0, 0, 0, 0.07);
-  --text: #17171b;
+  --text: #1a1a1f;
   --muted: #5c5c63;
   --dim: #8a8a90;
-  --card-border: rgba(0, 0, 0, 0.12);
+  --card-border: rgba(0, 0, 0, 0.1);
 }
 body[data-theme="light"] .card {
   box-shadow: 0 0 0 0.5px rgba(0,0,0,0.08), inset 0 1px 0 0 rgba(255,255,255,0.9), 0 18px 50px rgba(0,0,0,0.28);
@@ -131,10 +131,10 @@ body[data-state="answered"] .panel { display: flex; }
   color: var(--text); font-size: 13px; line-height: 1.5; word-break: break-word;
 }
 
-/* eri's reply — clean plain text, left. */
+/* eri's reply — rendered markdown, left-aligned. */
 .answer {
   font-size: 14px; line-height: 1.62; color: var(--text);
-  white-space: pre-wrap; word-break: break-word;
+  white-space: normal; word-break: break-word;
 }
 /* Typing indicator — a cute rotating word + bouncing dots, instead of the
    robotic "Thinking…". eri's version of Claude's whimsical status words. */
@@ -199,3 +199,13 @@ body[data-min="1"] .bar { justify-content: center; gap: 0; padding: 0; height: 4
 body[data-min="1"] .card { border-radius: 999px; }
 body[data-min="1"] .brand { padding: 0; font-size: 17px; }
 body[data-min="1"] .card:hover { background: var(--raised); }
+
+/* ---------- rendered markdown in eri's answers ---------- */
+.answer p { margin: 0 0 8px; }
+.answer p:last-child { margin-bottom: 0; }
+.answer h4 { margin: 10px 0 6px; font-size: 14.5px; font-weight: 650; }
+.answer ul, .answer ol { margin: 4px 0 8px; padding-left: 20px; }
+.answer li { margin: 2px 0; }
+.answer strong { font-weight: 650; color: var(--text); }
+.answer em { font-style: italic; }
+.answer code { font-family: "SF Mono", "JetBrains Mono", Menlo, monospace; font-size: 12.5px; padding: 1px 5px; border-radius: 5px; background: rgba(127,127,127,0.18); }
