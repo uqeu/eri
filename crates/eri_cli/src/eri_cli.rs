@@ -1497,14 +1497,16 @@ async fn run_control(
         }
     }
     if !summary.trim().is_empty() {
+        // `[eri-result]` is a marker line: the app switches to "answer mode" and
+        // renders everything after it (until end) as eri's final reply — distinct
+        // from the [eri-status] chips that streamed during the run.
+        println!("\n[eri-result]");
         if actuated {
-            println!("\n[eri] {summary}");
+            println!("{summary}");
         } else {
             // Dry-run actuated nothing — never present the model's summary as if
             // the work was done. Frame it as the plan it actually is.
-            println!(
-                "\n[eri] dry-run — nothing was actuated. This is what eri would do:\n{summary}"
-            );
+            println!("dry-run — nothing was actuated. This is what eri would do:\n{summary}");
         }
         // Hands-free: emit a short, TTS-ready line the app speaks back.
         if spoken {

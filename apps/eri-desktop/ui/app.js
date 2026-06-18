@@ -22,6 +22,7 @@ let settingsOpen = false;
 let currentTurn = 0;   // every ask() bumps this; stale events from old turns are ignored
 let gotStream = false; // did THIS turn stream any real text?
 let answerRaw = "";    // raw markdown text accumulated for the current answer
+let resultMode = false; // a control run has emitted [eri-result]; following lines are the final reply
 
 // eri's whimsical loading words (à la Claude's "flibbertigibbeting") — never "Thinking".
 const ERI_WORDS = [
@@ -45,6 +46,28 @@ function hideTyping() {
   if (t) t.hidden = true;
   clearInterval(_typeTimer);
   _typeTimer = null;
+}
+// Show eri's live action as the typing word — a single, replacing status chip
+// (e.g. "Opening Safari"), overriding the cute-word cycling during a control run.
+function setStatusChip(text) {
+  const t = document.getElementById("typing");
+  if (!t) return;
+  clearInterval(_typeTimer); _typeTimer = null; // stop cute-word cycling; show the real action
+  const w = document.getElementById("typingWord");
+  if (w) w.textContent = text;
+  t.hidden = false;
+  fit();
+}
+// Turn a raw control action ("open Safari", "type \"hi\"") into a friendly,
+// present-tense chip label.
+function prettyStatus(s) {
+  s = String(s).replace(/\s+/g, " ").trim();
+  if (/^look/i.test(s)) return "Looking at the screen";
+  const map = { open: "Opening", type: "Typing", click: "Clicking", scroll: "Scrolling",
+    quit: "Quitting", press: "Pressing", drag: "Dragging", switch: "Switching", wait: "Working" };
+  const m = s.match(/^(\w+)\b(.*)$/);
+  if (m && map[m[1].toLowerCase()]) return (map[m[1].toLowerCase()] + m[2]).trim();
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
 function bridge(command, payload = {}) {
@@ -127,26 +150,34 @@ function onStreamLine(line) {
   if (t.includes("<tool_call") || t.startsWith("<tool_response")) { inTool = true; return; }
   if (t === "</tool_call>" || t.startsWith("</tool_response>")) { inTool = false; return; }
   if (inTool) return;
+
+  // Control: a live status chip (single, replacing) for the action eri is doing.
+  if (t.startsWith("[eri-status]")) {
+    const s = t.replace(/^\[eri-status\]\s*/, "").trim();
+    if (s && !resultMode) setStatusChip(prettyStatus(s));
+    return;
+  }
+  // Control: the final-answer marker — everything after it is eri's reply, not
+  // the step-by-step it took to get there.
+  if (t.startsWith("[eri-result]")) {
+    resultMode = true; gotStream = true;
+    hideTyping(); statusEl.textContent = "";
+    answerRaw = t.replace(/^\[eri-result\]\s*/, "").trim();
+    if (currentAnswerEl) currentAnswerEl.innerHTML = renderMarkdown(answerRaw);
+    return;
+  }
+  // Plumbing the user never sees.
+  if (t.startsWith("[eri:speak]")) return;          // TTS-only line
+  if (t.startsWith("[eri]")) return;                // generic control trace (gated lines)
   if (/^\[tool\]|^done\s*—|turn done/.test(t)) return;
   if (/tokens:\s*\d/.test(t)) return;
-  if (/^\{.*\}$/.test(t)) return; // bare JSON tool args
+  if (/^\{.*\}$/.test(t)) return;                   // bare JSON tool args
 
-  let out;
-  if (t.startsWith("[eri]")) {
-    // Control loop lines. Keep the user-facing RESULT; drop status/trace/dry-run.
-    const rest = t.replace(/^\[eri\]\s*/, "");
-    const isResult = /^(done|opening|opened|launch(ed)?|clos(e|ed|ing)|sent|typed|clicked|switch(ed)?|playing|paused|muted)/i.test(rest);
-    if (!isResult || /dry[ -]?run/i.test(rest)) return;
-    out = rest
-      .replace(/^done\s*—\s*/i, "")
-      .replace(/\s*\(no model tokens used\)/gi, "")
-      .replace(/\s*\([^)]*\)\s*\.?\s*$/, "")
-      .trim();
-    if (out) out = out.charAt(0).toUpperCase() + out.slice(1).replace(/\.*$/, ".");
-  } else {
-    out = cleanLine(t); // model text — strip any mid-line markers/dry-run
-  }
+  // Model text: ask/research/vision stream it directly; control only after the
+  // result marker. Strip stray markers, then accumulate + render.
+  const out = cleanLine(t);
   if (!out) return;
+  if (!gotStream) { gotStream = true; statusEl.textContent = ""; hideTyping(); }
   answerRaw += (answerRaw ? "\n" : "") + out;
   if (currentAnswerEl) currentAnswerEl.innerHTML = renderMarkdown(answerRaw);
   const thread = document.getElementById("thread");
@@ -160,6 +191,7 @@ function ask() {
   currentTurn += 1;
   gotStream = false;
   answerRaw = "";
+  resultMode = false;
   // Append a new turn (your bubble + a fresh answer) to the scrollable log.
   const thread = $("thread"), typing = $("typing");
   const u = document.createElement("div"); u.className = "msg-user"; u.textContent = text;
@@ -179,6 +211,7 @@ function ask() {
 
 function newChat() {
   answerRaw = "";
+  resultMode = false;
   currentAnswerEl = null;
   const thread = $("thread");
   thread.querySelectorAll(".msg-user, .answer").forEach((el) => el.remove());
@@ -300,7 +333,9 @@ function init() {
     listen("eri-stream", (e) => {
       const p = e.payload || {};
       if (p.turn !== currentTurn) return; // ignore stale events from a previous turn
-      if (!gotStream) { answerRaw = ""; if (currentAnswerEl) currentAnswerEl.textContent = ""; gotStream = true; statusEl.textContent = ""; hideTyping(); }
+      // NOTE: don't clear/hide here — onStreamLine decides when real answer text
+      // (vs a [eri-status] chip) arrives, so the status chip persists during a
+      // control run instead of being hidden on the first status line.
       onStreamLine(p.line);
     });
     listen("eri-result", (e) => {

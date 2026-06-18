@@ -245,7 +245,12 @@ impl ControlTurn for ClaudeControlTurn {
             .await
             .map_err(crate::build_agent::friendly_proxy_error)?;
         let mut stdout = std::io::stdout();
-        let turn = crate::build_agent::consume_turn(response, &mut stdout, true).await?;
+        // Control is clean by default: do NOT stream the model's step-by-step
+        // reasoning to stdout. The app shows a status chip + final result, not
+        // the chain of thought (and the raw text would otherwise leak into the
+        // chat). `ERI_DEBUG` restores full narration for debugging.
+        let narrate = std::env::var_os("ERI_DEBUG").is_some();
+        let turn = crate::build_agent::consume_turn(response, &mut stdout, narrate).await?;
         let text = eri_agent::stream::assistant_text(&turn.content);
         Ok(TurnOutput {
             assistant_content: json!(turn.content),

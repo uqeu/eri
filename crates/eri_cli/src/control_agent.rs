@@ -1005,7 +1005,14 @@ first to see the current app and its actionable elements, then act, then \
 observe again to verify. Prefer clicking elements by their id over \
 coordinates. Use open_app to launch/focus apps. Keep steps minimal -- do not \
 take unnecessary actions. When the goal is achieved, call done with a one-line \
-summary. Be efficient: observe only when state may have changed.\n\n\
+summary. Be efficient: observe only when state may have changed.\n\
+TYPE CAREFULLY: a field may ALREADY contain text. Before typing, check what is \
+there (the snapshot/look shows it). Don't blindly insert at the cursor and mash \
+your text onto existing content. Decide deliberately: to replace it, select all \
+(cmd+a) then type; to add to it, position the cursor and add a separator \
+(space/newline) first; for a fresh start, open a new document/compose window. \
+The same applies to search bars, address bars, and reply boxes that may hold a \
+draft.\n\n\
 SAFETY (the harness enforces these in code; your job is to behave consistently \
 with them and narrate clearly):\n\
 - STOP/CANCEL: if the user says stop, no, wait, never mind, forget it, or \
@@ -1727,11 +1734,15 @@ pub(crate) async fn drive_control_loop(
                 // Narrate + record each escalation that happened this turn, in
                 // order, with the SAME event shape the build loop uses.
                 for ev in &t.events {
-                    let _ = writeln!(
-                        stdout,
-                        "[eri] {} engine couldn't continue ({}); escalating to {}.",
-                        ev.from_engine_name, ev.reason, ev.to_engine_name
-                    );
+                    // Engine escalation is plumbing — keep it out of the clean
+                    // output (the user shouldn't see "local couldn't continue").
+                    if std::env::var_os("ERI_DEBUG").is_some() {
+                        let _ = writeln!(
+                            stdout,
+                            "[eri] {} engine couldn't continue ({}); escalating to {}.",
+                            ev.from_engine_name, ev.reason, ev.to_engine_name
+                        );
+                    }
                     sink.record_escalation(ev);
                 }
                 t.value
@@ -1784,7 +1795,14 @@ pub(crate) async fn drive_control_loop(
         }
         let executed = execute_tool_calls(bridge, gate, confirm, &out.tool_calls).await;
         for line in &executed.log {
-            let _ = writeln!(stdout, "[eri] {line}");
+            // Emit a clean, live status the app renders as a single updating
+            // chip — the action being taken, not the post-hoc "-> result"
+            // detail. Full detail stays under ERI_DEBUG.
+            let status = line.split(" -> ").next().unwrap_or(line);
+            let _ = writeln!(stdout, "[eri-status] {status}");
+            if std::env::var_os("ERI_DEBUG").is_some() {
+                let _ = writeln!(stdout, "[eri] {line}");
+            }
         }
         // Never push an empty user turn: if execution produced no results (e.g.
         // every call was filtered/dropped), there's nothing for the model to
