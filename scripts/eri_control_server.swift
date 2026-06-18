@@ -323,6 +323,50 @@ func captureScreen() -> [String: Any] {
     return holder.value
 }
 
+// Capture a rectangular region (screen points) as a base64 PNG. Captures the
+// full display then crops, scaling points→pixels for Retina. Same permission
+// gate as the full-screen capture.
+func captureRegion(_ x: Int, _ y: Int, _ w: Int, _ h: Int) -> [String: Any] {
+    guard CGPreflightScreenCaptureAccess() else {
+        CGRequestScreenCaptureAccess()
+        return ["error": "Screen Recording permission not granted. Enable eri in System Settings > Privacy & Security > Screen Recording, then retry."]
+    }
+    let holder = CaptureResult()
+    let sem = DispatchSemaphore(value: 0)
+    Task {
+        defer { sem.signal() }
+        do {
+            let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+            guard let display = content.displays.first else {
+                holder.value = ["error": "no display found"]
+                return
+            }
+            let filter = SCContentFilter(display: display, excludingWindows: [])
+            let config = SCStreamConfiguration()
+            config.width = display.width
+            config.height = display.height
+            let full = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
+            let sx = Double(full.width) / Double(max(display.width, 1))
+            let sy = Double(full.height) / Double(max(display.height, 1))
+            let rect = CGRect(x: Double(x) * sx, y: Double(y) * sy, width: Double(w) * sx, height: Double(h) * sy)
+            guard let crop = full.cropping(to: rect) else {
+                holder.value = ["error": "region out of bounds"]
+                return
+            }
+            let rep = NSBitmapImageRep(cgImage: crop)
+            if let png = rep.representation(using: .png, properties: [:]) {
+                holder.value = ["image": png.base64EncodedString(), "format": "png", "width": crop.width, "height": crop.height]
+            } else {
+                holder.value = ["error": "failed to encode PNG"]
+            }
+        } catch {
+            holder.value = ["error": "region capture failed: \(error.localizedDescription)"]
+        }
+    }
+    _ = sem.wait(timeout: .now() + 5)
+    return holder.value
+}
+
 // MARK: - Request dispatch
 
 func handle(_ body: [String: Any]) -> [String: Any] {
@@ -353,6 +397,19 @@ func handle(_ body: [String: Any]) -> [String: Any] {
     case "run_applescript":
         guard let s = body["script"] as? String else { return ["error": "run_applescript needs script"] }
         return runAppleScript(s)
+    case "read_clipboard":
+        return ["result": NSPasteboard.general.string(forType: .string) ?? ""]
+    case "write_clipboard":
+        guard let t = body["text"] as? String else { return ["error": "write_clipboard needs text"] }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(t, forType: .string)
+        return ["result": "copied to clipboard"]
+    case "capture_region":
+        func intOf(_ k: String) -> Int? { (body[k] as? Int) ?? (body[k] as? Double).map { Int($0) } }
+        guard let x = intOf("x"), let y = intOf("y"), let w = intOf("w"), let h = intOf("h") else {
+            return ["error": "capture_region needs x, y, w, h"]
+        }
+        return captureRegion(x, y, w, h)
     default:
         return ["error": "unknown kind \(kind)"]
     }

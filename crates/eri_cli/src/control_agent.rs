@@ -106,6 +106,12 @@ pub enum ControlAction {
     /// faster and far more reliable than clicking. Content-gated like `Type`: a
     /// destructive script (delete/erase/rm/quit/shutdown) is held for confirm.
     RunAppleScript(String),
+    /// Read the system clipboard — the cross-app bus. Lets eri carry something
+    /// it grabbed in one app (a snippet, a value) into another. A read.
+    ReadClipboard,
+    /// Put text on the system clipboard so it can be pasted elsewhere. Not
+    /// executed until something pastes it, so not destructive on its own.
+    WriteClipboard(String),
 }
 
 impl ControlAction {
@@ -131,7 +137,9 @@ impl ControlAction {
             | ControlAction::Drag { .. }
             | ControlAction::RightClick(_)
             | ControlAction::DoubleClick(_)
-            | ControlAction::MouseMove(..) => false,
+            | ControlAction::MouseMove(..)
+            | ControlAction::ReadClipboard
+            | ControlAction::WriteClipboard(_) => false,
         }
     }
 
@@ -185,7 +193,9 @@ impl ControlAction {
             | ControlAction::RightClick(_)
             | ControlAction::DoubleClick(_)
             | ControlAction::MouseMove(..)
-            | ControlAction::RunAppleScript(_) => None,
+            | ControlAction::RunAppleScript(_)
+            | ControlAction::ReadClipboard
+            | ControlAction::WriteClipboard(_) => None,
         }
     }
 
@@ -206,7 +216,9 @@ impl ControlAction {
             | ControlAction::RightClick(_)
             | ControlAction::DoubleClick(_)
             | ControlAction::MouseMove(..)
-            | ControlAction::RunAppleScript(_) => None,
+            | ControlAction::RunAppleScript(_)
+            | ControlAction::ReadClipboard
+            | ControlAction::WriteClipboard(_) => None,
         }
     }
 
@@ -237,6 +249,8 @@ impl ControlAction {
                     format!("run AppleScript: {short}")
                 }
             }
+            ControlAction::ReadClipboard => "read the clipboard".into(),
+            ControlAction::WriteClipboard(_) => "copy to the clipboard".into(),
         }
     }
 }
@@ -300,6 +314,21 @@ pub trait ControlBridge: Send + Sync {
     /// unsupported — only the live macOS bridge implements it.
     async fn run_applescript(&self, _script: &str) -> Result<String> {
         anyhow::bail!("AppleScript not supported by this bridge")
+    }
+    /// Read the system clipboard (the cross-app bus). Default: unsupported.
+    async fn read_clipboard(&self) -> Result<String> {
+        anyhow::bail!("clipboard not supported by this bridge")
+    }
+    /// Write text to the system clipboard. Default: unsupported.
+    async fn write_clipboard(&self, _text: &str) -> Result<String> {
+        anyhow::bail!("clipboard not supported by this bridge")
+    }
+    /// Capture a RECTANGULAR REGION of the screen as a base64 PNG (raw — caller
+    /// must redact before any cloud send). A tighter, cheaper alternative to a
+    /// full-screen `capture` when eri only needs one area (a chart, a snippet).
+    /// Default: unsupported.
+    async fn capture_region(&self, _x: i64, _y: i64, _w: i64, _h: i64) -> Result<String> {
+        anyhow::bail!("region capture not supported by this bridge")
     }
 }
 
@@ -519,6 +548,8 @@ async fn apply(bridge: &dyn ControlBridge, action: &ControlAction) -> Result<Str
         ControlAction::DoubleClick(t) => bridge.double_click(t).await,
         ControlAction::MouseMove(x, y) => bridge.mouse_move(*x, *y).await,
         ControlAction::RunAppleScript(s) => bridge.run_applescript(s).await,
+        ControlAction::ReadClipboard => bridge.read_clipboard().await,
+        ControlAction::WriteClipboard(s) => bridge.write_clipboard(s).await,
     }
 }
 
@@ -601,6 +632,10 @@ pub fn parse_action(name: &str, input: &Value) -> Result<ControlAction> {
         "run_applescript" => s("script")
             .map(ControlAction::RunAppleScript)
             .ok_or_else(|| anyhow!("run_applescript needs `script`")),
+        "read_clipboard" => Ok(ControlAction::ReadClipboard),
+        "write_clipboard" => s("text")
+            .map(ControlAction::WriteClipboard)
+            .ok_or_else(|| anyhow!("write_clipboard needs `text`")),
         other => Err(anyhow!("unknown control tool: {other}")),
     }
 }
@@ -770,6 +805,32 @@ fn primitive_tool_specs() -> Vec<Value> {
                 "required": ["script"]
             }
         }),
+        json!({
+            "name": "read_clipboard",
+            "description": "Read the system clipboard as text — the cross-app bus. Use to carry something you grabbed in one app (a value, a snippet) into another.",
+            "input_schema": { "type": "object", "properties": {} }
+        }),
+        json!({
+            "name": "write_clipboard",
+            "description": "Put text on the system clipboard so it can be pasted (cmd+v) into another app — the other half of moving content across apps.",
+            "input_schema": {
+                "type": "object",
+                "properties": { "text": { "type": "string", "description": "Text to place on the clipboard." } },
+                "required": ["text"]
+            }
+        }),
+        json!({
+            "name": "capture_region",
+            "description": "Capture a RECTANGULAR REGION of the screen as an image (faces auto-blurred). Cheaper + more focused than `look` when you only need one area — e.g. read a chart or copy a value from a specific spot. x,y = top-left; w,h = size in screen points.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "x": { "type": "number" }, "y": { "type": "number" },
+                    "w": { "type": "number" }, "h": { "type": "number" }
+                },
+                "required": ["x", "y", "w", "h"]
+            }
+        }),
     ]
 }
 
@@ -856,6 +917,31 @@ pub async fn execute_tool_calls(
                     }
                 },
                 Err(e) => tool_result(id, &format!("capture failed: {e}"), true),
+            });
+            continue;
+        }
+        // `capture_region`: like `look` but a single rectangle — capture, REDACT
+        // faces locally, return the redacted image. Same fail-closed contract.
+        if name == "capture_region" {
+            let g = |k: &str| input.get(k).and_then(Value::as_i64);
+            let (Some(x), Some(y), Some(w), Some(h)) = (g("x"), g("y"), g("w"), g("h")) else {
+                out.results
+                    .push(tool_result(id, "capture_region needs x, y, w, h", true));
+                continue;
+            };
+            out.results.push(match bridge.capture_region(x, y, w, h).await {
+                Ok(b64) => match redact_png(&b64).await {
+                    Ok(redacted) => {
+                        out.log.push("looked at a region of the screen".into());
+                        image_tool_result(id, &redacted)
+                    }
+                    Err(e) => tool_result(
+                        id,
+                        &format!("refused: could not redact the capture ({e}); not sending it."),
+                        true,
+                    ),
+                },
+                Err(e) => tool_result(id, &format!("region capture failed: {e}"), true),
             });
             continue;
         }
@@ -1184,6 +1270,15 @@ impl ControlBridge for DryRunBridge {
     async fn run_applescript(&self, script: &str) -> Result<String> {
         Ok(format!("DRY RUN: would run AppleScript ({} chars)", script.len()))
     }
+    async fn read_clipboard(&self) -> Result<String> {
+        Ok("DRY RUN: would read the clipboard".into())
+    }
+    async fn write_clipboard(&self, _text: &str) -> Result<String> {
+        Ok("DRY RUN: would write the clipboard".into())
+    }
+    async fn capture_region(&self, _x: i64, _y: i64, _w: i64, _h: i64) -> Result<String> {
+        Err(anyhow!("DRY RUN: no screen capture"))
+    }
 }
 
 /// Serialize an action to the wire JSON the actuation server understands.
@@ -1213,6 +1308,8 @@ pub fn action_to_wire(action: &ControlAction) -> Value {
         ControlAction::DoubleClick(t) => merge_kind("double_click", target_to_wire(t)),
         ControlAction::MouseMove(x, y) => json!({ "kind": "move_mouse", "x": x, "y": y }),
         ControlAction::RunAppleScript(s) => json!({ "kind": "run_applescript", "script": s }),
+        ControlAction::ReadClipboard => json!({ "kind": "read_clipboard" }),
+        ControlAction::WriteClipboard(s) => json!({ "kind": "write_clipboard", "text": s }),
     }
 }
 
@@ -1366,6 +1463,19 @@ impl ControlBridge for LoggingBridge<'_> {
         self.record(ControlAction::RunAppleScript(script.to_string()));
         Ok(result)
     }
+    async fn read_clipboard(&self) -> Result<String> {
+        // A read — forwarded unrecorded, like snapshot/capture.
+        self.inner.read_clipboard().await
+    }
+    async fn write_clipboard(&self, text: &str) -> Result<String> {
+        let result = self.inner.write_clipboard(text).await?;
+        self.record(ControlAction::WriteClipboard(text.to_string()));
+        Ok(result)
+    }
+    async fn capture_region(&self, x: i64, y: i64, w: i64, h: i64) -> Result<String> {
+        // A read — forwarded unrecorded.
+        self.inner.capture_region(x, y, w, h).await
+    }
 }
 
 /// The real actuation bridge: POSTs each action to a loopback endpoint hosted
@@ -1473,6 +1583,18 @@ impl ControlBridge for HttpBridge {
     async fn run_applescript(&self, script: &str) -> Result<String> {
         self.act(&ControlAction::RunAppleScript(script.to_string()))
             .await
+    }
+    async fn read_clipboard(&self) -> Result<String> {
+        self.act(&ControlAction::ReadClipboard).await
+    }
+    async fn write_clipboard(&self, text: &str) -> Result<String> {
+        self.act(&ControlAction::WriteClipboard(text.to_string())).await
+    }
+    async fn capture_region(&self, x: i64, y: i64, w: i64, h: i64) -> Result<String> {
+        let reply = self
+            .post(json!({ "kind": "capture_region", "x": x, "y": y, "w": w, "h": h }))
+            .await?;
+        parse_wire_capture(&reply)
     }
     /// Ask the app for the user's latest gaze point. Best-effort: any transport
     /// error or a reply without a usable point yields `None` (the loop then
@@ -2212,6 +2334,21 @@ mod tests {
                 .unwrap()
                 .push(format!("applescript:{script}"));
             Ok("ran applescript".into())
+        }
+        async fn read_clipboard(&self) -> Result<String> {
+            self.calls.lock().unwrap().push("read_clipboard".into());
+            Ok("clipboard contents".into())
+        }
+        async fn write_clipboard(&self, text: &str) -> Result<String> {
+            self.calls.lock().unwrap().push(format!("write_clipboard:{text}"));
+            Ok("copied".into())
+        }
+        async fn capture_region(&self, x: i64, y: i64, w: i64, h: i64) -> Result<String> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(format!("capture_region:{x},{y},{w},{h}"));
+            Ok("ZmFrZS1wbmc=".into())
         }
     }
 
@@ -3162,6 +3299,33 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn clipboard_is_nonrisky_and_region_capture_reaches_the_bridge() {
+        // Clipboard ops (the cross-app bus) parse and are not risky.
+        let w = parse_action("write_clipboard", &json!({ "text": "hi" })).unwrap();
+        let r = parse_action("read_clipboard", &json!({})).unwrap();
+        assert!(matches!(w, ControlAction::WriteClipboard(_)));
+        assert!(matches!(r, ControlAction::ReadClipboard));
+        assert!(!w.is_risky() && !r.is_risky(), "clipboard ops are not risky");
+
+        // capture_region is special-cased (image tool) and reaches the bridge
+        // with the rect (the result is redacted/fail-closed downstream).
+        let bridge = MockBridge::default();
+        let gate = ControlGate::default();
+        let mut confirm = |_: &str, _: Option<crate::control_safety::Permission>| true;
+        let calls = vec![(
+            "c1".into(),
+            "capture_region".into(),
+            json!({ "x": 0, "y": 0, "w": 100, "h": 80 }),
+        )];
+        let _ = execute_tool_calls(&bridge, &gate, &mut confirm, None, &calls).await;
+        assert!(
+            bridge.calls().iter().any(|c| c == "capture_region:0,0,100,80"),
+            "capture_region must reach the bridge; got {:?}",
+            bridge.calls()
+        );
+    }
+
     /// Helper: a turn that *claims* it wants tools but hands back an empty
     /// tool-call list — the malformed shape C1 guards against.
     fn empty_tool_call_turn(text: &str) -> crate::control_turn::TurnOutput {
@@ -3477,8 +3641,8 @@ mod tests {
     #[test]
     fn tool_specs_cover_the_action_surface() {
         let specs = tool_specs();
-        // 14 primitive computer-control tools + 6 coding-environment tools.
-        assert_eq!(specs.len(), 20);
+        // 17 primitive computer-control tools + 6 coding-environment tools.
+        assert_eq!(specs.len(), 23);
         let names: Vec<&str> = specs
             .iter()
             .map(|s| s.get("name").and_then(Value::as_str).unwrap())
@@ -3498,6 +3662,9 @@ mod tests {
             "double_click",
             "move_mouse",
             "run_applescript",
+            "read_clipboard",
+            "write_clipboard",
+            "capture_region",
             // Coding-environment surface, layered on top.
             "editor_open_file",
             "editor_command",
