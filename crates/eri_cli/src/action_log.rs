@@ -44,6 +44,7 @@ pub fn undo_plan_for(action: &ControlAction) -> UndoPlan {
             UndoPlan::Irreversible(format!("scrolled {direction} {amount}"))
         }
         ControlAction::Drag { .. } => UndoPlan::Irreversible("a drag".to_string()),
+        ControlAction::RunAppleScript(_) => UndoPlan::Irreversible("an AppleScript command".to_string()),
         ControlAction::RightClick(_) => UndoPlan::Irreversible("a right-click".to_string()),
         ControlAction::DoubleClick(_) => UndoPlan::Irreversible("a double-click".to_string()),
         // Moving the pointer changes no state — nothing to undo (like Observe).

@@ -101,6 +101,11 @@ pub enum ControlAction {
     DoubleClick(ClickTarget),
     /// Move the pointer to a coordinate without clicking (hover).
     MouseMove(f32, f32),
+    /// Run an AppleScript / Apple Event — the semantic Tier-1 path for native
+    /// apps (make a new document, compose mail, set a field's value) that's
+    /// faster and far more reliable than clicking. Content-gated like `Type`: a
+    /// destructive script (delete/erase/rm/quit/shutdown) is held for confirm.
+    RunAppleScript(String),
 }
 
 impl ControlAction {
@@ -113,7 +118,9 @@ impl ControlAction {
         match self {
             ControlAction::QuitApp(_) => true,
             ControlAction::Key(combo) => is_destructive_combo(combo),
-            ControlAction::Type(text) => looks_destructive(text),
+            ControlAction::Type(text) | ControlAction::RunAppleScript(text) => {
+                looks_destructive(text)
+            }
             // Pointer/navigation actions are not destructive on their own; they
             // still flow through the gate so the remote channel can confirm them.
             ControlAction::Observe
@@ -161,6 +168,9 @@ impl ControlAction {
             ControlAction::Type(text) if looks_destructive(text) => {
                 Some(Permission::DestructiveCommands)
             }
+            ControlAction::RunAppleScript(s) if looks_destructive(s) => {
+                Some(Permission::DestructiveCommands)
+            }
             // Everything else (incl. the pointer/navigation actions) has no
             // grantable permission category — it either isn't risky, or it's a
             // refusal that can't be granted away.
@@ -174,7 +184,8 @@ impl ControlAction {
             | ControlAction::Drag { .. }
             | ControlAction::RightClick(_)
             | ControlAction::DoubleClick(_)
-            | ControlAction::MouseMove(..) => None,
+            | ControlAction::MouseMove(..)
+            | ControlAction::RunAppleScript(_) => None,
         }
     }
 
@@ -194,7 +205,8 @@ impl ControlAction {
             | ControlAction::Drag { .. }
             | ControlAction::RightClick(_)
             | ControlAction::DoubleClick(_)
-            | ControlAction::MouseMove(..) => None,
+            | ControlAction::MouseMove(..)
+            | ControlAction::RunAppleScript(_) => None,
         }
     }
 
@@ -216,6 +228,15 @@ impl ControlAction {
             ControlAction::RightClick(t) => format!("right-click {}", describe_target(t)),
             ControlAction::DoubleClick(t) => format!("double-click {}", describe_target(t)),
             ControlAction::MouseMove(x, y) => format!("move mouse to ({x:.0}, {y:.0})"),
+            ControlAction::RunAppleScript(s) => {
+                let one = s.replace('\n', " ");
+                let short: String = one.chars().take(60).collect();
+                if one.chars().count() > 60 {
+                    format!("run AppleScript: {short}…")
+                } else {
+                    format!("run AppleScript: {short}")
+                }
+            }
         }
     }
 }
@@ -274,6 +295,11 @@ pub trait ControlBridge: Send + Sync {
     /// Move the pointer without clicking. Default: unsupported.
     async fn mouse_move(&self, _x: f32, _y: f32) -> Result<String> {
         anyhow::bail!("move-mouse not supported by this bridge")
+    }
+    /// Run an AppleScript / Apple Event (Tier-1 semantic control). Default:
+    /// unsupported — only the live macOS bridge implements it.
+    async fn run_applescript(&self, _script: &str) -> Result<String> {
+        anyhow::bail!("AppleScript not supported by this bridge")
     }
 }
 
@@ -355,8 +381,14 @@ impl ControlGate {
                  Tell me \"you can use {app} again\" if you want to change that."
             )));
         }
-        // (1) Refusal — check typed text against the sensitive-action classifier.
-        if let ControlAction::Type(text) = action
+        // (1) Refusal — check typed text (and AppleScript source) against the
+        // sensitive-action classifier. A script that types a password or moves
+        // money is refused exactly like a literal keystroke would be.
+        let sensitive_text = match action {
+            ControlAction::Type(t) | ControlAction::RunAppleScript(t) => Some(t.as_str()),
+            _ => None,
+        };
+        if let Some(text) = sensitive_text
             && let Some(kind) = crate::control_safety::classify_refusal(text)
         {
             return Ok(Disposition::Refused(kind.handback_message().to_string()));
@@ -486,6 +518,7 @@ async fn apply(bridge: &dyn ControlBridge, action: &ControlAction) -> Result<Str
         ControlAction::RightClick(t) => bridge.right_click(t).await,
         ControlAction::DoubleClick(t) => bridge.double_click(t).await,
         ControlAction::MouseMove(x, y) => bridge.mouse_move(*x, *y).await,
+        ControlAction::RunAppleScript(s) => bridge.run_applescript(s).await,
     }
 }
 
@@ -565,6 +598,9 @@ pub fn parse_action(name: &str, input: &Value) -> Result<ControlAction> {
         "wait" => Ok(ControlAction::Wait(
             input.get("ms").and_then(Value::as_u64).unwrap_or(500),
         )),
+        "run_applescript" => s("script")
+            .map(ControlAction::RunAppleScript)
+            .ok_or_else(|| anyhow!("run_applescript needs `script`")),
         other => Err(anyhow!("unknown control tool: {other}")),
     }
 }
@@ -723,6 +759,15 @@ fn primitive_tool_specs() -> Vec<Value> {
                     "y": { "type": "number" }
                 },
                 "required": ["x", "y"]
+            }
+        }),
+        json!({
+            "name": "run_applescript",
+            "description": "Run an AppleScript command to control a native macOS app SEMANTICALLY (Apple Events) — e.g. `tell application \"TextEdit\" to make new document`, compose a Mail message, set or get a field's text. PREFER this over clicking/typing for native apps that support AppleScript: it's exact and avoids dialogs (a real new document, not an Open panel; clean field replacement, not blind typing). Not for secrets or destructive commands.",
+            "input_schema": {
+                "type": "object",
+                "properties": { "script": { "type": "string", "description": "AppleScript source to execute." } },
+                "required": ["script"]
             }
         }),
     ]
@@ -1003,8 +1048,11 @@ fn control_system_prompt() -> &'static str {
 operating the computer with the provided tools. ALWAYS call screen_observe \
 first to see the current app and its actionable elements, then act, then \
 observe again to verify. Prefer clicking elements by their id over \
-coordinates. Use open_app to launch/focus apps. Keep steps minimal -- do not \
-take unnecessary actions. When the goal is achieved, call done with a one-line \
+coordinates. Use open_app to launch/focus apps. For native apps that support \
+AppleScript, PREFER run_applescript for semantic actions (make a new document, \
+compose mail, set/get a field's value) -- it's exact and avoids the dialogs and \
+mishaps blind clicking/typing cause (a real new document, not an Open panel). \
+Keep steps minimal -- do not take unnecessary actions. When the goal is achieved, call done with a one-line \
 summary. Be efficient: observe only when state may have changed.\n\
 TYPE CAREFULLY: a field may ALREADY contain text. Before typing, check what is \
 there (the snapshot/look shows it). Don't blindly insert at the cursor and mash \
@@ -1081,6 +1129,9 @@ impl ControlBridge for DryRunBridge {
     async fn mouse_move(&self, x: f32, y: f32) -> Result<String> {
         Ok(format!("DRY RUN: would move mouse to ({x:.0}, {y:.0})"))
     }
+    async fn run_applescript(&self, script: &str) -> Result<String> {
+        Ok(format!("DRY RUN: would run AppleScript ({} chars)", script.len()))
+    }
 }
 
 /// Serialize an action to the wire JSON the actuation server understands.
@@ -1109,6 +1160,7 @@ pub fn action_to_wire(action: &ControlAction) -> Value {
         ControlAction::RightClick(t) => merge_kind("right_click", target_to_wire(t)),
         ControlAction::DoubleClick(t) => merge_kind("double_click", target_to_wire(t)),
         ControlAction::MouseMove(x, y) => json!({ "kind": "move_mouse", "x": x, "y": y }),
+        ControlAction::RunAppleScript(s) => json!({ "kind": "run_applescript", "script": s }),
     }
 }
 
@@ -1257,6 +1309,11 @@ impl ControlBridge for LoggingBridge<'_> {
         self.record(ControlAction::MouseMove(x, y));
         Ok(result)
     }
+    async fn run_applescript(&self, script: &str) -> Result<String> {
+        let result = self.inner.run_applescript(script).await?;
+        self.record(ControlAction::RunAppleScript(script.to_string()));
+        Ok(result)
+    }
 }
 
 /// The real actuation bridge: POSTs each action to a loopback endpoint hosted
@@ -1360,6 +1417,10 @@ impl ControlBridge for HttpBridge {
     }
     async fn mouse_move(&self, x: f32, y: f32) -> Result<String> {
         self.act(&ControlAction::MouseMove(x, y)).await
+    }
+    async fn run_applescript(&self, script: &str) -> Result<String> {
+        self.act(&ControlAction::RunAppleScript(script.to_string()))
+            .await
     }
     /// Ask the app for the user's latest gaze point. Best-effort: any transport
     /// error or a reply without a usable point yields `None` (the loop then
@@ -2049,6 +2110,13 @@ mod tests {
                 .unwrap()
                 .push(format!("mouse_move:{x},{y}"));
             Ok("moved".into())
+        }
+        async fn run_applescript(&self, script: &str) -> Result<String> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(format!("applescript:{script}"));
+            Ok("ran applescript".into())
         }
     }
 
@@ -2919,6 +2987,36 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn applescript_parses_runs_and_gates_destructive_scripts() {
+        // Tier-1 AppleScript: parses, runs a benign script through the bridge,
+        // and gates a destructive one (content-aware, exactly like Type).
+        let benign = parse_action(
+            "run_applescript",
+            &json!({ "script": "tell application \"TextEdit\" to make new document" }),
+        )
+        .unwrap();
+        assert!(matches!(benign, ControlAction::RunAppleScript(_)));
+
+        let gate = ControlGate::default();
+        let bridge = MockBridge::default();
+        match gate.submit(&bridge, &benign).await.unwrap() {
+            Disposition::Executed(_) => {}
+            other => panic!("a benign AppleScript should run, got {other:?}"),
+        }
+        assert_eq!(
+            bridge.calls(),
+            vec!["applescript:tell application \"TextEdit\" to make new document"]
+        );
+
+        // A script that shells out to `rm -rf` is held for confirmation.
+        let danger = ControlAction::RunAppleScript("do shell script \"rm -rf ~/Documents\"".into());
+        assert!(matches!(
+            gate.submit(&MockBridge::default(), &danger).await.unwrap(),
+            Disposition::NeedsConfirmation(_)
+        ));
+    }
+
     /// Helper: a turn that *claims* it wants tools but hands back an empty
     /// tool-call list — the malformed shape C1 guards against.
     fn empty_tool_call_turn(text: &str) -> crate::control_turn::TurnOutput {
@@ -3227,8 +3325,8 @@ mod tests {
     #[test]
     fn tool_specs_cover_the_action_surface() {
         let specs = tool_specs();
-        // 13 primitive computer-control tools + 6 coding-environment tools.
-        assert_eq!(specs.len(), 19);
+        // 14 primitive computer-control tools + 6 coding-environment tools.
+        assert_eq!(specs.len(), 20);
         let names: Vec<&str> = specs
             .iter()
             .map(|s| s.get("name").and_then(Value::as_str).unwrap())
@@ -3247,6 +3345,7 @@ mod tests {
             "right_click",
             "double_click",
             "move_mouse",
+            "run_applescript",
             // Coding-environment surface, layered on top.
             "editor_open_file",
             "editor_command",

@@ -350,9 +350,29 @@ func handle(_ body: [String: Any]) -> [String: Any] {
         return ["result": "ok"]
     case "capture":
         return captureScreen()
+    case "run_applescript":
+        guard let s = body["script"] as? String else { return ["error": "run_applescript needs script"] }
+        return runAppleScript(s)
     default:
         return ["error": "unknown kind \(kind)"]
     }
+}
+
+// Run an AppleScript / Apple Event — the semantic Tier-1 path (make a new
+// document, compose mail, set a field's value) that's exact and avoids the UI
+// dialogs blind clicking falls into. Requires the Automation TCC grant for the
+// target app on first use (macOS prompts).
+func runAppleScript(_ source: String) -> [String: Any] {
+    guard let script = NSAppleScript(source: source) else {
+        return ["error": "invalid AppleScript"]
+    }
+    var errorInfo: NSDictionary?
+    let out = script.executeAndReturnError(&errorInfo)
+    if let err = errorInfo {
+        let msg = (err[NSAppleScript.errorMessage] as? String) ?? "AppleScript error"
+        return ["error": msg]
+    }
+    return ["result": out.stringValue ?? "ok"]
 }
 
 // MARK: - Minimal loopback HTTP server (NWListener)
