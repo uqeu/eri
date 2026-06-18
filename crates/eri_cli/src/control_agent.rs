@@ -1637,6 +1637,7 @@ pub(crate) async fn drive_control_loop(
     tools: &Value,
     goal: &str,
     max_turns: usize,
+    autonomous: bool,
 ) -> Result<ControlRun> {
     use std::io::Write;
 
@@ -1795,13 +1796,40 @@ pub(crate) async fn drive_control_loop(
                 usage,
             });
         }
-        messages.push(json!({ "role": "user", "content": executed.results }));
         if executed.done {
+            messages.push(json!({ "role": "user", "content": executed.results }));
             return Ok(ControlRun {
                 text: final_text,
                 usage,
             });
         }
+        // Autonomous perception: guarantee eri SEES the result of what it just
+        // did before choosing its next move — screenshot → act → re-perceive →
+        // repeat — instead of relying on the model to remember to observe (the
+        // discretionary "observe again to verify" the prompt asks for, made
+        // automatic so eri never acts blind). The perception is ONE cheap
+        // accessibility snapshot, appended as a text block alongside the tool
+        // results; the model still calls `look` for a real screenshot when the
+        // AX text is too thin to locate a target (canvas / web / images).
+        // Skipped when the model already observed this turn (no redundant
+        // snapshot), and never after `done`.
+        let mut content = executed.results;
+        if autonomous
+            && !out
+                .tool_calls
+                .iter()
+                .any(|(_, name, _)| name == "screen_observe" || name == "look")
+            && let Ok(graph) = bridge.snapshot().await
+        {
+            content.push(json!({
+                "type": "text",
+                "text": format!(
+                    "[eri auto-perceive — the screen after your last action]\n{}",
+                    graph.to_prompt()
+                ),
+            }));
+        }
+        messages.push(json!({ "role": "user", "content": content }));
     }
     Ok(ControlRun {
         text: final_text,
@@ -1866,6 +1894,15 @@ pub async fn run_control_agent(
     for note in context_blocks(goal, bridge, &workspace).await {
         system.push(json!({ "type": "text", "text": note }));
     }
+    // Autonomous perception (default ON; `ERI_CONTROL_AUTONOMOUS=0` opts out).
+    // When on, the loop feeds eri a fresh screen snapshot after every action so
+    // it steers itself across many steps — the foundation of "eri does it all".
+    let autonomous = std::env::var("ERI_CONTROL_AUTONOMOUS")
+        .map(|v| !matches!(v.trim(), "0" | "false" | "off" | ""))
+        .unwrap_or(true);
+    if autonomous {
+        system.push(json!({ "type": "text", "text": AUTONOMOUS_NOTE }));
+    }
     // Learn-do loop: record what the user asked so future sessions anticipate.
     remember_goal(goal, &workspace);
     let tools: Value = json!(tool_specs());
@@ -1886,9 +1923,24 @@ pub async fn run_control_agent(
         &tools,
         goal,
         max_turns,
+        autonomous,
     )
     .await
 }
+
+/// Appended to the control system prompt in autonomous mode. Tells eri the loop
+/// will keep showing it the screen after each action — so it should push the
+/// goal all the way to done on its own, and escalate to a real screenshot
+/// (`look`) whenever the accessibility text can't locate what it needs.
+const AUTONOMOUS_NOTE: &str = "AUTONOMOUS MODE: after each action you take, you \
+will automatically be shown the current screen (an accessibility snapshot) — you \
+do not need to call screen_observe just to see the result of your own action. \
+Keep going step by step until the whole goal is done, then call done; don't stop \
+half-way to ask unless you hit a safety boundary (passwords, money, CAPTCHAs) or \
+are genuinely blocked. When the accessibility snapshot is too thin to find what \
+you need (canvas, web pages, images, custom UI), call `look` for a real \
+screenshot and decide visually. Work like a careful person doing the task \
+end-to-end.";
 
 #[cfg(test)]
 mod tests {
@@ -2786,6 +2838,7 @@ mod tests {
             &tools,
             "open Safari please",
             8,
+            false,
         )
         .await
         .unwrap();
@@ -2796,6 +2849,56 @@ mod tests {
         assert_eq!(logs.len(), 2);
         assert!(logs.iter().all(|l| l.engine == "local"));
         assert_eq!(logs[0].tool_names, vec!["open_app"]);
+    }
+
+    #[tokio::test]
+    async fn autonomous_mode_auto_perceives_after_each_action() {
+        // The autonomous loop: after an action turn (open_app, not done) eri is
+        // automatically fed a fresh accessibility snapshot WITHOUT the model
+        // asking — screenshot → act → re-perceive → repeat. We assert it via the
+        // bridge call trail: a `snapshot` lands right after the action.
+        let gate = ControlGate::default();
+        let mut confirm = |_: &str, _: Option<crate::control_safety::Permission>| true;
+        let system = vec![json!({ "type": "text", "text": "sys" })];
+        let tools = json!(tool_specs());
+        let turns = || {
+            vec![
+                Ok(tool_call_turn("t1", "open_app", json!({ "name": "Safari" }))),
+                Ok(done_turn("Done.")),
+            ]
+        };
+
+        // autonomous = true → an auto snapshot follows the open_app action.
+        let bridge = MockBridge::with_snapshot(graph());
+        let stub = StubTurn::new("local", turns());
+        let sink = RecordingSink::default();
+        drive_control_loop(
+            &[&stub], &bridge, &gate, &mut confirm, &sink, &system, &tools,
+            "open Safari", 8, true,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            bridge.calls(),
+            vec!["open:Safari", "snapshot"],
+            "autonomous mode must re-perceive (snapshot) after the action"
+        );
+
+        // autonomous = false → no auto snapshot (frugal, model-driven observe).
+        let bridge2 = MockBridge::with_snapshot(graph());
+        let stub2 = StubTurn::new("local", turns());
+        let sink2 = RecordingSink::default();
+        drive_control_loop(
+            &[&stub2], &bridge2, &gate, &mut confirm, &sink2, &system, &tools,
+            "open Safari", 8, false,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            bridge2.calls(),
+            vec!["open:Safari"],
+            "non-autonomous mode must not snapshot on its own"
+        );
     }
 
     /// Helper: a turn that *claims* it wants tools but hands back an empty
@@ -2838,6 +2941,7 @@ mod tests {
             &tools,
             "do nothing",
             8,
+            false,
         )
         .await
         .unwrap();
@@ -2881,6 +2985,7 @@ mod tests {
             &tools,
             "open Safari",
             8,
+            false,
         )
         .await
         .unwrap();
@@ -2925,6 +3030,7 @@ mod tests {
             &tools,
             "open Safari",
             8,
+            false,
         )
         .await
         .unwrap();
@@ -2955,6 +3061,7 @@ mod tests {
             &tools,
             "do the thing",
             8,
+            false,
         )
         .await
         .unwrap();
@@ -3015,6 +3122,7 @@ mod tests {
             &tools,
             "do a few steps",
             8,
+            false,
         )
         .await
         .unwrap();
@@ -3057,6 +3165,7 @@ mod tests {
             &tools,
             "open Safari",
             8,
+            false,
         )
         .await
         .expect_err("a sole failing engine surfaces the error");
@@ -3087,6 +3196,7 @@ mod tests {
             &tools,
             "do the thing",
             24,
+            false,
         )
         .await
         .unwrap();
@@ -3660,6 +3770,7 @@ mod tests {
             &tools,
             "open Cargo.toml in the editor",
             8,
+            false,
         )
         .await
         .unwrap();
