@@ -10,7 +10,14 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 APP="$ROOT/apps/Eri.app"
-ID="${ERI_SIGN_ID:-eri-dev}"
+
+# Ensure the stable eri-dev identity exists (idempotent), then resolve it to a
+# HASH. Signing by hash (not the "eri-dev" name) is unambiguous even if stray
+# same-named certs linger in the keychain — the name-based form fails with
+# "ambiguous (matches eri-dev and eri-dev)".
+"$ROOT/scripts/make_eri_cert.sh"
+ID="${ERI_SIGN_ID:-$(security find-identity -v -p codesigning | awk '/eri-dev/{print $2; exit}')}"
+if [ -z "$ID" ]; then echo "✗ no eri-dev signing identity; run scripts/make_eri_cert.sh" >&2; exit 1; fi
 
 cd "$ROOT/apps/eri-desktop/src-tauri"
 cargo build
@@ -24,5 +31,6 @@ codesign --force --sign "$ID" "$APP/Contents/MacOS/eri_control_server" 2>/dev/nu
 codesign --force --sign "$ID" "$APP/Contents/MacOS/eri_voice_server" 2>/dev/null || true
 codesign --force --deep --sign "$ID" "$APP"
 
-echo "built + signed ($ID): $APP"
+echo "built + signed ($ID = eri-dev): $APP"
 codesign -dv "$APP" 2>&1 | grep -i authority | head -1 || true
+codesign --verify --deep --strict "$APP" && echo "signature valid ✓"
