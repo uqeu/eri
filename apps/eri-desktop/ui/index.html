@@ -6,7 +6,7 @@
     <title>Eri</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Funnel+Display:wght@500;600;700;800&display=swap" />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Funnel+Display:wght@500;600;700;800&family=Inter:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,400;9..144,600&display=swap" />
     <link rel="stylesheet" href="./app.css" />
   </head>
   <body data-state="resting">
@@ -30,10 +30,10 @@
             <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><rect x="2" y="4" width="12" height="9" rx="1.5" stroke="currentColor" stroke-width="1.2" fill="none"/><circle cx="8" cy="8.5" r="2.2" stroke="currentColor" stroke-width="1.2" fill="none"/><path d="M6 4l1-1.5h2L10 4" stroke="currentColor" stroke-width="1.2" fill="none" stroke-linejoin="round"/></svg>
           </button>
           <button id="gear" class="ico" title="Settings" aria-label="Settings">
-            <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><circle cx="8" cy="8" r="2.1" stroke="currentColor" stroke-width="1.2" fill="none"/><path d="M8 1.6v2M8 12.4v2M1.6 8h2M12.4 8h2M3.5 3.5l1.4 1.4M11.1 11.1l1.4 1.4M12.5 3.5l-1.4 1.4M4.9 11.1l-1.4 1.4" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/></svg>
+            <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M2.5 5h4.5M9.5 5h4M2.5 11h7M12 11h1.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><circle cx="8.4" cy="5" r="1.7" stroke="currentColor" stroke-width="1.3" fill="none"/><circle cx="10.6" cy="11" r="1.7" stroke="currentColor" stroke-width="1.3" fill="none"/></svg>
           </button>
-          <button id="close" class="ico close" title="Close eri (⌘Q)" aria-label="Close">
-            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          <button id="close" class="ico close" title="Hide eri (Esc) · ⌘Q to quit" aria-label="Hide">
+            <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M4 6.5l4 3.5 4-3.5" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </button>
           <button id="send" class="send" title="Ask (Enter)" aria-label="Ask">
             <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M8 13V3.5M8 3.5l-4 4M8 3.5l4 4" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -47,6 +47,10 @@
         <div class="thread" id="thread">
           <div class="msg-user" id="msgUser" hidden></div>
           <div class="answer" id="answer"></div>
+          <div class="typing" id="typing" hidden>
+            <span class="tword" id="typingWord">noodling</span>
+            <span class="tdots"><i></i><i></i><i></i></span>
+          </div>
         </div>
         <div class="panel-foot">
           <span class="status" id="status"></span>
@@ -57,8 +61,23 @@
       <!-- Settings panel (toggled by the gear). -->
       <section class="settings" id="settings">
         <div class="set-row">
+          <div class="set-text"><div class="set-name">Appearance</div><div class="set-hint">Dark or light.</div></div>
+          <div class="seg" id="themeSeg">
+            <button class="seg-btn" type="button" data-theme="dark">Dark</button>
+            <button class="seg-btn" type="button" data-theme="light">Light</button>
+          </div>
+        </div>
+        <div class="set-row">
+          <div class="set-text"><div class="set-name">Accent</div><div class="set-hint">Colors the logo &amp; highlights.</div></div>
+          <div class="swatches" id="accentSwatches"></div>
+        </div>
+        <div class="set-row">
+          <div class="set-text"><div class="set-name">Font</div><div class="set-hint">eri's typeface.</div></div>
+          <div class="fonts" id="fontChips"></div>
+        </div>
+        <div class="set-row">
           <div class="set-text"><div class="set-name">Transparency</div><div class="set-hint">Slide right to fade into the screen.</div></div>
-          <div class="set-slider"><input type="range" id="transparency" min="0" max="85" step="1" value="38" /><span id="transparencyVal">38%</span></div>
+          <div class="set-slider"><input type="range" id="transparency" min="0" max="92" step="1" value="50" /><span id="transparencyVal">50%</span></div>
         </div>
         <div class="set-row">
           <div class="set-text"><div class="set-name">Invisible in screen shares</div><div class="set-hint">Hidden from recordings &amp; calls. You still see it.</div></div>

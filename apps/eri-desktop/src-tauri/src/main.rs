@@ -132,6 +132,37 @@ fn spawn_stream(app: AppHandle, ui_command: String, args: Vec<String>, turn: i64
     });
 }
 
+/// Classify a non-actuation question so the desktop app can be as smart as the
+/// phone brain using EXISTING eri commands: web/weather facts → `eri research`
+/// (live web search), personal recall → `eri memory recall`, everything else →
+/// the warm chat brain. This is why "weather in Toronto" now works.
+enum Query {
+    Research,
+    Memory,
+    General,
+}
+
+fn classify_query(text: &str) -> Query {
+    let t = text.to_lowercase();
+    const MEM: &[&str] = &[
+        "remember when", "did i ", "what did i", "when did i", "do i like",
+        "my favorite", "what's my", "whats my", "what do i", "have i ",
+    ];
+    if MEM.iter().any(|k| t.contains(k)) {
+        return Query::Memory;
+    }
+    const WEB: &[&str] = &[
+        "weather", "temperature", "forecast", "raining", "snowing", "how hot", "how cold",
+        "look up", "search for", "google", "news", "price of", "stock", "score",
+        "what is the", "who is", "who won", "when is", "when was", "how much",
+        "latest", "today's", "current", "right now",
+    ];
+    if WEB.iter().any(|k| t.contains(k)) {
+        return Query::Research;
+    }
+    Query::General
+}
+
 /// The single entry point the web layer calls (via the bridge shim). `message`
 /// is the object manager.js sends: `{ command, mode, intent, ...payload }`.
 #[tauri::command]
@@ -171,8 +202,48 @@ fn bridge(app: AppHandle, message: Value) -> Result<(), String> {
             }
             ack("ok");
         }
-        // moveWindow is handled natively by data-tauri-drag-region; no-op here.
+        // Start a native window drag (Rust-side — no JS ACL permission needed,
+        // which is why data-tauri-drag-region / JS startDragging() silently failed).
+        "startDrag" => {
+            if let Some(w) = &window {
+                let _ = w.start_dragging();
+            }
+        }
+        // moveWindow superseded by startDrag.
         "moveWindow" => ack("ok"),
+
+        // Hide-to-pill: shrink + park at bottom-center (eri keeps running; ⌘Q quits).
+        "park" => {
+            if let Some(w) = &window {
+                let pw = f64_field(&message, "width").unwrap_or(150.0);
+                let ph = f64_field(&message, "height").unwrap_or(44.0);
+                let _ = w.set_size(tauri::LogicalSize::new(pw, ph));
+                if let Ok(Some(mon)) = w.current_monitor() {
+                    let scale = mon.scale_factor();
+                    let ms = mon.size().to_logical::<f64>(scale);
+                    let mp = mon.position().to_logical::<f64>(scale);
+                    let x = mp.x + (ms.width - pw) / 2.0;
+                    let y = mp.y + ms.height - ph - 28.0;
+                    let _ = w.set_position(tauri::LogicalPosition::new(x, y));
+                }
+            }
+            ack("ok");
+        }
+        // Restore from the pill back to a top-center card.
+        "unpark" => {
+            if let Some(w) = &window {
+                if let Ok(Some(mon)) = w.current_monitor() {
+                    let scale = mon.scale_factor();
+                    let ms = mon.size().to_logical::<f64>(scale);
+                    let mp = mon.position().to_logical::<f64>(scale);
+                    let ww = 600.0;
+                    let x = mp.x + (ms.width - ww) / 2.0;
+                    let y = mp.y + 80.0;
+                    let _ = w.set_position(tauri::LogicalPosition::new(x, y));
+                }
+            }
+            ack("ok");
+        }
 
         "quit" => {
             app.exit(0);
@@ -187,16 +258,36 @@ fn bridge(app: AppHandle, message: Value) -> Result<(), String> {
             let turn = message.get("turn").and_then(|v| v.as_i64()).unwrap_or(0);
             let intent = str_field(&message, "intent").to_string();
             if is_actuation_command(&intent) {
-                // `control` accepts --mode (fast tier keeps actuation snappy).
-                spawn_stream(app, command.clone(), vec!["control".into(), "--live".into(), "--mode".into(), "fast".into(), intent], turn);
-            } else if !ask_warm(&intent, turn) {
-                // Warm brain down → cold fallback. `eri ask` takes only the prompt.
-                spawn_stream(app, command.clone(), vec!["ask".into(), intent], turn);
+                // --yes: the GUI has no stdin to confirm risky actions (quit/close),
+                // so auto-confirm — eri's safety REFUSALS (money/passwords/CAPTCHA)
+                // still hard-block even with --yes. --mode fast keeps it snappy.
+                spawn_stream(app, command.clone(), vec!["control".into(), "--live".into(), "--yes".into(), "--mode".into(), "fast".into(), intent], turn);
+            } else {
+                // Smart routing so the desktop matches the phone brain.
+                match classify_query(&intent) {
+                    Query::Research => spawn_stream(app, command.clone(), vec!["research".into(), intent], turn),
+                    Query::Memory => spawn_stream(app, command.clone(), vec!["memory".into(), "recall".into(), intent], turn),
+                    Query::General => {
+                        if !ask_warm(&intent, turn) {
+                            spawn_stream(app, command.clone(), vec!["ask".into(), intent], turn);
+                        }
+                    }
+                }
             }
         }
         "research" => {
             let turn = message.get("turn").and_then(|v| v.as_i64()).unwrap_or(0);
             spawn_stream(app, command.clone(), vec!["research".into(), str_field(&message, "intent").into()], turn);
+        }
+        // Camera/screenshot: eri's control `look` tool captures the screen (via the
+        // control bridge, face-redacted) and analyzes it with vision.
+        "screenshot" => {
+            let turn = message.get("turn").and_then(|v| v.as_i64()).unwrap_or(0);
+            let prompt = {
+                let p = str_field(&message, "intent");
+                if p.is_empty() { "look at my screen and tell me what's on it".to_string() } else { p.to_string() }
+            };
+            spawn_stream(app, "screenshot".into(), vec!["control".into(), "--live".into(), "--yes".into(), prompt], turn);
         }
         "runEri" | "spawnAgent" => {
             let turn = message.get("turn").and_then(|v| v.as_i64()).unwrap_or(0);

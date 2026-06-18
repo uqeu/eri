@@ -23,7 +23,7 @@
         "alwaysOnTop": false,
         "visible": true,
         "center": false,
-        "shadow": true,
+        "shadow": false,
         "acceptFirstMouse": true,
         "contentProtected": false,
         "titleBarStyle": "Overlay"
