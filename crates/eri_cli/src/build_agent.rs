@@ -2237,7 +2237,7 @@ pub(crate) async fn mcp_vars_with_session() -> std::collections::BTreeMap<String
 
 /// MCP is loaded only at depth 0: subagents inherit a restricted, local-only
 /// tool set by design, so they don't get external servers.
-async fn load_mcp(root: &Path) -> (Option<eri_mcp::Mcp>, Vec<eri_mcp::ToolHandle>) {
+pub(crate) async fn load_mcp(root: &Path) -> (Option<eri_mcp::Mcp>, Vec<eri_mcp::ToolHandle>) {
     let mcp = match eri_mcp::Mcp::load_with_vars(root, &mcp_vars_with_session().await).await {
         Ok(m) => m,
         // A broken mcp.json must never break a build — degrade to no MCP.
@@ -2276,7 +2276,7 @@ async fn load_mcp(root: &Path) -> (Option<eri_mcp::Mcp>, Vec<eri_mcp::ToolHandle
 /// Anthropic tool specs for the MCP tools, namespaced `server__tool` so they
 /// can't collide with built-ins. Appended to the END of the tools array so the
 /// stable built-in prefix stays prompt-cached across turns.
-fn mcp_tool_specs(handles: &[eri_mcp::ToolHandle]) -> Vec<Value> {
+pub(crate) fn mcp_tool_specs(handles: &[eri_mcp::ToolHandle]) -> Vec<Value> {
     handles
         .iter()
         .map(|h| {
@@ -2296,7 +2296,7 @@ fn mcp_tool_specs(handles: &[eri_mcp::ToolHandle]) -> Vec<Value> {
 
 /// Invoke an MCP tool and render its result as a `ToolExec`. Errors and
 /// tool-level failures come back as graceful, non-panicking tool results.
-async fn call_mcp_tool(
+pub(crate) async fn call_mcp_tool(
     mcp: &eri_mcp::Mcp,
     handle: &eri_mcp::ToolHandle,
     input: &Value,

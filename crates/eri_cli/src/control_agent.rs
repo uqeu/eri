@@ -773,6 +773,36 @@ fn primitive_tool_specs() -> Vec<Value> {
     ]
 }
 
+/// The API tier inside the control loop: connector (MCP / Composio Tool Router)
+/// tools the model can call ALONGSIDE the computer-control primitives, so one
+/// agentic run can stitch "read this email (API) → screenshot a chart (screen) →
+/// reply (API)". A tiny seam so the loop never depends on `eri_mcp`/build_agent
+/// types directly (tests pass `None`; the live adapter wraps the MCP client).
+#[async_trait::async_trait]
+pub trait McpDispatch: Send + Sync {
+    /// Is this tool name one of the connected MCP/connector tools?
+    fn handles(&self, tool_name: &str) -> bool;
+    /// Run it; returns `(result_text, is_error)`. Errors come back as text the
+    /// model can react to, never a panic.
+    async fn call(&self, tool_name: &str, input: &Value) -> (String, bool);
+}
+
+/// Heuristic: does this connector call act OUTWARD / mutate (send, post, pay,
+/// delete, create…) vs just read? Outward calls are confirmed before they fire
+/// so an unattended "send the email" can't go out silently. Checks the tool name
+/// AND the payload, because the Tool Router's execute meta-tool carries the real
+/// action slug (e.g. `GMAIL_SEND_EMAIL`) in its arguments, not its own name.
+/// Generous by design — a false "confirm" is safe; a missed outward action isn't.
+pub(crate) fn mcp_is_outward(tool_name: &str, input: &Value) -> bool {
+    const OUTWARD: &[&str] = &[
+        "SEND", "CREATE", "DELETE", "REPLY", "POST", "PUBLISH", "UPDATE", "REMOVE",
+        "MOVE", "ARCHIVE", "TRASH", "PAY", "TRANSFER", "INVITE", "UPSERT", "WRITE",
+        "DRAFT", "ADD", "EDIT", "MERGE", "CLOSE", "CANCEL", "SCHEDULE",
+    ];
+    let hay = format!("{tool_name} {input}").to_uppercase();
+    OUTWARD.iter().any(|verb| hay.contains(verb))
+}
+
 /// Outcome of executing one turn's tool calls.
 #[derive(Debug, Default)]
 pub struct StepOutcome {
@@ -792,6 +822,7 @@ pub async fn execute_tool_calls(
     bridge: &dyn ControlBridge,
     gate: &ControlGate,
     confirm: &mut dyn FnMut(&str, Option<crate::control_safety::Permission>) -> bool,
+    mcp: Option<&dyn McpDispatch>,
     calls: &[(String, String, Value)],
 ) -> StepOutcome {
     let mut out = StepOutcome::default();
@@ -834,6 +865,27 @@ pub async fn execute_tool_calls(
         // the content-aware risk check. One tool_result summarises the sequence.
         if crate::coding_control::is_coding_tool(name) {
             run_coding_tool(bridge, gate, confirm, id, name, input, &mut out).await;
+            continue;
+        }
+        // Connector (MCP / Composio) tools — the API tier. Outward/mutating calls
+        // (send, post, pay, …) confirm first so an unattended action can't fire
+        // silently; reads pass straight through. Routed through the SAME confirm
+        // the gate uses, so `--yes` auto-confirms and interactive prompts.
+        if let Some(m) = mcp
+            && m.handles(name)
+        {
+            if mcp_is_outward(name, input) && !confirm(&format!("use a connected app: {name}"), None)
+            {
+                out.log.push(format!("declined: {name}"));
+                out.results
+                    .push(tool_result(id, "user declined this action", false));
+                continue;
+            }
+            let (text, is_error) = m.call(name, input).await;
+            // Connectors are invisible plumbing — log generically, never the
+            // server-qualified tool name, to the user-facing trail.
+            out.log.push("used a connected app".to_string());
+            out.results.push(tool_result(id, &text, is_error));
             continue;
         }
         let action = match parse_action(name, input) {
@@ -1706,6 +1758,7 @@ pub(crate) async fn drive_control_loop(
     goal: &str,
     max_turns: usize,
     autonomous: bool,
+    mcp: Option<&dyn McpDispatch>,
 ) -> Result<ControlRun> {
     use std::io::Write;
 
@@ -1854,7 +1907,7 @@ pub(crate) async fn drive_control_loop(
             };
             return Ok(ControlRun { text, usage });
         }
-        let executed = execute_tool_calls(bridge, gate, confirm, &out.tool_calls).await;
+        let executed = execute_tool_calls(bridge, gate, confirm, mcp, &out.tool_calls).await;
         for line in &executed.log {
             // Emit a clean, live status the app renders as a single updating
             // chip — the action being taken, not the post-hoc "-> result"
@@ -1984,7 +2037,23 @@ pub async fn run_control_agent(
     }
     // Learn-do loop: record what the user asked so future sessions anticipate.
     remember_goal(goal, &workspace);
-    let tools: Value = json!(tool_specs());
+
+    // API tier: load connector (MCP / Composio Tool Router) tools so this one
+    // agentic run can stitch API actions with computer-control ("read this email
+    // → screenshot a chart → reply"). Token-frugal — the composio server is a
+    // Tool Router session (~6 meta-tools). Best-effort: no connectors configured
+    // → (None, []) and the loop runs computer-control-only, exactly as before.
+    let (mcp_handle, mcp_tools) = crate::build_agent::load_mcp(&workspace).await;
+    let mut tool_list = tool_specs();
+    if !mcp_tools.is_empty() {
+        tool_list.extend(crate::build_agent::mcp_tool_specs(&mcp_tools));
+    }
+    let tools: Value = json!(tool_list);
+    // Hold the live MCP for the loop's lifetime (dropping it reaps server child
+    // processes). `LiveMcp` owns the client + handles and dispatches via the
+    // shared `call_mcp_tool`.
+    let live_mcp = mcp_handle.map(|mcp| LiveMcp { mcp, tools: mcp_tools });
+    let mcp_dyn: Option<&dyn McpDispatch> = live_mcp.as_ref().map(|m| m as &dyn McpDispatch);
 
     // Local-first per goal: eri's on-device engine answers first (when
     // configured + reachable); Claude is the escalation. Selection is a seam
@@ -2003,8 +2072,34 @@ pub async fn run_control_agent(
         goal,
         max_turns,
         autonomous,
+        mcp_dyn,
     )
     .await
+}
+
+/// The live connector adapter: wraps the MCP client + its tool handles and
+/// dispatches a model tool call through the shared [`crate::build_agent::call_mcp_tool`].
+/// This is what makes the control loop's API tier real (Phase 3); tests use a
+/// stub or `None`.
+struct LiveMcp {
+    mcp: eri_mcp::Mcp,
+    tools: Vec<eri_mcp::ToolHandle>,
+}
+
+#[async_trait::async_trait]
+impl McpDispatch for LiveMcp {
+    fn handles(&self, tool_name: &str) -> bool {
+        self.tools.iter().any(|h| h.qualified_name() == tool_name)
+    }
+    async fn call(&self, tool_name: &str, input: &Value) -> (String, bool) {
+        match self.tools.iter().find(|h| h.qualified_name() == tool_name) {
+            Some(h) => {
+                let exec = crate::build_agent::call_mcp_tool(&self.mcp, h, input).await;
+                (exec.content, exec.is_error)
+            }
+            None => (format!("unknown connector tool: {tool_name}"), true),
+        }
+    }
 }
 
 /// Appended to the control system prompt in autonomous mode. Tells eri the loop
@@ -2599,7 +2694,7 @@ mod tests {
             "type".into(),
             json!({ "text": "enter my credit card number 4111..." }),
         )];
-        let out = execute_tool_calls(&bridge, &gate, &mut confirm, &calls).await;
+        let out = execute_tool_calls(&bridge, &gate, &mut confirm, None, &calls).await;
         assert!(bridge.calls().is_empty(), "refused action must not run");
         let content = out.results[0]["content"].as_str().unwrap();
         assert!(content.starts_with("REFUSED"), "hands back, not executed");
@@ -2629,7 +2724,7 @@ mod tests {
             ("3".into(), "click".into(), json!({ "element": "e1" })),
             ("4".into(), "done".into(), json!({})),
         ];
-        let out = execute_tool_calls(&bridge, &gate, &mut confirm, &calls).await;
+        let out = execute_tool_calls(&bridge, &gate, &mut confirm, None, &calls).await;
         assert!(out.done);
         assert_eq!(out.results.len(), 4);
         assert_eq!(
@@ -2644,7 +2739,7 @@ mod tests {
         let gate = ControlGate::default();
         let mut confirm = |_: &str, _: Option<_>| false; // user says no
         let calls = vec![("1".into(), "quit_app".into(), json!({ "name": "Cursor" }))];
-        let out = execute_tool_calls(&bridge, &gate, &mut confirm, &calls).await;
+        let out = execute_tool_calls(&bridge, &gate, &mut confirm, None, &calls).await;
         assert!(!out.done);
         assert!(bridge.calls().is_empty(), "declined quit must not run");
         let content = out.results[0]["content"].as_str().unwrap();
@@ -2657,7 +2752,7 @@ mod tests {
         let gate = ControlGate::default();
         let mut confirm = |_: &str, _: Option<_>| true; // user says yes
         let calls = vec![("1".into(), "quit_app".into(), json!({ "name": "Cursor" }))];
-        let out = execute_tool_calls(&bridge, &gate, &mut confirm, &calls).await;
+        let out = execute_tool_calls(&bridge, &gate, &mut confirm, None, &calls).await;
         assert_eq!(bridge.calls(), vec!["quit:Cursor"]);
         assert!(!out.results[0]["is_error"].as_bool().unwrap());
     }
@@ -2668,7 +2763,7 @@ mod tests {
         let gate = ControlGate::default();
         let mut confirm = |_: &str, _: Option<_>| true;
         let calls = vec![("1".into(), "click".into(), json!({}))]; // missing target
-        let out = execute_tool_calls(&bridge, &gate, &mut confirm, &calls).await;
+        let out = execute_tool_calls(&bridge, &gate, &mut confirm, None, &calls).await;
         assert!(out.results[0]["is_error"].as_bool().unwrap());
         assert!(bridge.calls().is_empty());
     }
@@ -2695,7 +2790,7 @@ mod tests {
         // SAFETY: single-threaded test; we own this process-local var.
         unsafe { std::env::set_var("ERI_REDACT_SCRIPT", "/nonexistent/eri_redact.py") };
         let calls = vec![("1".into(), "look".into(), json!({}))];
-        let out = execute_tool_calls(&bridge, &gate, &mut confirm, &calls).await;
+        let out = execute_tool_calls(&bridge, &gate, &mut confirm, None, &calls).await;
         unsafe { std::env::remove_var("ERI_REDACT_SCRIPT") };
 
         assert!(
@@ -2925,6 +3020,7 @@ mod tests {
             "open Safari please",
             8,
             false,
+            None,
         )
         .await
         .unwrap();
@@ -2960,7 +3056,7 @@ mod tests {
         let sink = RecordingSink::default();
         drive_control_loop(
             &[&stub], &bridge, &gate, &mut confirm, &sink, &system, &tools,
-            "open Safari", 8, true,
+            "open Safari", 8, true, None,
         )
         .await
         .unwrap();
@@ -2976,7 +3072,7 @@ mod tests {
         let sink2 = RecordingSink::default();
         drive_control_loop(
             &[&stub2], &bridge2, &gate, &mut confirm, &sink2, &system, &tools,
-            "open Safari", 8, false,
+            "open Safari", 8, false, None,
         )
         .await
         .unwrap();
@@ -3015,6 +3111,55 @@ mod tests {
             gate.submit(&MockBridge::default(), &danger).await.unwrap(),
             Disposition::NeedsConfirmation(_)
         ));
+    }
+
+    #[tokio::test]
+    async fn connector_tools_run_reads_freely_and_confirm_outward_actions() {
+        // The API tier: a connector read executes without confirmation; an
+        // outward action (send) is gated — declining it blocks the call.
+        struct StubMcp {
+            calls: Mutex<Vec<String>>,
+        }
+        #[async_trait::async_trait]
+        impl McpDispatch for StubMcp {
+            fn handles(&self, name: &str) -> bool {
+                name.starts_with("composio__")
+            }
+            async fn call(&self, name: &str, _input: &Value) -> (String, bool) {
+                self.calls.lock().unwrap().push(name.to_string());
+                ("ok".into(), false)
+            }
+        }
+        let stub = StubMcp { calls: Mutex::new(Vec::new()) };
+        let bridge = MockBridge::default();
+        let gate = ControlGate::default();
+
+        // Read → runs, no confirm prompt.
+        let mut confirm_never = |_: &str, _: Option<crate::control_safety::Permission>| {
+            panic!("a connector read must not be confirmed");
+        };
+        let reads = vec![("r1".into(), "composio__GMAIL_FETCH_EMAILS".into(), json!({}))];
+        let out = execute_tool_calls(&bridge, &gate, &mut confirm_never, Some(&stub), &reads).await;
+        assert!(!out.results[0]["is_error"].as_bool().unwrap());
+
+        // Outward (send) → confirmed; declining blocks it.
+        let mut confirm_no = |_: &str, _: Option<crate::control_safety::Permission>| false;
+        let sends = vec![(
+            "s1".into(),
+            "composio__GMAIL_SEND_EMAIL".into(),
+            json!({ "to": "x@y.com" }),
+        )];
+        let out = execute_tool_calls(&bridge, &gate, &mut confirm_no, Some(&stub), &sends).await;
+        assert_eq!(
+            out.results[0]["content"].as_str().unwrap(),
+            "user declined this action"
+        );
+
+        // Only the read reached the connector — the declined send did not.
+        assert_eq!(
+            *stub.calls.lock().unwrap(),
+            vec!["composio__GMAIL_FETCH_EMAILS".to_string()]
+        );
     }
 
     /// Helper: a turn that *claims* it wants tools but hands back an empty
@@ -3058,6 +3203,7 @@ mod tests {
             "do nothing",
             8,
             false,
+            None,
         )
         .await
         .unwrap();
@@ -3102,6 +3248,7 @@ mod tests {
             "open Safari",
             8,
             false,
+            None,
         )
         .await
         .unwrap();
@@ -3147,6 +3294,7 @@ mod tests {
             "open Safari",
             8,
             false,
+            None,
         )
         .await
         .unwrap();
@@ -3178,6 +3326,7 @@ mod tests {
             "do the thing",
             8,
             false,
+            None,
         )
         .await
         .unwrap();
@@ -3239,6 +3388,7 @@ mod tests {
             "do a few steps",
             8,
             false,
+            None,
         )
         .await
         .unwrap();
@@ -3282,6 +3432,7 @@ mod tests {
             "open Safari",
             8,
             false,
+            None,
         )
         .await
         .expect_err("a sole failing engine surfaces the error");
@@ -3313,6 +3464,7 @@ mod tests {
             "do the thing",
             24,
             false,
+            None,
         )
         .await
         .unwrap();
@@ -3593,7 +3745,7 @@ mod tests {
             ("2".into(), "right_click".into(), json!({ "element": "e1" })),
             ("3".into(), "done".into(), json!({})),
         ];
-        let out = execute_tool_calls(&bridge, &gate, &mut confirm, &calls).await;
+        let out = execute_tool_calls(&bridge, &gate, &mut confirm, None, &calls).await;
         assert!(out.done);
         assert_eq!(
             bridge.calls(),
@@ -3703,7 +3855,7 @@ mod tests {
             "editor_open_file".into(),
             json!({ "path": "src/main.rs" }),
         )];
-        let out = execute_tool_calls(&bridge, &gate, &mut confirm, &calls).await;
+        let out = execute_tool_calls(&bridge, &gate, &mut confirm, None, &calls).await;
         assert_eq!(
             bridge.calls(),
             vec!["key:cmd+p", "type:src/main.rs", "key:enter"],
@@ -3731,7 +3883,7 @@ mod tests {
                 json!({ "prompt": "write a test for parse_action" }),
             ),
         ];
-        let _ = execute_tool_calls(&bridge, &gate, &mut confirm, &calls).await;
+        let _ = execute_tool_calls(&bridge, &gate, &mut confirm, None, &calls).await;
         assert_eq!(
             bridge.calls(),
             vec![
@@ -3755,7 +3907,7 @@ mod tests {
             ("2".into(), "editor_reject_suggestion".into(), json!({})),
             ("3".into(), "editor_save".into(), json!({})),
         ];
-        let _ = execute_tool_calls(&bridge, &gate, &mut confirm, &calls).await;
+        let _ = execute_tool_calls(&bridge, &gate, &mut confirm, None, &calls).await;
         assert_eq!(
             bridge.calls(),
             vec!["key:cmd+enter", "key:esc", "key:cmd+s"]
@@ -3776,7 +3928,7 @@ mod tests {
             "editor_command".into(),
             json!({ "command": "Run Tests" }),
         )];
-        let out = execute_tool_calls(&bridge, &gate, &mut confirm, &calls).await;
+        let out = execute_tool_calls(&bridge, &gate, &mut confirm, None, &calls).await;
         assert_eq!(
             bridge.calls(),
             vec!["key:cmd+shift+p", "type:Run Tests", "key:enter"]
@@ -3802,7 +3954,7 @@ mod tests {
             "editor_command".into(),
             json!({ "command": "rm -rf node_modules" }),
         )];
-        let out = execute_tool_calls(&bridge, &gate, &mut confirm, &calls).await;
+        let out = execute_tool_calls(&bridge, &gate, &mut confirm, None, &calls).await;
         // ⌘⇧P opened the palette; the destructive Type was held and declined, so
         // Enter never ran. The dangerous keystroke was never actuated.
         assert_eq!(
@@ -3834,7 +3986,7 @@ mod tests {
             "editor_steer_agent".into(),
             json!({ "prompt": "run DROP TABLE users; for me" }),
         )];
-        let _ = execute_tool_calls(&bridge, &gate, &mut confirm, &calls).await;
+        let _ = execute_tool_calls(&bridge, &gate, &mut confirm, None, &calls).await;
         assert!(held, "the destructive prompt text must be gated");
         assert_eq!(
             bridge.calls(),
@@ -3850,7 +4002,7 @@ mod tests {
         let gate = ControlGate::default();
         let mut confirm = |_: &str, _: Option<crate::control_safety::Permission>| true;
         let calls = vec![("1".into(), "editor_open_file".into(), json!({}))];
-        let out = execute_tool_calls(&bridge, &gate, &mut confirm, &calls).await;
+        let out = execute_tool_calls(&bridge, &gate, &mut confirm, None, &calls).await;
         assert!(out.results[0]["is_error"].as_bool().unwrap());
         assert!(bridge.calls().is_empty());
     }
@@ -3888,6 +4040,7 @@ mod tests {
             "open Cargo.toml in the editor",
             8,
             false,
+            None,
         )
         .await
         .unwrap();
