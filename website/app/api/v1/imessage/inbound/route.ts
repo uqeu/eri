@@ -19,6 +19,7 @@ import { NextResponse } from "next/server";
 import { Composio } from "@composio/core";
 import { decryptAtRest } from "@/lib/crypto/server_encryption";
 import { sql } from "@/lib/db";
+import { loadConversation, recordExchange } from "@/lib/agent/conversation";
 import { runAgentTurn, type ConversationTurn, type TierAProfile } from "@/lib/agent/run_core";
 import {
   CALENDAR_TOOLKIT,
@@ -153,7 +154,7 @@ function makeDeps(): InboundDeps {
     weather: makeWeatherDeps(),
     runVisionTurn: ({ imageUrl, prompt, system }) => runVisionTurn({ imageUrl, prompt, system }),
     loadConversation,
-    recordConversation,
+    recordConversation: recordExchange,
     recordSignal,
     rejectRecentSignal,
     confirmPending,
@@ -244,46 +245,9 @@ function makeWebSearchDeps(): WebSearchDeps {
 //   2. durable facts (learned_facts) that outlive the window entirely, so the
 //      important things are remembered FOREVER even after a message scrolls off.
 // (Claude-style summarization of truly enormous threads is the next-level add.)
-/** Max recent turns replayed verbatim — high; the durable-facts layer covers the rest. */
-const HISTORY_LIMIT = 300;
-/** Replay window — a month, so eri never forgets a normal-length relationship's thread. */
-const HISTORY_WINDOW = "30 days";
-
-/** Load the recent conversation (oldest→newest) so eri remembers the thread. */
-async function loadConversation(userId: string): Promise<ConversationTurn[]> {
-  try {
-    const rows = await sql()<{ role: string; content: string }[]>`
-      SELECT role, content FROM conversation_turns
-      WHERE user_id = ${userId} AND created_at > now() - ${HISTORY_WINDOW}::interval
-      ORDER BY created_at DESC
-      LIMIT ${HISTORY_LIMIT}
-    `;
-    // DB gave newest→oldest; reverse to oldest→newest for the model.
-    return rows
-      .reverse()
-      .map((r) => ({ role: r.role === "assistant" ? "assistant" : "user", content: r.content }));
-  } catch (e) {
-    logEvent("imessage.history_load_failed", { userId, error: errMsg(e) });
-    return [];
-  }
-}
-
-/** Append this exchange to the running conversation. Best-effort — never throws. */
-async function recordConversation(
-  userId: string,
-  userText: string,
-  assistantText: string,
-): Promise<void> {
-  try {
-    await sql()`
-      INSERT INTO conversation_turns (user_id, role, content) VALUES
-        (${userId}, 'user', ${userText}),
-        (${userId}, 'assistant', ${assistantText})
-    `;
-  } catch (e) {
-    logEvent("imessage.history_record_failed", { userId, error: errMsg(e) });
-  }
-}
+// The running conversation (load/record) now lives in the ONE shared module
+// `@/lib/agent/conversation` — the same thread the desktop reads/writes — so
+// there's a single implementation, not a phone copy. Imported above.
 
 /**
  * Wire SQL (active connections) + Composio tool execution behind the ConnectorDeps
