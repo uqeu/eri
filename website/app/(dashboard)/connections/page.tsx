@@ -1,54 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { authedFetch } from "@/lib/auth-client";
 
-/** The apps eri can connect through Composio. Composio supports hundreds; this
- *  is a curated, grouped launch set. Slugs are EXACT Composio toolkit slugs
- *  (verified via the toolkits API) — each needs a matching auth config named
- *  COMPOSIO_AUTH_CONFIG_<SLUG-UPPERCASED>. With the Tool Router, listing more
- *  apps costs no per-turn tokens (schemas are lazy-loaded), so breadth is safe. */
-const APPS: ReadonlyArray<{ slug: string; name: string; blurb: string; category: string }> = [
-  // Email & Calendar
-  { slug: "gmail", name: "Gmail", blurb: "Read and send email", category: "Email & Calendar" },
-  { slug: "googlecalendar", name: "Google Calendar", blurb: "Read and create events", category: "Email & Calendar" },
-  { slug: "outlook", name: "Outlook", blurb: "Mail and calendar", category: "Email & Calendar" },
-  { slug: "googlecontacts", name: "Google Contacts", blurb: "Look up people you email", category: "Email & Calendar" },
-  // Docs & Files
-  { slug: "notion", name: "Notion", blurb: "Read and write pages", category: "Docs & Files" },
-  { slug: "googledocs", name: "Google Docs", blurb: "Read and write docs", category: "Docs & Files" },
-  { slug: "googlesheets", name: "Google Sheets", blurb: "Read and edit spreadsheets", category: "Docs & Files" },
-  { slug: "googledrive", name: "Google Drive", blurb: "Find and manage files", category: "Docs & Files" },
-  { slug: "dropbox", name: "Dropbox", blurb: "Find and manage files", category: "Docs & Files" },
-  // Development
-  { slug: "github", name: "GitHub", blurb: "Issues, PRs, repositories", category: "Development" },
-  { slug: "linear", name: "Linear", blurb: "Issues and projects", category: "Development" },
-  { slug: "jira", name: "Jira", blurb: "Issues and sprints", category: "Development" },
-  // Communication
-  { slug: "slack", name: "Slack", blurb: "Send and read messages", category: "Communication" },
-  { slug: "discord", name: "Discord", blurb: "Send and read messages", category: "Communication" },
-  { slug: "telegram", name: "Telegram", blurb: "Send and read messages", category: "Communication" },
-  // Productivity
-  { slug: "asana", name: "Asana", blurb: "Tasks and projects", category: "Productivity" },
-  { slug: "trello", name: "Trello", blurb: "Boards and cards", category: "Productivity" },
-  { slug: "clickup", name: "ClickUp", blurb: "Tasks and docs", category: "Productivity" },
-  { slug: "todoist", name: "Todoist", blurb: "Tasks and reminders", category: "Productivity" },
-  { slug: "calendly", name: "Calendly", blurb: "Scheduling links", category: "Productivity" },
-  // CRM & Social
-  { slug: "hubspot", name: "HubSpot", blurb: "Contacts and deals", category: "CRM & Social" },
-  { slug: "twitter", name: "Twitter / X", blurb: "Post and read", category: "CRM & Social" },
-  { slug: "linkedin", name: "LinkedIn", blurb: "Post and read", category: "CRM & Social" },
-];
-
-/** Stable display order for the category section headers. */
-const CATEGORY_ORDER: ReadonlyArray<string> = [
-  "Email & Calendar",
-  "Docs & Files",
-  "Development",
-  "Communication",
-  "Productivity",
-  "CRM & Social",
-];
+/** A connectable app from Composio's catalog (fetched dynamically — no
+ *  hand-maintained list). The catalog is ~900 apps; the UI is search-driven and
+ *  pins the user's connected apps when the search box is empty. */
+interface ToolkitItem {
+  slug: string;
+  name: string;
+  logo?: string;
+  description?: string;
+  category?: string;
+}
 
 type Status = "active" | "pending" | "error";
 
@@ -61,6 +25,9 @@ interface Toast {
   kind: "success" | "error";
   message: string;
 }
+
+/** How many search matches to render at once (the catalog is huge). */
+const MAX_RESULTS = 60;
 
 function StatusBadge({ status }: { status?: Status }): ReactNode {
   if (status === "active") {
@@ -76,11 +43,26 @@ function StatusBadge({ status }: { status?: Status }): ReactNode {
 }
 
 export default function ConnectionsPage(): ReactNode {
+  const [catalog, setCatalog] = useState<ToolkitItem[]>([]);
   const [statuses, setStatuses] = useState<Record<string, Status>>({});
+  const [query, setQuery] = useState<string>("");
   const [loading, setLoading] = useState<boolean>(true);
   const [locked, setLocked] = useState<boolean>(false);
   const [connecting, setConnecting] = useState<string | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
+
+  // The catalog is global (same for every user) — fetch once. Per-user
+  // connection status comes from /api/composio/status (refreshable).
+  const loadCatalog = useCallback(async (): Promise<void> => {
+    const res = await authedFetch("/api/composio/toolkits", { method: "GET" });
+    if (res.status === 402) {
+      setLocked(true);
+      return;
+    }
+    if (!res.ok) return;
+    const body = (await res.json()) as { toolkits?: ToolkitItem[] };
+    setCatalog(body.toolkits ?? []);
+  }, []);
 
   const refresh = useCallback(async (): Promise<void> => {
     try {
@@ -102,14 +84,35 @@ export default function ConnectionsPage(): ReactNode {
   }, []);
 
   useEffect(() => {
+    void loadCatalog();
     void refresh();
-  }, [refresh]);
+  }, [loadCatalog, refresh]);
 
   useEffect(() => {
     if (!toast) return;
     const id = window.setTimeout(() => setToast(null), 4000);
     return () => window.clearTimeout(id);
   }, [toast]);
+
+  // Empty search → show the apps you've connected (pinned). Typing → search the
+  // whole catalog, capped so 900 apps never flood the page.
+  const visible = useMemo<ToolkitItem[]>(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) {
+      return catalog
+        .filter((a) => statuses[a.slug])
+        .sort((a, b) => a.name.localeCompare(b.name));
+    }
+    return catalog
+      .filter(
+        (a) =>
+          a.name.toLowerCase().includes(q) ||
+          a.slug.includes(q) ||
+          (a.category?.toLowerCase().includes(q) ?? false),
+      )
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .slice(0, MAX_RESULTS);
+  }, [catalog, statuses, query]);
 
   async function connect(slug: string): Promise<void> {
     setConnecting(slug);
@@ -140,6 +143,8 @@ export default function ConnectionsPage(): ReactNode {
     }
   }
 
+  const hasQuery = query.trim().length > 0;
+
   return (
     <div className="mx-auto max-w-3xl px-5 py-10 sm:py-14">
       <div className="flex items-start justify-between gap-4">
@@ -167,53 +172,85 @@ export default function ConnectionsPage(): ReactNode {
           </p>
         </div>
       ) : (
-        <div className="mt-8 space-y-8">
-          {CATEGORY_ORDER.map((category) => {
-            const apps = APPS.filter((a) => a.category === category);
-            if (apps.length === 0) return null;
-            return (
-              <div key={category}>
-                <h2 className="mb-2 text-[12px] font-medium uppercase tracking-wide text-muted">
-                  {category}
-                </h2>
-                <div className="overflow-hidden rounded-lg border border-white/[0.08]">
-                  {apps.map((app, i) => {
-                    const status = statuses[app.slug];
-                    const isActive = status === "active";
-                    return (
-                      <div
-                        key={app.slug}
-                        className={`flex items-center justify-between gap-4 px-5 py-4 ${
-                          i > 0 ? "border-t border-white/[0.06]" : ""
-                        }`}
-                      >
-                        <div className="min-w-0">
-                          <div className="text-[14px] font-medium text-paper">{app.name}</div>
-                          <div className="truncate text-[12.5px] text-muted">{app.blurb}</div>
-                        </div>
-                        <div className="flex shrink-0 items-center gap-4">
-                          <StatusBadge status={status} />
-                          <button
-                            onClick={() => void connect(app.slug)}
-                            disabled={isActive || connecting === app.slug || loading}
-                            className="rounded-md border border-white/[0.1] px-3 py-1.5 text-[13px] text-paper transition-colors hover:bg-white/[0.04] disabled:cursor-not-allowed disabled:opacity-40"
-                          >
-                            {isActive
-                              ? "Connected"
-                              : connecting === app.slug
-                                ? "Opening…"
-                                : status === "pending"
-                                  ? "Reconnect"
-                                  : "Connect"}
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
+        <div className="mt-8">
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={
+              catalog.length ? `Search ${catalog.length}+ apps…` : "Search apps…"
+            }
+            className="w-full rounded-lg border border-white/[0.1] bg-white/[0.02] px-4 py-2.5 text-[14px] text-paper placeholder:text-muted focus:border-white/[0.2] focus:outline-none"
+          />
+
+          <div className="mt-6 overflow-hidden rounded-lg border border-white/[0.08]">
+            {visible.length === 0 ? (
+              <div className="px-5 py-8 text-center text-[13px] text-muted">
+                {loading
+                  ? "Loading…"
+                  : hasQuery
+                    ? "No apps match that search."
+                    : "Search above to find and connect any of your apps."}
               </div>
-            );
-          })}
+            ) : (
+              visible.map((app, i) => {
+                const status = statuses[app.slug];
+                const isActive = status === "active";
+                return (
+                  <div
+                    key={app.slug}
+                    className={`flex items-center justify-between gap-4 px-5 py-4 ${
+                      i > 0 ? "border-t border-white/[0.06]" : ""
+                    }`}
+                  >
+                    <div className="flex min-w-0 items-center gap-3">
+                      {app.logo ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={app.logo}
+                          alt=""
+                          width={20}
+                          height={20}
+                          className="h-5 w-5 shrink-0 rounded"
+                        />
+                      ) : null}
+                      <div className="min-w-0">
+                        <div className="text-[14px] font-medium text-paper">{app.name}</div>
+                        {app.description ? (
+                          <div className="truncate text-[12.5px] text-muted">
+                            {app.description}
+                          </div>
+                        ) : app.category ? (
+                          <div className="truncate text-[12.5px] text-muted">{app.category}</div>
+                        ) : null}
+                      </div>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-4">
+                      <StatusBadge status={status} />
+                      <button
+                        onClick={() => void connect(app.slug)}
+                        disabled={isActive || connecting === app.slug}
+                        className="rounded-md border border-white/[0.1] px-3 py-1.5 text-[13px] text-paper transition-colors hover:bg-white/[0.04] disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        {isActive
+                          ? "Connected"
+                          : connecting === app.slug
+                            ? "Opening…"
+                            : status === "pending"
+                              ? "Reconnect"
+                              : "Connect"}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+          {hasQuery && visible.length === MAX_RESULTS ? (
+            <p className="mt-3 text-center text-[12px] text-muted">
+              Showing the first {MAX_RESULTS} matches — keep typing to narrow it down.
+            </p>
+          ) : null}
         </div>
       )}
 

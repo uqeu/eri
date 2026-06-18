@@ -24,7 +24,36 @@ export interface ComposioConnection {
   redirectUrl: string;
 }
 
+/** The relevant subset of a Composio catalog item (`toolkits.get({})`). Internal
+ *  — mapped to `ToolkitInfo` before leaving the seam. */
+interface RawToolkit {
+  slug: string;
+  name: string;
+  isNoAuth?: boolean;
+  meta?: {
+    logo?: string;
+    description?: string;
+    categories?: Array<{ slug: string; name: string }>;
+  };
+}
+
+/** One app in Composio's catalog (the dynamic connector list — ~900 apps). The
+ *  per-user connection status is NOT here; it's overlaid from our own DB. */
+export interface ToolkitInfo {
+  slug: string;
+  name: string;
+  logo?: string;
+  description?: string;
+  category?: string;
+}
+
 export interface ComposioClient {
+  /**
+   * Composio's full toolkit catalog (~900 apps), so the connections UI is
+   * dynamic — no hand-maintained app list. Auth-requiring apps only (no-auth
+   * toolkits are filtered out: there's nothing for the user to connect).
+   */
+  listToolkits(): Promise<ToolkitInfo[]>;
   /**
    * Start linking `toolkit` for `userId`. Composio returns a hosted redirect the
    * user opens to authorize; on success the connected account becomes active.
@@ -36,9 +65,11 @@ export interface ComposioClient {
   mcpUrl(userId: string): string;
 }
 
-/** Build the per-user Composio MCP URL. Pure — the computer injects the user id. */
+/** Build the per-user Composio MCP URL. Pure — the computer injects the user id.
+ *  The `/mcp` transport segment is the canonical endpoint (the bare path
+ *  307-redirects to it). */
 export function composioMcpUrl(serverId: string, userId: string): string {
-  return `https://backend.composio.dev/v3/mcp/${serverId}?user_id=${encodeURIComponent(userId)}`;
+  return `https://backend.composio.dev/v3/mcp/${serverId}/mcp?user_id=${encodeURIComponent(userId)}`;
 }
 
 /** Read a required Composio env var, failing fast with a clear message. */
@@ -62,13 +93,33 @@ function composio(): Composio {
  * COMPOSIO_AUTH_CONFIG_GMAIL; the MCP server id is COMPOSIO_MCP_SERVER_ID.
  */
 export class ComposioApiClient implements ComposioClient {
+  async listToolkits(): Promise<ToolkitInfo[]> {
+    // The whole catalog. The SDK returns an array (or a paginated wrapper across
+    // versions) — handle both, fail-soft to empty.
+    const res = (await composio().toolkits.get({})) as unknown;
+    const items: RawToolkit[] = Array.isArray(res)
+      ? (res as RawToolkit[])
+      : (((res as { items?: RawToolkit[] }).items ?? []) as RawToolkit[]);
+    return items
+      .filter((t) => t.slug && t.name && !t.isNoAuth)
+      .map((t) => ({
+        slug: t.slug,
+        name: t.name,
+        logo: t.meta?.logo,
+        description: t.meta?.description,
+        category: t.meta?.categories?.[0]?.name,
+      }));
+  }
+
   async initiateConnection(userId: string, toolkit: string): Promise<ComposioConnection> {
-    const authConfigId = requireEnv(`COMPOSIO_AUTH_CONFIG_${toolkit.toUpperCase()}`);
-    // link() = Composio-managed OAuth (hosted redirect, multiple accounts) — the
-    // non-deprecated replacement for initiate().
-    const req = await composio().connectedAccounts.link(userId, authConfigId);
+    // On-demand + managed auth: `authorize` creates the auth config itself if one
+    // doesn't exist and uses Composio's managed OAuth app — so NO per-app
+    // COMPOSIO_AUTH_CONFIG_* env var is needed for the ~900 catalog apps. We still
+    // honor a custom config when one IS set (custom scopes/branding for a few).
+    const custom = process.env[`COMPOSIO_AUTH_CONFIG_${toolkit.toUpperCase()}`];
+    const req = await composio().toolkits.authorize(userId, toolkit, custom || undefined);
     if (!req.id || !req.redirectUrl) {
-      throw new Error(`composio link returned no redirect for "${toolkit}"`);
+      throw new Error(`composio authorize returned no redirect for "${toolkit}"`);
     }
     return { connectedAccountId: req.id, redirectUrl: req.redirectUrl };
   }
