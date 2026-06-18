@@ -1011,6 +1011,33 @@ async fn execute_tool(
         };
     }
     match name {
+        "web_search" => {
+            let q = input
+                .get("query")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            if q.is_empty() {
+                return err("web_search needs a `query`".to_string());
+            }
+            // The SAME web-search impl `eri research` uses (model web search via
+            // the eri proxy). It's blocking, so run it off the async worker so the
+            // loop isn't stalled. Now the desktop brain can search mid-task, like
+            // phone eri does.
+            match tokio::task::spawn_blocking(move || crate::research::search_web_via_proxy(&q))
+                .await
+            {
+                Ok(Ok(Some(answer))) => ToolExec {
+                    content: answer,
+                    is_error: false,
+                    written: Vec::new(),
+                },
+                Ok(Ok(None)) => err("web search needs you signed in (eri auth login).".to_string()),
+                Ok(Err(e)) => err(format!("web search failed: {e}")),
+                Err(e) => err(format!("web search task failed: {e}")),
+            }
+        }
         "bash" => {
             // Background variant: spawn + return a task id instead of blocking.
             if input
@@ -2017,6 +2044,17 @@ fn background_specs() -> Vec<Value> {
 /// subagent cannot spawn further subagents.
 fn tool_specs(allow_shell: bool, depth: u8) -> Value {
     let mut tools = json!([
+        {
+            "name": "web_search",
+            "description": "Search the live web and get an answer with sources. Use for anything you don't know or that may have changed (current events, docs, prices, facts to verify). Runs on the user's eri tokens. Don't guess when you can search.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "query": { "type": "string", "description": "What to search for." }
+                },
+                "required": ["query"]
+            }
+        },
         {
             "name": "list_dir",
             "description": "List files and subdirectories at a workspace-relative path. Use to explore before reading or writing. Defaults to the workspace root.",

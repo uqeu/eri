@@ -19,29 +19,34 @@ pub fn research(query: &str) -> Result<()> {
     if query.is_empty() {
         anyhow::bail!("research needs a question, e.g. eri research \"what is pgvector?\"");
     }
-
-    // eri tokens, via the proxy — no bring-your-own-key for end users.
-    let creds = config::load().context("load eri credentials")?;
-    let Some(bearer) = creds.bearer() else {
-        println!(
+    println!("eri is searching…\n");
+    match search_web_via_proxy(query)? {
+        Some(answer) if !answer.trim().is_empty() => println!("{}", answer.trim()),
+        Some(_) => println!("(No answer came back — try rephrasing the question.)"),
+        None => println!(
             "eri research runs on your eri tokens, so it needs you signed in:\n\
              \n  eri auth login\n  eri research \"{query}\"\n"
-        );
-        return Ok(());
-    };
+        ),
+    }
+    Ok(())
+}
 
+/// Run a web search through the model's built-in web search, billed to the
+/// user's eri plan via the proxy bearer. The ONE web-search implementation —
+/// shared by the `eri research` CLI and the in-turn `web_search` agent tool, so
+/// the desktop brain searches the web the same way everywhere (no clone).
+///
+/// `Ok(None)` = not signed in (the only non-error "can't" case); `Ok(Some(text))`
+/// = the answer (possibly empty); `Err` = a real failure.
+pub(crate) fn search_web_via_proxy(query: &str) -> Result<Option<String>> {
+    let creds = config::load().context("load eri credentials")?;
+    let Some(bearer) = creds.bearer() else {
+        return Ok(None);
+    };
     // Route through the eri inference proxy (Bearer = the eri session), so the
     // web search is billed to the user's eri plan — not a provider key.
     let provider = AnthropicProvider::for_model_with_proxy(WIRE_MODEL, bearer, &creds.base_url())
         .context("build eri research provider")?;
-
-    println!("eri is searching…\n");
     let answer = provider.search_web(query).context("web search")?;
-    let answer = answer.trim();
-    if answer.is_empty() {
-        println!("(No answer came back — try rephrasing the question.)");
-    } else {
-        println!("{answer}");
-    }
-    Ok(())
+    Ok(Some(answer))
 }
