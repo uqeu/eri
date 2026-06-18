@@ -4,9 +4,12 @@
 //! the backend's brain layer can pick the right model + budget.
 
 use std::io::{self, Write};
+use std::path::Path;
 
 use anyhow::{Context, Result};
+use base64::Engine as _;
 use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 
 use crate::client::Client;
 use crate::config;
@@ -60,6 +63,104 @@ struct AgentArtifactEvent<'a> {
 
 pub async fn ask(prompt: &str) -> Result<()> {
     run_intent("ask", prompt, None, &[], AgentOutputMode::Text).await
+}
+
+/// `eri ask --image <PATH>`: analyze one or more local images with the prompt.
+///
+/// This is eri's vision path — the desktop app captures the screen (e.g. with
+/// macOS `screencapture`) and calls `eri ask --image /tmp/shot.png "what's on my
+/// screen"`. Each image is read, base64-encoded, and attached as an Anthropic
+/// image content block in a single user message alongside the text prompt. We
+/// run ONE non-tool turn through the same vision-capable Claude engine the
+/// control loop's `look` tool uses (`ClaudeControlTurn`), which streams the
+/// answer to stdout in eri's persona/human voice.
+pub async fn ask_with_image(prompt: &str, images: &[std::path::PathBuf]) -> Result<()> {
+    if images.is_empty() {
+        // No image after all — behave exactly like a normal ask.
+        return ask(prompt).await;
+    }
+    let prompt = prompt.trim();
+    if prompt.is_empty() {
+        anyhow::bail!("ask needs a question to go with the image, e.g. eri ask --image shot.png \"what's on my screen\"");
+    }
+
+    // Build the image blocks first (fail fast on a bad path / unknown type).
+    let mut content: Vec<Value> = Vec::with_capacity(images.len() + 1);
+    for path in images {
+        content.push(image_block(path)?);
+    }
+    content.push(json!({ "type": "text", "text": prompt }));
+
+    let messages = vec![json!({ "role": "user", "content": content })];
+
+    // eri's persona/voice — the same shared brand blocks the control loop uses,
+    // so vision answers read like every other eri reply.
+    let system = vec![
+        json!({ "type": "text", "text": ASK_VISION_SYSTEM }),
+        json!({ "type": "text", "text": eri_inference::brand::GUARDRAIL }),
+        json!({ "type": "text", "text": eri_inference::brand::HUMAN_VOICE }),
+    ];
+
+    // Vision needs a vision-capable engine. Claude is that engine (the same one
+    // the control `look` tool routes images to). Run a single no-tool turn; the
+    // adapter streams tokens to stdout as they arrive.
+    use crate::control_turn::ControlTurn as _;
+    let model = crate::build_agent::DEFAULT_MODEL;
+    let engine = crate::control_turn::ClaudeControlTurn::signed_in(model)
+        .context("eri ask --image needs a vision-capable engine — run `eri auth login` first")?;
+    let no_tools = json!([]);
+    let out = engine.run(&system, &messages, &no_tools).await?;
+
+    // The adapter already streamed the text; finish the line. If nothing
+    // streamed (rare), print whatever the turn returned so the user isn't left
+    // with a blank reply.
+    let mut stdout = io::stdout();
+    if !out.text.trim().is_empty() {
+        writeln!(stdout)?;
+    } else {
+        writeln!(stdout, "[eri] (no answer returned for the image)")?;
+    }
+    Ok(())
+}
+
+/// System prompt for the image-analysis path: keep it grounded in what's
+/// actually visible. eri's voice + guardrails are layered on top by the caller.
+const ASK_VISION_SYSTEM: &str = "You are eri. The user has attached one or more \
+images (often a screenshot of their screen). Answer their question by describing \
+what is actually visible. Be concrete and specific; do not invent UI, text, or \
+details that aren't in the image. If something is unreadable or cut off, say so.";
+
+/// Read an image file and build an Anthropic image content block (base64).
+/// Media type is inferred from the extension (png/jpeg/webp/gif); anything else
+/// is rejected with a clear error rather than mislabeled.
+fn image_block(path: &Path) -> Result<Value> {
+    let bytes = std::fs::read(path)
+        .with_context(|| format!("could not read image {}", path.display()))?;
+    let media_type = media_type_for(path)
+        .with_context(|| format!("unsupported image type for {}", path.display()))?;
+    let data = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    Ok(json!({
+        "type": "image",
+        "source": { "type": "base64", "media_type": media_type, "data": data },
+    }))
+}
+
+/// Map a file extension to an Anthropic-supported image media type. `None` for
+/// anything we don't support (don't guess — a wrong media type makes the API
+/// reject the request).
+fn media_type_for(path: &Path) -> Option<&'static str> {
+    match path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        Some("png") => Some("image/png"),
+        Some("jpg") | Some("jpeg") => Some("image/jpeg"),
+        Some("webp") => Some("image/webp"),
+        Some("gif") => Some("image/gif"),
+        _ => None,
+    }
 }
 
 pub async fn plan_with_output(prompt: &str, output: AgentOutputMode) -> Result<()> {

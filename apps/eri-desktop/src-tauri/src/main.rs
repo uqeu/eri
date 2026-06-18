@@ -37,8 +37,30 @@ static CONTROL_ENV: Mutex<Option<(String, String)>> = Mutex::new(None);
 #[cfg(target_os = "macos")]
 use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial, NSVisualEffectState};
 
-/// Resolve the `eri` CLI. Prefer PATH; fall back to the repo release build.
+/// Resolve the `eri` CLI to an ABSOLUTE path. GUI apps launched via Finder/`open`
+/// get a minimal PATH WITHOUT /usr/local/bin, so a bare "eri" fails to spawn —
+/// which made every brain call return "couldn't reach my brain". Resolve directly.
 fn eri_bin() -> String {
+    if let Ok(p) = std::env::var("ERI_BIN") {
+        if std::path::Path::new(&p).exists() {
+            return p;
+        }
+    }
+    for p in [
+        "/usr/local/bin/eri",
+        "/opt/homebrew/bin/eri",
+        "/Users/khai/Desktop/eri/target/release/eri",
+    ] {
+        if std::path::Path::new(p).exists() {
+            return p.to_string();
+        }
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        let cargo = format!("{home}/.cargo/bin/eri");
+        if std::path::Path::new(&cargo).exists() {
+            return cargo;
+        }
+    }
     "eri".to_string()
 }
 
@@ -92,44 +114,45 @@ fn is_actuation_command(text: &str) -> bool {
 /// `eri-stream` events, finishing with an `eri-result` event — the exact
 /// contract manager.js's `eriStreamEvent` / `eriBridgeResult` expect.
 fn spawn_stream(app: AppHandle, ui_command: String, args: Vec<String>, turn: i64) {
-    std::thread::spawn(move || {
-        let cwd = default_cwd();
-        let _ = std::fs::create_dir_all(&cwd);
-        let mut cmd = Command::new(eri_bin());
-        cmd.args(&args).current_dir(&cwd).stdout(Stdio::piped()).stderr(Stdio::piped());
-        // Hand control children the live actuation bridge so they don't dry-run.
-        if let Ok(g) = CONTROL_ENV.lock() {
-            if let Some((ep, tok)) = g.as_ref() {
-                cmd.env("ERI_CONTROL_ENDPOINT", ep).env("ERI_CONTROL_TOKEN", tok);
-            }
+    std::thread::spawn(move || run_and_stream(app, ui_command, args, turn));
+}
+
+/// Synchronous core of spawn_stream (call from an existing thread).
+fn run_and_stream(app: AppHandle, ui_command: String, args: Vec<String>, turn: i64) {
+    let cwd = default_cwd();
+    let _ = std::fs::create_dir_all(&cwd);
+    let mut cmd = Command::new(eri_bin());
+    cmd.args(&args).current_dir(&cwd).stdout(Stdio::piped()).stderr(Stdio::piped());
+    // Hand control children the live actuation bridge so they don't dry-run.
+    if let Ok(g) = CONTROL_ENV.lock() {
+        if let Some((ep, tok)) = g.as_ref() {
+            cmd.env("ERI_CONTROL_ENDPOINT", ep).env("ERI_CONTROL_TOKEN", tok);
         }
-        let child = cmd.spawn();
-
-        let mut child = match child {
-            Ok(c) => c,
-            Err(e) => {
-                let _ = app.emit(
-                    "eri-result",
-                    json!({ "command": ui_command, "turn": turn, "status": "error", "detail": format!("could not start eri: {e}") }),
-                );
-                return;
-            }
-        };
-
-        if let Some(stdout) = child.stdout.take() {
-            let reader = BufReader::new(stdout);
-            for line in reader.lines().map_while(Result::ok) {
-                let _ = app.emit("eri-stream", json!({ "command": ui_command, "turn": turn, "line": line }));
-            }
+    }
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => {
+            let _ = app.emit(
+                "eri-result",
+                json!({ "command": ui_command, "turn": turn, "status": "error", "detail": format!("could not start eri: {e}") }),
+            );
+            return;
         }
+    };
 
-        let status = child.wait();
-        let ok = status.map(|s| s.success()).unwrap_or(false);
-        let _ = app.emit(
-            "eri-result",
-            json!({ "command": ui_command, "turn": turn, "status": if ok { "done" } else { "error" }, "detail": "" }),
-        );
-    });
+    if let Some(stdout) = child.stdout.take() {
+        let reader = BufReader::new(stdout);
+        for line in reader.lines().map_while(Result::ok) {
+            let _ = app.emit("eri-stream", json!({ "command": ui_command, "turn": turn, "line": line }));
+        }
+    }
+
+    let status = child.wait();
+    let ok = status.map(|s| s.success()).unwrap_or(false);
+    let _ = app.emit(
+        "eri-result",
+        json!({ "command": ui_command, "turn": turn, "status": if ok { "done" } else { "error" }, "detail": "" }),
+    );
 }
 
 /// Classify a non-actuation question so the desktop app can be as smart as the
@@ -289,14 +312,14 @@ fn bridge(app: AppHandle, message: Value) -> Result<(), String> {
             } else {
                 // Smart routing so the desktop matches the phone brain.
                 match classify_query(&intent) {
-                    // "read my screen" → eri's control `look` tool (capture + analyze).
-                    Query::Vision => spawn_stream(app, "screenshot".into(), vec!["control".into(), "--live".into(), "--yes".into(), intent], turn),
+                    // "read my screen" → capture in the granted main app, analyze via vision.
+                    Query::Vision => spawn_vision(app, intent, turn),
                     Query::Research => spawn_stream(app, command.clone(), vec!["research".into(), intent], turn),
                     Query::Memory => spawn_stream(app, command.clone(), vec!["memory".into(), "recall".into(), intent], turn),
                     Query::General => {
-                        if !ask_warm(&intent, turn) {
-                            spawn_stream(app, command.clone(), vec!["ask".into(), intent], turn);
-                        }
+                        // Use the proven one-shot `eri ask` (reliable) — the warm-chat
+                        // stdin pipe was dropping replies. Latency trade we accept for now.
+                        spawn_stream(app, command.clone(), vec!["ask".into(), intent], turn);
                     }
                 }
             }
@@ -311,9 +334,9 @@ fn bridge(app: AppHandle, message: Value) -> Result<(), String> {
             let turn = message.get("turn").and_then(|v| v.as_i64()).unwrap_or(0);
             let prompt = {
                 let p = str_field(&message, "intent");
-                if p.is_empty() { "look at my screen and tell me what's on it".to_string() } else { p.to_string() }
+                if p.is_empty() { "Look at my screen and tell me what's on it.".to_string() } else { p.to_string() }
             };
-            spawn_stream(app, "screenshot".into(), vec!["control".into(), "--live".into(), "--yes".into(), prompt], turn);
+            spawn_vision(app, prompt, turn);
         }
         "runEri" | "spawnAgent" => {
             let turn = message.get("turn").and_then(|v| v.as_i64()).unwrap_or(0);
@@ -324,6 +347,38 @@ fn bridge(app: AppHandle, message: Value) -> Result<(), String> {
         _ => ack("ok"),
     }
 
+    Ok(())
+}
+
+/// Vision: capture the screen FROM THE MAIN APP PROCESS (which the user grants as
+/// "Eri" in Screen Recording — `screencapture` runs as a child so TCC attributes
+/// it to us), then analyze the PNG with `eri ask --image`. This avoids the helper
+/// binary's separate code-signature, which can't share the "Eri" grant.
+fn spawn_vision(app: AppHandle, prompt: String, turn: i64) {
+    std::thread::spawn(move || {
+        let tmp = std::env::temp_dir().join("eri_screen.png");
+        let _ = std::fs::remove_file(&tmp);
+        if let Err(e) = capture_screen_png(&tmp) {
+            let _ = app.emit("eri-stream", json!({ "command": "screenshot", "turn": turn, "line": format!("I couldn't capture the screen ({e}). Grant eri Screen Recording in System Settings → Privacy & Security, then try again.") }));
+            let _ = app.emit("eri-result", json!({ "command": "screenshot", "turn": turn, "status": "error", "detail": "" }));
+            return;
+        }
+        run_and_stream(
+            app,
+            "screenshot".into(),
+            vec!["ask".into(), "--image".into(), tmp.to_string_lossy().to_string(), prompt],
+            turn,
+        );
+    });
+}
+
+/// In-process screen capture via xcap (the Pluely technique) — runs as the main
+/// "Eri" process so it uses the Screen-Recording grant the user gave "Eri".
+fn capture_screen_png(path: &std::path::Path) -> Result<(), String> {
+    let monitors = xcap::Monitor::all().map_err(|e| format!("no monitors: {e}"))?;
+    let mon = monitors.into_iter().next().ok_or_else(|| "no monitor found".to_string())?;
+    let img = mon.capture_image().map_err(|e| format!("capture failed: {e}"))?;
+    img.save(path).map_err(|e| format!("save failed: {e}"))?;
     Ok(())
 }
 

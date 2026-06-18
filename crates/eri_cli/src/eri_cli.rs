@@ -327,6 +327,10 @@ pub enum Command {
     },
     /// Ask Eri a one-off question about the current project.
     Ask {
+        /// Attach an image (screenshot/photo) for eri to analyze. Repeatable.
+        /// PNG/JPEG/WEBP/GIF; routes the question to eri's vision engine.
+        #[arg(long, value_name = "PATH")]
+        image: Vec<PathBuf>,
         /// The question to ask.
         prompt: Vec<String>,
     },
@@ -850,7 +854,15 @@ async fn dispatch(cli: Cli) -> anyhow::Result<()> {
             }
         }
         // -- new agent-mode commands (async) --
-        Command::Ask { prompt } => agent::ask(&prompt.join(" ")).await,
+        Command::Ask { image, prompt } => {
+            // With --image, route through the vision engine; otherwise the
+            // existing text-only ask path (no regression).
+            if image.is_empty() {
+                agent::ask(&prompt.join(" ")).await
+            } else {
+                agent::ask_with_image(&prompt.join(" "), &image).await
+            }
+        }
         Command::Plan {
             prompt,
             output,
@@ -2062,8 +2074,26 @@ mod tests {
     #[test]
     fn parses_ask_subcommand() {
         match parsed_command(["eri", "ask", "what", "is", "tokio?"]) {
-            Command::Ask { prompt } => {
+            Command::Ask { image, prompt } => {
                 assert_eq!(prompt, vec!["what", "is", "tokio?"]);
+                assert!(image.is_empty());
+            }
+            other => panic!("expected Ask, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_ask_with_image_flag() {
+        match parsed_command([
+            "eri",
+            "ask",
+            "--image",
+            "/tmp/shot.png",
+            "what's on my screen",
+        ]) {
+            Command::Ask { image, prompt } => {
+                assert_eq!(image, vec![PathBuf::from("/tmp/shot.png")]);
+                assert_eq!(prompt, vec!["what's on my screen"]);
             }
             other => panic!("expected Ask, got {other:?}"),
         }
