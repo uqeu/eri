@@ -1038,6 +1038,21 @@ async fn execute_tool(
                 Err(e) => err(format!("web search task failed: {e}")),
             }
         }
+        "get_weather" => {
+            let loc = input
+                .get("location")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
+            match crate::weather::get_weather(&loc).await {
+                Ok(s) => ToolExec {
+                    content: s,
+                    is_error: false,
+                    written: Vec::new(),
+                },
+                Err(e) => err(format!("weather lookup failed: {e}")),
+            }
+        }
         "bash" => {
             // Background variant: spawn + return a task id instead of blocking.
             if input
@@ -2053,6 +2068,17 @@ fn tool_specs(allow_shell: bool, depth: u8) -> Value {
                     "query": { "type": "string", "description": "What to search for." }
                 },
                 "required": ["query"]
+            }
+        },
+        {
+            "name": "get_weather",
+            "description": "Current weather + today's high/low for a place (real-time). Use when the user asks about weather or you need current conditions for somewhere.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "location": { "type": "string", "description": "City or place, e.g. \"Toronto\" or \"Paris, France\"." }
+                },
+                "required": ["location"]
             }
         },
         {

@@ -65,6 +65,7 @@ mod remote;
 mod remote_recall;
 mod repl;
 mod research;
+mod weather;
 mod sandbox;
 mod sdk_tools;
 mod search;
