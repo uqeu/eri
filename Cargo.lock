@@ -1165,6 +1165,7 @@ dependencies = [
  "eri_caveman",
  "eri_core",
  "eri_git",
+ "eri_graph",
  "eri_router",
  "eri_tokens",
  "getrandom 0.2.16",

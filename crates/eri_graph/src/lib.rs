@@ -23,6 +23,7 @@ pub mod auto;
 mod error;
 mod storage;
 mod types;
+pub mod world;
 
 pub use error::GraphError;
 pub use types::{
@@ -117,6 +118,24 @@ impl Graph {
     pub fn get_node(&self, id: &NodeId) -> Result<Option<Node>, GraphError> {
         let inner = self.lock_inner()?;
         inner.store.get_node(id)
+    }
+
+    /// Replace an edge's metadata JSON (e.g. to stamp `valid_to` when a
+    /// bi-temporal relation stops being true — invalidate, don't delete).
+    pub fn update_edge_metadata(
+        &self,
+        edge_id: &EdgeId,
+        metadata: &Value,
+    ) -> Result<(), GraphError> {
+        let inner = self.lock_inner()?;
+        inner.store.update_edge_metadata(edge_id, metadata)
+    }
+
+    /// Replace a node's body JSON (e.g. to record a resolved name alias on an
+    /// entity, or update an entity's attributes).
+    pub fn update_node_body(&self, node_id: &NodeId, body: &Value) -> Result<(), GraphError> {
+        let inner = self.lock_inner()?;
+        inner.store.update_node_body(node_id, body)
     }
 
     /// Return `(edge, neighbor)` pairs for `id`. `direction` controls whether

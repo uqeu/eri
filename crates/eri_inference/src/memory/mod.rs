@@ -28,6 +28,7 @@ pub mod collectors;
 pub mod consolidation;
 pub mod embeddings;
 pub mod eventtime;
+pub mod graph_bridge;
 pub mod keys;
 pub mod profile;
 pub mod profile_sync;
@@ -830,8 +831,11 @@ impl MemoryStore {
                     "preference" | "habit" | consolidation::SEMANTIC_KIND => 0.08,
                     _ => 0.0,
                 };
-                let score =
-                    0.45 * sem + 0.25 * lex + 0.10 * rec + 0.20 * (o.importance * retention) + kind_boost;
+                let score = 0.45 * sem
+                    + 0.25 * lex
+                    + 0.10 * rec
+                    + 0.20 * (o.importance * retention)
+                    + kind_boost;
                 (o.clone(), score)
             })
             .collect();
@@ -1434,9 +1438,13 @@ mod tests {
         // A pre-P1 Tier-B blob has no importance/recall_count fields — they must
         // deserialize to a kind-derived importance (not zero), so old memories
         // keep a sensible standing weight in the new scorer.
-        let json = r#"{"id":"x","ts_ms":1,"kind":"fact","workspace_hash":"","body":"my name is Khai"}"#;
+        let json =
+            r#"{"id":"x","ts_ms":1,"kind":"fact","workspace_hash":"","body":"my name is Khai"}"#;
         let o: Observation = serde_json::from_str(json).unwrap();
-        assert!(o.importance >= 0.8, "a first-person fact backfills high importance");
+        assert!(
+            o.importance >= 0.8,
+            "a first-person fact backfills high importance"
+        );
         assert_eq!(o.recall_count, 0);
         assert!(o.last_recalled_ms.is_none());
     }
@@ -1468,9 +1476,16 @@ mod tests {
         assert_eq!(store.all().len(), 2);
         assert!(store.rollback().unwrap(), "there was a write to undo");
         let bodies: Vec<_> = store.all().into_iter().map(|o| o.body).collect();
-        assert_eq!(bodies, vec!["uses rust".to_string()], "the last write is undone");
+        assert_eq!(
+            bodies,
+            vec!["uses rust".to_string()],
+            "the last write is undone"
+        );
         // Snapshot is consumed — a second rollback finds nothing.
-        assert!(!store.rollback().unwrap(), "single-step: no double rollback");
+        assert!(
+            !store.rollback().unwrap(),
+            "single-step: no double rollback"
+        );
     }
 
     #[test]
@@ -1482,9 +1497,16 @@ mod tests {
         let body = r#"{"state":"screen shows the dashboard"}"#;
         store.insert("screen", ws, body).unwrap();
         store.insert("screen", ws, body).unwrap();
-        let screens: Vec<_> = store.all().into_iter().filter(|o| o.kind == "screen").collect();
+        let screens: Vec<_> = store
+            .all()
+            .into_iter()
+            .filter(|o| o.kind == "screen")
+            .collect();
         assert_eq!(screens.len(), 1, "exact re-log is not duplicated");
-        assert_eq!(screens[0].recall_count, 1, "re-seeing reinforces the existing memory");
+        assert_eq!(
+            screens[0].recall_count, 1,
+            "re-seeing reinforces the existing memory"
+        );
     }
 
     #[test]

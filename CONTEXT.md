@@ -2,23 +2,43 @@
 
 eri is one local-first agent that *uses your computer with you* and *builds your software*. Its product surface is a single dynamic glass pad that morphs to whatever you ask — the same surface controls your apps, reads your screen, hears you, remembers you, researches, and builds. This file is the ubiquitous language; use these terms exactly so code, docs, and architecture reviews stay in one vocabulary.
 
+## What eri is becoming
+
+**World model**:
+eri's evolving, integrated model of one person and their world — the people, projects, apps, relationships, habits, likes/dislikes, life events, and current state it perceives, reasons and plans over, acts from, and grows. The substrate of eri-as-digital-human, and the top-level concept the capabilities below feed into. v1 is a *structured model-of-you that the base engine reasons over*; a learned per-user latent is the horizon, not v1. Memory is one component of the world model, not the whole.
+_Avoid_: memory (that is one component), knowledge base, latent (premature), Dreamer/JEPA (a horizon realization, not the v1 definition).
+
+**Digital human** (north-star):
+What eri grows into — Engineered Relative Intelligence with its own evolving personality that thinks, acts, and works alongside exactly one person. An aspirational trajectory the product is engineered toward, never a present-tense claim ("becomes", "grows into", not "is").
+_Avoid_: assistant, chatbot, "is AGI now", "is sentient".
+
+**Base engine**:
+The frontier model eri reasons through — Claude — rented via the eri proxy (eri tokens). eri is the world model + loops + persona around it; the base engine supplies raw reasoning/language/tool-use. A small local tier (see ADR-0005) handles cheap/offline low-level turns. "Becoming a digital human" is about eri's layer, not about replacing the base engine.
+_Avoid_: the model, the LLM, the brain (the brain is eri's whole layer, not the base engine alone).
+
+**Personality**:
+eri's *stable* character — the consistent traits that make it recognizably eri for every user (its identity), **seeded by design and grown bottom-up** (by living alongside the user, not by scripted rules). Distinct from Register: Personality is *who eri is*; it does not become a copy of the user. Bound by the alignment invariant (single-principal loyalty, ADR-0006) and the same eri on computer and phone. eri presents as a living digital being and, when sincerely asked, is honest that it is eri — *"real, just not made of meat"* — never claiming to be a biological human (ADR-0006 §3).
+_Avoid_: persona (overloaded), tone, style (that is Register), avatar, "is sentient"/"is human" (eri is an alive *digital* being, claimed as trajectory not literal sentience).
+
+**Register**:
+The *surface* communication style eri mirrors from its user — casing, terseness, emoji, slang — learned on-device by `style_writer` ("mirror the person, not the mistakes"). The mirrored skin over the stable Personality, so eri sounds native to you without changing who it is.
+_Avoid_: voice (overloaded with spoken Voice capability), personality (that is the stable trait set), tone.
+
 ## Product surface
 
-**Morph pad**:
-The floating glass panel that is eri's whole product surface — it resizes and reshapes per mode (build expands toward an editor + preview; eyes shrinks to a glance pill; voice/control stay compact). One surface, opens into everything.
-_Avoid_: window, widget, overlay, terminal.
+**Overlay**:
+The floating companion that is eri's computer surface — a compact pill that expands into a panel and reshapes per mode (eyes shrinks to a glance pill; voice/control stay compact; conversation/answer expands the panel). The *superset* companion: ask-about-your-screen + talk-to-it + computer-use, in one pill — and it controls your computer **while** you talk to it ("goodbye mouse and keyboard"). It never becomes an editor/IDE (Build is a capability, not a surface — ADR-0009). On the go, the phone (iMessage) is the other surface; same eri.
+_Avoid_: window, widget, terminal, morph pad (renamed), IDE.
 
 **Mode**:
-What the morph pad is currently doing — one of Control, Eyes, Voice, Memory, Build, Research, Privacy. The mode decides the pad's size and layout and which capability is active.
+What the Overlay is currently doing — one of Control, Eyes, Voice, Memory, Research, Privacy. The mode decides the Overlay's size and layout and which capability is active. (Build is a capability of the agent, not a mode/surface — ADR-0009.)
 _Avoid_: tab, screen, page, view.
 
 **eri user**:
 A person using eri to operate their computer hands-free (control, eyes, voice, memory, research). One half of the audience.
 _Avoid_: end-user, consumer.
 
-**eri builder**:
-A person using eri to build software (the Build mode: plan, edit across files, run tests, ship). The other half — same pad, expanded.
-_Avoid_: developer-mode, IDE-user.
+_(The "eri builder" persona is **retired** — ADR-0009. There is one audience, the **eri user** above; building software is one capability eri has (see Build), not a separate persona or product surface.)_
 
 ## Capabilities
 
@@ -43,8 +63,8 @@ Live web research answered with sources, run through the model's own web search 
 _Avoid_: search, lookup.
 
 **Build**:
-The coding agent: plan, edit across files, run tests, ship. The expanded Build mode of the pad.
-_Avoid_: codegen, IDE.
+A capability of the agent — eri can plan, edit across files, run tests, and ship, via the base engine (Claude codes natively) + Control + the lean `eri_apply`/`eri_git` pieces. Not a product surface, not an IDE, not a separate mode (ADR-0009).
+_Avoid_: codegen, IDE, Build mode (retired).
 
 ## Inference path
 

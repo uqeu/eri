@@ -186,6 +186,19 @@ impl Store {
         Ok(())
     }
 
+    pub fn update_edge_metadata(
+        &self,
+        id: &str,
+        metadata: &serde_json::Value,
+    ) -> Result<(), GraphError> {
+        let metadata = serde_json::to_string(metadata)?;
+        self.conn.execute(
+            "UPDATE edges SET metadata = ?1 WHERE id = ?2",
+            params![metadata, id],
+        )?;
+        Ok(())
+    }
+
     pub fn count_nodes(&self) -> Result<usize, GraphError> {
         let count: i64 = self
             .conn
