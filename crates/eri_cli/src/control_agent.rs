@@ -90,11 +90,17 @@ pub enum ControlAction {
     Wait(u64),
     /// Scroll the focused view. `direction` is up/down/left/right; `amount` is a
     /// relative click/notch count (positive). Navigation, not destructive.
-    Scroll { direction: String, amount: i64 },
+    Scroll {
+        direction: String,
+        amount: i64,
+    },
     /// Press-drag-release from one point to another — moving a slider, a file,
     /// selecting a range. Reversible navigation, but flows through the gate like
     /// any pointer action so the remote channel can still confirm it.
-    Drag { from: ClickTarget, to: ClickTarget },
+    Drag {
+        from: ClickTarget,
+        to: ClickTarget,
+    },
     /// Right-click (secondary click) to open a context menu.
     RightClick(ClickTarget),
     /// Double-click (open/activate).
@@ -235,7 +241,11 @@ impl ControlAction {
             ControlAction::Wait(ms) => format!("wait {ms}ms"),
             ControlAction::Scroll { direction, amount } => format!("scroll {direction} {amount}"),
             ControlAction::Drag { from, to } => {
-                format!("drag from {} to {}", describe_target(from), describe_target(to))
+                format!(
+                    "drag from {} to {}",
+                    describe_target(from),
+                    describe_target(to)
+                )
             }
             ControlAction::RightClick(t) => format!("right-click {}", describe_target(t)),
             ControlAction::DoubleClick(t) => format!("double-click {}", describe_target(t)),
@@ -385,6 +395,21 @@ impl ControlGate {
             auto_confirm: false,
             permissions,
             force_confirm_risky: true,
+        }
+    }
+
+    /// Whether an action matches a **known/allowed pattern** — the confirmation
+    /// envelope's familiarity signal (ADR-0008 Q18). A learned caution un-knows
+    /// any action (the user kept undoing it); otherwise an action that needs a
+    /// permission is known once it's granted, and one that needs none is
+    /// inherently allowed. Read-only; used by the predict→gate shadow.
+    pub fn is_known_pattern(&self, action: &ControlAction) -> bool {
+        if self.permissions.is_cautioned(&action.describe()) {
+            return false;
+        }
+        match action.permission() {
+            Some(p) => self.permissions.is_granted(p),
+            None => true,
         }
     }
 
@@ -856,9 +881,9 @@ pub trait McpDispatch: Send + Sync {
 /// Generous by design — a false "confirm" is safe; a missed outward action isn't.
 pub(crate) fn mcp_is_outward(tool_name: &str, input: &Value) -> bool {
     const OUTWARD: &[&str] = &[
-        "SEND", "CREATE", "DELETE", "REPLY", "POST", "PUBLISH", "UPDATE", "REMOVE",
-        "MOVE", "ARCHIVE", "TRASH", "PAY", "TRANSFER", "INVITE", "UPSERT", "WRITE",
-        "DRAFT", "ADD", "EDIT", "MERGE", "CLOSE", "CANCEL", "SCHEDULE",
+        "SEND", "CREATE", "DELETE", "REPLY", "POST", "PUBLISH", "UPDATE", "REMOVE", "MOVE",
+        "ARCHIVE", "TRASH", "PAY", "TRANSFER", "INVITE", "UPSERT", "WRITE", "DRAFT", "ADD", "EDIT",
+        "MERGE", "CLOSE", "CANCEL", "SCHEDULE",
     ];
     let hay = format!("{tool_name} {input}").to_uppercase();
     OUTWARD.iter().any(|verb| hay.contains(verb))
@@ -881,15 +906,50 @@ pub enum Reach {
 pub(crate) fn classify_reach(goal: &str) -> Reach {
     let g = goal.to_lowercase();
     const API: &[&str] = &[
-        "email", "gmail", "inbox", "calendar", "schedule", "meeting", "invite", "github",
-        "pull request", " pr ", "issue", "slack", "message", "dm ", "notion", "reply", "send",
-        "draft", "linear", "ticket", "spreadsheet", "sheet", "drive", "event", "post ",
+        "email",
+        "gmail",
+        "inbox",
+        "calendar",
+        "schedule",
+        "meeting",
+        "invite",
+        "github",
+        "pull request",
+        " pr ",
+        "issue",
+        "slack",
+        "message",
+        "dm ",
+        "notion",
+        "reply",
+        "send",
+        "draft",
+        "linear",
+        "ticket",
+        "spreadsheet",
+        "sheet",
+        "drive",
+        "event",
+        "post ",
     ];
     // Concrete screen cues only — avoid broad phrases like "what's on" that also
     // match "what's on my calendar" (which is API, not local).
     const LOCAL: &[&str] = &[
-        "screen", "window", "click", "scroll", "this app", "highlight", "the button",
-        "type into", "drag", "cursor", "desktop", "finder", "textedit", "menu bar", "this page",
+        "screen",
+        "window",
+        "click",
+        "scroll",
+        "this app",
+        "highlight",
+        "the button",
+        "type into",
+        "drag",
+        "cursor",
+        "desktop",
+        "finder",
+        "textedit",
+        "menu bar",
+        "this page",
     ];
     let api = API.iter().any(|k| g.contains(k));
     let local = LOCAL.iter().any(|k| g.contains(k));
@@ -898,6 +958,19 @@ pub(crate) fn classify_reach(goal: &str) -> Reach {
         (true, false) => Reach::Api,
         _ => Reach::Local,
     }
+}
+
+/// One action's confirmation-envelope **shadow** record (ADR-0007 §4): what the
+/// envelope WOULD have decided vs. what `ControlGate` actually did. Collected for
+/// calibration; it never changes execution. Promoted to authoritative later.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EnvelopeShadow {
+    /// Human description of the action.
+    pub action: String,
+    /// The envelope's advisory decision label ("auto-execute" / "confirm" / "refuse:…").
+    pub envelope: String,
+    /// What `ControlGate` actually did ("executed" / "confirm" / "refused").
+    pub actual: String,
 }
 
 /// Outcome of executing one turn's tool calls.
@@ -909,6 +982,29 @@ pub struct StepOutcome {
     pub done: bool,
     /// Human-readable log of what happened this step (for narration).
     pub log: Vec<String>,
+    /// Per-action confirmation-envelope shadow records (advisory; see
+    /// [`EnvelopeShadow`]). Forwarded to the sink by the loop, off the
+    /// user-facing narration trail.
+    pub envelope_shadow: Vec<EnvelopeShadow>,
+}
+
+/// The typed/scripted content of an action (what `ControlGate` runs through the
+/// refusal classifier), so the envelope shadow checks refusal on the same text.
+fn sensitive_text_of(action: &ControlAction) -> Option<&str> {
+    match action {
+        ControlAction::Type(t) | ControlAction::RunAppleScript(t) => Some(t.as_str()),
+        _ => None,
+    }
+}
+
+/// Short label of what `ControlGate` actually did, for the envelope-vs-actual
+/// shadow comparison.
+fn disposition_label(d: &Disposition) -> &'static str {
+    match d {
+        Disposition::Executed(_) => "executed",
+        Disposition::NeedsConfirmation(_) => "confirm",
+        Disposition::Refused(_) => "refused",
+    }
 }
 
 /// Execute one turn's tool calls through the gate + bridge. Risky actions are
@@ -965,20 +1061,23 @@ pub async fn execute_tool_calls(
                     .push(tool_result(id, "capture_region needs x, y, w, h", true));
                 continue;
             };
-            out.results.push(match bridge.capture_region(x, y, w, h).await {
-                Ok(b64) => match redact_png(&b64).await {
-                    Ok(redacted) => {
-                        out.log.push("looked at a region of the screen".into());
-                        image_tool_result(id, &redacted)
-                    }
-                    Err(e) => tool_result(
-                        id,
-                        &format!("refused: could not redact the capture ({e}); not sending it."),
-                        true,
-                    ),
-                },
-                Err(e) => tool_result(id, &format!("region capture failed: {e}"), true),
-            });
+            out.results
+                .push(match bridge.capture_region(x, y, w, h).await {
+                    Ok(b64) => match redact_png(&b64).await {
+                        Ok(redacted) => {
+                            out.log.push("looked at a region of the screen".into());
+                            image_tool_result(id, &redacted)
+                        }
+                        Err(e) => tool_result(
+                            id,
+                            &format!(
+                                "refused: could not redact the capture ({e}); not sending it."
+                            ),
+                            true,
+                        ),
+                    },
+                    Err(e) => tool_result(id, &format!("region capture failed: {e}"), true),
+                });
             continue;
         }
         // Coding-environment tools (`editor_*`): a single tool call lowers to a
@@ -996,7 +1095,8 @@ pub async fn execute_tool_calls(
         if let Some(m) = mcp
             && m.handles(name)
         {
-            if mcp_is_outward(name, input) && !confirm(&format!("use a connected app: {name}"), None)
+            if mcp_is_outward(name, input)
+                && !confirm(&format!("use a connected app: {name}"), None)
             {
                 out.log.push(format!("declined: {name}"));
                 out.results
@@ -1019,7 +1119,25 @@ pub async fn execute_tool_calls(
                 continue;
             }
         };
-        match gate.submit(bridge, &action).await {
+        // P2 shadow (ADR-0007 §4): compute what the confirmation envelope WOULD
+        // decide and record it next to ControlGate's REAL disposition — calibration
+        // only, it never changes what executes. `known` is the live allowlist +
+        // learned-caution signal; confidence is the attended placeholder until the
+        // predict step lands. Refusal stays enforced by the gate below.
+        let envelope = crate::control_envelope::advise(
+            &action.describe(),
+            sensitive_text_of(&action),
+            gate.is_known_pattern(&action),
+        );
+        let disposition = gate.submit(bridge, &action).await;
+        if let Ok(ref d) = disposition {
+            out.envelope_shadow.push(EnvelopeShadow {
+                action: action.describe(),
+                envelope: envelope.label(),
+                actual: disposition_label(d).to_string(),
+            });
+        }
+        match disposition {
             Ok(Disposition::Executed(result)) => {
                 out.log.push(format!("{} -> {result}", action.describe()));
                 out.results.push(tool_result(id, &result, false));
@@ -1304,7 +1422,10 @@ impl ControlBridge for DryRunBridge {
         Ok(format!("DRY RUN: would move mouse to ({x:.0}, {y:.0})"))
     }
     async fn run_applescript(&self, script: &str) -> Result<String> {
-        Ok(format!("DRY RUN: would run AppleScript ({} chars)", script.len()))
+        Ok(format!(
+            "DRY RUN: would run AppleScript ({} chars)",
+            script.len()
+        ))
     }
     async fn read_clipboard(&self) -> Result<String> {
         Ok("DRY RUN: would read the clipboard".into())
@@ -1624,7 +1745,8 @@ impl ControlBridge for HttpBridge {
         self.act(&ControlAction::ReadClipboard).await
     }
     async fn write_clipboard(&self, text: &str) -> Result<String> {
-        self.act(&ControlAction::WriteClipboard(text.to_string())).await
+        self.act(&ControlAction::WriteClipboard(text.to_string()))
+            .await
     }
     async fn capture_region(&self, x: i64, y: i64, w: i64, h: i64) -> Result<String> {
         let reply = self
@@ -1673,8 +1795,11 @@ pub fn parse_wire_gaze(reply: &Value) -> Option<eri_coreutils::services::gaze::G
 async fn context_blocks(goal: &str, bridge: &dyn ControlBridge, workspace: &Path) -> Vec<String> {
     let mut blocks = Vec::new();
     if let Ok(mut store) = MemoryStore::open()
-        && let Ok(hits) =
-            store.recall_hybrid_with_budget(goal, workspace, crate::memory_tools::RECALL_TOKEN_BUDGET)
+        && let Ok(hits) = store.recall_hybrid_with_budget(
+            goal,
+            workspace,
+            crate::memory_tools::RECALL_TOKEN_BUDGET,
+        )
     {
         let lines: Vec<String> = hits
             .into_iter()
@@ -2066,6 +2191,12 @@ pub(crate) async fn drive_control_loop(
             return Ok(ControlRun { text, usage });
         }
         let executed = execute_tool_calls(bridge, gate, confirm, mcp, &out.tool_calls).await;
+        // P2 shadow (ADR-0007 §4): forward each action's confirmation-envelope
+        // advisory (what it WOULD have decided vs. what ControlGate did) to the
+        // sink for calibration. Advisory only — execution already happened.
+        for shadow in &executed.envelope_shadow {
+            sink.record_envelope_shadow(shadow);
+        }
         for line in &executed.log {
             // Emit a clean, live status the app renders as a single updating
             // chip — the action being taken, not the post-hoc "-> result"
@@ -2200,7 +2331,10 @@ pub async fn run_control_agent(
     // server-side (computer-off) or needs the local screen. Diagnostic for now;
     // the phone/cloud path consults the same `classify_reach` seam.
     if std::env::var_os("ERI_DEBUG").is_some() {
-        eprintln!("[eri] reach={:?} (Api = runnable with the computer off)", classify_reach(goal));
+        eprintln!(
+            "[eri] reach={:?} (Api = runnable with the computer off)",
+            classify_reach(goal)
+        );
     }
 
     // API tier: load connector (MCP / Composio Tool Router) tools so this one
@@ -2217,7 +2351,10 @@ pub async fn run_control_agent(
     // Hold the live MCP for the loop's lifetime (dropping it reaps server child
     // processes). `LiveMcp` owns the client + handles and dispatches via the
     // shared `call_mcp_tool`.
-    let live_mcp = mcp_handle.map(|mcp| LiveMcp { mcp, tools: mcp_tools });
+    let live_mcp = mcp_handle.map(|mcp| LiveMcp {
+        mcp,
+        tools: mcp_tools,
+    });
     let mcp_dyn: Option<&dyn McpDispatch> = live_mcp.as_ref().map(|m| m as &dyn McpDispatch);
 
     // Local-first per goal: eri's on-device engine answers first (when
@@ -2383,7 +2520,10 @@ mod tests {
             Ok("clipboard contents".into())
         }
         async fn write_clipboard(&self, text: &str) -> Result<String> {
-            self.calls.lock().unwrap().push(format!("write_clipboard:{text}"));
+            self.calls
+                .lock()
+                .unwrap()
+                .push(format!("write_clipboard:{text}"));
             Ok("copied".into())
         }
         async fn capture_region(&self, x: i64, y: i64, w: i64, h: i64) -> Result<String> {
@@ -3225,7 +3365,11 @@ mod tests {
         let tools = json!(tool_specs());
         let turns = || {
             vec![
-                Ok(tool_call_turn("t1", "open_app", json!({ "name": "Safari" }))),
+                Ok(tool_call_turn(
+                    "t1",
+                    "open_app",
+                    json!({ "name": "Safari" }),
+                )),
                 Ok(done_turn("Done.")),
             ]
         };
@@ -3235,8 +3379,17 @@ mod tests {
         let stub = StubTurn::new("local", turns());
         let sink = RecordingSink::default();
         drive_control_loop(
-            &[&stub], &bridge, &gate, &mut confirm, &sink, &system, &tools,
-            "open Safari", 8, true, None,
+            &[&stub],
+            &bridge,
+            &gate,
+            &mut confirm,
+            &sink,
+            &system,
+            &tools,
+            "open Safari",
+            8,
+            true,
+            None,
         )
         .await
         .unwrap();
@@ -3251,8 +3404,17 @@ mod tests {
         let stub2 = StubTurn::new("local", turns());
         let sink2 = RecordingSink::default();
         drive_control_loop(
-            &[&stub2], &bridge2, &gate, &mut confirm, &sink2, &system, &tools,
-            "open Safari", 8, false, None,
+            &[&stub2],
+            &bridge2,
+            &gate,
+            &mut confirm,
+            &sink2,
+            &system,
+            &tools,
+            "open Safari",
+            8,
+            false,
+            None,
         )
         .await
         .unwrap();
@@ -3310,7 +3472,9 @@ mod tests {
                 ("ok".into(), false)
             }
         }
-        let stub = StubMcp { calls: Mutex::new(Vec::new()) };
+        let stub = StubMcp {
+            calls: Mutex::new(Vec::new()),
+        };
         let bridge = MockBridge::default();
         let gate = ControlGate::default();
 
@@ -3318,7 +3482,11 @@ mod tests {
         let mut confirm_never = |_: &str, _: Option<crate::control_safety::Permission>| {
             panic!("a connector read must not be confirmed");
         };
-        let reads = vec![("r1".into(), "composio__GMAIL_FETCH_EMAILS".into(), json!({}))];
+        let reads = vec![(
+            "r1".into(),
+            "composio__GMAIL_FETCH_EMAILS".into(),
+            json!({}),
+        )];
         let out = execute_tool_calls(&bridge, &gate, &mut confirm_never, Some(&stub), &reads).await;
         assert!(!out.results[0]["is_error"].as_bool().unwrap());
 
@@ -3348,7 +3516,10 @@ mod tests {
         assert_eq!(classify_reach("reply to my latest email"), Reach::Api);
         assert_eq!(classify_reach("what's on my calendar tomorrow"), Reach::Api);
         // Pure screen work → needs the local machine.
-        assert_eq!(classify_reach("scroll down and click the blue button"), Reach::Local);
+        assert_eq!(
+            classify_reach("scroll down and click the blue button"),
+            Reach::Local
+        );
         // Both → mixed (grab locally, send via API).
         assert_eq!(
             classify_reach("grab the chart on this screen and email it to Sam"),
@@ -3365,7 +3536,10 @@ mod tests {
         let r = parse_action("read_clipboard", &json!({})).unwrap();
         assert!(matches!(w, ControlAction::WriteClipboard(_)));
         assert!(matches!(r, ControlAction::ReadClipboard));
-        assert!(!w.is_risky() && !r.is_risky(), "clipboard ops are not risky");
+        assert!(
+            !w.is_risky() && !r.is_risky(),
+            "clipboard ops are not risky"
+        );
 
         // capture_region is special-cased (image tool) and reaches the bridge
         // with the rect (the result is redacted/fail-closed downstream).
@@ -3379,7 +3553,10 @@ mod tests {
         )];
         let _ = execute_tool_calls(&bridge, &gate, &mut confirm, None, &calls).await;
         assert!(
-            bridge.calls().iter().any(|c| c == "capture_region:0,0,100,80"),
+            bridge
+                .calls()
+                .iter()
+                .any(|c| c == "capture_region:0,0,100,80"),
             "capture_region must reach the bridge; got {:?}",
             bridge.calls()
         );
@@ -3787,9 +3964,7 @@ mod tests {
         assert!(parse_action("scroll", &json!({ "direction": "down", "amount": 0 })).is_err());
         // drag: missing from/to, or a target with neither element nor coords.
         assert!(parse_action("drag", &json!({ "from": { "element": "a" } })).is_err());
-        assert!(
-            parse_action("drag", &json!({ "from": {}, "to": { "element": "b" } })).is_err()
-        );
+        assert!(parse_action("drag", &json!({ "from": {}, "to": { "element": "b" } })).is_err());
         // right/double click + move_mouse need a real target.
         assert!(parse_action("right_click", &json!({})).is_err());
         assert!(parse_action("double_click", &json!({})).is_err());
@@ -3859,7 +4034,9 @@ mod tests {
             ControlAction::DoubleClick(ClickTarget::Element("Send draft".into())).is_risky_remote()
         );
         // A benign element is not.
-        assert!(!ControlAction::DoubleClick(ClickTarget::Element("Notes".into())).is_risky_remote());
+        assert!(
+            !ControlAction::DoubleClick(ClickTarget::Element("Notes".into())).is_risky_remote()
+        );
     }
 
     #[tokio::test]
@@ -3912,8 +4089,14 @@ mod tests {
             )
             .await
             .unwrap();
-        bridge.right_click(&ClickTarget::Element("e1".into())).await.unwrap();
-        bridge.double_click(&ClickTarget::Element("e2".into())).await.unwrap();
+        bridge
+            .right_click(&ClickTarget::Element("e1".into()))
+            .await
+            .unwrap();
+        bridge
+            .double_click(&ClickTarget::Element("e2".into()))
+            .await
+            .unwrap();
         bridge.mouse_move(7.0, 8.0).await.unwrap();
         let trail = log.lock().unwrap().trail();
         assert_eq!(trail.len(), 5, "all five pointer mutations are recorded");
@@ -3943,7 +4126,9 @@ mod tests {
             json!({ "kind": "drag", "from": { "element": "a" }, "to": { "x": 9.0, "y": 3.0 } })
         );
         assert_eq!(
-            action_to_wire(&ControlAction::RightClick(ClickTarget::Element("e1".into()))),
+            action_to_wire(&ControlAction::RightClick(ClickTarget::Element(
+                "e1".into()
+            ))),
             json!({ "kind": "right_click", "element": "e1" })
         );
         assert_eq!(
@@ -3978,6 +4163,33 @@ mod tests {
             vec!["scroll:down:3", "right_click:Element(\"e1\")"]
         );
         assert!(!out.results[0]["is_error"].as_bool().unwrap_or(false));
+    }
+
+    #[tokio::test]
+    async fn executor_records_the_envelope_shadow_next_to_the_real_disposition() {
+        // Shadow mode (ADR-0007 §4): per action, the envelope's advisory decision
+        // is recorded next to ControlGate's REAL disposition — without changing
+        // execution. On the absolute boundary the two agree: both refuse.
+        let bridge = MockBridge::with_snapshot(graph());
+        let gate = ControlGate::default();
+        let mut confirm = |_: &str, _: Option<crate::control_safety::Permission>| true;
+        let calls = vec![
+            (
+                "1".into(),
+                "type".into(),
+                json!({ "text": "my password is hunter2" }),
+            ),
+            ("2".into(), "done".into(), json!({})),
+        ];
+        let out = execute_tool_calls(&bridge, &gate, &mut confirm, None, &calls).await;
+
+        // One shadow record (the `done` sentinel isn't gated).
+        assert_eq!(out.envelope_shadow.len(), 1);
+        let shadow = &out.envelope_shadow[0];
+        assert_eq!(shadow.envelope, "refuse:Credential");
+        assert_eq!(shadow.actual, "refused");
+        // And nothing was actually typed — the boundary held.
+        assert!(bridge.calls().is_empty());
     }
 
     /// A bridge that supplies BOTH a snapshot (with screen bounds) and a live
