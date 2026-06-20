@@ -676,32 +676,48 @@ pub trait ControlTurnSink: Send + Sync {
 }
 
 /// Production sink: appends each turn to the local learn-do memory so the
-/// routing can later learn where local was enough vs. where it escalated. Best
-/// effort — never blocks the loop. The richer `eri_graph` causal log is the
-/// future target (Candidate B); this is the same seam it plugs into.
-pub struct MemorySink;
+/// routing can later learn where local was enough vs. where it escalated, and
+/// records the proactive chain. Best effort — never blocks the loop.
+///
+/// **User-scoped** (ADR-0007 — one graph is eri's brain): the signed-in user's
+/// memory + world graph, so the control loop's chains land in the SAME
+/// user-scoped world graph as the entities `/remember` writes — not a second
+/// anonymous brain. `None` = genuinely signed-out (anonymous local-only).
+pub struct MemorySink {
+    user_id: Option<String>,
+}
+
+impl MemorySink {
+    /// Build a sink scoped to the signed-in user (`None` = anonymous local-only).
+    pub fn new(user_id: Option<String>) -> Self {
+        Self { user_id }
+    }
+}
 
 impl ControlTurnSink for MemorySink {
     fn record(&self, log: ControlTurnLog) {
         let workspace = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-        if let Ok(mut store) = eri_inference::memory::MemoryStore::open() {
+        if let Ok(mut store) = eri_inference::memory::MemoryStore::open_for(self.user_id.as_deref())
+        {
             let _ = store.insert("control_turn", &workspace, &log.summary());
         }
     }
 
     fn record_escalation(&self, event: &crate::engine_ladder::LadderEvent) {
         let workspace = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-        if let Ok(mut store) = eri_inference::memory::MemoryStore::open() {
+        if let Ok(mut store) = eri_inference::memory::MemoryStore::open_for(self.user_id.as_deref())
+        {
             let _ = store.insert("engine_escalation", &workspace, &escalation_summary(event));
         }
     }
 
     fn record_transition(&self, from: &str, to: &str) -> Option<String> {
-        // Record the transition, then surface the learned next step after `to`
-        // once it's an established pattern (seen ≥2×). Anon-scoped, matching how
-        // control records to memory; best-effort throughout.
-        let _ = eri_inference::memory::world_recall::observe_transition(None, from, to);
-        eri_inference::memory::world_recall::predict_next(None, to, 1)
+        // Record the transition into the user's world graph (the SAME graph the
+        // entities live in), then surface the learned next step after `to` once
+        // it's an established pattern (seen ≥2×). Best-effort throughout.
+        let user = self.user_id.as_deref();
+        let _ = eri_inference::memory::world_recall::observe_transition(user, from, to);
+        eri_inference::memory::world_recall::predict_next(user, to, 1)
             .into_iter()
             .next()
             .filter(|(_, count)| *count >= 2)

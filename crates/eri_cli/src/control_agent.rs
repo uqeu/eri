@@ -2411,18 +2411,13 @@ pub async fn run_control_agent(
     let engines = crate::control_turn::select_control_turn(model)?;
     let refs: Vec<&dyn crate::control_turn::ControlTurn> =
         engines.iter().map(|e| e.as_ref()).collect();
+    // One brain (ADR-0007): scope control's learn-do recording + proactive chains
+    // to the signed-in user, so they share the SAME user-scoped world graph as the
+    // entities `/remember` writes. Falls back to anonymous when signed out.
+    let user_id = crate::config::load().ok().and_then(|c| c.user_id);
+    let sink = crate::control_turn::MemorySink::new(user_id);
     drive_control_loop(
-        &refs,
-        bridge,
-        gate,
-        confirm,
-        &crate::control_turn::MemorySink,
-        &system,
-        &tools,
-        goal,
-        max_turns,
-        autonomous,
-        mcp_dyn,
+        &refs, bridge, gate, confirm, &sink, &system, &tools, goal, max_turns, autonomous, mcp_dyn,
     )
     .await
 }
