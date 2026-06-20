@@ -66,6 +66,25 @@ pub fn world_block_for(user_id: Option<&str>, limit: usize) -> String {
     format_world_block(&people, &projects)
 }
 
+/// Record that one action followed another into the user's world model — the
+/// proactive-chain **observe** step (Q16): it strengthens the weighted `next`
+/// edge between the two actions. Best-effort for the caller: the chain enriches
+/// prediction, it is not a precondition for the action itself.
+pub fn observe_transition(user_id: Option<&str>, from: &str, to: &str) -> io::Result<()> {
+    let graph = open_world_graph(user_id)?;
+    world::link_next(&graph, from, to).map_err(|e| io::Error::other(format!("link_next: {e}")))
+}
+
+/// "After X you usually Y" — the successor actions for `action`, ranked by how
+/// often they followed it (Q16). Best-effort: an empty list on cold start or any
+/// error, so a missing world model simply yields no proactive suggestion.
+pub fn predict_next(user_id: Option<&str>, action: &str, limit: usize) -> Vec<(String, u64)> {
+    let Ok(graph) = open_world_graph(user_id) else {
+        return Vec::new();
+    };
+    world::next_steps(&graph, action, limit).unwrap_or_default()
+}
+
 // --- world-model queries ------------------------------------------------------
 
 /// People who collaborate on the named project — "who do I work with on X?".

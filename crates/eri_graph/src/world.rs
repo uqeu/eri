@@ -15,6 +15,9 @@ use crate::{Direction, Edge, Graph, GraphError, Node, NodeId};
 pub mod node_kind {
     /// A raw thing eri observed about the user (the episodic record).
     pub const OBSERVATION: &str = "observation";
+    /// A behavioral action eri took or observed ("open Safari") — the unit of a
+    /// proactive chain. One node per distinct action so transitions accumulate.
+    pub const ACTION: &str = "action";
 }
 
 /// Entity kinds — the "things" in a person's world.
@@ -38,6 +41,9 @@ pub mod relation {
     pub const EVIDENCES: &str = "evidences";
     /// Provenance: a node mentions an entity.
     pub const MENTIONS: &str = "mentions";
+    /// Temporal: one action usually follows another (a proactive chain edge). The
+    /// edge metadata carries a `count` = how many times the transition was seen.
+    pub const NEXT: &str = "next";
 }
 
 /// A typed view over an entity node: a thing in the user's world with a
@@ -365,6 +371,96 @@ pub fn related_in(graph: &Graph, dst: &NodeId, relation: &str) -> Result<Vec<Ent
         .filter(|(edge, _)| edge_valid_at(edge, at))
         .map(|(_edge, node)| Entity { node })
         .collect())
+}
+
+// ── Proactive chains (Q16): weighted "next" paths between actions ──
+
+/// An action node's label (the behavior it represents).
+fn action_label(node: &Node) -> &str {
+    node.body
+        .get("label")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+}
+
+/// Resolve-or-create the action node for `label` (trim + case-insensitive), so
+/// one node per distinct action accumulates its transition edges.
+pub fn record_action(graph: &Graph, label: &str) -> Result<NodeId, GraphError> {
+    let needle = normalize_name(label);
+    if let Some(id) = find_action(graph, &needle)? {
+        return Ok(id);
+    }
+    graph.insert_node(Node::new(
+        node_kind::ACTION,
+        json!({ "label": label.trim() }),
+    ))
+}
+
+/// The action node whose normalized label equals `needle` (already normalized).
+fn find_action(graph: &Graph, needle: &str) -> Result<Option<NodeId>, GraphError> {
+    Ok(graph
+        .query_by_kind(node_kind::ACTION, ENTITY_SCAN_LIMIT)?
+        .into_iter()
+        .find(|n| normalize_name(action_label(n)) == needle)
+        .map(|n| n.id))
+}
+
+/// Record that `to_label` followed `from_label`: create or strengthen the
+/// weighted `NEXT` edge between their action nodes (the metadata `count` is how
+/// many times the transition was seen). The proactive-chain primitive. A
+/// self-transition (`from == to`) is ignored — the graph has no self-edges.
+pub fn link_next(graph: &Graph, from_label: &str, to_label: &str) -> Result<(), GraphError> {
+    let from = record_action(graph, from_label)?;
+    let to = record_action(graph, to_label)?;
+    if from == to {
+        return Ok(());
+    }
+    for (edge, node) in graph.neighbors(&from, Some(relation::NEXT), Direction::Out)? {
+        if node.id == to {
+            let count = next_count(&edge) + 1;
+            let mut meta = edge.metadata.clone();
+            if !meta.is_object() {
+                meta = json!({});
+            }
+            if let Some(obj) = meta.as_object_mut() {
+                obj.insert("count".into(), Value::from(count));
+            }
+            return graph.update_edge_metadata(&edge.id, &meta);
+        }
+    }
+    graph.insert_edge(Edge::new(from, to, relation::NEXT).with_metadata(json!({ "count": 1 })))?;
+    Ok(())
+}
+
+/// The transition count recorded on a `NEXT` edge (defaults to 1 for legacy edges
+/// without the field).
+fn next_count(edge: &Edge) -> u64 {
+    edge.metadata
+        .get("count")
+        .and_then(Value::as_u64)
+        .unwrap_or(1)
+}
+
+/// Successor actions ranked by how often they followed `label` — "after X you
+/// usually Y" (Q16). Returns `(label, count)` best-first (ties broken by label
+/// for determinism), capped at `limit`. Unknown action → empty.
+pub fn next_steps(
+    graph: &Graph,
+    label: &str,
+    limit: usize,
+) -> Result<Vec<(String, u64)>, GraphError> {
+    let needle = normalize_name(label);
+    let Some(from) = find_action(graph, &needle)? else {
+        return Ok(Vec::new());
+    };
+    let mut steps: Vec<(String, u64)> = graph
+        .neighbors(&from, Some(relation::NEXT), Direction::Out)?
+        .into_iter()
+        .map(|(edge, node)| (action_label(&node).to_string(), next_count(&edge)))
+        .collect();
+    steps.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    steps.truncate(limit);
+    Ok(steps)
 }
 
 fn edge_valid_at(edge: &Edge, at: u64) -> bool {
