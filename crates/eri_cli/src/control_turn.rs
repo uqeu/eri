@@ -665,6 +665,14 @@ pub trait ControlTurnSink: Send + Sync {
     /// an identical event shape on every surface. Default no-op so existing
     /// sinks that only care about per-turn records need no change.
     fn record_escalation(&self, _event: &crate::engine_ladder::LadderEvent) {}
+
+    /// Record that one executed action followed another into the world-model
+    /// proactive chain (P2, Q16), and return the learned next step after `to`
+    /// ("after X you usually Y"), if one is established. Default no-op returns
+    /// `None`, so test sinks do no IO and surface no hint.
+    fn record_transition(&self, _from: &str, _to: &str) -> Option<String> {
+        None
+    }
 }
 
 /// Production sink: appends each turn to the local learn-do memory so the
@@ -686,6 +694,18 @@ impl ControlTurnSink for MemorySink {
         if let Ok(mut store) = eri_inference::memory::MemoryStore::open() {
             let _ = store.insert("engine_escalation", &workspace, &escalation_summary(event));
         }
+    }
+
+    fn record_transition(&self, from: &str, to: &str) -> Option<String> {
+        // Record the transition, then surface the learned next step after `to`
+        // once it's an established pattern (seen ≥2×). Anon-scoped, matching how
+        // control records to memory; best-effort throughout.
+        let _ = eri_inference::memory::world_recall::observe_transition(None, from, to);
+        eri_inference::memory::world_recall::predict_next(None, to, 1)
+            .into_iter()
+            .next()
+            .filter(|(_, count)| *count >= 2)
+            .map(|(step, _)| step)
     }
 }
 

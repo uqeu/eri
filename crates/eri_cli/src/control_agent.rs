@@ -1043,6 +1043,10 @@ pub struct StepOutcome {
     pub done: bool,
     /// Human-readable log of what happened this step (for narration).
     pub log: Vec<String>,
+    /// Descriptions of the actions that actually **executed** this step, in order
+    /// — the input to the world-model proactive chain (P2: `observe_transition`).
+    /// Excludes refused/declined/failed actions.
+    pub executed: Vec<String>,
 }
 
 /// Execute one turn's tool calls through the gate + bridge. Risky actions are
@@ -1167,6 +1171,7 @@ pub async fn execute_tool_calls(
         match disposition {
             Ok(Disposition::Executed(result)) => {
                 out.log.push(format!("{} -> {result}", action.describe()));
+                out.executed.push(action.describe());
                 out.results.push(tool_result(id, &result, false));
             }
             Ok(Disposition::Refused(message)) => {
@@ -1188,6 +1193,7 @@ pub async fn execute_tool_calls(
                     match gate.confirm(bridge, &action).await {
                         Ok(result) => {
                             out.log.push(format!("confirmed: {desc} -> {result}"));
+                            out.executed.push(action.describe());
                             out.results.push(tool_result(id, &result, false));
                         }
                         Err(e) => {
@@ -2084,6 +2090,9 @@ pub(crate) async fn drive_control_loop(
     let mut messages: Vec<Value> = vec![json!({ "role": "user", "content": goal.trim() })];
     let mut stdout = std::io::stdout();
     let mut final_text = String::new();
+    // The last action eri actually executed, carried across turns so consecutive
+    // actions form a proactive chain in the world model (P2: observe_transition).
+    let mut last_action: Option<String> = None;
     let mut usage = crate::control_turn::TokenUsage::default();
     let mut stuck = StuckGuard::default();
     // ONE unified escalation policy across build + control (review C5): cheap
@@ -2233,6 +2242,18 @@ pub(crate) async fn drive_control_loop(
             if std::env::var_os("ERI_DEBUG").is_some() {
                 let _ = writeln!(stdout, "[eri] {line}");
             }
+        }
+        // P2 proactive chains (Q16): record each consecutive executed action as a
+        // weighted `next` transition in the world model — through the SINK, so
+        // test sinks do no IO — and surface the learned next step the sink returns
+        // ("after X you usually Y"). Best-effort; a world-model hiccup is silent.
+        for act in &executed.executed {
+            if let Some(prev) = &last_action
+                && let Some(hint) = sink.record_transition(prev, act)
+            {
+                let _ = writeln!(stdout, "[eri-hint] after \"{act}\" you usually: {hint}");
+            }
+            last_action = Some(act.clone());
         }
         // Never push an empty user turn: if execution produced no results (e.g.
         // every call was filtered/dropped), there's nothing for the model to
@@ -4220,6 +4241,39 @@ mod tests {
             gate.submit(&bridge, &scroll).await.unwrap(),
             Disposition::Executed(_)
         ));
+    }
+
+    #[tokio::test]
+    async fn executor_records_only_executed_actions_for_the_proactive_chain() {
+        // `out.executed` feeds the world-model chain (observe_transition): only
+        // actions that actually RAN are listed, in order; a refused action is not.
+        let bridge = MockBridge::with_snapshot(graph());
+        let gate = ControlGate::default();
+        // `confirm` returns true, so confidence-gated reversible actions run via
+        // the confirmed path; the refusal boundary still holds independently.
+        let mut confirm = |_: &str, _: Option<crate::control_safety::Permission>| true;
+        let calls = vec![
+            (
+                "1".into(),
+                "scroll".into(),
+                json!({ "direction": "down", "amount": 1 }),
+            ),
+            (
+                "2".into(),
+                "type".into(),
+                json!({ "text": "my password is hunter2" }),
+            ),
+            ("3".into(), "right_click".into(), json!({ "element": "e1" })),
+        ];
+        let out = execute_tool_calls(&bridge, &gate, &mut confirm, None, &calls).await;
+        assert_eq!(
+            out.executed,
+            vec![
+                "scroll down 1".to_string(),
+                "right-click element e1".to_string(),
+            ],
+            "only executed actions, in order; the refused password is excluded"
+        );
     }
 
     /// A bridge that supplies BOTH a snapshot (with screen bounds) and a live
