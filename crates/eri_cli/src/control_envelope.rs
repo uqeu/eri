@@ -50,17 +50,6 @@ pub enum Decision {
     Refuse(RefusalKind),
 }
 
-impl Decision {
-    /// A short, stable label for shadow-mode logging / calibration.
-    pub fn label(&self) -> String {
-        match self {
-            Decision::AutoExecute => "auto-execute".to_string(),
-            Decision::Confirm => "confirm".to_string(),
-            Decision::Refuse(kind) => format!("refuse:{kind:?}"),
-        }
-    }
-}
-
 /// The minimum confidence for an auto-execute (below it, eri asks). A standing
 /// default; per-tier tuning + a learned router can adjust it later.
 pub const DEFAULT_CONFIDENCE_FLOOR: f32 = 0.8;
@@ -86,98 +75,6 @@ fn envelope_decision(prediction: &Prediction, floor: f32) -> Decision {
         }
         _ => Decision::Confirm,
     }
-}
-
-/// Verb cues that make an action irreversible (or risky enough to always ask).
-/// Trailing spaces on short cues avoid matching inside longer words.
-const IRREVERSIBLE_CUES: &[&str] = &[
-    "delete",
-    "remove",
-    "rm ",
-    "trash",
-    "erase",
-    "wipe",
-    "format ",
-    "quit",
-    "close",
-    "shut down",
-    "shutdown",
-    "uninstall",
-    "send",
-    "submit",
-    "post ",
-    "publish",
-    "buy",
-    "purchase",
-    "order",
-    "pay ",
-    "overwrite",
-    "discard",
-    "empty ",
-    "drop ",
-    "reset",
-];
-
-/// Verb cues that make an action trivially reversible.
-const REVERSIBLE_CUES: &[&str] = &[
-    "open",
-    "click",
-    "select",
-    "type",
-    "scroll",
-    "focus",
-    "switch",
-    "search",
-    "navigate",
-    "hover",
-    "read",
-    "view",
-    "highlight",
-    "copy",
-];
-
-/// Classify an action's reversibility from its text (cold-start taxonomy, grill
-/// Q17). Irreversible cues win over reversible ones; an unrecognized action is
-/// conservatively [`Reversibility::Irreversible`], so anything novel asks first.
-pub fn classify_reversibility(action_text: &str) -> Reversibility {
-    let t = action_text.to_lowercase();
-    if IRREVERSIBLE_CUES.iter().any(|c| t.contains(c)) {
-        Reversibility::Irreversible
-    } else if REVERSIBLE_CUES.iter().any(|c| t.contains(c)) {
-        Reversibility::Reversible
-    } else {
-        Reversibility::Irreversible
-    }
-}
-
-/// Shadow-mode advisory (ADR-0007 §4): compute what the confirmation envelope
-/// WOULD decide for an action — to be logged next to `ControlGate`'s real
-/// decision so predict→gate can be calibrated before it becomes authoritative.
-/// Pure: it only computes the [`Decision`] and **never** changes what executes;
-/// the caller emits the envelope-vs-actual comparison.
-///
-/// `action_desc` is the human description (drives reversibility); `sensitive_text`
-/// is the typed/scripted content when present (drives the refusal axis, matching
-/// the live gate); `known` is whether the action is a standing grant / learned
-/// pattern (wired to the real `PermissionStore` at the call site); `confidence`
-/// is the base engine's per-action forecast from the predict step
-/// ([`crate::predict::forecast_confidence`]).
-pub fn advise(
-    action_desc: &str,
-    sensitive_text: Option<&str>,
-    known: bool,
-    confidence: f32,
-) -> Decision {
-    let prediction = Prediction {
-        reversibility: classify_reversibility(action_desc),
-        confidence,
-        known,
-    };
-    gate(
-        sensitive_text.unwrap_or(action_desc),
-        &prediction,
-        DEFAULT_CONFIDENCE_FLOOR,
-    )
 }
 
 #[cfg(test)]
@@ -252,58 +149,5 @@ mod tests {
             DEFAULT_CONFIDENCE_FLOOR,
         );
         assert_eq!(d, Decision::Refuse(RefusalKind::Credential));
-    }
-
-    #[test]
-    fn reversibility_taxonomy_classifies_verbs_and_defaults_conservatively() {
-        use Reversibility::{Irreversible, Reversible};
-        assert_eq!(classify_reversibility("delete the file"), Irreversible);
-        assert_eq!(classify_reversibility("quit Safari"), Irreversible);
-        assert_eq!(classify_reversibility("send the email"), Irreversible);
-        assert_eq!(classify_reversibility("click the button"), Reversible);
-        assert_eq!(classify_reversibility("open Notes"), Reversible);
-        assert_eq!(classify_reversibility("type hello there"), Reversible);
-        // Unrecognized → conservatively irreversible (novel asks first).
-        assert_eq!(
-            classify_reversibility("frobnicate the widget"),
-            Irreversible
-        );
-        // An irreversible cue wins over a reversible one in the same action.
-        assert_eq!(
-            classify_reversibility("open and delete the doc"),
-            Irreversible
-        );
-    }
-
-    #[test]
-    fn advise_auto_executes_a_reversible_known_action_when_the_forecast_is_confident() {
-        assert_eq!(
-            advise("click element e1", None, true, 0.9),
-            Decision::AutoExecute
-        );
-    }
-
-    #[test]
-    fn advise_confirms_a_reversible_known_action_when_the_forecast_is_low() {
-        // The real-confidence behavior (#2): same reversible+known action, but a
-        // low forecast → eri asks instead of auto-running. With the old attended
-        // placeholder this would have auto-executed.
-        assert_eq!(
-            advise("click element e1", None, true, 0.4),
-            Decision::Confirm
-        );
-    }
-
-    #[test]
-    fn advise_refuses_on_sensitive_text_regardless_of_a_confident_forecast() {
-        assert_eq!(
-            advise(
-                "fill the login field",
-                Some("my password is hunter2"),
-                true,
-                0.99
-            ),
-            Decision::Refuse(RefusalKind::Credential)
-        );
     }
 }

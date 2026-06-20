@@ -158,13 +158,34 @@ impl ControlAction {
         if self.is_risky() {
             return true;
         }
+        // Exhaustive on purpose — NO `_` wildcard. `is_risky_remote` is a
+        // reversibility source for unattended auto-execute, so a newly-added
+        // action variant must force a deliberate remote-risk decision here
+        // (otherwise it would silently become auto-executable from the phone).
         match self {
             ControlAction::Click(ClickTarget::Element(label))
             | ControlAction::RightClick(ClickTarget::Element(label))
             | ControlAction::DoubleClick(ClickTarget::Element(label)) => {
                 looks_outward_facing(label)
             }
-            _ => false,
+            // Coord-target clicks + every non-click action carry no extra remote
+            // escalation beyond `is_risky()` above. Listed explicitly so the match
+            // stays exhaustive.
+            ControlAction::Click(ClickTarget::Coord(..))
+            | ControlAction::RightClick(ClickTarget::Coord(..))
+            | ControlAction::DoubleClick(ClickTarget::Coord(..))
+            | ControlAction::Observe
+            | ControlAction::Type(_)
+            | ControlAction::Key(_)
+            | ControlAction::OpenApp(_)
+            | ControlAction::QuitApp(_)
+            | ControlAction::Wait(_)
+            | ControlAction::Scroll { .. }
+            | ControlAction::Drag { .. }
+            | ControlAction::MouseMove(..)
+            | ControlAction::RunAppleScript(_)
+            | ControlAction::ReadClipboard
+            | ControlAction::WriteClipboard(_) => false,
         }
     }
 
@@ -413,16 +434,37 @@ impl ControlGate {
         }
     }
 
-    /// Submit an action. Order of checks (each a hard guarantee):
-    /// 1. **Refuse** sensitive actions (password/money/CAPTCHA/access control) —
-    ///    never run, hand back to the user.
-    /// 2. **Confirm** risky actions, UNLESS the user granted that permission or
-    ///    `auto_confirm` is set.
-    /// 3. Otherwise run immediately.
+    /// Submit an action with the **attended** default confidence (1.0) — the call
+    /// shape for paths that have no per-action forecast (coding tools, the remote
+    /// channel, tests). Delegates to [`submit_confident`](Self::submit_confident);
+    /// at confidence 1.0 a reversible+known action runs, matching the pre-flip
+    /// behavior.
     pub async fn submit(
         &self,
         bridge: &dyn ControlBridge,
         action: &ControlAction,
+    ) -> Result<Disposition> {
+        self.submit_confident(bridge, action, 1.0).await
+    }
+
+    /// The **single decision path** of the predict→gate→act cycle (P2 #1 — flip +
+    /// unify, ADR-0006/0007 §4). Order, each a hard guarantee:
+    ///
+    /// 1. **Refuse** denied apps + sensitive actions (password/money/CAPTCHA/
+    ///    access control) — never run; absolute and independent of confidence or
+    ///    grants. "Yes" can't unlock these.
+    /// 2. **Confirm** learned cautions, and risky/irreversible actions unless the
+    ///    user granted that permission (the allowlist) or `auto_confirm` is set.
+    /// 3. **Auto-execute** a reversible action ONLY when the predict step is
+    ///    confident (`confidence >= floor`) AND it's a known pattern
+    ///    ([`is_known_pattern`](Self::is_known_pattern)); otherwise ask. This is
+    ///    the confidence axis the shadow envelope calibrated — it only ADDS
+    ///    caution on uncertain reversible actions; it never weakens (1) or (2).
+    pub async fn submit_confident(
+        &self,
+        bridge: &dyn ControlBridge,
+        action: &ControlAction,
+        confidence: f32,
     ) -> Result<Disposition> {
         // (0) App denylist — the user said "don't touch this app." A hard
         // boundary like a refusal: not run, and "yes" can't unlock it; only
@@ -435,9 +477,10 @@ impl ControlGate {
                  Tell me \"you can use {app} again\" if you want to change that."
             )));
         }
-        // (1) Refusal — check typed text (and AppleScript source) against the
-        // sensitive-action classifier. A script that types a password or moves
-        // money is refused exactly like a literal keystroke would be.
+        // (1) Refusal — the independent, absolute axis. Check typed text (and
+        // AppleScript source) against the sensitive-action classifier. A script
+        // that types a password or moves money is refused exactly like a literal
+        // keystroke would be. Never overridden by confidence or a grant.
         let sensitive_text = match action {
             ControlAction::Type(t) | ControlAction::RunAppleScript(t) => Some(t.as_str()),
             _ => None,
@@ -453,26 +496,57 @@ impl ControlGate {
         if !self.auto_confirm && self.permissions.is_cautioned(&action.describe()) {
             return Ok(Disposition::NeedsConfirmation(action.describe()));
         }
-        // (2) Confirmation — risky unless explicitly permitted. In remote mode
-        // (`force_confirm_risky`) the risk bar is stricter (outward-facing clicks
-        // too) AND a granted permission does NOT skip the confirm, so an
-        // unattended risky action always bounces to the phone (security C1, M1).
+        // (2) Explicit authorization bypasses the envelope: an `auto_confirm` run
+        // (headless / --yes), or a risky action the user granted in the allowlist,
+        // runs without asking. In remote mode (`force_confirm_risky`) a grant never
+        // bypasses — an unattended risky action always bounces to the phone
+        // (security C1, M1).
         let risky = if self.force_confirm_risky {
             action.is_risky_remote()
         } else {
             action.is_risky()
         };
-        if risky && !self.auto_confirm {
-            let granted = !self.force_confirm_risky
-                && action
-                    .permission()
-                    .is_some_and(|p| self.permissions.is_granted(p));
-            if !granted {
-                return Ok(Disposition::NeedsConfirmation(action.describe()));
+        if self.auto_confirm {
+            return Ok(Disposition::Executed(apply(bridge, action).await?));
+        }
+        if risky
+            && !self.force_confirm_risky
+            && action
+                .permission()
+                .is_some_and(|p| self.permissions.is_granted(p))
+        {
+            return Ok(Disposition::Executed(apply(bridge, action).await?));
+        }
+        // (3) The confirmation envelope is the decision (ADR-0006/0007 §4): a
+        // reversible action auto-runs only when the forecast is confident AND it's
+        // a known pattern; a risky/irreversible one always asks; refusal is the
+        // envelope's independent override (already enforced at (1)). Reversibility
+        // is the authoritative per-variant risk classification, so benign pointer
+        // actions aren't penalized by a text heuristic.
+        let prediction = crate::control_envelope::Prediction {
+            reversibility: if risky {
+                crate::control_envelope::Reversibility::Irreversible
+            } else {
+                crate::control_envelope::Reversibility::Reversible
+            },
+            confidence,
+            known: self.is_known_pattern(action),
+        };
+        match crate::control_envelope::gate(
+            sensitive_text.unwrap_or(""),
+            &prediction,
+            crate::control_envelope::DEFAULT_CONFIDENCE_FLOOR,
+        ) {
+            crate::control_envelope::Decision::AutoExecute => {
+                Ok(Disposition::Executed(apply(bridge, action).await?))
+            }
+            crate::control_envelope::Decision::Refuse(kind) => {
+                Ok(Disposition::Refused(kind.handback_message().to_string()))
+            }
+            crate::control_envelope::Decision::Confirm => {
+                Ok(Disposition::NeedsConfirmation(action.describe()))
             }
         }
-        // (3) Run.
-        Ok(Disposition::Executed(apply(bridge, action).await?))
     }
 
     /// Run a previously-held action after the user said yes. Refusals can never
@@ -960,19 +1034,6 @@ pub(crate) fn classify_reach(goal: &str) -> Reach {
     }
 }
 
-/// One action's confirmation-envelope **shadow** record (ADR-0007 §4): what the
-/// envelope WOULD have decided vs. what `ControlGate` actually did. Collected for
-/// calibration; it never changes execution. Promoted to authoritative later.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EnvelopeShadow {
-    /// Human description of the action.
-    pub action: String,
-    /// The envelope's advisory decision label ("auto-execute" / "confirm" / "refuse:…").
-    pub envelope: String,
-    /// What `ControlGate` actually did ("executed" / "confirm" / "refused").
-    pub actual: String,
-}
-
 /// Outcome of executing one turn's tool calls.
 #[derive(Debug, Default)]
 pub struct StepOutcome {
@@ -982,29 +1043,6 @@ pub struct StepOutcome {
     pub done: bool,
     /// Human-readable log of what happened this step (for narration).
     pub log: Vec<String>,
-    /// Per-action confirmation-envelope shadow records (advisory; see
-    /// [`EnvelopeShadow`]). Forwarded to the sink by the loop, off the
-    /// user-facing narration trail.
-    pub envelope_shadow: Vec<EnvelopeShadow>,
-}
-
-/// The typed/scripted content of an action (what `ControlGate` runs through the
-/// refusal classifier), so the envelope shadow checks refusal on the same text.
-fn sensitive_text_of(action: &ControlAction) -> Option<&str> {
-    match action {
-        ControlAction::Type(t) | ControlAction::RunAppleScript(t) => Some(t.as_str()),
-        _ => None,
-    }
-}
-
-/// Short label of what `ControlGate` actually did, for the envelope-vs-actual
-/// shadow comparison.
-fn disposition_label(d: &Disposition) -> &'static str {
-    match d {
-        Disposition::Executed(_) => "executed",
-        Disposition::NeedsConfirmation(_) => "confirm",
-        Disposition::Refused(_) => "refused",
-    }
 }
 
 /// Execute one turn's tool calls through the gate + bridge. Risky actions are
@@ -1119,25 +1157,13 @@ pub async fn execute_tool_calls(
                 continue;
             }
         };
-        // P2 shadow (ADR-0007 §4): compute what the confirmation envelope WOULD
-        // decide and record it next to ControlGate's REAL disposition — calibration
-        // only, it never changes what executes. `known` is the live allowlist +
-        // learned-caution signal; confidence is the attended placeholder until the
-        // predict step lands. Refusal stays enforced by the gate below.
-        let envelope = crate::control_envelope::advise(
-            &action.describe(),
-            sensitive_text_of(&action),
-            gate.is_known_pattern(&action),
-            crate::predict::forecast_confidence(input),
-        );
-        let disposition = gate.submit(bridge, &action).await;
-        if let Ok(ref d) = disposition {
-            out.envelope_shadow.push(EnvelopeShadow {
-                action: action.describe(),
-                envelope: envelope.label(),
-                actual: disposition_label(d).to_string(),
-            });
-        }
+        // P2 #1 (flip + unify, ADR-0007 §4): ONE decision path — the confirmation
+        // envelope IS the gate. The predict step's per-action confidence drives
+        // the auto-execute-vs-confirm decision inside `submit_confident`; the
+        // absolute refusal axis stays enforced there too.
+        let disposition = gate
+            .submit_confident(bridge, &action, crate::predict::forecast_confidence(input))
+            .await;
         match disposition {
             Ok(Disposition::Executed(result)) => {
                 out.log.push(format!("{} -> {result}", action.describe()));
@@ -2198,12 +2224,6 @@ pub(crate) async fn drive_control_loop(
             return Ok(ControlRun { text, usage });
         }
         let executed = execute_tool_calls(bridge, gate, confirm, mcp, &out.tool_calls).await;
-        // P2 shadow (ADR-0007 §4): forward each action's confirmation-envelope
-        // advisory (what it WOULD have decided vs. what ControlGate did) to the
-        // sink for calibration. Advisory only — execution already happened.
-        for shadow in &executed.envelope_shadow {
-            sink.record_envelope_shadow(shadow);
-        }
         for line in &executed.log {
             // Emit a clean, live status the app renders as a single updating
             // chip — the action being taken, not the post-hoc "-> result"
@@ -4173,68 +4193,33 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn executor_records_the_envelope_shadow_next_to_the_real_disposition() {
-        // Shadow mode (ADR-0007 §4): per action, the envelope's advisory decision
-        // is recorded next to ControlGate's REAL disposition — without changing
-        // execution. On the absolute boundary the two agree: both refuse.
-        let bridge = MockBridge::with_snapshot(graph());
+    async fn submit_is_confidence_gated_on_uncertain_reversible_actions() {
+        // P2 #1 (flip + unify): the confidence axis is AUTHORITATIVE now. A
+        // reversible, known action runs unprompted only when the forecast is
+        // confident; an unforecast / low-confidence one is held for confirmation.
+        // Refusals and risky actions are unaffected (covered by their own tests).
+        let bridge = DryRunBridge;
         let gate = ControlGate::default();
-        let mut confirm = |_: &str, _: Option<crate::control_safety::Permission>| true;
-        let calls = vec![
-            (
-                "1".into(),
-                "type".into(),
-                json!({ "text": "my password is hunter2" }),
-            ),
-            ("2".into(), "done".into(), json!({})),
-        ];
-        let out = execute_tool_calls(&bridge, &gate, &mut confirm, None, &calls).await;
+        let scroll = ControlAction::Scroll {
+            direction: "down".into(),
+            amount: 1,
+        };
 
-        // One shadow record (the `done` sentinel isn't gated).
-        assert_eq!(out.envelope_shadow.len(), 1);
-        let shadow = &out.envelope_shadow[0];
-        assert_eq!(shadow.envelope, "refuse:Credential");
-        assert_eq!(shadow.actual, "refused");
-        // And nothing was actually typed — the boundary held.
-        assert!(bridge.calls().is_empty());
-    }
-
-    #[tokio::test]
-    async fn envelope_confidence_comes_from_the_models_per_action_forecast() {
-        // #2: the model's `confidence` (carried in the tool input) drives the
-        // envelope's auto-execute-vs-confirm advisory. Both scrolls are reversible,
-        // unpermissioned (known) and not risky, so ControlGate runs both — only the
-        // SHADOW decision differs, proving confidence is real, not a placeholder.
-        let bridge = MockBridge::with_snapshot(graph());
-        let gate = ControlGate::default();
-        let mut confirm = |_: &str, _: Option<crate::control_safety::Permission>| true;
-        let calls = vec![
-            (
-                "1".into(),
-                "scroll".into(),
-                json!({ "direction": "down", "amount": 1, "confidence": 0.95 }),
-            ),
-            // No forecast → conservative fallback below the floor.
-            (
-                "2".into(),
-                "scroll".into(),
-                json!({ "direction": "up", "amount": 1 }),
-            ),
-        ];
-        let out = execute_tool_calls(&bridge, &gate, &mut confirm, None, &calls).await;
-
-        assert_eq!(out.envelope_shadow.len(), 2);
-        assert_eq!(
-            out.envelope_shadow[0].envelope, "auto-execute",
-            "a confident, reversible, known action would auto-execute"
-        );
-        assert_eq!(
-            out.envelope_shadow[1].envelope, "confirm",
-            "an unforecast action falls back below the floor → ask"
-        );
-        // Shadow changes nothing: both actually ran.
-        assert_eq!(out.envelope_shadow[0].actual, "executed");
-        assert_eq!(out.envelope_shadow[1].actual, "executed");
+        // Confident reversible + known → runs.
+        assert!(matches!(
+            gate.submit_confident(&bridge, &scroll, 0.95).await.unwrap(),
+            Disposition::Executed(_)
+        ));
+        // Low-confidence (or unforecast) reversible → ask.
+        assert!(matches!(
+            gate.submit_confident(&bridge, &scroll, 0.40).await.unwrap(),
+            Disposition::NeedsConfirmation(_)
+        ));
+        // The 2-arg `submit` keeps the attended default (1.0) → runs.
+        assert!(matches!(
+            gate.submit(&bridge, &scroll).await.unwrap(),
+            Disposition::Executed(_)
+        ));
     }
 
     /// A bridge that supplies BOTH a snapshot (with screen bounds) and a live

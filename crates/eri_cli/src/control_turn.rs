@@ -665,12 +665,6 @@ pub trait ControlTurnSink: Send + Sync {
     /// an identical event shape on every surface. Default no-op so existing
     /// sinks that only care about per-turn records need no change.
     fn record_escalation(&self, _event: &crate::engine_ladder::LadderEvent) {}
-
-    /// Record ONE confirmation-envelope shadow comparison — what the predict→gate
-    /// envelope WOULD have decided vs. what `ControlGate` actually did (ADR-0007
-    /// §4, shadow mode). Default no-op so sinks that don't calibrate the envelope
-    /// need no change.
-    fn record_envelope_shadow(&self, _shadow: &crate::control_agent::EnvelopeShadow) {}
 }
 
 /// Production sink: appends each turn to the local learn-do memory so the
@@ -691,20 +685,6 @@ impl ControlTurnSink for MemorySink {
         let workspace = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
         if let Ok(mut store) = eri_inference::memory::MemoryStore::open() {
             let _ = store.insert("engine_escalation", &workspace, &escalation_summary(event));
-        }
-    }
-
-    fn record_envelope_shadow(&self, shadow: &crate::control_agent::EnvelopeShadow) {
-        let workspace = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-        if let Ok(mut store) = eri_inference::memory::MemoryStore::open() {
-            let _ = store.insert(
-                "envelope_shadow",
-                &workspace,
-                &format!(
-                    "envelope={} actual={} :: {}",
-                    shadow.envelope, shadow.actual, shadow.action
-                ),
-            );
         }
     }
 }
