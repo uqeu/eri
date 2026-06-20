@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use eri_inference::memory::{
-    MemoryStore, Observation, RetentionWindow, collectors, format_learned_block,
+    MemoryStore, Observation, RetentionWindow, collectors, format_learned_block, world_recall,
 };
 
 use crate::services::Services;
@@ -133,6 +133,12 @@ pub async fn remember(
         .map_err(|e| DispatchError::Other(anyhow::anyhow!("memory open: {e}")))?;
     let pinned = collectors::remember_fact(&mut store, &p.workspace, &p.text)
         .map_err(|e| DispatchError::Other(anyhow::anyhow!("memory write: {e}")))?;
+    // Additive (ADR-0007): also populate the user's world model so the same fact
+    // becomes queryable as people/projects. Best-effort — a world-model failure
+    // must never fail the remember the user asked for.
+    if let Err(e) = world_recall::model_observation(user_id.as_deref(), &pinned) {
+        tracing::debug!("world-model ingest skipped: {e}");
+    }
     Ok(serde_json::json!({
         "ok": true,
         "id": pinned.id,
@@ -166,12 +172,28 @@ pub async fn patterns(
     let store = MemoryStore::open_for(user_id.as_deref())
         .map_err(|e| DispatchError::Other(anyhow::anyhow!("memory open: {e}")))?;
     let hits = store.top_patterns(&p.workspace, 20);
-    let formatted = format_learned_block(&hits);
+    let learned = format_learned_block(&hits);
+    // Blend in the Tier-A world block (Key People / Active Projects) so the prompt
+    // carries the entity-level model alongside the learned patterns.
+    let world = world_recall::world_block_for(user_id.as_deref(), 10);
+    let formatted = join_blocks(&learned, &world);
     let wire: Vec<ObservationWire> = hits.iter().map(ObservationWire::from).collect();
     Ok(serde_json::json!({
         "patterns": wire,
         "formatted": formatted,
     }))
+}
+
+/// Join two system-prompt blocks with a blank line, dropping any that are empty,
+/// so a missing world model (or no learned patterns yet) leaves no stray
+/// whitespace in the prompt.
+fn join_blocks(a: &str, b: &str) -> String {
+    match (a.trim().is_empty(), b.trim().is_empty()) {
+        (true, true) => String::new(),
+        (false, true) => a.trim().to_string(),
+        (true, false) => b.trim().to_string(),
+        (false, false) => format!("{}\n\n{}", a.trim(), b.trim()),
+    }
 }
 
 /// Tier-gated nightly prune. The dispatcher hooks this on sidecar startup
@@ -184,4 +206,23 @@ pub fn prune_for_tier(tier: &str, user_id: Option<&str>) -> std::io::Result<usiz
     let window = RetentionWindow::from_tier(tier);
     let mut store = MemoryStore::open_for(user_id)?;
     store.prune(window)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::join_blocks;
+
+    #[test]
+    fn join_blocks_drops_empties_and_separates_present_blocks() {
+        assert_eq!(join_blocks("", ""), "");
+        assert_eq!(join_blocks("## Learned\n· a", ""), "## Learned\n· a");
+        assert_eq!(
+            join_blocks("", "## Key People\nPeople: Alice"),
+            "## Key People\nPeople: Alice"
+        );
+        assert_eq!(
+            join_blocks("## Learned", "## Key People"),
+            "## Learned\n\n## Key People"
+        );
+    }
 }

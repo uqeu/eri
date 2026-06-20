@@ -147,6 +147,95 @@ fn a_single_char_typo_in_a_long_name_resolves_to_the_same_entity() {
 }
 
 #[test]
+fn related_in_finds_who_collaborates_on_a_project() {
+    let g = Graph::open_in_memory().unwrap();
+    let alice = world::record_entity(&g, world::entity_kind::PERSON, "Alice").unwrap();
+    let bob = world::record_entity(&g, world::entity_kind::PERSON, "Bob").unwrap();
+    let eri = world::record_entity(&g, world::entity_kind::PROJECT, "eri").unwrap();
+    world::relate(&g, &alice, &eri, world::relation::COLLABORATES_ON).unwrap();
+    world::relate(&g, &bob, &eri, world::relation::COLLABORATES_ON).unwrap();
+
+    // "who do I work with on eri?" — the inverse of `related`.
+    let collaborators = world::related_in(&g, &eri, world::relation::COLLABORATES_ON).unwrap();
+    let names: Vec<&str> = collaborators.iter().map(|e| e.canonical_name()).collect();
+    assert_eq!(collaborators.len(), 2);
+    assert!(names.contains(&"Alice") && names.contains(&"Bob"));
+}
+
+#[test]
+fn related_in_excludes_a_collaboration_that_has_since_ended() {
+    let g = Graph::open_in_memory().unwrap();
+    let alice = world::record_entity(&g, world::entity_kind::PERSON, "Alice").unwrap();
+    let carol = world::record_entity(&g, world::entity_kind::PERSON, "Carol").unwrap();
+    let eri = world::record_entity(&g, world::entity_kind::PROJECT, "eri").unwrap();
+
+    // Carol's collaboration lived entirely in the past [100, 200); Alice's is
+    // open-ended from "now". A current "who works on eri" must list only Alice.
+    world::relate_at(&g, &carol, &eri, world::relation::COLLABORATES_ON, 100).unwrap();
+    world::end_relation(&g, &carol, &eri, world::relation::COLLABORATES_ON, 200).unwrap();
+    world::relate(&g, &alice, &eri, world::relation::COLLABORATES_ON).unwrap();
+
+    let now = world::related_in(&g, &eri, world::relation::COLLABORATES_ON).unwrap();
+    let names: Vec<&str> = now.iter().map(|e| e.canonical_name()).collect();
+    assert_eq!(
+        names,
+        vec!["Alice"],
+        "an ended collaboration is no longer current"
+    );
+}
+
+#[test]
+fn open_at_persists_to_an_explicit_path_and_reopens() {
+    // The world model opens at an explicit file (not the workspace convention);
+    // entities written through one handle survive a reopen of the same file.
+    let path =
+        std::env::temp_dir().join(format!("eri-world-open-at-{}.sqlite", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+
+    {
+        let g = Graph::open_at(&path).unwrap();
+        world::record_entity(&g, world::entity_kind::PROJECT, "eri").unwrap();
+    }
+    let reopened = Graph::open_at(&path).unwrap();
+    assert!(
+        world::entities_of_kind(&reopened, world::entity_kind::PROJECT)
+            .unwrap()
+            .iter()
+            .any(|e| e.canonical_name() == "eri"),
+        "an entity written to an explicit-path graph survives a reopen"
+    );
+
+    drop(reopened);
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn find_entity_resolves_by_name_without_creating() {
+    let g = Graph::open_in_memory().unwrap();
+    world::record_entity(&g, world::entity_kind::PROJECT, "eri").unwrap();
+
+    // Resolves on a trimmed, case-insensitive match.
+    let found = world::find_entity(&g, world::entity_kind::PROJECT, "  ERI ").unwrap();
+    assert_eq!(
+        found.map(|e| e.canonical_name().to_string()),
+        Some("eri".into())
+    );
+
+    // A miss returns None and creates nothing (unlike upsert_entity).
+    assert!(
+        world::find_entity(&g, world::entity_kind::PROJECT, "nope")
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(
+        world::entities_of_kind(&g, world::entity_kind::PROJECT)
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[test]
 fn fuzzy_matching_does_not_merge_distinct_short_names() {
     let g = Graph::open_in_memory().unwrap();
 

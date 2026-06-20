@@ -170,6 +170,23 @@ pub fn entities_of_kind(graph: &Graph, kind: &str) -> Result<Vec<Entity>, GraphE
         .collect())
 }
 
+/// Resolve an existing entity of `kind` by exact canonical name or a recorded
+/// alias (trim + case-insensitive). Read-only — never creates (the difference
+/// from [`upsert_entity`]). Returns `None` when nothing matches.
+pub fn find_entity(graph: &Graph, kind: &str, name: &str) -> Result<Option<Entity>, GraphError> {
+    let needle = normalize_name(name);
+    Ok(entities_of_kind(graph, kind)?
+        .into_iter()
+        .find(|e| name_matches(e, &needle)))
+}
+
+/// Whether `entity`'s canonical name or any alias equals the already-normalized
+/// `needle`. The shared exact-match rule for resolution.
+fn name_matches(entity: &Entity, needle: &str) -> bool {
+    normalize_name(entity.canonical_name()) == needle
+        || entity.aliases().iter().any(|a| normalize_name(a) == needle)
+}
+
 /// Resolve-or-create an entity. Resolution is layered, cheapest-first:
 /// 1. **exact** — canonical name or a known alias (trim + case-insensitive);
 /// 2. **typo-tolerant** — a one-edit variant of a long name sharing a first
@@ -189,9 +206,7 @@ pub fn upsert_entity(
 
     // 1. exact match on canonical name or a recorded alias.
     for entity in &entities {
-        if normalize_name(entity.canonical_name()) == needle
-            || entity.aliases().iter().any(|a| normalize_name(a) == needle)
-        {
+        if name_matches(entity, &needle) {
             return Ok(entity.id().clone());
         }
     }
@@ -332,6 +347,19 @@ pub fn related_as_of(
     at: u64,
 ) -> Result<Vec<Entity>, GraphError> {
     let neighbors = graph.neighbors(src, Some(relation), Direction::Out)?;
+    Ok(neighbors
+        .into_iter()
+        .filter(|(edge, _)| edge_valid_at(edge, at))
+        .map(|(_edge, node)| Entity { node })
+        .collect())
+}
+
+/// Entities pointing INTO `dst` along currently-valid `relation` edges — the
+/// inverse of [`related`]. Answers "who collaborates on this project?": the
+/// person is the edge source, the project is `dst`.
+pub fn related_in(graph: &Graph, dst: &NodeId, relation: &str) -> Result<Vec<Entity>, GraphError> {
+    let at = now_ms();
+    let neighbors = graph.neighbors(dst, Some(relation), Direction::In)?;
     Ok(neighbors
         .into_iter()
         .filter(|(edge, _)| edge_valid_at(edge, at))

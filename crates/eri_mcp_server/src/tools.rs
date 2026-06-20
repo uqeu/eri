@@ -14,7 +14,7 @@
 //!   - eri.document     — placeholder: same rationale as tracer
 
 use anyhow::{Context, Result};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 pub fn manifest() -> Value {
     json!([
@@ -100,13 +100,16 @@ async fn handle_search(arguments: Value) -> Result<String> {
         10
     }
     let args: Args = serde_json::from_value(arguments).context("invalid arguments")?;
-    let store = eri_inference::memory::MemoryStore::open()
-        .context("failed to open eri memory store")?;
+    let store =
+        eri_inference::memory::MemoryStore::open().context("failed to open eri memory store")?;
     // The MCP server runs outside any workspace; pass `.` so recall
     // falls through to the global facts that aren't workspace-scoped.
     let observations = store.recall(&args.query, std::path::Path::new("."), args.limit);
     if observations.is_empty() {
-        return Ok(format!("No observations match `{query}`.", query = args.query));
+        return Ok(format!(
+            "No observations match `{query}`.",
+            query = args.query
+        ));
     }
     let mut out = format!(
         "{n} observation{plural} matching `{query}`:\n",
@@ -134,14 +137,18 @@ async fn handle_remember(arguments: Value) -> Result<String> {
     if text.is_empty() {
         return Err(anyhow::anyhow!("text must be non-empty"));
     }
-    let mut store = eri_inference::memory::MemoryStore::open()
-        .context("failed to open eri memory store")?;
+    let mut store =
+        eri_inference::memory::MemoryStore::open().context("failed to open eri memory store")?;
     let pinned = eri_inference::memory::collectors::remember_fact(
         &mut store,
         std::path::Path::new("."),
         text,
     )
     .context("failed to pin fact")?;
+    // Additive (ADR-0007): mirror the fact into the world model so it becomes
+    // queryable as people/projects. Anon scope (no signed-in user here),
+    // best-effort — a world-model failure must never fail the remember.
+    let _ = eri_inference::memory::world_recall::model_observation(None, &pinned);
     Ok(format!("Remembered (id: {}).", pinned.id))
 }
 

@@ -36,9 +36,9 @@ mod chat;
 mod checkpoint;
 mod client;
 mod coding_agent;
+mod coding_control;
 mod commands;
 mod composio;
-mod coding_control;
 mod composio_session;
 mod config;
 mod control_agent;
@@ -65,7 +65,6 @@ mod remote;
 mod remote_recall;
 mod repl;
 mod research;
-mod weather;
 mod sandbox;
 mod sdk_tools;
 mod search;
@@ -75,6 +74,7 @@ mod sync;
 mod trace;
 mod update;
 mod voice_control;
+mod weather;
 mod workflow;
 mod worktree;
 
@@ -564,6 +564,8 @@ pub enum MemoryCommand {
     },
     /// Pin a fact to memory.
     Remember { text: String },
+    /// Ask the world model who you work with on a project.
+    Who { project: String },
     /// Drop an observation by id, or "all" to clear everything.
     Forget { target: String },
 }
@@ -937,6 +939,7 @@ async fn dispatch(cli: Cli) -> anyhow::Result<()> {
             sync::spawn_best_effort();
             result
         }
+        Command::Memory(MemoryCommand::Who { project }) => memory::who(&project),
         Command::Memory(MemoryCommand::Forget { target }) => {
             let result = memory::forget(&target);
             sync::spawn_best_effort();
@@ -1581,7 +1584,9 @@ async fn run_control_undo(live: bool, log_path: Option<&std::path::Path>) -> any
                             let mut perms = control_safety::PermissionStore::load(&perm_path);
                             if perms.absorb_cautions(log.cautioned_patterns(2)) > 0 {
                                 let _ = perms.save(&perm_path);
-                                println!("[eri] noted — I'll check with you before \"{desc}\" next time.");
+                                println!(
+                                    "[eri] noted — I'll check with you before \"{desc}\" next time."
+                                );
                             }
                         }
                     }

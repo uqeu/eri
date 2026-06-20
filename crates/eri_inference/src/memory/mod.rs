@@ -28,12 +28,14 @@ pub mod collectors;
 pub mod consolidation;
 pub mod embeddings;
 pub mod eventtime;
+pub mod extraction;
 pub mod graph_bridge;
 pub mod keys;
 pub mod profile;
 pub mod profile_sync;
 pub mod style_writer;
 pub mod sync;
+pub mod world_recall;
 
 /// An observation's lifecycle/visibility — one state, so the old
 /// `superseded`/`consolidated`/`valid_to` flag soup can't form illegal

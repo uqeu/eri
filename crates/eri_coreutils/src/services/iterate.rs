@@ -556,14 +556,23 @@ fn format_diagnostics_block(diagnostics: &[DiagnosticWire]) -> Option<String> {
 fn load_learned_block(workspace: &std::path::Path, user_id: Option<&str>) -> Option<String> {
     let store = eri_inference::memory::MemoryStore::open_for(user_id).ok()?;
     let patterns = store.top_patterns(workspace, 20);
-    if patterns.is_empty() {
-        return None;
-    }
-    let formatted = eri_inference::memory::format_learned_block(&patterns);
-    if formatted.is_empty() {
+    let learned = if patterns.is_empty() {
+        String::new()
+    } else {
+        eri_inference::memory::format_learned_block(&patterns)
+    };
+    // Blend in the Tier-A world block (Key People / Active Projects) so the
+    // iterate loop's prompt carries the entity model alongside the patterns.
+    let world = eri_inference::memory::world_recall::world_block_for(user_id, 10);
+    let combined = [learned.trim(), world.trim()]
+        .into_iter()
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    if combined.is_empty() {
         None
     } else {
-        Some(formatted)
+        Some(combined)
     }
 }
 

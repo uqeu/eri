@@ -53,7 +53,32 @@ pub fn remember(text: &str) -> Result<()> {
     // kind "fact" = user-pinned and cross-workspace, matching the loop's recall
     // scope rule (facts surface everywhere; other kinds stay workspace-scoped).
     let o = store.insert("fact", &ws, text).context("remember")?;
+    // Additive (ADR-0007): mirror the fact into the user's world model so it
+    // becomes queryable as people/projects. Best-effort — never fails remember.
+    let user_id = config::load().ok().and_then(|c| c.user_id);
+    let _ = eri_inference::memory::world_recall::model_observation(user_id.as_deref(), &o);
     println!("Remembered ({}).", o.id);
+    Ok(())
+}
+
+/// `eri memory who <project>` — "who do I work with on X?", answered from the
+/// world model (the entity graph populated as you `remember`). NO fabrication:
+/// an unknown project, or one with no recorded collaborators, says so.
+pub fn who(project: &str) -> Result<()> {
+    let project = project.trim();
+    if project.is_empty() {
+        anyhow::bail!("usage: eri memory who <project>");
+    }
+    let user_id = config::load().ok().and_then(|c| c.user_id);
+    let graph = eri_inference::memory::world_recall::open_world_graph(user_id.as_deref())
+        .context("open world model")?;
+    let people = eri_inference::memory::world_recall::who_collaborates_on(&graph, project)
+        .context("query world model")?;
+    if people.is_empty() {
+        println!("No one on record working with you on `{project}`.");
+    } else {
+        println!("You work with {} on `{project}`.", people.join(", "));
+    }
     Ok(())
 }
 

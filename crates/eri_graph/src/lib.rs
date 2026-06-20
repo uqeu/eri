@@ -68,6 +68,19 @@ impl Graph {
         })
     }
 
+    /// Open (or create) a graph at an explicit database file `path`, instead of
+    /// the `<workspace_root>/.eri/graph.sqlite` convention of [`open`](Self::open).
+    /// For stores that aren't workspace-scoped — e.g. the user-global world model,
+    /// which sits beside the per-user memory store. Parent dirs are created lazily.
+    pub fn open_at(path: &Path) -> Result<Self, GraphError> {
+        let store = Store::open(path)?;
+        let workspace_root = path.parent().map(Path::to_path_buf).unwrap_or_default();
+        Ok(Self {
+            workspace_root,
+            inner: Mutex::new(Inner { store }),
+        })
+    }
+
     /// Path the graph is bound to.
     pub fn workspace_root(&self) -> &Path {
         &self.workspace_root
