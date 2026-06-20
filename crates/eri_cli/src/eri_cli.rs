@@ -60,6 +60,7 @@ mod openai_turn;
 mod phone;
 mod plan_tui;
 mod plugins;
+mod predict;
 mod proactive;
 mod project;
 mod remote;

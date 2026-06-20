@@ -150,12 +150,6 @@ pub fn classify_reversibility(action_text: &str) -> Reversibility {
     }
 }
 
-/// Confidence assumed for the **attended** control loop, where the user is
-/// present and watching — a placeholder until the base engine produces a real
-/// per-action forecast over the world model. Kept ≥ [`DEFAULT_CONFIDENCE_FLOOR`]
-/// so the reversibility + familiarity axes drive the advisory decision meanwhile.
-pub const ATTENDED_CONFIDENCE: f32 = 1.0;
-
 /// Shadow-mode advisory (ADR-0007 §4): compute what the confirmation envelope
 /// WOULD decide for an action — to be logged next to `ControlGate`'s real
 /// decision so predict→gate can be calibrated before it becomes authoritative.
@@ -165,12 +159,18 @@ pub const ATTENDED_CONFIDENCE: f32 = 1.0;
 /// `action_desc` is the human description (drives reversibility); `sensitive_text`
 /// is the typed/scripted content when present (drives the refusal axis, matching
 /// the live gate); `known` is whether the action is a standing grant / learned
-/// pattern (wired to the real `PermissionStore` at the call site). `confidence`
-/// is the attended-loop placeholder until the predict step lands.
-pub fn advise(action_desc: &str, sensitive_text: Option<&str>, known: bool) -> Decision {
+/// pattern (wired to the real `PermissionStore` at the call site); `confidence`
+/// is the base engine's per-action forecast from the predict step
+/// ([`crate::predict::forecast_confidence`]).
+pub fn advise(
+    action_desc: &str,
+    sensitive_text: Option<&str>,
+    known: bool,
+    confidence: f32,
+) -> Decision {
     let prediction = Prediction {
         reversibility: classify_reversibility(action_desc),
-        confidence: ATTENDED_CONFIDENCE,
+        confidence,
         known,
     };
     gate(
@@ -272,6 +272,38 @@ mod tests {
         assert_eq!(
             classify_reversibility("open and delete the doc"),
             Irreversible
+        );
+    }
+
+    #[test]
+    fn advise_auto_executes_a_reversible_known_action_when_the_forecast_is_confident() {
+        assert_eq!(
+            advise("click element e1", None, true, 0.9),
+            Decision::AutoExecute
+        );
+    }
+
+    #[test]
+    fn advise_confirms_a_reversible_known_action_when_the_forecast_is_low() {
+        // The real-confidence behavior (#2): same reversible+known action, but a
+        // low forecast → eri asks instead of auto-running. With the old attended
+        // placeholder this would have auto-executed.
+        assert_eq!(
+            advise("click element e1", None, true, 0.4),
+            Decision::Confirm
+        );
+    }
+
+    #[test]
+    fn advise_refuses_on_sensitive_text_regardless_of_a_confident_forecast() {
+        assert_eq!(
+            advise(
+                "fill the login field",
+                Some("my password is hunter2"),
+                true,
+                0.99
+            ),
+            Decision::Refuse(RefusalKind::Credential)
         );
     }
 }

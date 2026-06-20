@@ -1128,6 +1128,7 @@ pub async fn execute_tool_calls(
             &action.describe(),
             sensitive_text_of(&action),
             gate.is_known_pattern(&action),
+            crate::predict::forecast_confidence(input),
         );
         let disposition = gate.submit(bridge, &action).await;
         if let Ok(ref d) = disposition {
@@ -1369,7 +1370,13 @@ that begins with REFUSED means exactly this: relay the message and wait.\n\
 held for confirmation. If a tool_result says the user declined, do not retry; \
 move on or ask what they'd prefer. If you keep needing the same confirmation, \
 you may suggest they allow it permanently (\"want me to remember I can quit apps \
-so I don't ask each time?\")."
+so I don't ask each time?\").\n\n\
+CONFIDENCE: with each tool call, include a `confidence` field -- a number from 0 \
+to 1 estimating how likely THAT single action achieves what you intend, given \
+what's on screen and what you know about the user. Be calibrated: use >=0.8 only \
+when the target is clearly present and the action is unambiguous; lower when \
+you're guessing, the element is uncertain, or the step is novel. It does not \
+change what runs; it helps eri decide when it can act without interrupting you."
 }
 
 /// A safe bridge that performs NO actuation -- it logs what eri *would* do.
@@ -4190,6 +4197,44 @@ mod tests {
         assert_eq!(shadow.actual, "refused");
         // And nothing was actually typed — the boundary held.
         assert!(bridge.calls().is_empty());
+    }
+
+    #[tokio::test]
+    async fn envelope_confidence_comes_from_the_models_per_action_forecast() {
+        // #2: the model's `confidence` (carried in the tool input) drives the
+        // envelope's auto-execute-vs-confirm advisory. Both scrolls are reversible,
+        // unpermissioned (known) and not risky, so ControlGate runs both — only the
+        // SHADOW decision differs, proving confidence is real, not a placeholder.
+        let bridge = MockBridge::with_snapshot(graph());
+        let gate = ControlGate::default();
+        let mut confirm = |_: &str, _: Option<crate::control_safety::Permission>| true;
+        let calls = vec![
+            (
+                "1".into(),
+                "scroll".into(),
+                json!({ "direction": "down", "amount": 1, "confidence": 0.95 }),
+            ),
+            // No forecast → conservative fallback below the floor.
+            (
+                "2".into(),
+                "scroll".into(),
+                json!({ "direction": "up", "amount": 1 }),
+            ),
+        ];
+        let out = execute_tool_calls(&bridge, &gate, &mut confirm, None, &calls).await;
+
+        assert_eq!(out.envelope_shadow.len(), 2);
+        assert_eq!(
+            out.envelope_shadow[0].envelope, "auto-execute",
+            "a confident, reversible, known action would auto-execute"
+        );
+        assert_eq!(
+            out.envelope_shadow[1].envelope, "confirm",
+            "an unforecast action falls back below the floor → ask"
+        );
+        // Shadow changes nothing: both actually ran.
+        assert_eq!(out.envelope_shadow[0].actual, "executed");
+        assert_eq!(out.envelope_shadow[1].actual, "executed");
     }
 
     /// A bridge that supplies BOTH a snapshot (with screen bounds) and a live
