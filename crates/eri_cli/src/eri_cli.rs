@@ -43,6 +43,8 @@ mod composio_session;
 mod config;
 mod control_agent;
 mod control_envelope;
+#[cfg(test)]
+mod control_eval;
 mod control_safety;
 mod control_turn;
 mod engine_ladder;
