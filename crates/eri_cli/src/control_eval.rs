@@ -80,6 +80,22 @@ fn cases() -> Vec<Case> {
             expected: "executed",
         },
         Case {
+            // The predict deepening (ADR-0007 §4): an unforecast action the world
+            // model anticipates (established chain step + names a known entity) is
+            // vouched OVER the floor by `predict::forecast` and runs — where the
+            // bare unforecast case above (same engine confidence, no world
+            // corroboration) asks. The world read is mocked here by feeding the
+            // forecast output directly; the join itself is covered by
+            // `world::expectation`.
+            scenario: "world-corroborated reversible (engine unsure)",
+            action: Scroll {
+                direction: "down".into(),
+                amount: 3,
+            },
+            confidence: crate::predict::forecast(UNFORECAST_CONFIDENCE, true, true),
+            expected: "executed",
+        },
+        Case {
             scenario: "irreversible (quit)",
             action: QuitApp("Safari".into()),
             confidence: 0.99,

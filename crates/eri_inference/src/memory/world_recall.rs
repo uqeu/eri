@@ -85,6 +85,25 @@ pub fn predict_next(user_id: Option<&str>, action: &str, limit: usize) -> Vec<(S
     world::next_steps(&graph, action, limit).unwrap_or_default()
 }
 
+/// What the user's world model anticipates about an action about to run — joins
+/// the proactive **chain** (`prev` → `action_label`) with the **entity** model
+/// (does the action name a known entity), both from the one user graph (P2,
+/// ADR-0007 §4). The one-line seam the predict step (`eri_cli::predict`) reads to
+/// blend the world model into the confirmation envelope's confidence.
+/// Best-effort: a missing/locked graph yields the neutral expectation (nothing
+/// anticipated), so the predict step falls back to the engine's own confidence.
+pub fn anticipate(
+    user_id: Option<&str>,
+    prev: Option<&str>,
+    action_label: &str,
+    target: Option<&str>,
+) -> world::Expectation {
+    let Ok(graph) = open_world_graph(user_id) else {
+        return world::Expectation::default();
+    };
+    world::expectation(&graph, prev, action_label, target).unwrap_or_default()
+}
+
 // --- world-model queries ------------------------------------------------------
 
 /// People who collaborate on the named project — "who do I work with on X?".

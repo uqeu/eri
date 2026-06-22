@@ -463,6 +463,117 @@ pub fn next_steps(
     Ok(steps)
 }
 
+// ── Predict substrate (ADR-0007 §4): what the world model anticipates ──
+
+/// The transition count at which a `next` step counts as an **established**
+/// pattern the world model anticipates — the same threshold the proactive hint
+/// uses, so "what eri suggests" and "what eri vouches for" stay in step.
+pub const ESTABLISHED_TRANSITIONS: u64 = 2;
+
+/// How many successors of one action to scan when checking expectation (an
+/// action has few; a generous cap).
+const NEXT_LOOKUP_LIMIT: usize = 64;
+
+/// Every entity kind, for the cross-kind grounding scan.
+pub const ENTITY_KINDS: [&str; 6] = [
+    entity_kind::PERSON,
+    entity_kind::PROJECT,
+    entity_kind::APP,
+    entity_kind::TOPIC,
+    entity_kind::PLACE,
+    entity_kind::LIFE_EVENT,
+];
+
+/// The minimum entity-name length (in chars, separators excluded) eligible for
+/// grounding, so a very short name can't spuriously match a stray word.
+const MIN_GROUND_CHARS: usize = 3;
+
+/// What the world model anticipates about an action about to run: was it an
+/// **established** next-step after `prev` (the proactive *chain*), and does its
+/// text/`target` name a known entity (the *entity* model). The two signals
+/// joined — both read from the one graph — are the substrate the predict step
+/// (eri_cli) blends into the confirmation envelope's confidence (ADR-0007 §4).
+/// Neutral (`false, false`) means nothing is anticipated, so the predict step
+/// falls back to the engine's own confidence.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Expectation {
+    /// `action_label` is an established successor of `prev` (count ≥ threshold).
+    pub expected: bool,
+    /// The action's text or `target` names a known entity ("who/what is X").
+    pub grounded: bool,
+}
+
+/// Compute the world model's [`Expectation`] for an action `action_label`
+/// following `prev` (the previously executed action, if any), optionally with an
+/// explicit `target` string to ground (e.g. the focused app). Read-only.
+pub fn expectation(
+    graph: &Graph,
+    prev: Option<&str>,
+    action_label: &str,
+    target: Option<&str>,
+) -> Result<Expectation, GraphError> {
+    let expected = match prev {
+        Some(p) => {
+            let want = normalize_name(action_label);
+            next_steps(graph, p, NEXT_LOOKUP_LIMIT)?
+                .into_iter()
+                .any(|(label, count)| {
+                    count >= ESTABLISHED_TRANSITIONS && normalize_name(&label) == want
+                })
+        }
+        None => false,
+    };
+    let grounded = mentions_known_entity(graph, action_label)?
+        || match target {
+            Some(t) => mentions_known_entity(graph, t)?,
+            None => false,
+        };
+    Ok(Expectation { expected, grounded })
+}
+
+/// Whether `text` names a known entity of any kind — the action's target matched
+/// to the entity model ("who/what is X"). A name grounds when its word(s) appear
+/// as a contiguous, case-insensitive **whole-word** run in `text`, by canonical
+/// name or alias. The grounding half of [`expectation`].
+pub fn mentions_known_entity(graph: &Graph, text: &str) -> Result<bool, GraphError> {
+    let hay = tokenize(text);
+    if hay.is_empty() {
+        return Ok(false);
+    }
+    for kind in ENTITY_KINDS {
+        for entity in entities_of_kind(graph, kind)? {
+            if name_grounds(&hay, entity.canonical_name())
+                || entity.aliases().iter().any(|a| name_grounds(&hay, a))
+            {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
+/// Lowercase alphanumeric word tokens of `s`.
+fn tokenize(s: &str) -> Vec<String> {
+    s.split(|c: char| !c.is_alphanumeric())
+        .filter(|t| !t.is_empty())
+        .map(|t| t.to_lowercase())
+        .collect()
+}
+
+/// Whether `name`'s tokens appear as a contiguous run within `hay` (the text's
+/// tokens) and the name clears [`MIN_GROUND_CHARS`].
+fn name_grounds(hay: &[String], name: &str) -> bool {
+    let needle = tokenize(name);
+    if needle.is_empty() {
+        return false;
+    }
+    let chars: usize = needle.iter().map(|t| t.chars().count()).sum();
+    if chars < MIN_GROUND_CHARS {
+        return false;
+    }
+    hay.windows(needle.len()).any(|w| w == needle.as_slice())
+}
+
 fn edge_valid_at(edge: &Edge, at: u64) -> bool {
     let from = edge
         .metadata

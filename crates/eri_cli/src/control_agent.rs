@@ -381,7 +381,7 @@ pub enum Disposition {
 /// for non-interactive/headless runs and tests; the interactive default is
 /// false. Refusals always apply, even with `auto_confirm` — they are not a
 /// confirmation, they are a boundary.
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct ControlGate {
     auto_confirm: bool,
     permissions: crate::control_safety::PermissionStore,
@@ -390,6 +390,18 @@ pub struct ControlGate {
     /// their keyboard must NOT auto-run a risky action triggered from their phone
     /// (security C1). The app denylist + refusals still apply.
     force_confirm_risky: bool,
+    /// The signed-in user this gate acts for (`None` = anonymous / signed-out).
+    /// Scopes the predict step's world-model read to one graph (ADR-0007), so a
+    /// gate decision can consult the SAME world model the user's memory lives in.
+    user_id: Option<String>,
+    /// The action that last executed in an EARLIER turn — the cross-turn
+    /// predecessor the predict step checks chain corroboration against ("after X
+    /// last turn you do Y"), the common one-action-per-turn pattern that
+    /// within-turn `prev` can't see. Seeded once per turn by `drive_control_loop`
+    /// (the same `last_action` the proactive-chain FEED tracks). `Arc<Mutex>` so
+    /// the loop updates it through the shared `&ControlGate`; a cloned gate shares
+    /// the cell (only the loop writes). Anonymous gates never read it.
+    last_action: std::sync::Arc<std::sync::Mutex<Option<String>>>,
 }
 
 impl ControlGate {
@@ -404,7 +416,38 @@ impl ControlGate {
             auto_confirm,
             permissions,
             force_confirm_risky: false,
+            user_id: None,
+            last_action: Default::default(),
         }
+    }
+
+    /// Scope this gate to the signed-in user, so the predict step reads that
+    /// user's world model (`None` = anonymous). Chainable; identity otherwise.
+    pub fn with_user(mut self, user_id: Option<String>) -> Self {
+        self.user_id = user_id;
+        self
+    }
+
+    /// The user this gate acts for (`None` = anonymous), for the predict step's
+    /// user-scoped world-model read.
+    pub fn user_id(&self) -> Option<&str> {
+        self.user_id.as_deref()
+    }
+
+    /// Seed the cross-turn predecessor the predict step reads — the action that
+    /// executed in the prior turn. Called once per turn by the control loop.
+    /// Best-effort: a poisoned lock is ignored (the forecast simply falls back to
+    /// within-turn `prev`).
+    pub fn set_last_action(&self, action: Option<String>) {
+        if let Ok(mut slot) = self.last_action.lock() {
+            *slot = action;
+        }
+    }
+
+    /// The cross-turn predecessor action, if any, for the predict step's chain
+    /// corroboration.
+    pub fn last_action(&self) -> Option<String> {
+        self.last_action.lock().ok().and_then(|slot| slot.clone())
     }
 
     /// Build a gate for the **unattended remote channel**: never auto-confirms,
@@ -416,6 +459,8 @@ impl ControlGate {
             auto_confirm: false,
             permissions,
             force_confirm_risky: true,
+            user_id: None,
+            last_action: Default::default(),
         }
     }
 
@@ -1049,6 +1094,15 @@ pub struct StepOutcome {
     pub executed: Vec<String>,
 }
 
+/// The predecessor the predict step checks an action's chain corroboration
+/// against: the action that executed earlier THIS turn (`within_turn`), else the
+/// cross-turn `last_action` the gate carries. Mirrors how the proactive-chain
+/// FEED records consecutive executed pairs, so what predict anticipates lines up
+/// with what the chain learned.
+fn predict_prev<'a>(within_turn: Option<&'a str>, cross_turn: Option<&'a str>) -> Option<&'a str> {
+    within_turn.or(cross_turn)
+}
+
 /// Execute one turn's tool calls through the gate + bridge. Risky actions are
 /// confirmed via `confirm(description) -> bool` (interactive: prompt stdin;
 /// tests: a canned closure). Shared by the live loop and the unit tests, so the
@@ -1162,12 +1216,33 @@ pub async fn execute_tool_calls(
             }
         };
         // P2 #1 (flip + unify, ADR-0007 §4): ONE decision path — the confirmation
-        // envelope IS the gate. The predict step's per-action confidence drives
-        // the auto-execute-vs-confirm decision inside `submit_confident`; the
-        // absolute refusal axis stays enforced there too.
-        let disposition = gate
-            .submit_confident(bridge, &action, crate::predict::forecast_confidence(input))
-            .await;
+        // envelope IS the gate. The predict step forecasts the per-action
+        // confidence that drives the auto-execute-vs-confirm decision inside
+        // `submit_confident`; the absolute refusal axis stays enforced there too.
+        //
+        // The forecast blends the engine's self-report with a real read of the
+        // world model (ADR-0007 §4): is this an established next step after the
+        // last one (the proactive chain), and does it name a known entity. That
+        // corroboration can only RAISE confidence. We read the world model only
+        // for the signed-in user (`gate.user_id()`); signed-out → the engine's
+        // own number, no IO. `prev` is the previously executed action this turn,
+        // else the cross-turn predecessor the loop seeded on the gate — so the
+        // common one-action-per-turn pattern ("after X last turn you do Y") still
+        // corroborates.
+        let model_confidence = crate::predict::forecast_confidence(input);
+        let (expected, grounded) = match gate.user_id() {
+            Some(uid) => {
+                let cross_turn = gate.last_action();
+                let prev = predict_prev(
+                    out.executed.last().map(String::as_str),
+                    cross_turn.as_deref(),
+                );
+                crate::predict::anticipate(Some(uid), prev, &action)
+            }
+            None => (false, false),
+        };
+        let confidence = crate::predict::forecast(model_confidence, expected, grounded);
+        let disposition = gate.submit_confident(bridge, &action, confidence).await;
         match disposition {
             Ok(Disposition::Executed(result)) => {
                 out.log.push(format!("{} -> {result}", action.describe()));
@@ -2232,6 +2307,12 @@ pub(crate) async fn drive_control_loop(
             };
             return Ok(ControlRun { text, usage });
         }
+        // Seed the predict step's cross-turn predecessor on the gate: the action
+        // that executed in the prior turn (`last_action`, the same value the
+        // proactive-chain FEED below tracks). This is what lets chain
+        // corroboration fire for the common one-action-per-turn pattern;
+        // within-turn predecessors still come from `out.executed`.
+        gate.set_last_action(last_action.clone());
         let executed = execute_tool_calls(bridge, gate, confirm, mcp, &out.tool_calls).await;
         for line in &executed.log {
             // Emit a clean, live status the app renders as a single updating
@@ -2415,9 +2496,13 @@ pub async fn run_control_agent(
     // to the signed-in user, so they share the SAME user-scoped world graph as the
     // entities `/remember` writes. Falls back to anonymous when signed out.
     let user_id = crate::config::load().ok().and_then(|c| c.user_id);
-    let sink = crate::control_turn::MemorySink::new(user_id);
+    let sink = crate::control_turn::MemorySink::new(user_id.clone());
+    // Scope the loop's gate to the same signed-in user, so the predict step reads
+    // that user's world model (the SAME graph the sink writes chains + entities
+    // into). The caller's gate carries permissions/flags; we only attach the user.
+    let gate = gate.clone().with_user(user_id);
     drive_control_loop(
-        &refs, bridge, gate, confirm, &sink, &system, &tools, goal, max_turns, autonomous, mcp_dyn,
+        &refs, bridge, &gate, confirm, &sink, &system, &tools, goal, max_turns, autonomous, mcp_dyn,
     )
     .await
 }
@@ -4236,6 +4321,65 @@ mod tests {
             gate.submit(&bridge, &scroll).await.unwrap(),
             Disposition::Executed(_)
         ));
+    }
+
+    #[tokio::test]
+    async fn a_world_corroborated_forecast_crosses_the_auto_floor_and_runs() {
+        // The predict step (ADR-0007 §4) feeds the gate's confidence axis: a
+        // reversible, known action the world model anticipates — an established
+        // chain step (`expected`) that names a known entity (`grounded`) — is
+        // vouched over the auto floor and runs unprompted, even when the engine
+        // alone was unsure. The SAME action with no corroboration is held to ask.
+        // (The world read is covered by `world::expectation`; here we compose the
+        // pure forecast with the live gate, IO-free.)
+        let bridge = DryRunBridge;
+        let gate = ControlGate::default();
+        let scroll = ControlAction::Scroll {
+            direction: "down".into(),
+            amount: 1,
+        };
+
+        // Engine unsure (0.5) but the world model anticipates an established,
+        // grounded step → vouched over the floor → runs.
+        let corroborated = crate::predict::forecast(0.5, true, true);
+        assert!(matches!(
+            gate.submit_confident(&bridge, &scroll, corroborated)
+                .await
+                .unwrap(),
+            Disposition::Executed(_)
+        ));
+        // Same engine confidence, no world corroboration → asks.
+        let uncorroborated = crate::predict::forecast(0.5, false, false);
+        assert!(matches!(
+            gate.submit_confident(&bridge, &scroll, uncorroborated)
+                .await
+                .unwrap(),
+            Disposition::NeedsConfirmation(_)
+        ));
+    }
+
+    #[test]
+    fn gate_carries_and_clones_the_cross_turn_last_action() {
+        // The predict step's cross-turn predecessor rides on the gate (seeded once
+        // per turn by the loop). It round-trips, and a clone keeps it — the clone
+        // run_control_agent makes to attach the signed-in user.
+        let gate = ControlGate::default();
+        assert_eq!(gate.last_action(), None);
+        gate.set_last_action(Some("open editor".into()));
+        assert_eq!(gate.last_action().as_deref(), Some("open editor"));
+
+        let scoped = gate.clone().with_user(Some("u1".into()));
+        assert_eq!(scoped.last_action().as_deref(), Some("open editor"));
+        assert_eq!(scoped.user_id(), Some("u1"));
+    }
+
+    #[test]
+    fn predict_prev_prefers_within_turn_then_falls_back_to_cross_turn() {
+        // Within a turn, the immediately prior executed action is the predecessor;
+        // for a turn's first action (none executed yet), the cross-turn seed is.
+        assert_eq!(predict_prev(Some("B"), Some("A")), Some("B"));
+        assert_eq!(predict_prev(None, Some("A")), Some("A"));
+        assert_eq!(predict_prev(None, None), None);
     }
 
     #[tokio::test]
