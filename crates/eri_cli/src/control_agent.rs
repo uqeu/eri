@@ -1108,6 +1108,56 @@ fn predict_prev<'a>(within_turn: Option<&'a str>, cross_turn: Option<&'a str>) -
     within_turn.or(cross_turn)
 }
 
+/// The outcome of running one action through the gate, after asking the user if
+/// the gate required confirmation. The callers ([`execute_tool_calls`]'s main
+/// path and [`run_coding_tool`]) record it differently — per-call vs collapsed
+/// into a sequence — but the *decision* is made in exactly one place.
+enum Gated {
+    /// Ran — directly (auto) or after the user confirmed.
+    Ran { result: String, confirmed: bool },
+    /// The absolute boundary: handed back, never run.
+    Refused(String),
+    /// The gate asked and the user declined (carries the action description).
+    Declined(String),
+    /// Execution errored (carries the error text).
+    Failed(String),
+}
+
+/// Run `action` through the gate at `confidence`, asking `confirm` when the gate
+/// returns `NeedsConfirmation`. This is the SINGLE home for the confirmation
+/// envelope's submit→confirm→`gate.confirm` gauntlet (ADR-0006), so the main
+/// action path and the coding path can't drift onto different gates. Callers
+/// decide only how to *record* the [`Gated`] outcome.
+async fn gate_and_confirm(
+    bridge: &dyn ControlBridge,
+    gate: &ControlGate,
+    confirm: &mut dyn FnMut(&str, Option<crate::control_safety::Permission>) -> bool,
+    action: &ControlAction,
+    confidence: f32,
+) -> Gated {
+    match gate.submit_confident(bridge, action, confidence).await {
+        Ok(Disposition::Executed(result)) => Gated::Ran {
+            result,
+            confirmed: false,
+        },
+        Ok(Disposition::Refused(message)) => Gated::Refused(message),
+        Ok(Disposition::NeedsConfirmation(desc)) => {
+            if confirm(&desc, action.permission()) {
+                match gate.confirm(bridge, action).await {
+                    Ok(result) => Gated::Ran {
+                        result,
+                        confirmed: true,
+                    },
+                    Err(e) => Gated::Failed(e.to_string()),
+                }
+            } else {
+                Gated::Declined(desc)
+            }
+        }
+        Err(e) => Gated::Failed(e.to_string()),
+    }
+}
+
 /// Execute one turn's tool calls through the gate + bridge. Risky actions are
 /// confirmed via `confirm(description) -> bool` (interactive: prompt stdin;
 /// tests: a canned closure). Shared by the live loop and the unit tests, so the
@@ -1242,14 +1292,20 @@ pub async fn execute_tool_calls(
         );
         let (expected, grounded) = crate::predict::anticipate(gate.world(), prev, &action);
         let confidence = crate::predict::forecast(model_confidence, expected, grounded);
-        let disposition = gate.submit_confident(bridge, &action, confidence).await;
-        match disposition {
-            Ok(Disposition::Executed(result)) => {
-                out.log.push(format!("{} -> {result}", action.describe()));
-                out.executed.push(action.describe());
+        // ONE gate (the shared gauntlet); the main path records per-call and keeps
+        // going to the next call regardless of this one's outcome.
+        match gate_and_confirm(bridge, gate, confirm, &action, confidence).await {
+            Gated::Ran { result, confirmed } => {
+                let verb = action.describe();
+                out.log.push(if confirmed {
+                    format!("confirmed: {verb} -> {result}")
+                } else {
+                    format!("{verb} -> {result}")
+                });
+                out.executed.push(verb);
                 out.results.push(tool_result(id, &result, false));
             }
-            Ok(Disposition::Refused(message)) => {
+            Gated::Refused(message) => {
                 // A boundary, not a failure: eri won't do this, and tells the
                 // user why. Feed the handback back to the model (not an error)
                 // so it relays the message and waits for the user instead of
@@ -1263,27 +1319,12 @@ pub async fn execute_tool_calls(
                     false,
                 ));
             }
-            Ok(Disposition::NeedsConfirmation(desc)) => {
-                if confirm(&desc, action.permission()) {
-                    match gate.confirm(bridge, &action).await {
-                        Ok(result) => {
-                            out.log.push(format!("confirmed: {desc} -> {result}"));
-                            out.executed.push(action.describe());
-                            out.results.push(tool_result(id, &result, false));
-                        }
-                        Err(e) => {
-                            out.log.push(format!("confirm failed: {e}"));
-                            out.results
-                                .push(tool_result(id, &format!("error: {e}"), true));
-                        }
-                    }
-                } else {
-                    out.log.push(format!("declined: {desc}"));
-                    out.results
-                        .push(tool_result(id, "user declined this action", false));
-                }
+            Gated::Declined(desc) => {
+                out.log.push(format!("declined: {desc}"));
+                out.results
+                    .push(tool_result(id, "user declined this action", false));
             }
-            Err(e) => {
+            Gated::Failed(e) => {
                 out.log.push(format!("{} failed: {e}", action.describe()));
                 out.results
                     .push(tool_result(id, &format!("error: {e}"), true));
@@ -1319,12 +1360,19 @@ async fn run_coding_tool(
     };
     let mut step_results: Vec<String> = Vec::new();
     for action in coding.lower() {
-        match gate.submit(bridge, &action).await {
-            Ok(Disposition::Executed(result)) => {
-                out.log.push(format!("{} -> {result}", action.describe()));
+        // The SAME gate as the main action path (attended confidence 1.0 — a
+        // lowered keystroke carries no per-action forecast). Strict sequencing: a
+        // refusal, decline, or error abandons the REMAINING keystrokes.
+        match gate_and_confirm(bridge, gate, confirm, &action, 1.0).await {
+            Gated::Ran { result, confirmed } => {
+                out.log.push(if confirmed {
+                    format!("confirmed: {} -> {result}", action.describe())
+                } else {
+                    format!("{} -> {result}", action.describe())
+                });
                 step_results.push(result);
             }
-            Ok(Disposition::Refused(message)) => {
+            Gated::Refused(message) => {
                 // A boundary inside the sequence (e.g. a destructive palette
                 // command). Hand back and abandon the rest — don't keep typing.
                 out.log
@@ -1336,28 +1384,13 @@ async fn run_coding_tool(
                 ));
                 return;
             }
-            Ok(Disposition::NeedsConfirmation(desc)) => {
-                if confirm(&desc, action.permission()) {
-                    match gate.confirm(bridge, &action).await {
-                        Ok(result) => {
-                            out.log.push(format!("confirmed: {desc} -> {result}"));
-                            step_results.push(result);
-                        }
-                        Err(e) => {
-                            out.log.push(format!("confirm failed: {e}"));
-                            out.results
-                                .push(tool_result(id, &format!("error: {e}"), true));
-                            return;
-                        }
-                    }
-                } else {
-                    out.log.push(format!("declined: {desc}"));
-                    out.results
-                        .push(tool_result(id, "user declined this action", false));
-                    return;
-                }
+            Gated::Declined(desc) => {
+                out.log.push(format!("declined: {desc}"));
+                out.results
+                    .push(tool_result(id, "user declined this action", false));
+                return;
             }
-            Err(e) => {
+            Gated::Failed(e) => {
                 // Don't just report "error" — hand the model eri's recovery brain:
                 // look at the screen, diagnose the blocker (frozen / popup / still
                 // working), recover like a person — or STOP and hand back if it's an
@@ -1365,7 +1398,7 @@ async fn run_coding_tool(
                 out.log.push(format!("{} failed: {e}", coding.describe()));
                 out.results.push(tool_result(
                     id,
-                    &crate::coding_agent::recovery_directive(&e.to_string()),
+                    &crate::coding_agent::recovery_directive(&e),
                     true,
                 ));
                 return;
@@ -2110,16 +2143,17 @@ async fn control_prelude(
         remember_goal(goal, &workspace);
         let mut done: Vec<String> = Vec::new();
         for action in &plan {
-            match gate.submit(bridge, action).await? {
-                Disposition::Executed(result) => done.push(result),
-                Disposition::NeedsConfirmation(desc) => {
-                    if confirm(&desc, action.permission()) {
-                        done.push(gate.confirm(bridge, action).await?);
-                    } else {
-                        return Ok(Some(format!("Okay — skipped {desc}. Nothing else to do.")));
-                    }
+            // The SAME canonical gauntlet (`gate_and_confirm`) as the two reasoning
+            // paths — attended confidence 1.0, a deterministic single step. The
+            // fast lane has no model loop to recover into, so a failure aborts the
+            // plan (propagated as Err) rather than being handed back for retry.
+            match gate_and_confirm(bridge, gate, confirm, action, 1.0).await {
+                Gated::Ran { result, .. } => done.push(result),
+                Gated::Declined(desc) => {
+                    return Ok(Some(format!("Okay — skipped {desc}. Nothing else to do.")));
                 }
-                Disposition::Refused(msg) => return Ok(Some(msg)),
+                Gated::Refused(msg) => return Ok(Some(msg)),
+                Gated::Failed(e) => return Err(anyhow!(e)),
             }
         }
         return Ok(Some(format!(
@@ -4422,6 +4456,68 @@ mod tests {
         assert!(
             out.executed.iter().any(|a| a.contains("scroll")),
             "a chain-corroborated reversible action auto-runs through the gate's world handle"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_sensitive_coding_command_is_held_by_the_same_gate_as_a_direct_action() {
+        // The coding path lowers `editor_command` to [palette, Type(command),
+        // submit] and runs each primitive through the SAME gate as the main action
+        // path. A sensitive command trips the refusal axis and is HELD — never
+        // auto-typed, even with auto_confirm + confirm=true (the refusal boundary
+        // is absolute, ADR-0006). This pins the unified confirm-and-run path so the
+        // coding route can never silently drift off the gate.
+        let bridge = MockBridge::with_snapshot(graph());
+        let gate = ControlGate::with_permissions(true, Default::default()); // auto_confirm
+        let mut confirm = |_: &str, _: Option<crate::control_safety::Permission>| true;
+        let calls = vec![(
+            "1".into(),
+            "editor_command".into(),
+            json!({ "command": "my password is hunter2" }),
+        )];
+        let out = execute_tool_calls(&bridge, &gate, &mut confirm, None, &calls).await;
+
+        assert!(
+            out.results
+                .iter()
+                .any(|r| r["content"].as_str().unwrap_or("").contains("REFUSED")),
+            "a sensitive coding command must be handed back as refused"
+        );
+        assert!(
+            !bridge.calls().iter().any(|c| c.contains("hunter2")),
+            "the sensitive command must never reach the bridge — refusal is absolute, \
+             and auto_confirm/confirm=true cannot unlock it"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_fast_lane_holds_a_refused_action_through_the_same_gate() {
+        // The Tier-0 fast lane resolves "open Spotify" to a deterministic OpenApp
+        // and runs it through the SAME gate as the other two paths. With Spotify on
+        // the per-app denylist (an absolute boundary), the gate REFUSES it even
+        // under auto_confirm, and the app is never opened. The fast lane is THE
+        // auto-execute path, so its gauntlet is the highest-stakes of the three —
+        // this pins it to the canonical gate.
+        let bridge = MockBridge::with_snapshot(graph());
+        let mut perms = crate::control_safety::PermissionStore::default();
+        perms.deny_app("Spotify");
+        let gate = ControlGate::with_permissions(true, perms); // auto_confirm
+        let mut confirm = |_: &str, _: Option<crate::control_safety::Permission>| true;
+
+        let out = control_prelude("open Spotify", &bridge, &gate, &mut confirm)
+            .await
+            .unwrap();
+
+        assert!(
+            out.as_deref()
+                .unwrap_or("")
+                .to_lowercase()
+                .contains("spotify"),
+            "the fast lane hands back the denied-app boundary"
+        );
+        assert!(
+            !bridge.calls().iter().any(|c| c.contains("open:Spotify")),
+            "a denied app must never be opened on the fast lane — auto_confirm cannot unlock it"
         );
     }
 
