@@ -13,10 +13,11 @@
  * `space.send(chunk)`.
  */
 
-import { Spectrum, typing, type Message, type Space } from "spectrum-ts";
+import { Spectrum, typing, voice, type Message, type Space } from "spectrum-ts";
 import { imessage } from "@spectrum-ts/imessage";
 import type { InboundMessage } from "@/lib/imessage/webhook";
 import type { InboundTransport } from "@/lib/messaging/inbound_runtime";
+import { synthesizeSpeech, textForSpeech } from "@/lib/messaging/voice";
 
 function requireEnv(name: string): string {
   const v = process.env[name];
@@ -73,7 +74,26 @@ export function makeSpectrumTransport(space: Space): InboundTransport {
         // best-effort — a missing typing bubble must never block the reply.
       }
     },
-    sendReply: async (chunks) => {
+    sendReply: async (chunks, ctx) => {
+      // Voice reply (per the user's setting): synthesize the whole reply once and
+      // send it as one voice note. Any failure falls through to a text reply, so
+      // the message is never lost to a flaky TTS call.
+      if (ctx.speak) {
+        const key = process.env.ELEVENLABS_API_KEY;
+        const spoken = textForSpeech(chunks.join(" "));
+        if (key && spoken) {
+          try {
+            const audio = await synthesizeSpeech(spoken, {
+              apiKey: key,
+              voiceId: process.env.ELEVENLABS_VOICE_ID,
+            });
+            await space.send(voice(audio));
+            return true;
+          } catch {
+            // fall through to text
+          }
+        }
+      }
       for (const chunk of chunks) {
         if (!chunk.trim()) continue;
         try {

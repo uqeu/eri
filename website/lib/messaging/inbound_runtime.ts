@@ -34,14 +34,23 @@ import { cancelPending, confirmPending, enqueueCommand } from "@/lib/commands/qu
 import { handleInbound, type InboundDeps } from "@/lib/imessage/inbound";
 import { consumePairing, normalizeE164, resolveUserByPhone } from "@/lib/imessage/identity";
 import type { InboundMessage } from "@/lib/imessage/webhook";
+import { getUserSettings } from "@/lib/messaging/settings";
+import { shouldSpeak } from "@/lib/messaging/voice";
 import { ensureWithinQuota, recordUsage } from "@/lib/usage/quota";
+
+/** Per-reply context a transport may honor (e.g. speak instead of typing text). */
+export interface ReplyContext {
+  /** Reply with a voice note instead of text (resolved from the user's setting). */
+  speak: boolean;
+}
 
 /** How a given provider shows "typing…" and sends the reply for one message. */
 export interface InboundTransport {
   /** Show the typing/"composing" indicator. Best-effort; must never throw. */
   sendTyping(): Promise<void>;
-  /** Send the ordered reply chunks. Returns true only if every chunk landed. */
-  sendReply(chunks: string[]): Promise<boolean>;
+  /** Send the ordered reply chunks. Returns true only if every chunk landed.
+   *  Providers without voice support ignore `ctx.speak` and send text. */
+  sendReply(chunks: string[], ctx: ReplyContext): Promise<boolean>;
 }
 
 export type ProcessStatus =
@@ -68,6 +77,7 @@ export interface ProcessOutcome {
 export async function processInbound(
   msg: InboundMessage,
   transport: InboundTransport,
+  opts: { inboundWasVoice?: boolean } = {},
 ): Promise<ProcessOutcome> {
   if (msg.isOutbound) return { status: "skipped_outbound" };
 
@@ -109,7 +119,11 @@ export async function processInbound(
       }).catch((e) => logEvent("inbound.meter_failed", { handle: msg.messageHandle, error: errMsg(e) }));
     }
 
-    const sent = await transport.sendReply(outcome.replyChunks);
+    // Decide voice-vs-text from the user's setting (only for resolved users;
+    // unknown/unlinked senders always get text). A settings hiccup → text.
+    const speak = await resolveSpeak(outcome.meter?.userId ?? null, opts.inboundWasVoice ?? false);
+
+    const sent = await transport.sendReply(outcome.replyChunks, { speak });
     if (!sent) {
       await releaseLease(msg.messageHandle);
       logEvent("inbound.send_failed", { handle: msg.messageHandle, branch: outcome.branch });
@@ -130,6 +144,17 @@ export async function processInbound(
     await releaseLease(msg.messageHandle).catch(() => {});
     logEvent("inbound.error", { handle: msg.messageHandle, error: errMsg(err) });
     return { status: "error" };
+  }
+}
+
+/** Resolve whether eri should reply with a voice note for this user/turn. */
+async function resolveSpeak(userId: string | null, inboundWasVoice: boolean): Promise<boolean> {
+  if (!userId) return false;
+  try {
+    const settings = await getUserSettings(userId);
+    return shouldSpeak(settings.voiceMode, inboundWasVoice);
+  } catch {
+    return false;
   }
 }
 

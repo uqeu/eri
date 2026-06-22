@@ -24,7 +24,8 @@ export async function POST(request: Request): Promise<Response> {
     work = (async () => {
       try {
         const msg = spectrumMessageToInbound(space, message);
-        await processInbound(msg, makeSpectrumTransport(space));
+        const inboundWasVoice = message.content.type === "voice";
+        await processInbound(msg, makeSpectrumTransport(space), { inboundWasVoice });
       } catch (e) {
         logEvent("spectrum.handler_error", { error: e instanceof Error ? e.message : String(e) });
       }
