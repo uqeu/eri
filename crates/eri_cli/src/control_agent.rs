@@ -390,10 +390,6 @@ pub struct ControlGate {
     /// their keyboard must NOT auto-run a risky action triggered from their phone
     /// (security C1). The app denylist + refusals still apply.
     force_confirm_risky: bool,
-    /// The signed-in user this gate acts for (`None` = anonymous / signed-out).
-    /// Scopes the predict step's world-model read to one graph (ADR-0007), so a
-    /// gate decision can consult the SAME world model the user's memory lives in.
-    user_id: Option<String>,
     /// The action that last executed in an EARLIER turn — the cross-turn
     /// predecessor the predict step checks chain corroboration against ("after X
     /// last turn you do Y"), the common one-action-per-turn pattern that
@@ -402,6 +398,11 @@ pub struct ControlGate {
     /// the loop updates it through the shared `&ControlGate`; a cloned gate shares
     /// the cell (only the loop writes). Anonymous gates never read it.
     last_action: std::sync::Arc<std::sync::Mutex<Option<String>>>,
+    /// The run's opened world-model reader (predict step), or `None` when
+    /// signed-out. Opened ONCE in `run_control_agent`; the predict step reads
+    /// through it on every action instead of reopening the SQLite per action
+    /// (fork b). `Arc` so a cloned gate shares the one handle.
+    world: Option<std::sync::Arc<eri_inference::memory::world_recall::WorldModel>>,
 }
 
 impl ControlGate {
@@ -416,22 +417,26 @@ impl ControlGate {
             auto_confirm,
             permissions,
             force_confirm_risky: false,
-            user_id: None,
             last_action: Default::default(),
+            world: None,
         }
     }
 
-    /// Scope this gate to the signed-in user, so the predict step reads that
-    /// user's world model (`None` = anonymous). Chainable; identity otherwise.
-    pub fn with_user(mut self, user_id: Option<String>) -> Self {
-        self.user_id = user_id;
+    /// Attach the run's opened world-model reader (fork b), so the predict step
+    /// reads through it instead of reopening the SQLite per action. Opened once
+    /// in `run_control_agent`. Chainable.
+    pub fn with_world(
+        mut self,
+        world: Option<eri_inference::memory::world_recall::WorldModel>,
+    ) -> Self {
+        self.world = world.map(std::sync::Arc::new);
         self
     }
 
-    /// The user this gate acts for (`None` = anonymous), for the predict step's
-    /// user-scoped world-model read.
-    pub fn user_id(&self) -> Option<&str> {
-        self.user_id.as_deref()
+    /// The run's world-model reader, if opened (`None` = signed-out → the predict
+    /// step uses the engine's own confidence, no IO).
+    pub fn world(&self) -> Option<&eri_inference::memory::world_recall::WorldModel> {
+        self.world.as_deref()
     }
 
     /// Seed the cross-turn predecessor the predict step reads — the action that
@@ -459,8 +464,8 @@ impl ControlGate {
             auto_confirm: false,
             permissions,
             force_confirm_risky: true,
-            user_id: None,
             last_action: Default::default(),
+            world: None,
         }
     }
 
@@ -1223,24 +1228,19 @@ pub async fn execute_tool_calls(
         // The forecast blends the engine's self-report with a real read of the
         // world model (ADR-0007 §4): is this an established next step after the
         // last one (the proactive chain), and does it name a known entity. That
-        // corroboration can only RAISE confidence. We read the world model only
-        // for the signed-in user (`gate.user_id()`); signed-out → the engine's
-        // own number, no IO. `prev` is the previously executed action this turn,
-        // else the cross-turn predecessor the loop seeded on the gate — so the
-        // common one-action-per-turn pattern ("after X last turn you do Y") still
-        // corroborates.
+        // corroboration can only RAISE confidence. The read goes through the
+        // run's opened world-model handle (`gate.world()`, fork b); signed-out →
+        // `None` → the engine's own number, no IO. `prev` is the previously
+        // executed action this turn, else the cross-turn predecessor the loop
+        // seeded on the gate — so the common one-action-per-turn pattern ("after X
+        // last turn you do Y") still corroborates.
         let model_confidence = crate::predict::forecast_confidence(input);
-        let (expected, grounded) = match gate.user_id() {
-            Some(uid) => {
-                let cross_turn = gate.last_action();
-                let prev = predict_prev(
-                    out.executed.last().map(String::as_str),
-                    cross_turn.as_deref(),
-                );
-                crate::predict::anticipate(Some(uid), prev, &action)
-            }
-            None => (false, false),
-        };
+        let cross_turn = gate.last_action();
+        let prev = predict_prev(
+            out.executed.last().map(String::as_str),
+            cross_turn.as_deref(),
+        );
+        let (expected, grounded) = crate::predict::anticipate(gate.world(), prev, &action);
         let confidence = crate::predict::forecast(model_confidence, expected, grounded);
         let disposition = gate.submit_confident(bridge, &action, confidence).await;
         match disposition {
@@ -2497,10 +2497,12 @@ pub async fn run_control_agent(
     // entities `/remember` writes. Falls back to anonymous when signed out.
     let user_id = crate::config::load().ok().and_then(|c| c.user_id);
     let sink = crate::control_turn::MemorySink::new(user_id.clone());
-    // Scope the loop's gate to the same signed-in user, so the predict step reads
-    // that user's world model (the SAME graph the sink writes chains + entities
-    // into). The caller's gate carries permissions/flags; we only attach the user.
-    let gate = gate.clone().with_user(user_id);
+    // Open the loop gate's world-model reader ONCE for the signed-in user (the
+    // SAME graph the sink writes chains + entities into), so the predict step
+    // reads through one handle instead of reopening the SQLite per action (fork
+    // b). The caller's gate carries permissions/flags; we attach the world.
+    let world = eri_inference::memory::world_recall::WorldModel::open(user_id.as_deref());
+    let gate = gate.clone().with_world(world);
     drive_control_loop(
         &refs, bridge, &gate, confirm, &sink, &system, &tools, goal, max_turns, autonomous, mcp_dyn,
     )
@@ -4362,15 +4364,14 @@ mod tests {
     fn gate_carries_and_clones_the_cross_turn_last_action() {
         // The predict step's cross-turn predecessor rides on the gate (seeded once
         // per turn by the loop). It round-trips, and a clone keeps it — the clone
-        // run_control_agent makes to attach the signed-in user.
+        // run_control_agent makes to attach the world-model handle.
         let gate = ControlGate::default();
         assert_eq!(gate.last_action(), None);
         gate.set_last_action(Some("open editor".into()));
         assert_eq!(gate.last_action().as_deref(), Some("open editor"));
 
-        let scoped = gate.clone().with_user(Some("u1".into()));
+        let scoped = gate.clone().with_world(None);
         assert_eq!(scoped.last_action().as_deref(), Some("open editor"));
-        assert_eq!(scoped.user_id(), Some("u1"));
     }
 
     #[test]
@@ -4380,6 +4381,48 @@ mod tests {
         assert_eq!(predict_prev(Some("B"), Some("A")), Some("B"));
         assert_eq!(predict_prev(None, Some("A")), Some("A"));
         assert_eq!(predict_prev(None, None), None);
+    }
+
+    #[tokio::test]
+    async fn gate_with_a_world_handle_auto_runs_a_chain_corroborated_action() {
+        // Fork b end-to-end: the gate holds an opened world-model handle, and the
+        // predict step reads through it (no per-action reopen). The world model
+        // has learned "open editor" → <scroll> as an established step, so the
+        // unforecast scroll is vouched over the auto floor and runs WITHOUT asking.
+        use eri_graph::{Graph, world};
+        use eri_inference::memory::world_recall::WorldModel;
+
+        let scroll = ControlAction::Scroll {
+            direction: "down".into(),
+            amount: 1,
+        };
+        let g = Graph::open_in_memory().unwrap();
+        world::link_next(&g, "open editor", &scroll.describe()).unwrap();
+        world::link_next(&g, "open editor", &scroll.describe()).unwrap();
+
+        // A gate holding that handle, with the cross-turn predecessor seeded — as
+        // drive_control_loop does each turn.
+        let gate = ControlGate::default().with_world(Some(WorldModel::from_graph(g)));
+        gate.set_last_action(Some("open editor".into()));
+
+        let bridge = DryRunBridge;
+        // No model confidence in the input (unforecast → 0.5, below the floor):
+        // alone this asks. The chain corroboration lifts it over the floor, so it
+        // runs unprompted — `confirm` panics if it is ever consulted.
+        let calls = vec![(
+            "1".into(),
+            "scroll".into(),
+            json!({ "direction": "down", "amount": 1 }),
+        )];
+        let mut confirm = |_: &str, _: Option<crate::control_safety::Permission>| -> bool {
+            panic!("must not ask: the world model corroborates this established step")
+        };
+        let out = execute_tool_calls(&bridge, &gate, &mut confirm, None, &calls).await;
+
+        assert!(
+            out.executed.iter().any(|a| a.contains("scroll")),
+            "a chain-corroborated reversible action auto-runs through the gate's world handle"
+        );
     }
 
     #[tokio::test]

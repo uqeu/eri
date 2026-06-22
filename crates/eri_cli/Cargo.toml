@@ -54,3 +54,6 @@ url.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+# Tests only: build an in-memory world graph to exercise the predict step's
+# world-model read end-to-end through the gate's handle (no HOME IO).
+eri_graph = { path = "../eri_graph" }

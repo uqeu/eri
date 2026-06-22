@@ -85,23 +85,53 @@ pub fn predict_next(user_id: Option<&str>, action: &str, limit: usize) -> Vec<(S
     world::next_steps(&graph, action, limit).unwrap_or_default()
 }
 
-/// What the user's world model anticipates about an action about to run — joins
-/// the proactive **chain** (`prev` → `action_label`) with the **entity** model
-/// (does the action name a known entity), both from the one user graph (P2,
-/// ADR-0007 §4). The one-line seam the predict step (`eri_cli::predict`) reads to
-/// blend the world model into the confirmation envelope's confidence.
-/// Best-effort: a missing/locked graph yields the neutral expectation (nothing
-/// anticipated), so the predict step falls back to the engine's own confidence.
-pub fn anticipate(
-    user_id: Option<&str>,
-    prev: Option<&str>,
-    action_label: &str,
-    target: Option<&str>,
-) -> world::Expectation {
-    let Ok(graph) = open_world_graph(user_id) else {
-        return world::Expectation::default();
-    };
-    world::expectation(&graph, prev, action_label, target).unwrap_or_default()
+/// An **opened, reusable handle** on the user's world model — the predict step's
+/// reader (P2, ADR-0007 §4).
+///
+/// Opening the world-model SQLite is amortized to **once per control run**
+/// instead of once per gated action: the control gate (`eri_cli`) holds this
+/// handle and reads through it on every action, so the predict→gate hot path is
+/// a query, not an open. The seam stays in `eri_inference::memory` per ADR-0007 —
+/// callers never name `eri_graph`. Best-effort by construction: [`open`](Self::open)
+/// is `None` when the user has no world model yet, and [`anticipate`](Self::anticipate)
+/// is neutral on a read error, so the predict step falls back to the engine's
+/// own confidence.
+pub struct WorldModel {
+    graph: Graph,
+}
+
+impl std::fmt::Debug for WorldModel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // The handle is opaque — don't print the underlying graph/connection.
+        f.debug_struct("WorldModel").finish_non_exhaustive()
+    }
+}
+
+impl WorldModel {
+    /// Open the signed-in user's world model (`None` = anonymous or unopenable).
+    /// Called once per run; the handle is then reused for every action.
+    pub fn open(user_id: Option<&str>) -> Option<Self> {
+        open_world_graph(user_id).ok().map(|graph| Self { graph })
+    }
+
+    /// Wrap an already-open graph — the in-memory seam for tests (no HOME IO).
+    pub fn from_graph(graph: Graph) -> Self {
+        Self { graph }
+    }
+
+    /// What the world model anticipates about an action about to run — joins the
+    /// proactive **chain** (`prev` → `action_label`) with the **entity** model
+    /// (does the action name a known entity), both from the one user graph.
+    /// Reads through the held handle (no reopen); neutral (`expected=false,
+    /// grounded=false`) on any read error.
+    pub fn anticipate(
+        &self,
+        prev: Option<&str>,
+        action_label: &str,
+        target: Option<&str>,
+    ) -> world::Expectation {
+        world::expectation(&self.graph, prev, action_label, target).unwrap_or_default()
+    }
 }
 
 // --- world-model queries ------------------------------------------------------
@@ -201,6 +231,38 @@ mod tests {
             body: body.into(),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn world_model_handle_anticipates_chain_and_entity_over_one_open() {
+        let g = Graph::open_in_memory().unwrap();
+        // An established step ("open editor" → "run tests", seen twice) and a
+        // known project, in the one graph.
+        world::link_next(&g, "open editor", "run tests").unwrap();
+        world::link_next(&g, "open editor", "run tests").unwrap();
+        ingest_observation(
+            &g,
+            &CueExtractor,
+            &fact("I work with Alice on the eri project"),
+        )
+        .unwrap();
+
+        // One opened handle, reused across reads — no reopen per call.
+        let world = WorldModel::from_graph(g);
+        assert!(
+            world
+                .anticipate(Some("open editor"), "run tests", None)
+                .expected,
+            "an established chain step is anticipated through the handle"
+        );
+        assert!(
+            world
+                .anticipate(None, "open the eri project", None)
+                .grounded,
+            "a known entity named in the action grounds through the handle"
+        );
+        let neutral = world.anticipate(None, "click the Save button", None);
+        assert!(!neutral.expected && !neutral.grounded);
     }
 
     #[test]

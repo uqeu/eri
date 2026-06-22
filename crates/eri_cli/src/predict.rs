@@ -23,6 +23,8 @@
 
 use serde_json::Value;
 
+use eri_inference::memory::world_recall::WorldModel;
+
 use crate::control_agent::ControlAction;
 
 /// Confidence used when the model gave no (or an invalid) forecast — deliberately
@@ -81,20 +83,23 @@ fn world_vouch(expected: bool, grounded: bool) -> f32 {
     }
 }
 
-/// Read the world model's anticipation of `action` following `prev` for the
-/// signed-in user — is it an established chain step, and does it name a known
-/// entity. Joins the proactive chain with the entity model over the one user
-/// graph (best-effort, user-scoped). Returns `(expected, grounded)` for
-/// [`forecast`]; a missing world model yields `(false, false)` (no corroboration).
+/// Read the world model's anticipation of `action` following `prev` through the
+/// run's opened [`WorldModel`] handle — is it an established chain step, and does
+/// it name a known entity. Joins the proactive chain with the entity model over
+/// the one user graph. Returns `(expected, grounded)` for [`forecast`]; no world
+/// model (signed-out) yields `(false, false)` (no corroboration, no IO).
 pub fn anticipate(
-    user_id: Option<&str>,
+    world: Option<&WorldModel>,
     prev: Option<&str>,
     action: &ControlAction,
 ) -> (bool, bool) {
-    let label = action.describe();
-    let e =
-        eri_inference::memory::world_recall::anticipate(user_id, prev, &label, action.target_app());
-    (e.expected, e.grounded)
+    match world {
+        Some(w) => {
+            let e = w.anticipate(prev, &action.describe(), action.target_app());
+            (e.expected, e.grounded)
+        }
+        None => (false, false),
+    }
 }
 
 #[cfg(test)]
