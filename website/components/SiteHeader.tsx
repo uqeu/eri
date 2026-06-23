@@ -26,8 +26,15 @@ const DASHBOARD_PREFIXES = [
   "/account",
 ];
 
+// Marketing routes that render their own light header (HomeHeader), so the
+// global dark SiteHeader would be a duplicate.
+const HOMEHEADER_ROUTES = ["/", "/download", "/pricing", "/phone", "/sign-in", "/docs", "/careers"];
+
 export function SiteHeader({ variant = "transparent" }: SiteHeaderProps) {
   const pathname = usePathname();
+  if (pathname && HOMEHEADER_ROUTES.includes(pathname)) {
+    return null;
+  }
   if (pathname && DASHBOARD_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`))) {
     return null;
   }

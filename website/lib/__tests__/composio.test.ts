@@ -1,8 +1,23 @@
 import { strict as assert } from "node:assert";
 import { isValidToolkit } from "../composio/accounts";
 import { composioMcpUrl, normalizeStatus } from "../composio/client";
-import { handleConnect, listFreshConnections, type ConnectDeps, type RefreshDeps } from "../composio/connect";
+import {
+  handleConnect,
+  handleDisconnect,
+  listFreshConnections,
+  type ConnectDeps,
+  type DisconnectDeps,
+  type RefreshDeps,
+} from "../composio/connect";
 import type { ComposioAccountRow } from "../composio/accounts";
+import {
+  authConfigEnvKey,
+  hasAuthConfig,
+  isConnectable,
+  markConnectable,
+  resolveAuthConfigId,
+} from "../composio/auth_config";
+import type { ToolkitInfo } from "../composio/client";
 
 async function run() {
   // isValidToolkit: strict slug allowlist.
@@ -30,7 +45,7 @@ async function run() {
   // composioMcpUrl builds a per-user, url-encoded MCP endpoint.
   {
     const url = composioMcpUrl("srv_123", "user/abc");
-    assert.equal(url, "https://backend.composio.dev/v3/mcp/srv_123?user_id=user%2Fabc");
+    assert.equal(url, "https://backend.composio.dev/v3/mcp/srv_123/mcp?user_id=user%2Fabc");
   }
 
   // handleConnect — happy path records pending + returns the redirect.
@@ -124,6 +139,145 @@ async function run() {
     };
     const out = await listFreshConnections("u1", deps);
     assert.equal(out[0].status, "pending");
+  }
+
+  // auth_config: env-var key derivation (slug → COMPOSIO_AUTH_CONFIG_<SLUG>).
+  {
+    assert.equal(authConfigEnvKey("spotify"), "COMPOSIO_AUTH_CONFIG_SPOTIFY");
+    assert.equal(authConfigEnvKey("google_calendar"), "COMPOSIO_AUTH_CONFIG_GOOGLE_CALENDAR");
+    assert.equal(authConfigEnvKey("github-issues"), "COMPOSIO_AUTH_CONFIG_GITHUB_ISSUES");
+  }
+
+  // auth_config: resolveAuthConfigId reads the slug; blank/missing → null.
+  {
+    const env = { COMPOSIO_AUTH_CONFIG_SPOTIFY: "ac_QQW2tlbMsEdq", COMPOSIO_AUTH_CONFIG_X: "  " };
+    assert.equal(resolveAuthConfigId("spotify", env), "ac_QQW2tlbMsEdq");
+    assert.equal(resolveAuthConfigId("x", env), null, "whitespace-only → null");
+    assert.equal(resolveAuthConfigId("notion", env), null, "missing → null");
+    assert.equal(hasAuthConfig("spotify", env), true);
+    assert.equal(hasAuthConfig("notion", env), false);
+  }
+
+  // auth_config: connectability honesty — managed/api_key/none always; custom_oauth
+  // only with a registered config.
+  {
+    const env = { COMPOSIO_AUTH_CONFIG_SPOTIFY: "ac_1" };
+    assert.equal(isConnectable("managed", "gmail", env), true);
+    assert.equal(isConnectable("api_key", "openai", env), true);
+    assert.equal(isConnectable("none", "hackernews", env), true);
+    assert.equal(isConnectable("custom_oauth", "spotify", env), true, "configured custom → connectable");
+    assert.equal(isConnectable("custom_oauth", "twitter", env), false, "unconfigured custom → not");
+  }
+
+  // auth_config: markConnectable stamps the catalog without mutating inputs.
+  {
+    const env = { COMPOSIO_AUTH_CONFIG_SPOTIFY: "ac_1" };
+    const catalog: ToolkitInfo[] = [
+      { slug: "gmail", name: "Gmail", authKind: "managed" },
+      { slug: "spotify", name: "Spotify", authKind: "custom_oauth" },
+      { slug: "twitter", name: "X", authKind: "custom_oauth" },
+    ];
+    const marked = markConnectable(catalog, env);
+    assert.equal(marked.find((t) => t.slug === "gmail")?.connectable, true);
+    assert.equal(marked.find((t) => t.slug === "spotify")?.connectable, true);
+    assert.equal(marked.find((t) => t.slug === "twitter")?.connectable, false);
+    assert.equal(catalog[0].connectable, undefined, "original catalog untouched");
+  }
+
+  // handleConnect threads an apiKey through to initiate (API-key toolkits).
+  {
+    let seenOpts: { apiKey?: string } | undefined;
+    const deps: ConnectDeps = {
+      initiate: async (_u, _tk, opts) => {
+        seenOpts = opts;
+        return { connectedAccountId: "ca_k", redirectUrl: "" };
+      },
+      record: async () => {},
+    };
+    const out = await handleConnect("u1", "openai", deps, { apiKey: "sk-test" });
+    assert.equal(out.branch, "ok");
+    assert.equal(out.redirectUrl, "", "API-key connect has no redirect");
+    assert.equal(seenOpts?.apiKey, "sk-test", "apiKey forwarded to initiate");
+  }
+
+  // handleDisconnect — revokes at Composio then forgets the row.
+  {
+    const calls: string[] = [];
+    const deps: DisconnectDeps = {
+      find: async () => ({ toolkit: "gmail", connectedAccountId: "ca_1", status: "active" }),
+      revoke: async (id) => {
+        calls.push(`revoke:${id}`);
+      },
+      remove: async (_u, tk) => {
+        calls.push(`remove:${tk}`);
+      },
+    };
+    const out = await handleDisconnect("u1", "gmail", deps);
+    assert.equal(out.branch, "ok");
+    assert.deepEqual(calls, ["revoke:ca_1", "remove:gmail"], "revoke before remove");
+  }
+
+  // handleDisconnect — nothing connected → not_connected, no external call.
+  {
+    let revoked = false;
+    const deps: DisconnectDeps = {
+      find: async () => null,
+      revoke: async () => {
+        revoked = true;
+      },
+      remove: async () => {},
+    };
+    const out = await handleDisconnect("u1", "gmail", deps);
+    assert.equal(out.branch, "not_connected");
+    assert.equal(revoked, false);
+  }
+
+  // handleDisconnect — invalid toolkit short-circuits.
+  {
+    const deps: DisconnectDeps = {
+      find: async () => {
+        throw new Error("should not be called");
+      },
+      revoke: async () => {},
+      remove: async () => {},
+    };
+    const out = await handleDisconnect("u1", "BAD slug", deps);
+    assert.equal(out.branch, "invalid_toolkit");
+  }
+
+  // handleDisconnect — a revoke failure keeps the row (composio_error), so the
+  // user can retry rather than the account silently lingering at Composio.
+  {
+    let removed = false;
+    const deps: DisconnectDeps = {
+      find: async () => ({ toolkit: "gmail", connectedAccountId: "ca_1", status: "active" }),
+      revoke: async () => {
+        throw new Error("composio 503");
+      },
+      remove: async () => {
+        removed = true;
+      },
+    };
+    const out = await handleDisconnect("u1", "gmail", deps);
+    assert.equal(out.branch, "composio_error");
+    assert.equal(removed, false, "row kept when revoke fails");
+  }
+
+  // handleDisconnect — a pending row with no account id just forgets the row.
+  {
+    const calls: string[] = [];
+    const deps: DisconnectDeps = {
+      find: async () => ({ toolkit: "slack", connectedAccountId: null, status: "pending" }),
+      revoke: async () => {
+        calls.push("revoke");
+      },
+      remove: async () => {
+        calls.push("remove");
+      },
+    };
+    const out = await handleDisconnect("u1", "slack", deps);
+    assert.equal(out.branch, "ok");
+    assert.deepEqual(calls, ["remove"], "no revoke without an account id");
   }
 
   // eslint-disable-next-line no-console

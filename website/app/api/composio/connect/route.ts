@@ -31,12 +31,21 @@ export async function POST(request: Request): Promise<Response> {
     return NextResponse.json({ error: "invalid_json" }, { status: 400 });
   }
   const toolkit = (body as { toolkit?: unknown })?.toolkit;
+  const rawKey = (body as { apiKey?: unknown })?.apiKey;
+  // Accept an optional API key (for `api_key` toolkits). Trim + bound it; an empty
+  // string means "no key" → fall through to the OAuth path.
+  const apiKey = typeof rawKey === "string" && rawKey.trim() ? rawKey.trim().slice(0, 4096) : undefined;
 
   const client = new ComposioApiClient();
-  const outcome = await handleConnect(caller.id, toolkit, {
-    initiate: (userId, tk) => client.initiateConnection(userId, tk),
-    record: upsertConnection,
-  });
+  const outcome = await handleConnect(
+    caller.id,
+    toolkit,
+    {
+      initiate: (userId, tk, opts) => client.initiateConnection(userId, tk, opts),
+      record: upsertConnection,
+    },
+    { apiKey },
+  );
 
   switch (outcome.branch) {
     case "ok":

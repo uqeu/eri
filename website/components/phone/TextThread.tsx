@@ -36,13 +36,7 @@ export function TextThread(): React.ReactElement {
         >
           eri
         </span>
-        <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-text-ter">
-          iMessage
-        </span>
-        <span className="ml-auto flex items-center gap-1.5 font-mono text-[10px] text-text-ter">
-          <span className="h-1.5 w-1.5 rounded-full bg-accent" />
-          live
-        </span>
+        <span className="font-geist text-[12px] text-text-ter">iMessage</span>
       </div>
 
       <div className="space-y-3">
@@ -61,7 +55,7 @@ export function TextThread(): React.ReactElement {
               {b.text}
             </div>
             {b.note ? (
-              <span className="mt-1 px-1 font-mono text-[10px] uppercase tracking-[0.12em] text-text-ter">
+              <span className="mt-1 px-1 font-geist text-[11px] text-text-ter">
                 {b.note}
               </span>
             ) : null}

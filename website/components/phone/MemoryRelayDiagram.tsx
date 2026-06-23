@@ -119,7 +119,7 @@ export function MemoryRelayDiagram(): React.ReactElement {
             <div key={tier.id} className="bg-bg-card p-5">
               <div className="flex items-center justify-between">
                 <span className="mono-cap text-accent">{tier.label}</span>
-                <span className="rounded-full border border-border px-2.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.14em] text-text-ter">
+                <span className="font-geist text-[12px] text-text-ter">
                   {tier.readable}
                 </span>
               </div>

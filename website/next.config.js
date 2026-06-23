@@ -32,7 +32,10 @@ const securityHeaders = [
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
       "img-src 'self' data: blob: https:",
       "font-src 'self' data: https:",
-      "connect-src 'self' https://api.anthropic.com https://api.openai.com https://generativelanguage.googleapis.com https://api.inceptionlabs.ai https://api.deepseek.com",
+      // `data:` lets three.js's EXR loader read the hero bubble's HDRI, which
+      // @pmndrs/assets bundles as a `data:application/exr;base64,…` URI and the
+      // loader fetches (self-contained, so no exfiltration surface).
+      "connect-src 'self' data: https://api.anthropic.com https://api.openai.com https://generativelanguage.googleapis.com https://api.inceptionlabs.ai https://api.deepseek.com",
       "upgrade-insecure-requests",
     ].join("; "),
   },

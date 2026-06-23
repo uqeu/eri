@@ -8,6 +8,7 @@
 
 import { NextResponse } from "next/server";
 import { composioCaller } from "@/lib/composio/auth";
+import { markConnectable } from "@/lib/composio/auth_config";
 import { ComposioApiClient } from "@/lib/composio/client";
 import { featureLocked } from "@/lib/feature_gate";
 
@@ -23,7 +24,10 @@ export async function GET(request: Request): Promise<Response> {
   }
 
   try {
-    const toolkits = await new ComposioApiClient().listToolkits();
+    // Stamp each app with whether it's connectable today (managed/api-key/no-auth
+    // always; custom-OAuth only where we've registered an auth config) so the UI
+    // offers Connect only where it actually works.
+    const toolkits = markConnectable(await new ComposioApiClient().listToolkits());
     return NextResponse.json(
       { toolkits },
       // Global catalog — cache 10 min at the edge, serve stale while revalidating.

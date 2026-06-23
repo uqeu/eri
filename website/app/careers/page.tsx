@@ -1,77 +1,88 @@
 import type { Metadata } from "next";
-import Link from "next/link";
-import { FooterBig } from "@/components/FooterBig";
+import { ArrowRight } from "lucide-react";
+import { HomeHeader } from "@/components/home/HomeHeader";
+import { MeshFooter } from "@/components/home/MeshFooter";
 
 export const metadata: Metadata = {
-  title: "Careers — eri",
+  title: "Join us: eri",
   description:
-    "eri is an independent project run by one person. Not hiring full-time roles right now. Email if you'd like to contribute.",
+    "Want to work on eri? Email khai@tryeri.ca with your resume and your GitHub or LinkedIn, and tell him why you want to help build it.",
 };
 
-export default function CareersPage() {
+const EMAIL = "khai@tryeri.ca";
+
+const STEPS: ReadonlyArray<{ n: string; title: string; body: string }> = [
+  {
+    n: "1",
+    title: "Email khai",
+    body: `If you want to work on eri, send a note to ${EMAIL}. A short one is fine.`,
+  },
+  {
+    n: "2",
+    title: "Send your resume",
+    body: "Attach your resume so he gets the shape of what you've done.",
+  },
+  {
+    n: "3",
+    title: "Add your GitHub or LinkedIn",
+    body: "Drop a link to your GitHub or LinkedIn so he can see your real work.",
+  },
+  {
+    n: "4",
+    title: "Tell him why",
+    body: "Say why you want to join and how you'd like to contribute to eri. From there you can chat or message back and forth.",
+  },
+];
+
+export default function CareersPage(): React.ReactElement {
+  const mailto = `mailto:${EMAIL}?subject=${encodeURIComponent("I want to help build eri")}`;
+
   return (
-    <main>
-
-      <section className="border-b border-white/10">
-        <div className="mx-auto max-w-3xl px-6 py-20 sm:py-28">
-          <p className="text-xs uppercase tracking-[0.25em] text-accent">
-            Careers
-          </p>
-          <h1 className="mt-5 font-display text-4xl sm:text-6xl tracking-tight text-balance">
-            Honestly? No openings.
+    <div className="theme-light bg-bg text-text">
+      <HomeHeader />
+      <main className="pt-32">
+        <section className="mx-auto max-w-3xl px-6 pb-10 pt-6">
+          <h1 className="font-display text-[clamp(2.4rem,6vw,4rem)] font-600 leading-[1.02] tracking-[-0.04em] text-text">
+            Come build eri.
           </h1>
-          <p className="mt-5 text-lg text-muted leading-relaxed">
-            eri is an independent project — one person, based in Ontario.
-            There is no team to join, no equity to offer, and no salary to
-            quote. If that changes, this page is where the first listings
-            will go.
+          <p className="mt-6 max-w-xl text-pretty font-geist text-[17px] leading-relaxed text-text-sec">
+            eri is a small project with a big idea: a digital human that is truly
+            yours. If you want to help build it, there is a short way in. No
+            forms, no portal, just an email to the person making it.
           </p>
-        </div>
-      </section>
 
-      <section className="border-b border-white/10">
-        <div className="mx-auto max-w-3xl px-6 py-16 sm:py-24">
-          <h2 className="font-display text-3xl sm:text-4xl tracking-tight">
-            Want to contribute anyway?
-          </h2>
-          <p className="mt-4 text-muted leading-relaxed">
-            Plenty of useful things to do that aren&apos;t full-time roles —
-            bug reports, design feedback, docs improvements, prompt-tuning
-            experiments, open-source patches on the parts that live in
-            public. If you&apos;d like to help, email{" "}
-            <a
-              href="mailto:phlotu@gmail.com"
-              className="text-accent underline underline-offset-4"
-            >
-              phlotu@gmail.com
-            </a>{" "}
-            with one paragraph about what you&apos;d work on.
-          </p>
-        </div>
-      </section>
+          <a
+            href={mailto}
+            className="group mt-8 inline-flex items-center gap-2 rounded-full bg-[#16140f] px-6 py-3.5 font-geist text-[15px] font-600 text-white outline-none transition-transform duration-200 hover:-translate-y-0.5 focus-visible:ring-2 focus-visible:ring-[#16140f]/30 focus-visible:ring-offset-2"
+          >
+            Email {EMAIL}
+            <ArrowRight
+              size={16}
+              strokeWidth={2.4}
+              className="transition-transform duration-200 group-hover:translate-x-0.5"
+            />
+          </a>
+        </section>
 
-      <section>
-        <div className="mx-auto max-w-3xl px-6 py-16 sm:py-24">
-          <h2 className="font-display text-3xl sm:text-4xl tracking-tight">
-            If you wanted to apply
-          </h2>
-          <p className="mt-4 text-muted leading-relaxed">
-            The product itself is the application. Use it. Send feedback.
-            Show your work. The day eri becomes a place that hires, the
-            people who already shaped it are the ones the operator wants to
-            hear from first. In the meantime, the{" "}
-            <Link
-              href="/blog"
-              className="text-paper underline underline-offset-4 decoration-white/30 transition hover:text-accent"
-            >
-              blog
-            </Link>{" "}
-            is where build-in-public updates land.
-          </p>
-        </div>
-      </section>
-
-      <FooterBig />
-    </main>
+        <section className="mx-auto max-w-3xl px-6 pb-28 sm:pb-36">
+          <div className="mt-6 divide-y divide-border border-y border-border">
+            {STEPS.map((s) => (
+              <div key={s.n} className="flex items-start gap-5 py-6">
+                <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full border border-border font-geist-mono text-[13px] text-text-ter">
+                  {s.n}
+                </span>
+                <div>
+                  <h2 className="font-geist text-[16px] font-600 text-text">{s.title}</h2>
+                  <p className="mt-1.5 max-w-prose font-geist text-[14.5px] leading-relaxed text-text-sec">
+                    {s.body}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      </main>
+      <MeshFooter />
+    </div>
   );
 }

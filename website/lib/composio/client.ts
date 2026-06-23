@@ -15,13 +15,22 @@
  * changes for us. The seam is what made this an implementation-only swap.
  */
 
-import { Composio } from "@composio/core";
+import { AuthScheme, Composio } from "@composio/core";
+import { resolveAuthConfigId } from "@/lib/composio/auth_config";
 
-/** One initiated connection: the hosted URL to open, plus Composio's account id. */
+/** One initiated connection: the hosted URL to open (empty for API-key links,
+ *  which complete server-side with no consent screen), plus Composio's account id. */
 export interface ComposioConnection {
   connectedAccountId: string;
-  /** Hosted OAuth page the user opens to authorize the toolkit. */
+  /** Hosted OAuth page the user opens to authorize the toolkit. Empty when the
+   *  connection needs no redirect (API-key import). */
   redirectUrl: string;
+}
+
+/** Extra inputs a connect may carry beyond the toolkit slug. */
+export interface InitiateOptions {
+  /** A user-supplied API key, for `api_key` toolkits. */
+  apiKey?: string;
 }
 
 /** The relevant subset of a Composio catalog item from the REST toolkits list.
@@ -55,6 +64,11 @@ export interface ToolkitInfo {
   description?: string;
   category?: string;
   authKind: AuthKind;
+  /** Whether a user can connect this app today. Managed/api-key/no-auth apps are
+   *  always connectable; a custom-OAuth app only once we've registered its auth
+   *  config. Stamped by the catalog route (see `markConnectable`); absent means
+   *  "unknown — treat as connectable" for back-compat. */
+  connectable?: boolean;
 }
 
 /** Classify a catalog item by what connecting it requires. */
@@ -76,12 +90,16 @@ export interface ComposioClient {
    */
   listToolkits(): Promise<ToolkitInfo[]>;
   /**
-   * Start linking `toolkit` for `userId`. Composio returns a hosted redirect the
-   * user opens to authorize; on success the connected account becomes active.
+   * Start linking `toolkit` for `userId`. For OAuth toolkits Composio returns a
+   * hosted redirect the user opens to authorize; for API-key toolkits an
+   * `apiKey` is imported directly and `redirectUrl` comes back empty. On success
+   * the connected account becomes active.
    */
-  initiateConnection(userId: string, toolkit: string): Promise<ComposioConnection>;
+  initiateConnection(userId: string, toolkit: string, opts?: InitiateOptions): Promise<ComposioConnection>;
   /** Current status of a connected account, refreshed from Composio. */
   connectionStatus(connectedAccountId: string): Promise<"pending" | "active" | "error">;
+  /** Revoke + remove a connected account at Composio (used by disconnect). */
+  disconnect(connectedAccountId: string): Promise<void>;
   /** The per-user streamable-HTTP MCP URL the computer-resident eri reads tools from. */
   mcpUrl(userId: string): string;
 }
@@ -110,8 +128,8 @@ function composio(): Composio {
 
 /**
  * Production adapter over the official `@composio/core` SDK. Per-toolkit auth
- * configs are named COMPOSIO_AUTH_CONFIG_<TOOLKIT> (uppercased), e.g.
- * COMPOSIO_AUTH_CONFIG_GMAIL; the MCP server id is COMPOSIO_MCP_SERVER_ID.
+ * configs are resolved by `lib/composio/auth_config` (env COMPOSIO_AUTH_CONFIG_<SLUG>),
+ * with a managed-OAuth fallback; the MCP server id is COMPOSIO_MCP_SERVER_ID.
  */
 export class ComposioApiClient implements ComposioClient {
   async listToolkits(): Promise<ToolkitInfo[]> {
@@ -147,13 +165,37 @@ export class ComposioApiClient implements ComposioClient {
     return out;
   }
 
-  async initiateConnection(userId: string, toolkit: string): Promise<ComposioConnection> {
-    // On-demand + managed auth: `authorize` creates the auth config itself if one
-    // doesn't exist and uses Composio's managed OAuth app — so NO per-app
-    // COMPOSIO_AUTH_CONFIG_* env var is needed for the ~900 catalog apps. We still
-    // honor a custom config when one IS set (custom scopes/branding for a few).
-    const custom = process.env[`COMPOSIO_AUTH_CONFIG_${toolkit.toUpperCase()}`];
-    const req = await composio().toolkits.authorize(userId, toolkit, custom || undefined);
+  async initiateConnection(
+    userId: string,
+    toolkit: string,
+    opts: InitiateOptions = {},
+  ): Promise<ComposioConnection> {
+    // One auth-config lookup drives all three paths (see lib/composio/auth_config):
+    // a registered slug (`ac_...`) for custom-OAuth / API-key toolkits, else null
+    // → Composio's managed OAuth app handles it with zero setup.
+    const authConfigId = resolveAuthConfigId(toolkit);
+
+    // API-key path: the user pasted their own key. When we've registered an
+    // API_KEY auth config for the toolkit, import the key straight onto it — no
+    // consent screen, no redirect. When we HAVEN'T, fall through to `authorize`
+    // below, which returns Composio's hosted key-entry page (zero admin setup);
+    // the typed key is just re-entered there. Either way the connect never fails
+    // for lack of a config.
+    if (opts.apiKey && authConfigId) {
+      const req = await composio().connectedAccounts.initiate(userId, authConfigId, {
+        config: AuthScheme.APIKey({ api_key: opts.apiKey }),
+      });
+      if (!req.id) {
+        throw new Error(`composio API-key connect returned no account id for "${toolkit}"`);
+      }
+      return { connectedAccountId: req.id, redirectUrl: req.redirectUrl ?? "" };
+    }
+
+    // OAuth path (managed or custom): `authorize` creates the auth config if one
+    // doesn't exist and returns the hosted consent URL. Passing our registered
+    // `authConfigId` is what makes a custom-OAuth toolkit (our own app) work;
+    // omitting it falls back to Composio's managed app.
+    const req = await composio().toolkits.authorize(userId, toolkit, authConfigId ?? undefined);
     if (!req.id || !req.redirectUrl) {
       throw new Error(`composio authorize returned no redirect for "${toolkit}"`);
     }
@@ -169,6 +211,12 @@ export class ComposioApiClient implements ComposioClient {
       console.log(JSON.stringify({ event: "composio.unknown_status", status: account.status }));
     }
     return status;
+  }
+
+  async disconnect(connectedAccountId: string): Promise<void> {
+    // Permanently delete the connected account at Composio — this revokes the
+    // stored tokens. Our own DB row is removed separately by the caller.
+    await composio().connectedAccounts.delete(connectedAccountId);
   }
 
   mcpUrl(userId: string): string {

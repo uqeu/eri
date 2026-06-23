@@ -63,6 +63,36 @@ export async function listConnections(userId: string): Promise<ComposioAccountRo
   }));
 }
 
+/** One user's connection to a single toolkit, or null if they have none. */
+export async function findConnection(
+  userId: string,
+  toolkit: string,
+): Promise<ComposioAccountRow | null> {
+  const rows = await sql()<
+    { toolkit: string; connected_account_id: string | null; status: string }[]
+  >`
+    SELECT toolkit, connected_account_id, status
+    FROM composio_accounts
+    WHERE user_id = ${userId} AND toolkit = ${toolkit}
+    LIMIT 1
+  `;
+  const r = rows[0];
+  if (!r) return null;
+  return {
+    toolkit: r.toolkit,
+    connectedAccountId: r.connected_account_id,
+    status: normalizeRowStatus(r.status),
+  };
+}
+
+/** Forget a user's connection to a toolkit (after revoking it at Composio). */
+export async function deleteConnection(userId: string, toolkit: string): Promise<void> {
+  await sql()`
+    DELETE FROM composio_accounts
+    WHERE user_id = ${userId} AND toolkit = ${toolkit}
+  `;
+}
+
 function normalizeRowStatus(s: string): ConnectionStatus {
   return s === "active" || s === "pending" ? s : "error";
 }

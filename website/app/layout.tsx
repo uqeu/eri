@@ -16,13 +16,13 @@ const mono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "eri — Your computer, hands-free",
+  title: "eri — Engineered Relative Intelligence",
   description:
-    "eri is a local-first AI that runs your computer. It sees your screen, hears you, remembers you, and acts — a coding agent and a computer-use agent in one. Voice and eyes in, action out.",
+    "eri is Engineered Relative Intelligence: not one AGI for everyone, but intelligence engineered for you. It learns you, runs your world hands-free, and grows into your other half. From Eri Labs, an AGI lab.",
   openGraph: {
-    title: "eri — Your computer, hands-free",
+    title: "eri — the AGI that becomes yours",
     description:
-      "A local-first AI that sees your screen, hears you, remembers you, and does the work. Coding agent + computer-use agent in one.",
+      "Engineered Relative Intelligence. eri learns you, runs your world hands-free, and grows into your other half. From Eri Labs.",
     type: "website",
   },
 };
@@ -40,6 +40,11 @@ export default function RootLayout({
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
         <link
           href="https://fonts.googleapis.com/css2?family=Funnel+Display:wght@300;400;500;600;700;800&display=swap"
+          rel="stylesheet"
+        />
+        {/* Homepage body + mono type system: Geist (sans) + Geist Mono. */}
+        <link
+          href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap"
           rel="stylesheet"
         />
       </head>

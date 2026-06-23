@@ -19,6 +19,10 @@ const config: Config = {
         "text-ter": "var(--text-ter)",
         // Engine-only lime — used inside HeroBig/PromptPipeline/EngineRoom/EriDemo
         "demo-accent": "var(--demo-accent)",
+        // Paper-theme semantic accents (homepage editorial surface)
+        "ink-deep": "var(--ink-deep)",
+        emerald: "var(--accent-emerald)",
+        amber: "var(--accent-amber)",
         // Legacy aliases — pinned to dark engine colors so old demos still render
         ink: "#0A0A0A",
         paper: "#F5F2EC",
@@ -35,6 +39,11 @@ const config: Config = {
       },
       fontFamily: {
         display: ["Funnel Display", "system-ui", "sans-serif"],
+        // Premium homepage type system
+        geist: ["var(--font-geist)", "system-ui", "sans-serif"],
+        "geist-mono": ["var(--font-geist-mono)", "ui-monospace", "monospace"],
+        instrument: ["var(--font-instrument)", "ui-serif", "Georgia", "serif"],
+        serif: ["var(--font-instrument)", "ui-serif", "Georgia", "serif"],
         sans: ["var(--font-grotesk)", "system-ui", "sans-serif"],
         mono: ["var(--font-mono)", "ui-monospace", "monospace"],
       },
