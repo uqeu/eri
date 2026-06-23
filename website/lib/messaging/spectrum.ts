@@ -19,10 +19,14 @@ import type { InboundMessage } from "@/lib/imessage/webhook";
 import type { InboundTransport } from "@/lib/messaging/inbound_runtime";
 import { synthesizeSpeech, textForSpeech } from "@/lib/messaging/voice";
 
-function requireEnv(name: string): string {
-  const v = process.env[name];
-  if (!v) throw new Error(`${name} is not configured (Spectrum adapter)`);
-  return v;
+/** Read the first non-empty of several env names (so we accept both our
+ *  `PHOTON_*` naming and Photon's default `.env` naming — `PROJECT_ID` etc.). */
+function envAny(...names: string[]): string {
+  for (const n of names) {
+    const v = process.env[n];
+    if (v && v.trim()) return v.trim();
+  }
+  throw new Error(`none of [${names.join(", ")}] is configured (Spectrum adapter)`);
 }
 
 /** Build the Spectrum instance once. `webhookSecret` (optional) lets the SDK
@@ -31,9 +35,9 @@ function requireEnv(name: string): string {
  *  this one factory. */
 function createApp() {
   return Spectrum({
-    projectId: requireEnv("PHOTON_PROJECT_ID"),
-    projectSecret: requireEnv("PHOTON_PROJECT_SECRET"),
-    webhookSecret: process.env.PHOTON_WEBHOOK_SECRET,
+    projectId: envAny("PHOTON_PROJECT_ID", "PROJECT_ID"),
+    projectSecret: envAny("PHOTON_PROJECT_SECRET", "PROJECT_SECRET"),
+    webhookSecret: process.env.PHOTON_WEBHOOK_SECRET ?? process.env.WEBHOOK_SECRET,
     providers: [imessage.config()],
   });
 }
