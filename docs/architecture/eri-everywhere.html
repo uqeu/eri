@@ -1,0 +1,374 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>eri Everywhere — living spec</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Funnel+Display:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --ink: #0e0e13;
+        --panel: #15151d;
+        --panel2: #1b1b24;
+        --line: rgba(255, 255, 255, 0.08);
+        --line2: rgba(255, 255, 255, 0.13);
+        --paper: #f4f2ea;
+        --muted: #9a9aa6;
+        --dim: #6c6c78;
+        --lime: #d7f06a;
+        --green: #79e08a;
+        --amber: #f0c674;
+        --blue: #8fb7ff;
+      }
+      * { box-sizing: border-box; }
+      html { scroll-behavior: smooth; }
+      body {
+        margin: 0;
+        background: var(--ink);
+        color: var(--paper);
+        font-family: "Funnel Display", system-ui, sans-serif;
+        font-size: 16px;
+        line-height: 1.55;
+        -webkit-font-smoothing: antialiased;
+      }
+      a { color: var(--lime); text-decoration: none; }
+      code, .mono { font-family: "JetBrains Mono", ui-monospace, monospace; }
+      .wrap { max-width: 1080px; margin: 0 auto; padding: 0 28px; }
+
+      /* nav */
+      nav {
+        position: sticky; top: 0; z-index: 20;
+        background: rgba(14, 14, 19, 0.82);
+        backdrop-filter: blur(10px);
+        border-bottom: 1px solid var(--line);
+      }
+      nav .wrap { display: flex; align-items: center; gap: 22px; height: 56px; }
+      nav .brand { font-weight: 800; letter-spacing: -0.04em; font-size: 19px; }
+      nav .brand b { color: var(--lime); }
+      nav .links { display: flex; gap: 18px; margin-left: auto; flex-wrap: wrap; }
+      nav .links a { color: var(--muted); font-size: 13.5px; font-weight: 500; transition: color 0.15s; }
+      nav .links a:hover { color: var(--paper); }
+
+      /* hero */
+      header { padding: 84px 0 56px; border-bottom: 1px solid var(--line); }
+      header .kicker { color: var(--lime); font-family: "JetBrains Mono", monospace; font-size: 12.5px; letter-spacing: 0.16em; text-transform: uppercase; }
+      header h1 { font-size: clamp(40px, 7vw, 76px); font-weight: 800; letter-spacing: -0.045em; line-height: 1.02; margin: 16px 0 0; }
+      header h1 .accent { color: var(--lime); }
+      header p.lede { font-size: clamp(17px, 2.4vw, 21px); color: var(--muted); max-width: 64ch; margin: 22px 0 0; }
+      header .meta { margin-top: 26px; color: var(--dim); font-size: 13px; font-family: "JetBrains Mono", monospace; }
+
+      /* status strip */
+      .strip { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 30px; }
+      .pill {
+        display: inline-flex; align-items: center; gap: 7px;
+        border: 1px solid var(--line2); border-radius: 999px;
+        padding: 6px 13px; font-size: 13px; color: var(--paper);
+        background: var(--panel);
+      }
+      .pill .dot { width: 7px; height: 7px; border-radius: 50%; }
+      .dot.live { background: var(--green); box-shadow: 0 0 0 3px rgba(121,224,138,0.16); }
+      .dot.wip { background: var(--amber); }
+      .dot.next { background: var(--dim); }
+
+      section { padding: 64px 0; border-bottom: 1px solid var(--line); }
+      section > .wrap > h2 { font-size: clamp(26px, 4vw, 38px); font-weight: 700; letter-spacing: -0.035em; margin: 0 0 6px; }
+      section > .wrap > .sub { color: var(--muted); margin: 0 0 34px; max-width: 70ch; }
+      h3 { font-size: 19px; font-weight: 600; letter-spacing: -0.02em; margin: 0 0 6px; }
+
+      /* pillars */
+      .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+      .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 22px; }
+      .card .tag { font-family: "JetBrains Mono", monospace; font-size: 11.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--lime); }
+      .card p { color: var(--muted); font-size: 14.5px; margin: 8px 0 0; }
+      .card.muted .tag { color: var(--blue); }
+
+      /* feature catalog */
+      .feat-group { margin-bottom: 30px; }
+      .feat-group > h3 { display: flex; align-items: baseline; gap: 10px; border-bottom: 1px solid var(--line); padding-bottom: 8px; }
+      .feat-group > h3 .count { color: var(--dim); font-family: "JetBrains Mono", monospace; font-size: 12px; }
+      .feat { display: grid; grid-template-columns: 92px 1fr; gap: 14px; padding: 12px 2px; border-bottom: 1px solid var(--line); align-items: start; }
+      .feat:last-child { border-bottom: 0; }
+      .feat .st { font-family: "JetBrains Mono", monospace; font-size: 11px; padding-top: 2px; }
+      .st.live { color: var(--green); }
+      .st.wip { color: var(--amber); }
+      .st.next { color: var(--dim); }
+      .feat .name { font-weight: 600; font-size: 15px; }
+      .feat .desc { color: var(--muted); font-size: 13.5px; }
+
+      /* pipeline */
+      .flow { display: flex; flex-wrap: wrap; gap: 10px; align-items: stretch; }
+      .step { flex: 1 1 130px; background: var(--panel); border: 1px solid var(--line); border-radius: 11px; padding: 14px; }
+      .step .n { font-family: "JetBrains Mono", monospace; color: var(--lime); font-size: 11px; }
+      .step .t { font-weight: 600; font-size: 14px; margin-top: 3px; }
+      .step .d { color: var(--muted); font-size: 12.5px; margin-top: 4px; }
+      .arrow { align-self: center; color: var(--dim); font-size: 18px; }
+
+      /* board */
+      .board { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+      .col { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
+      .col h3 { display: flex; align-items: center; gap: 8px; }
+      .col h3 .c { margin-left: auto; color: var(--dim); font-family: "JetBrains Mono", monospace; font-size: 12px; }
+      .col.done h3 { color: var(--green); }
+      .col.building h3 { color: var(--amber); }
+      .col.next h3 { color: var(--paper); }
+      .item { background: var(--panel2); border: 1px solid var(--line); border-radius: 9px; padding: 10px 12px; margin-top: 9px; font-size: 13.5px; }
+      .item .m { font-family: "JetBrains Mono", monospace; font-size: 10.5px; color: var(--dim); letter-spacing: 0.06em; }
+
+      /* decisions */
+      .dl { display: grid; grid-template-columns: 180px 1fr; gap: 4px 18px; }
+      .dl dt { font-weight: 600; color: var(--paper); padding: 9px 0; border-top: 1px solid var(--line); }
+      .dl dd { margin: 0; color: var(--muted); font-size: 14px; padding: 9px 0; border-top: 1px solid var(--line); }
+
+      footer { padding: 48px 0 80px; color: var(--dim); font-size: 13px; }
+      .legend { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 10px; font-size: 13px; color: var(--muted); }
+      .legend span { display: inline-flex; align-items: center; gap: 7px; }
+
+      @media (max-width: 820px) {
+        .grid3, .board { grid-template-columns: 1fr; }
+        .dl { grid-template-columns: 1fr; }
+        .dl dd { padding-top: 0; border-top: 0; }
+        nav .links { display: none; }
+      }
+    </style>
+  </head>
+  <body>
+    <nav>
+      <div class="wrap">
+        <span class="brand"><b>eri</b> Everywhere</span>
+        <div class="links">
+          <a href="#vision">Vision</a>
+          <a href="#pillars">Architecture</a>
+          <a href="#features">Features</a>
+          <a href="#pipeline">Pipeline</a>
+          <a href="#world">World model</a>
+          <a href="#board">Board</a>
+          <a href="#roadmap">Roadmap</a>
+          <a href="#decisions">Decisions</a>
+        </div>
+      </div>
+    </nav>
+
+    <header>
+      <div class="wrap">
+        <div class="kicker">Living spec · one source of truth</div>
+        <h1>One mind, <span class="accent">everywhere</span> you are.</h1>
+        <p class="lede">
+          eri is an adaptive personal intelligence that lives in the cloud, talks to you
+          where you already are, and acts on your apps and your computer — logging
+          everything, undoing anything reversible, stopping before anything costly.
+          This page is the always-current map of what eri is, what it can do, and what
+          we're building right now.
+        </p>
+        <div class="strip">
+          <span class="pill"><span class="dot live"></span> iMessage on Spectrum — core shipped</span>
+          <span class="pill"><span class="dot live"></span> Voice-note replies (ElevenLabs)</span>
+          <span class="pill"><span class="dot live"></span> Full conversational brain (memory · search · vision)</span>
+          <span class="pill"><span class="dot wip"></span> Live webhook verification</span>
+          <span class="pill"><span class="dot next"></span> Multi-platform · location · groups</span>
+        </div>
+        <div class="meta">Program “eri Everywhere” · Milestone 1 “First Line” · updated each milestone, never a big-bang at the end.</div>
+      </div>
+    </header>
+
+    <section id="vision">
+      <div class="wrap">
+        <h2>The promise</h2>
+        <p class="sub">The marketing site makes a specific contract. The product has to actually do it — these are the load-bearing claims.</p>
+        <div class="grid3">
+          <div class="card"><div class="tag">Runs your computer</div><p>Ships code, clears the inbox, fixes sheets, queues music — by API where it can, by driving the real app on-screen where it can't.</p></div>
+          <div class="card"><div class="tag">Comes with you</div><p>Texts you over iMessage (and soon WhatsApp, Telegram, Slack, Discord). One mind, same memory, across every surface.</p></div>
+          <div class="card"><div class="tag">Knows you</div><p>A private, compounding model of you — your people, habits, voice — that grows over time and syncs across devices.</p></div>
+          <div class="card"><div class="tag">Shows its work</div><p>A live thought-stream: eri streams its thinking and every action it takes. The trust surface, not a black box.</p></div>
+          <div class="card"><div class="tag">Stays safe</div><p>Every action logged and undoable. Confirms before anything costly. Passwords, payments, CAPTCHAs are a hard boundary.</p></div>
+          <div class="card"><div class="tag">Adapts to you</div><p>Capabilities stay the same; the judgment behind them becomes more “yours” — per-user, and per-group.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="pillars">
+      <div class="wrap">
+        <h2>Three pillars</h2>
+        <p class="sub">Where you reach eri, how eri acts, and the fallback that means it always can.</p>
+        <div class="grid3">
+          <div class="card">
+            <div class="tag">Spectrum · interfaces</div>
+            <h3 style="margin-top:10px">Where you talk to eri</h3>
+            <p>Photon/Spectrum gives eri managed lines and a unified message stream: iMessage (live), then WhatsApp, Telegram, Slack, and Discord (custom adapter). Rich content — voice, attachments, polls, mini-app cards — with adaptive per-platform rendering.</p>
+          </div>
+          <div class="card">
+            <div class="tag">Composio · actions</div>
+            <h3 style="margin-top:10px">How eri acts on your apps</h3>
+            <p>The 1,000+ app connector layer. When an app is connected, eri calls its API directly — fast, precise, structured. The whole catalogue is reachable today via the Tool Router; headline apps get crafted, polished flows.</p>
+          </div>
+          <div class="card muted">
+            <div class="tag">Computer control · fallback</div>
+            <h3 style="margin-top:10px">When there's no API</h3>
+            <p>eri lives inside your computer and drives the real app: sees the screen, moves the mouse, types, reads the result, keeps going. <em>Connect it and eri's faster; don't, and eri still does it by hand.</em></p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="features">
+      <div class="wrap">
+        <h2>Feature catalog</h2>
+        <p class="sub">Everything eri is or will be, by area, with honest status. <span class="mono" style="color:var(--green)">live</span> = shipped &amp; green · <span class="mono" style="color:var(--amber)">wip</span> = building · <span class="mono" style="color:var(--dim)">next</span> = planned.</p>
+
+        <div class="feat-group">
+          <h3>Conversational surfaces <span class="count">— Spectrum</span></h3>
+          <div class="feat"><div class="st live">live</div><div><div class="name">iMessage inbound + reply</div><div class="desc">Spectrum webhook → shared <code>processInbound</code> → the real brain → <code>space.send()</code>. Reuses <code>handleInbound</code> untouched.</div></div></div>
+          <div class="feat"><div class="st live">live</div><div><div class="name">Voice-note replies</div><div class="desc">ElevenLabs TTS, per-user setting (never / auto-mirror / always), automatic text fallback on any TTS failure.</div></div></div>
+          <div class="feat"><div class="st live">live</div><div><div class="name">Typing indicator · dedup · metering</div><div class="desc">Lease-based idempotency, “eri is typing…”, usage metered before the reply lands.</div></div></div>
+          <div class="feat"><div class="st wip">wip</div><div><div class="name">Incoming voice transcription</div><div class="desc">Whisper (self-hosted, free) over inbound voice notes → text for the brain. Unlocks the “auto” voice mirror.</div></div></div>
+          <div class="feat"><div class="st next">next</div><div><div class="name">WhatsApp · Telegram · Slack</div><div class="desc">Native Spectrum providers, one brain, adaptive rendering per platform.</div></div></div>
+          <div class="feat"><div class="st next">next</div><div><div class="name">Discord</div><div class="desc">Custom <code>definePlatform</code> adapter (ships with a how-to guide).</div></div></div>
+          <div class="feat"><div class="st next">next</div><div><div class="name">Group chats + group world-model</div><div class="desc">Joins, responds only when addressed (“Eri …” / @mention), learns the group's register. Needs Business tier.</div></div></div>
+        </div>
+
+        <div class="feat-group">
+          <h3>Action layer <span class="count">— Composio + computer control</span></h3>
+          <div class="feat"><div class="st live">live</div><div><div class="name">Connector catalogue + connect/disconnect</div><div class="desc">~1,000 apps, OAuth / API-key / managed auth, the /connections UI, honest “connect where it works”.</div></div></div>
+          <div class="feat"><div class="st live">live</div><div><div class="name">In-cloud reads (Gmail, Calendar)</div><div class="desc">eri checks your inbox / day server-side, laptop closed.</div></div></div>
+          <div class="feat"><div class="st live">live</div><div><div class="name">Computer-control wedge</div><div class="desc">AX-first screen graph, full action primitives, predict→gate→act, refusal boundary.</div></div></div>
+          <div class="feat"><div class="st next">next</div><div><div class="name">API → computer-control fallback ladder</div><div class="desc">Try the connected API; if absent or it fails, drive the app on-screen — transparently.</div></div></div>
+          <div class="feat"><div class="st next">next</div><div><div class="name">Crafted verbs for headline apps</div><div class="desc">gmail triage · cal move · slack catchup · sheets fix · notion write · linear file · spotify queue.</div></div></div>
+          <div class="feat"><div class="st next">next</div><div><div class="name">Capability registry (one source of truth)</div><div class="desc">One list generates the homepage grid, pricing copy, and the runtime action catalog — never drifts.</div></div></div>
+        </div>
+
+        <div class="feat-group">
+          <h3>Memory &amp; personalization</h3>
+          <div class="feat"><div class="st live">live</div><div><div class="name">Cloud-primary memory</div><div class="desc">learned_facts + conversation_turns, hybrid recall (lexical ∪ semantic, RRF + rerank), consolidation/supersede.</div></div></div>
+          <div class="feat"><div class="st live">live</div><div><div class="name">Two-tier sync</div><div class="desc">Server-readable Tier-A profile + E2E-encrypted Tier-B blob; one mind across Mac + phone.</div></div></div>
+          <div class="feat"><div class="st live">live</div><div><div class="name">Learned communication style</div><div class="desc">eri mirrors how you actually write (casing, brevity, emoji) — the average, not a parrot.</div></div></div>
+          <div class="feat"><div class="st next">next</div><div><div class="name">Per-group world-model</div><div class="desc">A group's collective register as its own facet; eri phases to the room.</div></div></div>
+        </div>
+
+        <div class="feat-group">
+          <h3>Trust, voice &amp; the thought-stream</h3>
+          <div class="feat"><div class="st live">live</div><div><div class="name">Logged + undoable</div><div class="desc">Every action recorded; <code>eri control --history / --undo</code>, honest reversibility.</div></div></div>
+          <div class="feat"><div class="st live">live</div><div><div class="name">Confirm-before-costly + refusal boundary</div><div class="desc">Money / mass-send / deletions confirm first; passwords / payments / CAPTCHAs are never crossed.</div></div></div>
+          <div class="feat"><div class="st live">live</div><div><div class="name">Proactive loop</div><div class="desc">“After X you usually Y”, anti-annoyance gated; the proactive iMessage cron.</div></div></div>
+          <div class="feat"><div class="st wip">wip</div><div><div class="name">Confirm-card (poll) + Settings web-card</div><div class="desc">Yes/no confirms as native polls; an eri-authored Settings page sent as a link card. Every card action has a text/voice fallback.</div></div></div>
+          <div class="feat"><div class="st wip">wip</div><div><div class="name">Thought-stream</div><div class="desc">UI shipped (think/cmd/out/done); wiring it to live runs over SSE + a tasteful in-thread card.</div></div></div>
+          <div class="feat"><div class="st next">next</div><div><div class="name">Location-aware proactivity</div><div class="desc">Opt-in Find My share → “you're on the move + have a 3pm — text them you're on your way?” Confirm before sending.</div></div></div>
+          <div class="feat"><div class="st next">next</div><div><div class="name">Native iMessage mini-app</div><div class="desc">A real installable extension (Business). Coexists with the no-install web-cards + polls.</div></div></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="pipeline">
+      <div class="wrap">
+        <h2>How a text becomes a reply</h2>
+        <p class="sub">The same path serves every provider — the provider only supplies “how to show typing + how to send”.</p>
+        <div class="flow">
+          <div class="step"><div class="n">01</div><div class="t">Webhook in</div><div class="d">Spectrum POSTs; the SDK verifies the HMAC signature itself.</div></div>
+          <div class="arrow">→</div>
+          <div class="step"><div class="n">02</div><div class="t">Map</div><div class="d">Spectrum message → eri's <code>InboundMessage</code>. Brain untouched.</div></div>
+          <div class="arrow">→</div>
+          <div class="step"><div class="n">03</div><div class="t">processInbound</div><div class="d">Dedup lease · typing · the brain · meter.</div></div>
+          <div class="arrow">→</div>
+          <div class="step"><div class="n">04</div><div class="t">handleInbound</div><div class="d">Memory, Gmail/cal, search, weather, vision, control dispatch.</div></div>
+          <div class="arrow">→</div>
+          <div class="step"><div class="n">05</div><div class="t">Reply</div><div class="d">Text or voice (per your setting), via <code>space.send()</code>.</div></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="world">
+      <div class="wrap">
+        <h2>The world model</h2>
+        <p class="sub">eri isn't a chatbot with memory — it's a growing model of one person (and, in groups, of one room).</p>
+        <div class="grid3">
+          <div class="card"><div class="tag">Of you</div><p>People, habits, projects, preferences, voice — a private, compounding representation that informs every judgment, not just a fact lookup.</p></div>
+          <div class="card"><div class="tag">Of the group</div><p>When eri joins a group chat it seeds from whoever added it, then learns the room's collective register and phases to match — hype room, hype eri; calm room, calm eri.</p></div>
+          <div class="card"><div class="tag">Of the moment</div><p>Live context — where you are, what's on your calendar, what you just said — fused with the durable model so the proactive nudge lands at the right time.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="board">
+      <div class="wrap">
+        <h2>Sprint board</h2>
+        <p class="sub">What's done, what's in flight, what's queued. The live picture — updated each milestone.</p>
+        <div class="board">
+          <div class="col done">
+            <h3>Done <span class="c">shipped · green</span></h3>
+            <div class="item"><div class="m">M1 · spectrum</div>Webhook verify + inbound parser (tested)</div>
+            <div class="item"><div class="m">M1 · spectrum</div>Adapter: app factory · message map · send/typing transport</div>
+            <div class="item"><div class="m">M1 · core</div>Shared <code>processInbound</code> — Sendblue route slimmed to reuse it</div>
+            <div class="item"><div class="m">M1 · voice</div>ElevenLabs voice replies + <code>user_settings</code> + text fallback</div>
+            <div class="item"><div class="m">brand</div>eri iMessage avatar (off-white wordmark)</div>
+            <div class="item"><div class="m">prior</div>Full phone-eri brain: memory · search · weather · vision · proactive</div>
+            <div class="item"><div class="m">prior</div>Composio connections (connect / disconnect / honest coverage)</div>
+          </div>
+          <div class="col building">
+            <h3>Building <span class="c">in flight</span></h3>
+            <div class="item"><div class="m">M1 · go-live</div>Deploy to prod + register the Spectrum webhook → text eri live</div>
+            <div class="item"><div class="m">M1 · beauty</div>Poll-based confirm flow (brain signal → Yes/No poll)</div>
+            <div class="item"><div class="m">M1 · beauty</div>Settings web-card (eri-authored page + link card)</div>
+            <div class="item"><div class="m">M1 · voice</div>Whisper inbound transcription</div>
+            <div class="item"><div class="m">M1 · identity</div>Auto-allowlist a user's number on phone-link</div>
+          </div>
+          <div class="col next">
+            <h3>Next <span class="c">queued</span></h3>
+            <div class="item"><div class="m">M1 · cutover</div>Remove Sendblue once parity is proven</div>
+            <div class="item"><div class="m">M2</div>WhatsApp · Telegram · Slack · Discord adapter</div>
+            <div class="item"><div class="m">M3</div>Capability registry + API→control fallback ladder</div>
+            <div class="item"><div class="m">M3</div>Thought-stream live wiring (SSE)</div>
+            <div class="item"><div class="m">M4</div>Location worker + proactive nudges</div>
+            <div class="item"><div class="m">M4</div>Group chats + group world-model</div>
+            <div class="item"><div class="m">later</div>Native iMessage mini-app extension (Business)</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="roadmap">
+      <div class="wrap">
+        <h2>Milestones</h2>
+        <p class="sub">Everything is in scope; this is order. Each ships beautiful before the next starts.</p>
+        <div class="grid3">
+          <div class="card"><div class="tag">M1 · First Line</div><p>eri live and beautiful on iMessage via Spectrum — parity, confirm-card, voice notes, avatar. Replaces Sendblue.</p></div>
+          <div class="card"><div class="tag">M2 · Breadth</div><p>Everywhere eri talks: WhatsApp, Telegram, Slack, Discord — one brain, adaptive rendering.</p></div>
+          <div class="card"><div class="tag">M3 · Depth</div><p>The action layer: capability registry, API→control fallback, the live thought-stream.</p></div>
+          <div class="card"><div class="tag">M4 · Location · groups</div><p>The always-on worker, opt-in location nudges, group chats with a per-group world-model.</p></div>
+          <div class="card muted"><div class="tag">Parallel · the pill</div><p>eri's voice-first desktop presence in the Granola / Wispr-Flow aesthetic.</p></div>
+          <div class="card muted"><div class="tag">Cross-cutting</div><p>Cheapest-viable brain routing, token-frugality, and this doc — kept current every milestone.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="decisions">
+      <div class="wrap">
+        <h2>Decisions on record</h2>
+        <p class="sub">The calls we grilled and locked, so we don't relitigate them.</p>
+        <dl class="dl">
+          <dt>Platforms</dt><dd>iMessage / WhatsApp / Telegram / Slack native + Discord adapter. Instagram is an <em>action target</em> (Composio / computer-use), not an interface.</dd>
+          <dt>Hosting</dt><dd>Vercel webhooks for conversation; one small always-on worker for real-time location + deep streams.</dd>
+          <dt>Identity</dt><dd>One shared eri line; people told apart by handle; auto-allowlist on phone-link. Dedicated number (Business) later.</dd>
+          <dt>Voice</dt><dd>Text by default; voice replies a per-user setting (ElevenLabs). Incoming voice transcribed with Whisper (free).</dd>
+          <dt>Mini-apps</dt><dd>No-install first (polls + web-cards) for everyone; native installable extension later as a premium layer.</dd>
+          <dt>Brain</dt><dd>Claude now, behind a swappable seam; route each task to the cheapest model that clears the bar. No custom-trained model.</dd>
+          <dt>Action path</dt><dd>API first → computer-control fallback. Connect it and eri's faster; don't, and eri still does it.</dd>
+          <dt>Not doing</dt><dd>LiveContainer (on-device iOS app launcher) — nothing for it to run in a server relay.</dd>
+        </dl>
+      </div>
+    </section>
+
+    <footer>
+      <div class="wrap">
+        <div>eri Everywhere — the living spec. One list, kept current; the site, the product, and this doc never drift.</div>
+        <div class="legend">
+          <span><span class="dot live" style="display:inline-block;width:8px;height:8px;border-radius:50%"></span> live — shipped &amp; green</span>
+          <span><span class="dot wip" style="display:inline-block;width:8px;height:8px;border-radius:50%"></span> wip — building now</span>
+          <span><span class="dot next" style="display:inline-block;width:8px;height:8px;border-radius:50%"></span> next — queued</span>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>
