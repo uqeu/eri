@@ -113,6 +113,113 @@ export function mapStripePriceToTier(priceMetadataTier: string | null | undefine
   }
 }
 
+/**
+ * Last-resort tier resolution from a Stripe Product name. Products survive
+ * price migrations (the $25→$30 Pro and $45→$60 Pro+ reprices in 2026-05
+ * archived the old PRICES but kept the same PRODUCT), so a name match catches
+ * legacy subscriptions whose price predates the `metadata.tier` convention and
+ * isn't in the price-ID table. Pro+ is checked before Pro because "pro" is a
+ * substring of "pro+".
+ */
+export function tierFromProductName(name: string | null | undefined): Tier {
+  if (!name) return "free";
+  const n = name.trim().toLowerCase();
+  if (n.includes("pro+") || n.includes("pro plus") || n.includes("proplus")) {
+    return "pro_plus";
+  }
+  if (n.includes("pro")) return "pro";
+  if (n.includes("starter")) return "starter";
+  if (n.includes("enterprise")) return "enterprise";
+  return "free";
+}
+
+/**
+ * Resolve a tier from a Stripe Product reference. Reads `product.metadata.tier`
+ * first (set once per product, survives price churn), then falls back to the
+ * product name. Fetches the product only when given a bare ID. Any failure
+ * resolves to "free" and is logged loudly rather than throwing.
+ */
+async function tierForProduct(
+  ref: string | Stripe.Product | Stripe.DeletedProduct | null,
+): Promise<Tier> {
+  if (!ref) return "free";
+  let product: Stripe.Product | Stripe.DeletedProduct;
+  if (typeof ref === "string") {
+    try {
+      product = await stripe().products.retrieve(ref);
+    } catch (error) {
+      console.error("stripe.tier.product_fetch_failed", {
+        product: ref,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return "free";
+    }
+  } else {
+    product = ref;
+  }
+  if (product.deleted) return "free";
+  const metaTier = product.metadata?.tier;
+  if (metaTier) {
+    const fromMeta = mapStripePriceToTier(metaTier);
+    if (fromMeta !== "free") return fromMeta;
+  }
+  return tierFromProductName(product.name);
+}
+
+/**
+ * Stripe moved `current_period_end` from Subscription to SubscriptionItem in
+ * API version 2025-03-31. Read from the first item, fall back to the
+ * subscription-level field for older webhooks, then to 0 so postgres-js never
+ * receives `undefined`.
+ */
+export function subscriptionPeriodEnd(subscription: Stripe.Subscription): number {
+  const firstItem = subscription.items.data[0] as
+    | (Stripe.SubscriptionItem & { current_period_end?: number })
+    | undefined;
+  const fromItem = firstItem?.current_period_end;
+  if (typeof fromItem === "number") return fromItem;
+  const fromSub = (subscription as { current_period_end?: number })
+    .current_period_end;
+  if (typeof fromSub === "number") return fromSub;
+  return 0;
+}
+
+/**
+ * Canonical, robust tier resolution for a live Stripe subscription. Resolution
+ * order, each step falling through only when it yields "free":
+ *   1. `price.metadata.tier`   — new prices carry this
+ *   2. `tierForPriceId(price.id)` — known current price IDs
+ *   3. product metadata / name — survives the price migrations above
+ *
+ * Only `active`/`trialing` subscriptions grant a paid tier; every other status
+ * (past_due, canceled, unpaid, paused, incomplete…) resolves to "free", which
+ * matches the access semantics the webhook has always enforced.
+ *
+ * This is the fix for legacy subscribers (e.g. anyone on the archived $45 Pro+
+ * price `price_1TZEds…`, whose empty metadata + untracked price ID made the
+ * old resolver stamp them `free` despite an active paid subscription).
+ */
+export async function tierForSubscription(
+  subscription: Stripe.Subscription,
+): Promise<Tier> {
+  if (subscription.status !== "active" && subscription.status !== "trialing") {
+    return "free";
+  }
+  const item = subscription.items.data[0];
+  if (!item) return "free";
+
+  const metaTier = item.price.metadata?.tier;
+  if (metaTier) {
+    const fromMeta = mapStripePriceToTier(metaTier);
+    if (fromMeta !== "free") return fromMeta;
+  }
+
+  const byPrice = tierForPriceId(item.price.id);
+  if (byPrice !== "free") return byPrice;
+
+  return tierForProduct(item.price.product);
+}
+
 export function monthlyLimitForTier(tier: string): number {
   switch (tier) {
     case "starter":

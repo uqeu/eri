@@ -8,7 +8,14 @@ import {
   getUserByStripeCustomerId,
   type UserRow,
 } from "@/lib/db";
-import { mapStripePriceToTier, stripe, tierForPriceId, type Tier } from "@/lib/stripe";
+import {
+  mapStripePriceToTier,
+  stripe,
+  subscriptionPeriodEnd,
+  tierForPriceId,
+  tierForSubscription,
+  type Tier,
+} from "@/lib/stripe";
 import {
   sendPaymentFailedEmail,
   sendPaymentReceiptEmail,
@@ -75,41 +82,14 @@ function customerIdFrom(
   return typeof ref === "string" ? ref : ref.id;
 }
 
-// Stripe moved `current_period_end` from Subscription to SubscriptionItem
-// in API version 2025-03-31. Read from the first item, fall back to the
-// subscription-level field for older webhooks, and fall back to 0 if
-// neither is set so postgres-js doesn't get undefined.
-function subscriptionPeriodEnd(subscription: Stripe.Subscription): number {
-  const firstItem = subscription.items.data[0] as
-    | (Stripe.SubscriptionItem & { current_period_end?: number })
-    | undefined;
-  const fromItem = firstItem?.current_period_end;
-  if (typeof fromItem === "number") return fromItem;
-  const fromSub = (subscription as { current_period_end?: number })
-    .current_period_end;
-  if (typeof fromSub === "number") return fromSub;
-  return 0;
-}
-
-function tierFromSubscriptionItem(item: Stripe.SubscriptionItem | undefined): Tier {
-  if (!item) return "free";
-  const metadataTier = item.price.metadata?.tier;
-  if (metadataTier) {
-    return mapStripePriceToTier(metadataTier);
-  }
-  return tierForPriceId(item.price.id);
-}
-
 async function applySubscription(
   subscription: Stripe.Subscription,
 ): Promise<UserRow | null> {
   const customerId = customerIdFrom(subscription.customer);
   if (!customerId) return null;
-  const firstItem = subscription.items.data[0];
-  const tier: Tier =
-    subscription.status === "active" || subscription.status === "trialing"
-      ? tierFromSubscriptionItem(firstItem)
-      : "free";
+  // Robust resolution: price metadata → known price IDs → product (the latter
+  // survives price migrations, so legacy subscribers no longer fall to free).
+  const tier: Tier = await tierForSubscription(subscription);
 
   const userId = subscription.metadata?.user_id;
   const update = {
