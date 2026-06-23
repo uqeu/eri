@@ -25,13 +25,15 @@ function requireEnv(name: string): string {
   return v;
 }
 
-/** Build the Spectrum instance once. `webhookSecret` lets the SDK verify inbound
- *  deliveries; no streaming connection is opened in webhook mode. */
+/** Build the Spectrum instance once. `webhookSecret` (optional) lets the SDK
+ *  verify inbound webhook deliveries; it's unused by the streaming worker, which
+ *  consumes `app.messages` instead. Both the webhook route and the worker share
+ *  this one factory. */
 function createApp() {
   return Spectrum({
     projectId: requireEnv("PHOTON_PROJECT_ID"),
     projectSecret: requireEnv("PHOTON_PROJECT_SECRET"),
-    webhookSecret: requireEnv("PHOTON_WEBHOOK_SECRET"),
+    webhookSecret: process.env.PHOTON_WEBHOOK_SECRET,
     providers: [imessage.config()],
   });
 }
