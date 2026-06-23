@@ -12,9 +12,13 @@ function startHref(provider: "google", next: string | null | undefined): string 
   return next ? `${base}?next=${encodeURIComponent(next)}` : base;
 }
 
+// Where to land after sign-in when no explicit `next` was passed: the
+// dashboard, not the homepage.
+const DEFAULT_NEXT = "/dashboard";
+
 export function ProviderButtons(): React.ReactElement {
   return (
-    <Suspense fallback={<ProviderButtonsInner next={null} />}>
+    <Suspense fallback={<ProviderButtonsInner next={DEFAULT_NEXT} />}>
       <ProviderButtonsWithParams />
     </Suspense>
   );
@@ -22,7 +26,7 @@ export function ProviderButtons(): React.ReactElement {
 
 function ProviderButtonsWithParams(): React.ReactElement {
   const params = useSearchParams();
-  return <ProviderButtonsInner next={params?.get("next") ?? null} />;
+  return <ProviderButtonsInner next={params?.get("next") ?? DEFAULT_NEXT} />;
 }
 
 function ProviderButtonsInner({
