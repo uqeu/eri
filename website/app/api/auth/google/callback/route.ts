@@ -30,10 +30,12 @@ function callbackUrl(request: Request): string {
 }
 
 function sanitizeNext(value: string | undefined): string {
-  if (!value) return "/";
-  if (!value.startsWith("/")) return "/";
-  if (value.startsWith("//")) return "/";
-  if (value.length > 512) return "/";
+  // After a successful sign-in, land on the dashboard by default (not the
+  // marketing homepage). An explicit, valid `next` still wins.
+  if (!value) return "/dashboard";
+  if (!value.startsWith("/")) return "/dashboard";
+  if (value.startsWith("//")) return "/dashboard";
+  if (value.length > 512) return "/dashboard";
   return value;
 }
 
