@@ -33,15 +33,67 @@ interface Toast {
   message: string;
 }
 
-type FilterMode = "ready" | "all" | "connected";
+type FilterMode = "popular" | "all" | "connected";
+type SortMode = "popular" | "az";
 
 /** Cap rendered rows so "All ~1,000" never janks the page; a search narrows it. */
 const MAX_RENDER = 300;
 const UNCATEGORIZED = "Other";
+const ALL_CATEGORIES = "all";
 /** After a Connect, poll status this many times (×3s ≈ 90s) so an app the user
  *  just authorized flips to "Connected" on its own — no manual Refresh needed. */
 const POLL_ATTEMPTS = 30;
 const POLL_INTERVAL_MS = 3000;
+
+/** The well-known apps a person actually wants first, in priority order. Slugs
+ *  match Composio's catalog (gmail, googlecalendar, … are its real slugs). Apps
+ *  not listed here are still reachable via All / search; this only curates the
+ *  default "Popular" view and the Popular sort order. */
+const POPULAR_SLUGS: ReadonlyArray<string> = [
+  "gmail",
+  "googlecalendar",
+  "googledrive",
+  "googledocs",
+  "googlesheets",
+  "notion",
+  "slack",
+  "github",
+  "linear",
+  "spotify",
+  "youtube",
+  "twitter",
+  "discord",
+  "telegram",
+  "whatsapp",
+  "outlook",
+  "googletasks",
+  "googlemeet",
+  "trello",
+  "asana",
+  "clickup",
+  "todoist",
+  "jira",
+  "confluence",
+  "dropbox",
+  "onedrive",
+  "hubspot",
+  "salesforce",
+  "stripe",
+  "shopify",
+  "airtable",
+  "figma",
+  "zoom",
+  "calendly",
+  "reddit",
+  "gitlab",
+  "intercom",
+  "zendesk",
+  "mailchimp",
+  "microsoft_teams",
+];
+const POPULAR_RANK = new Map<string, number>(POPULAR_SLUGS.map((s, i) => [s, i]));
+const popularRank = (slug: string): number =>
+  POPULAR_RANK.has(slug) ? (POPULAR_RANK.get(slug) as number) : Number.POSITIVE_INFINITY;
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
@@ -62,11 +114,6 @@ function AuthHint({ app }: { app: ToolkitItem }): ReactNode {
   if (app.authKind === "api_key") {
     return <span className="rounded border border-border px-1.5 py-0.5 text-[10.5px] text-text-ter">API key</span>;
   }
-  // A custom-OAuth app is only labelled "Setup required" while it has no auth
-  // config; once configured it connects like any other, so drop the badge.
-  if (app.authKind === "custom_oauth" && !isConnectable(app)) {
-    return <span className="rounded border border-border px-1.5 py-0.5 text-[10.5px] text-text-ter">Setup required</span>;
-  }
   return null;
 }
 
@@ -74,7 +121,9 @@ export default function ConnectionsPage(): ReactNode {
   const [catalog, setCatalog] = useState<ToolkitItem[]>([]);
   const [statuses, setStatuses] = useState<Record<string, Status>>({});
   const [query, setQuery] = useState<string>("");
-  const [filter, setFilter] = useState<FilterMode>("ready");
+  const [filter, setFilter] = useState<FilterMode>("popular");
+  const [category, setCategory] = useState<string>(ALL_CATEGORIES);
+  const [sort, setSort] = useState<SortMode>("popular");
   const [loading, setLoading] = useState<boolean>(true);
   const [locked, setLocked] = useState<boolean>(false);
   const [connecting, setConnecting] = useState<string | null>(null);
@@ -151,13 +200,36 @@ export default function ConnectionsPage(): ReactNode {
     return () => window.clearTimeout(id);
   }, [toast]);
 
-  // Filter → search → cap → group by category. "ready" hides apps that aren't
-  // connectable yet (custom-OAuth without a registered auth config).
-  const { groups, shownCount, totalMatched } = useMemo(() => {
+  // The connectable apps only — the directory never shows an app a user can't
+  // actually link (custom-OAuth without a registered config), which is what made
+  // the old list feel like a raw dump.
+  const connectable = useMemo(() => catalog.filter(isConnectable), [catalog]);
+
+  // Categories present in the connectable catalog, for the filter menu.
+  const categories = useMemo(() => {
+    const set = new Set<string>();
+    for (const a of connectable) set.add(a.category || UNCATEGORIZED);
+    return [...set].sort((a, b) => {
+      if (a === UNCATEGORIZED) return 1;
+      if (b === UNCATEGORIZED) return -1;
+      return a.localeCompare(b);
+    });
+  }, [connectable]);
+
+  // Filter → search → sort → cap. A flat, app-store-style list: the tabs pick the
+  // pool, the category menu narrows it, the sort menu orders it.
+  const { items, shownCount, totalMatched } = useMemo(() => {
     const q = query.trim().toLowerCase();
-    let pool = catalog;
-    if (filter === "connected") pool = pool.filter((a) => statuses[a.slug]);
-    else if (filter === "ready") pool = pool.filter(isConnectable);
+    let pool =
+      filter === "connected"
+        ? catalog.filter((a) => statuses[a.slug])
+        : filter === "popular"
+          ? connectable.filter((a) => POPULAR_RANK.has(a.slug))
+          : connectable;
+
+    if (category !== ALL_CATEGORIES) {
+      pool = pool.filter((a) => (a.category || UNCATEGORIZED) === category);
+    }
     if (q) {
       pool = pool.filter(
         (a) =>
@@ -166,23 +238,24 @@ export default function ConnectionsPage(): ReactNode {
           (a.category?.toLowerCase().includes(q) ?? false),
       );
     }
-    pool = [...pool].sort((a, b) => a.name.localeCompare(b.name));
-    const total = pool.length;
-    const shown = pool.slice(0, MAX_RENDER);
-    const byCat = new Map<string, ToolkitItem[]>();
-    for (const a of shown) {
-      const cat = a.category || UNCATEGORIZED;
-      const arr = byCat.get(cat) ?? [];
-      arr.push(a);
-      byCat.set(cat, arr);
-    }
-    const ordered = [...byCat.entries()].sort((a, b) => {
-      if (a[0] === UNCATEGORIZED) return 1;
-      if (b[0] === UNCATEGORIZED) return -1;
-      return a[0].localeCompare(b[0]);
+
+    // Popular tab is always rank-ordered; elsewhere the sort menu decides.
+    const byPopular = filter === "popular" || sort === "popular";
+    const sorted = [...pool].sort((a, b) => {
+      if (byPopular) {
+        const ra = popularRank(a.slug);
+        const rb = popularRank(b.slug);
+        if (ra !== rb) return ra - rb;
+      }
+      return a.name.localeCompare(b.name);
     });
-    return { groups: ordered, shownCount: shown.length, totalMatched: total };
-  }, [catalog, statuses, query, filter]);
+
+    return {
+      items: sorted.slice(0, MAX_RENDER),
+      shownCount: Math.min(sorted.length, MAX_RENDER),
+      totalMatched: sorted.length,
+    };
+  }, [catalog, connectable, statuses, query, filter, category, sort]);
 
   // Start an OAuth or API-key connection. `apiKey` is set only for the API-key
   // flow (the toolkit imports the key directly, with no consent redirect).
@@ -240,10 +313,13 @@ export default function ConnectionsPage(): ReactNode {
   }
 
   const FILTERS: ReadonlyArray<{ id: FilterMode; label: string }> = [
-    { id: "ready", label: "Ready to connect" },
-    { id: "all", label: `All${catalog.length ? ` ${catalog.length}` : ""}` },
+    { id: "popular", label: "Popular" },
+    { id: "all", label: `All${connectable.length ? ` ${connectable.length}` : ""}` },
     { id: "connected", label: "Connected" },
   ];
+
+  const selectClass =
+    "rounded-full border border-border bg-bg-card px-3 py-1.5 text-[12.5px] text-text-sec transition-colors hover:border-[rgba(40,33,22,0.22)] focus:border-[rgba(40,33,22,0.22)] focus:outline-none";
 
   return (
     <div className="mx-auto max-w-3xl px-5 py-10 sm:py-14 font-geist">
@@ -275,16 +351,16 @@ export default function ConnectionsPage(): ReactNode {
             type="search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder={catalog.length ? `Search ${catalog.length} apps…` : "Search apps…"}
+            placeholder={connectable.length ? `Search ${connectable.length} apps…` : "Search apps…"}
             className="w-full rounded-xl border border-border bg-bg-card px-4 py-2.5 text-[14px] text-text placeholder:text-text-ter focus:border-[rgba(40,33,22,0.22)] focus:outline-none"
           />
 
-          <div className="mt-3 flex gap-2">
+          <div className="mt-3 flex flex-wrap items-center gap-2">
             {FILTERS.map((f) => (
               <button
                 key={f.id}
                 onClick={() => setFilter(f.id)}
-                className={`rounded-full px-3 py-1 text-[12.5px] transition-colors ${
+                className={`rounded-full px-3 py-1.5 text-[12.5px] transition-colors ${
                   filter === f.id
                     ? "bg-bg-card-2 text-text font-500"
                     : "border border-border text-text-sec hover:bg-bg-card-2"
@@ -293,114 +369,127 @@ export default function ConnectionsPage(): ReactNode {
                 {f.label}
               </button>
             ))}
+
+            <span className="mx-1 h-4 w-px bg-border" aria-hidden />
+
+            <label className="sr-only" htmlFor="cat-filter">Category</label>
+            <select
+              id="cat-filter"
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+              className={selectClass}
+            >
+              <option value={ALL_CATEGORIES}>All categories</option>
+              {categories.map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
+
+            <label className="sr-only" htmlFor="sort-by">Sort by</label>
+            <select
+              id="sort-by"
+              value={sort}
+              onChange={(e) => setSort(e.target.value as SortMode)}
+              className={selectClass}
+            >
+              <option value="popular">Sort: Popular</option>
+              <option value="az">Sort: A–Z</option>
+            </select>
           </div>
 
-          <div className="mt-6 space-y-7">
-            {groups.length === 0 ? (
+          <div className="mt-6">
+            {items.length === 0 ? (
               <div className="rounded-2xl border border-border bg-bg-card px-5 py-8 text-center text-[13px] text-text-sec">
                 {loading
                   ? "Loading the catalog…"
                   : filter === "connected"
-                    ? "No apps connected yet — switch to Ready to connect."
+                    ? "No apps connected yet — switch to Popular to add one."
                     : "No apps match that search."}
               </div>
             ) : (
-              groups.map(([category, apps]) => (
-                <div key={category}>
-                  <h2 className="mb-2 font-geist-mono text-[11px] font-medium uppercase tracking-[0.18em] text-text-ter">{category}</h2>
-                  <div className="overflow-hidden rounded-2xl border border-border bg-bg-card">
-                    {apps.map((app, i) => {
-                      const status = statuses[app.slug];
-                      const isActive = status === "active";
-                      const connectable = isConnectable(app);
-                      const keyOpen = keyFor === app.slug;
-                      return (
-                        <div
-                          key={app.slug}
-                          className={i > 0 ? "border-t border-border" : ""}
-                        >
-                          <div className="flex items-center justify-between gap-4 px-5 py-3.5">
-                            <div className="flex min-w-0 items-center gap-3">
-                              {app.logo ? (
-                                // eslint-disable-next-line @next/next/no-img-element
-                                <img src={app.logo} alt="" width={20} height={20} className="h-5 w-5 shrink-0 rounded" />
-                              ) : (
-                                <div className="h-5 w-5 shrink-0 rounded bg-bg-card-2" />
-                              )}
-                              <div className="min-w-0">
-                                <div className="flex items-center gap-2">
-                                  <span className="truncate text-[14px] font-medium text-text">{app.name}</span>
-                                  <AuthHint app={app} />
-                                </div>
-                                {app.description ? (
-                                  <div className="truncate text-[12.5px] text-text-sec">{app.description}</div>
-                                ) : null}
-                              </div>
+              <div className="overflow-hidden rounded-2xl border border-border bg-bg-card">
+                {items.map((app, i) => {
+                  const status = statuses[app.slug];
+                  const isActive = status === "active";
+                  const keyOpen = keyFor === app.slug;
+                  return (
+                    <div key={app.slug} className={i > 0 ? "border-t border-border" : ""}>
+                      <div className="flex items-center justify-between gap-4 px-5 py-3.5">
+                        <div className="flex min-w-0 items-center gap-3">
+                          {app.logo ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={app.logo} alt="" width={20} height={20} className="h-5 w-5 shrink-0 rounded" />
+                          ) : (
+                            <div className="h-5 w-5 shrink-0 rounded bg-bg-card-2" />
+                          )}
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="truncate text-[14px] font-medium text-text">{app.name}</span>
+                              <AuthHint app={app} />
                             </div>
-                            <div className="flex shrink-0 items-center gap-4">
-                              <StatusBadge status={status} />
-                              {isActive ? (
-                                <button
-                                  onClick={() => void disconnect(app.slug)}
-                                  disabled={disconnecting === app.slug}
-                                  className="rounded-full border border-border bg-bg-card px-4 py-2 text-[13.5px] text-text-sec transition-colors hover:border-red-300 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40"
-                                >
-                                  {disconnecting === app.slug ? "Removing…" : "Disconnect"}
-                                </button>
-                              ) : !connectable ? (
-                                <span className="rounded-full border border-border bg-bg-card-2 px-4 py-2 text-[12.5px] text-text-ter">
-                                  Needs setup
-                                </span>
-                              ) : (
-                                <button
-                                  onClick={() =>
-                                    app.authKind === "api_key"
-                                      ? (setKeyFor(keyOpen ? null : app.slug), setKeyValue(""))
-                                      : void submitConnect(app.slug)
-                                  }
-                                  disabled={connecting === app.slug}
-                                  className="rounded-full border border-border bg-bg-card px-4 py-2 text-[13.5px] text-text transition-colors hover:border-[rgba(40,33,22,0.22)] disabled:cursor-not-allowed disabled:opacity-40"
-                                >
-                                  {connecting === app.slug
-                                    ? "Opening…"
-                                    : status === "pending"
-                                      ? "Reconnect"
-                                      : "Connect"}
-                                </button>
-                              )}
-                            </div>
+                            {app.description ? (
+                              <div className="truncate text-[12.5px] text-text-sec">{app.description}</div>
+                            ) : null}
                           </div>
-                          {keyOpen && !isActive ? (
-                            <form
-                              onSubmit={(e) => {
-                                e.preventDefault();
-                                if (keyValue.trim()) void submitConnect(app.slug, keyValue.trim());
-                              }}
-                              className="flex items-center gap-2 border-t border-border bg-bg-card-2 px-5 py-3"
-                            >
-                              <input
-                                type="password"
-                                autoComplete="off"
-                                value={keyValue}
-                                onChange={(e) => setKeyValue(e.target.value)}
-                                placeholder={`Paste your ${app.name} API key`}
-                                className="min-w-0 flex-1 rounded-xl border border-border bg-bg-card px-3 py-1.5 text-[13px] text-text placeholder:text-text-ter focus:border-[rgba(40,33,22,0.22)] focus:outline-none"
-                              />
-                              <button
-                                type="submit"
-                                disabled={!keyValue.trim() || connecting === app.slug}
-                                className="rounded-full border border-border bg-bg-card px-4 py-2 text-[13.5px] text-text transition-colors hover:border-[rgba(40,33,22,0.22)] disabled:cursor-not-allowed disabled:opacity-40"
-                              >
-                                {connecting === app.slug ? "Saving…" : "Save key"}
-                              </button>
-                            </form>
-                          ) : null}
                         </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              ))
+                        <div className="flex shrink-0 items-center gap-4">
+                          <StatusBadge status={status} />
+                          {isActive ? (
+                            <button
+                              onClick={() => void disconnect(app.slug)}
+                              disabled={disconnecting === app.slug}
+                              className="rounded-full border border-border bg-bg-card px-4 py-2 text-[13.5px] text-text-sec transition-colors hover:border-red-300 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40"
+                            >
+                              {disconnecting === app.slug ? "Removing…" : "Disconnect"}
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() =>
+                                app.authKind === "api_key"
+                                  ? (setKeyFor(keyOpen ? null : app.slug), setKeyValue(""))
+                                  : void submitConnect(app.slug)
+                              }
+                              disabled={connecting === app.slug}
+                              className="rounded-full border border-border bg-bg-card px-4 py-2 text-[13.5px] text-text transition-colors hover:border-[rgba(40,33,22,0.22)] disabled:cursor-not-allowed disabled:opacity-40"
+                            >
+                              {connecting === app.slug
+                                ? "Opening…"
+                                : status === "pending"
+                                  ? "Reconnect"
+                                  : "Connect"}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      {keyOpen && !isActive ? (
+                        <form
+                          onSubmit={(e) => {
+                            e.preventDefault();
+                            if (keyValue.trim()) void submitConnect(app.slug, keyValue.trim());
+                          }}
+                          className="flex items-center gap-2 border-t border-border bg-bg-card-2 px-5 py-3"
+                        >
+                          <input
+                            type="password"
+                            autoComplete="off"
+                            value={keyValue}
+                            onChange={(e) => setKeyValue(e.target.value)}
+                            placeholder={`Paste your ${app.name} API key`}
+                            className="min-w-0 flex-1 rounded-xl border border-border bg-bg-card px-3 py-1.5 text-[13px] text-text placeholder:text-text-ter focus:border-[rgba(40,33,22,0.22)] focus:outline-none"
+                          />
+                          <button
+                            type="submit"
+                            disabled={!keyValue.trim() || connecting === app.slug}
+                            className="rounded-full border border-border bg-bg-card px-4 py-2 text-[13.5px] text-text transition-colors hover:border-[rgba(40,33,22,0.22)] disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            {connecting === app.slug ? "Saving…" : "Save key"}
+                          </button>
+                        </form>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
             )}
           </div>
 
