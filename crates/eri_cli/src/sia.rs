@@ -29,6 +29,12 @@
 // (definition-of-done). Per-item, not module-wide, so unrelated dead code added to
 // this file before 3a still warns.
 
+use std::collections::BTreeMap;
+use std::path::Path;
+
+use serde::{Deserialize, Serialize};
+
+use crate::control_envelope::DEFAULT_CONFIDENCE_FLOOR;
 use crate::control_safety;
 
 /// The provenance tag sia stamps on every change it makes — distinct from a user
@@ -113,6 +119,100 @@ pub fn accept(proposal: &Proposal, support: usize) -> Verdict {
     })
 }
 
+// ── Slice 2: the RefinablePolicy surface ──────────────────────────────────────
+
+/// The most a confidence floor may be raised to — sia narrows (asks more) but
+/// never pushes a pattern to "impossible to auto-run" in one go. Conservative.
+#[allow(dead_code)]
+pub const MAX_FLOOR: f32 = 0.95;
+
+/// How much one accepted `RaiseFloor` bumps a pattern's floor — small, so a single
+/// refinement is conservative and reversible.
+#[allow(dead_code)]
+pub const FLOOR_STEP: f32 = 0.05;
+
+/// Per-pattern confidence-floor overrides — the owned, refine-able confidence
+/// state (review #3). A pattern with no override uses [`DEFAULT_CONFIDENCE_FLOOR`],
+/// so an **empty policy is byte-for-byte today's behavior** (zero behavior change
+/// until sia raises a floor, and until the gate reads it at Slice 3a). Persisted
+/// per-user (the caller resolves the user-scoped path — fixing the cautions-global
+/// inconsistency).
+#[allow(dead_code)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct ConfidencePolicy {
+    floors: BTreeMap<String, f32>,
+}
+
+impl ConfidencePolicy {
+    /// The auto-execute confidence floor for `pattern` — a sia-raised override, or
+    /// the default when none.
+    #[allow(dead_code)]
+    pub fn floor_for(&self, pattern: &str) -> f32 {
+        self.floors
+            .get(pattern)
+            .copied()
+            .unwrap_or(DEFAULT_CONFIDENCE_FLOOR)
+    }
+
+    /// Raise `pattern`'s floor one conservative, capped step (sia asks more readily
+    /// for it). Idempotent at [`MAX_FLOOR`]. Returns the new floor.
+    #[allow(dead_code)]
+    pub fn raise(&mut self, pattern: &str) -> f32 {
+        let next = (self.floor_for(pattern) + FLOOR_STEP).min(MAX_FLOOR);
+        self.floors.insert(pattern.to_string(), next);
+        next
+    }
+
+    /// Persist to `path` (pretty JSON). The caller resolves a user-scoped path.
+    #[allow(dead_code)]
+    pub fn save(&self, path: &Path) -> std::io::Result<()> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let json = serde_json::to_string_pretty(self)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        std::fs::write(path, json)
+    }
+
+    /// Load, or an empty (= default-everywhere) policy if the file is absent or
+    /// unreadable — so a fresh user is exactly today's behavior.
+    #[allow(dead_code)]
+    pub fn load(path: &Path) -> Self {
+        std::fs::read_to_string(path)
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default()
+    }
+}
+
+/// The narrow surface sia may write — the three refine-able / *narrowing*
+/// operations. It **cannot name the refusal list or widen a grant** (the hard
+/// line, structural — there is no such method). The concrete adapter (over the
+/// [`ConfidencePolicy`] + the world-graph chain weights + cautions, all
+/// user-scoped) is wired at Slice 3a; [`apply`] is the one place a [`Verdict::Accept`]
+/// becomes a change.
+#[allow(dead_code)]
+pub trait RefinablePolicy {
+    /// Ask more readily for `pattern` (raise its confidence floor).
+    fn raise_floor(&mut self, pattern: &str, provenance: &Provenance);
+    /// Weaken the learned chain `from` → `to` (it misfired).
+    fn downweight_chain(&mut self, from: &str, to: &str, provenance: &Provenance);
+    /// Ask before repeating `pattern` (a caution — a narrowing).
+    fn caution(&mut self, pattern: &str, provenance: &Provenance);
+}
+
+/// Apply an accepted [`Proposal`] to a refine-able policy — the ONE place a
+/// verdict becomes a change. Routes to one of the three narrowing ops; it
+/// structurally cannot do anything else (no refusal edit, no grant-widening).
+#[allow(dead_code)]
+pub fn apply(policy: &mut impl RefinablePolicy, proposal: &Proposal, provenance: &Provenance) {
+    match proposal {
+        Proposal::RaiseFloor { pattern } => policy.raise_floor(pattern, provenance),
+        Proposal::DownweightChain { from, to } => policy.downweight_chain(from, to, provenance),
+        Proposal::Caution { pattern } => policy.caution(pattern, provenance),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -164,5 +264,99 @@ mod tests {
             to: "wire transfer $500 to account 12345".into(),
         };
         assert!(matches!(accept(&p, 5), Verdict::Reject(_)));
+    }
+
+    #[test]
+    fn an_empty_confidence_policy_is_todays_default_behavior() {
+        let pol = ConfidencePolicy::default();
+        assert_eq!(pol.floor_for("click Save"), DEFAULT_CONFIDENCE_FLOOR);
+    }
+
+    #[test]
+    fn raising_a_floor_is_a_capped_conservative_step() {
+        let mut pol = ConfidencePolicy::default();
+        let after = pol.raise("quit Slack");
+        assert!((after - (DEFAULT_CONFIDENCE_FLOOR + FLOOR_STEP)).abs() < 1e-6);
+        // Repeated raises converge to the cap, never past it.
+        for _ in 0..50 {
+            pol.raise("quit Slack");
+        }
+        assert_eq!(pol.floor_for("quit Slack"), MAX_FLOOR);
+        // Other patterns are untouched — still the default.
+        assert_eq!(pol.floor_for("click Save"), DEFAULT_CONFIDENCE_FLOOR);
+    }
+
+    #[test]
+    fn confidence_policy_round_trips_and_a_missing_file_is_the_default() {
+        let dir = std::env::temp_dir().join(format!("eri-sia-{}", std::process::id()));
+        let path = dir.join("confidence.json");
+        let mut pol = ConfidencePolicy::default();
+        pol.raise("quit Slack");
+        pol.save(&path).expect("save");
+        assert_eq!(
+            ConfidencePolicy::load(&path).floor_for("quit Slack"),
+            pol.floor_for("quit Slack")
+        );
+        // A fresh user (no file) is exactly today's behavior, not an error.
+        assert_eq!(
+            ConfidencePolicy::load(Path::new("/nonexistent/eri/confidence.json")).floor_for("x"),
+            DEFAULT_CONFIDENCE_FLOOR
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[derive(Default)]
+    struct RecordingPolicy {
+        ops: Vec<String>,
+    }
+    impl RefinablePolicy for RecordingPolicy {
+        fn raise_floor(&mut self, pattern: &str, _p: &Provenance) {
+            self.ops.push(format!("raise_floor:{pattern}"));
+        }
+        fn downweight_chain(&mut self, from: &str, to: &str, _p: &Provenance) {
+            self.ops.push(format!("downweight:{from}->{to}"));
+        }
+        fn caution(&mut self, pattern: &str, _p: &Provenance) {
+            self.ops.push(format!("caution:{pattern}"));
+        }
+    }
+
+    #[test]
+    fn apply_routes_each_proposal_to_its_narrowing_op() {
+        let prov = Provenance {
+            source: SIA_SOURCE,
+            support: 3,
+        };
+        let mut pol = RecordingPolicy::default();
+        apply(
+            &mut pol,
+            &Proposal::RaiseFloor {
+                pattern: "click Deploy".into(),
+            },
+            &prov,
+        );
+        apply(
+            &mut pol,
+            &Proposal::DownweightChain {
+                from: "A".into(),
+                to: "B".into(),
+            },
+            &prov,
+        );
+        apply(
+            &mut pol,
+            &Proposal::Caution {
+                pattern: "quit Slack".into(),
+            },
+            &prov,
+        );
+        assert_eq!(
+            pol.ops,
+            vec![
+                "raise_floor:click Deploy",
+                "downweight:A->B",
+                "caution:quit Slack",
+            ]
+        );
     }
 }
