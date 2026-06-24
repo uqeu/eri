@@ -48,6 +48,26 @@ interface RawToolkit {
   };
 }
 
+/** Composio's own platform/meta toolkits (its web-automation "Browser Tool",
+ *  web-search, and the umbrella "Composio" connector). They appear in the
+ *  catalog but aren't user-account connections — eri uses them server-side, and
+ *  a user "Connect" on them can't succeed. Keep them out of the directory so the
+ *  list only shows apps a person can actually link. */
+const COMPOSIO_INTERNAL_SLUGS = new Set([
+  "composio",
+  "composio_search",
+  "browser_tool",
+  "browserbase_tool",
+]);
+
+function isComposioInternalToolkit(slug: string, name: string): boolean {
+  if (COMPOSIO_INTERNAL_SLUGS.has(slug.toLowerCase())) return true;
+  const n = name.trim().toLowerCase();
+  if (n === "browser tool") return true;
+  // "Composio", "Composio Search", "Composio Browser Tool", …
+  return /^composio(\s|_|$)/i.test(name.trim());
+}
+
 /** What it takes for a user to connect an app:
  *  - `managed`     — Composio's OAuth: one click, zero admin setup.
  *  - `api_key`     — the user pastes their own API key; no admin OAuth app.
@@ -150,6 +170,7 @@ export class ComposioApiClient implements ComposioClient {
       const body = (await res.json()) as { items?: RawToolkit[]; next_cursor?: string | null };
       for (const t of body.items ?? []) {
         if (!t.slug || !t.name) continue;
+        if (isComposioInternalToolkit(t.slug, t.name)) continue;
         out.push({
           slug: t.slug,
           name: t.name,
