@@ -74,6 +74,7 @@ mod sandbox;
 mod sdk_tools;
 mod search;
 mod session;
+mod sia;
 mod skills;
 mod sync;
 mod trace;
