@@ -21,6 +21,8 @@
 //! Deterministic + token-frugal (no extra base-engine call). The reversibility
 //! and refusal axes of the envelope are independent and untouched by this step.
 
+use std::sync::{Arc, Mutex};
+
 use serde_json::Value;
 
 use eri_inference::memory::world_recall::WorldModel;
@@ -102,6 +104,73 @@ pub fn anticipate(
     }
 }
 
+/// The world the predict step reads for one control run (review #3): the opened
+/// world-model handle (fork b) **plus** the cross-turn cursor — the last action
+/// that executed in an earlier turn. One value the [`ControlGate`](crate::control_agent::ControlGate)
+/// carries instead of two loose fields: the loop seeds the cursor once per turn,
+/// the predict step reads both. Cloning shares the handle + cursor (only the loop
+/// writes the cursor). `Default` = signed-out (no world, empty cursor).
+#[derive(Clone, Debug, Default)]
+pub struct WorldView {
+    world: Option<Arc<WorldModel>>,
+    last_action: Arc<Mutex<Option<String>>>,
+}
+
+impl WorldView {
+    /// Replace the world handle (`None` = signed-out), keeping the cross-turn
+    /// cursor — so a gate clone that attaches the world keeps any seeded
+    /// predecessor.
+    pub fn with_world(mut self, world: Option<WorldModel>) -> Self {
+        self.world = world.map(Arc::new);
+        self
+    }
+
+    /// Seed the cross-turn predecessor (the last executed action), once per turn.
+    /// Best-effort: a poisoned lock is ignored (the forecast falls back to the
+    /// within-turn predecessor).
+    pub fn set_last_action(&self, action: Option<String>) {
+        if let Ok(mut slot) = self.last_action.lock() {
+            *slot = action;
+        }
+    }
+
+    /// The cross-turn predecessor action, if any.
+    pub fn last_action(&self) -> Option<String> {
+        self.last_action.lock().ok().and_then(|slot| slot.clone())
+    }
+
+    /// The opened world-model handle, if signed-in.
+    pub fn world(&self) -> Option<&WorldModel> {
+        self.world.as_deref()
+    }
+}
+
+/// The predecessor the predict step checks chain corroboration against: the
+/// action executed earlier THIS turn (`within_turn`), else the cross-turn cursor.
+/// Mirrors how the proactive-chain FEED records consecutive executed pairs.
+fn predict_prev<'a>(within_turn: Option<&'a str>, cross_turn: Option<&'a str>) -> Option<&'a str> {
+    within_turn.or(cross_turn)
+}
+
+/// The predict step (ADR-0007 §4) for one action — the single deep entry. Blends
+/// the engine's self-reported confidence (`input.confidence`) with the world
+/// model's anticipation read through `view`: the chain corroboration after the
+/// `within_turn` predecessor (or the cross-turn cursor) plus the entity grounding.
+/// Returns the confidence the confirmation envelope gates on. The envelope's
+/// reversibility/refusal axes are independent and unaffected.
+pub fn confidence_for(
+    input: &Value,
+    view: &WorldView,
+    within_turn: Option<&str>,
+    action: &ControlAction,
+) -> f32 {
+    let model_confidence = forecast_confidence(input);
+    let cross_turn = view.last_action();
+    let prev = predict_prev(within_turn, cross_turn.as_deref());
+    let (expected, grounded) = anticipate(view.world(), prev, action);
+    forecast(model_confidence, expected, grounded)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -153,5 +222,54 @@ mod tests {
     fn forecast_stays_in_unit_range() {
         assert_eq!(forecast(1.5, false, false), 1.0);
         assert_eq!(forecast(-1.0, true, true), EXPECTED_GROUNDED_FLOOR);
+    }
+
+    #[test]
+    fn predict_prev_prefers_within_turn_then_falls_back_to_cross_turn() {
+        // Within a turn, the immediately prior executed action is the predecessor;
+        // for a turn's first action (none executed yet), the cross-turn cursor is.
+        assert_eq!(predict_prev(Some("B"), Some("A")), Some("B"));
+        assert_eq!(predict_prev(None, Some("A")), Some("A"));
+        assert_eq!(predict_prev(None, None), None);
+    }
+
+    #[test]
+    fn world_view_seeds_and_keeps_the_cursor_across_with_world() {
+        let view = WorldView::default();
+        assert_eq!(view.last_action(), None);
+        view.set_last_action(Some("open editor".into()));
+        // Attaching the world handle keeps the seeded cursor (the clone
+        // run_control_agent makes to attach the user's world).
+        let attached = view.clone().with_world(None);
+        assert_eq!(attached.last_action().as_deref(), Some("open editor"));
+        assert!(attached.world().is_none());
+    }
+
+    #[test]
+    fn confidence_for_lifts_an_unforecast_action_the_world_model_anticipates() {
+        use crate::control_agent::ClickTarget;
+        use eri_graph::{Graph, world};
+        use eri_inference::memory::world_recall::WorldModel;
+
+        // The world model has learned "open editor" → <click Run> as an
+        // established step; the cursor points at "open editor".
+        let g = Graph::open_in_memory().unwrap();
+        let action = ControlAction::Click(ClickTarget::Element("Run".into()));
+        world::link_next(&g, "open editor", &action.describe()).unwrap();
+        world::link_next(&g, "open editor", &action.describe()).unwrap();
+        let view = WorldView::default().with_world(Some(WorldModel::from_graph(g)));
+        view.set_last_action(Some("open editor".into()));
+
+        // The engine gave NO confidence (unforecast 0.5, below the floor); the
+        // chain corroboration lifts the forecast over the auto floor.
+        let lifted = confidence_for(&json!({}), &view, None, &action);
+        assert!(
+            lifted >= DEFAULT_CONFIDENCE_FLOOR,
+            "world corroboration lifts an unforecast action over the auto floor"
+        );
+
+        // No world view → the engine's own (unforecast) confidence stands, no lift.
+        let bare = confidence_for(&json!({}), &WorldView::default(), None, &action);
+        assert_eq!(bare, UNFORECAST_CONFIDENCE);
     }
 }
