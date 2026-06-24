@@ -172,16 +172,16 @@ function PlanIcon() {
     >
       <defs>
         <linearGradient id="planGrad" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="hsl(var(--accent))" stopOpacity="0.4" />
-          <stop offset="100%" stopColor="hsl(var(--accent))" stopOpacity="0.05" />
+          <stop offset="0%" stopColor="#3a3833" stopOpacity="0.4" />
+          <stop offset="100%" stopColor="#3a3833" stopOpacity="0.05" />
         </linearGradient>
       </defs>
-      <circle cx="28" cy="28" r="3" fill="hsl(var(--accent))" />
+      <circle cx="28" cy="28" r="3" fill="#3a3833" />
       <circle
         cx="28"
         cy="28"
         r="9"
-        stroke="hsl(var(--accent))"
+        stroke="#3a3833"
         strokeOpacity="0.5"
         strokeWidth="1.2"
         fill="url(#planGrad)"
@@ -190,7 +190,7 @@ function PlanIcon() {
         cx="28"
         cy="28"
         r="17"
-        stroke="hsl(var(--accent))"
+        stroke="#3a3833"
         strokeOpacity="0.25"
         strokeWidth="1"
       />
@@ -198,14 +198,14 @@ function PlanIcon() {
         cx="28"
         cy="28"
         r="25"
-        stroke="hsl(var(--accent))"
+        stroke="#3a3833"
         strokeOpacity="0.1"
         strokeWidth="1"
       />
-      <circle cx="28" cy="11" r="1.8" fill="hsl(var(--accent))" opacity="0.7" />
-      <circle cx="45" cy="28" r="1.8" fill="hsl(var(--accent))" opacity="0.5" />
-      <circle cx="28" cy="45" r="1.8" fill="hsl(var(--accent))" opacity="0.5" />
-      <circle cx="11" cy="28" r="1.8" fill="hsl(var(--accent))" opacity="0.5" />
+      <circle cx="28" cy="11" r="1.8" fill="#3a3833" opacity="0.7" />
+      <circle cx="45" cy="28" r="1.8" fill="#3a3833" opacity="0.5" />
+      <circle cx="28" cy="45" r="1.8" fill="#3a3833" opacity="0.5" />
+      <circle cx="11" cy="28" r="1.8" fill="#3a3833" opacity="0.5" />
     </svg>
   );
 }
@@ -504,7 +504,7 @@ export default function BillingPage() {
                   onClick={() => setCadence("monthly")}
                   className={`px-3 py-1 text-[12px] rounded-full transition ${
                     cadence === "monthly"
-                      ? "bg-accent text-[#1a1d00]"
+                      ? "bg-text text-bg"
                       : "text-text-sec hover:text-text"
                   }`}
                 >
@@ -517,7 +517,7 @@ export default function BillingPage() {
                   onClick={() => setCadence("yearly")}
                   className={`px-3 py-1 text-[12px] rounded-full transition ${
                     cadence === "yearly"
-                      ? "bg-accent text-[#1a1d00]"
+                      ? "bg-text text-bg"
                       : "text-text-sec hover:text-text"
                   }`}
                 >
@@ -549,7 +549,7 @@ export default function BillingPage() {
                           {plan.name}
                         </span>
                         {isCurrent && (
-                          <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-accent text-[#1a1d00]">
+                          <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-text text-bg">
                             Current
                           </span>
                         )}
@@ -647,7 +647,7 @@ export default function BillingPage() {
                 title="Coming soon"
               >
                 <span>Buy more</span>
-                <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-accent text-[#1a1d00]">
+                <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-bg-card-2 text-text-ter">
                   Soon
                 </span>
               </button>

@@ -192,7 +192,7 @@ export default function DashboardPage() {
                 <span
                   className={`rounded-full px-2 py-0.5 font-geist text-[11px] ${
                     step.status === "done"
-                      ? "bg-accent text-[#1a1d00]"
+                      ? "bg-[rgba(28,26,23,0.10)] text-text"
                       : "bg-bg-card-2 text-text-sec"
                   }`}
                 >
@@ -282,7 +282,7 @@ export default function DashboardPage() {
           </div>
           <div className="mt-4 h-2 w-full overflow-hidden rounded-full bg-bg-card-2">
             <div
-              className="h-full rounded-full bg-accent transition-all"
+              className="h-full rounded-full bg-text transition-all"
               style={{ width: `${percent}%` }}
             />
           </div>
