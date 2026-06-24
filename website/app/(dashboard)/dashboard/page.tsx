@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { authedFetch, useUser } from "@/lib/auth-client";
 import { dashboardOnboardingSteps } from "@/lib/dashboard-onboarding";
-import { EriThoughtStream } from "@/components/EriThoughtStream";
 
 interface SubscriptionSummary {
   tier: string;
@@ -161,18 +160,6 @@ export default function DashboardPage() {
           Your account, usage, and connected devices, all in one place.
         </p>
       </header>
-
-      <section className="mt-9">
-        <div className="mb-3 flex items-baseline justify-between gap-3">
-          <h2 className="font-display text-[1.25rem] font-600 tracking-[-0.02em] text-text">
-            eri at work
-          </h2>
-          <span className="font-geist text-[12px] text-text-ter">
-            A preview of how eri thinks and acts across your apps.
-          </span>
-        </div>
-        <EriThoughtStream />
-      </section>
 
       <section className="mt-9 rounded-2xl border border-border bg-bg-card p-6 md:p-7">
         <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
