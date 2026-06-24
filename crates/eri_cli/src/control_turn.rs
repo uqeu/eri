@@ -652,12 +652,63 @@ pub fn control_turn_log(engine: &str, goal: &str, out: &TurnOutput) -> ControlTu
     }
 }
 
+/// How the confirmation envelope resolved one action — the per-action signal the
+/// sia loop (P3) learns from (ADR-0007 §5).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OutcomeKind {
+    /// The envelope auto-ran it (reversible + confident + known).
+    AutoExecuted,
+    /// The user confirmed a held action.
+    Confirmed,
+    /// The user declined a held action — a *negative* signal.
+    Declined,
+    /// The absolute boundary handed it back.
+    Refused,
+}
+
+impl OutcomeKind {
+    /// A stable label for the learn-do store / trust feed.
+    pub fn label(self) -> &'static str {
+        match self {
+            OutcomeKind::AutoExecuted => "auto-executed",
+            OutcomeKind::Confirmed => "confirmed",
+            OutcomeKind::Declined => "declined",
+            OutcomeKind::Refused => "refused",
+        }
+    }
+}
+
+/// What the gate decided for one action. The **one outcome stream** the sia loop
+/// reads (P3): auto-executed / confirmed / declined / refused, captured uniformly
+/// through [`ControlTurnSink::record_outcome`]. It flows through the SAME sink as
+/// turns, escalations, and transitions — so it *consolidates* the signal (the
+/// declined + refused outcomes were dropped to prose before), it is not a new sink.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Outcome {
+    /// The action eri gated (its `describe()`).
+    pub action: String,
+    pub disposition: OutcomeKind,
+}
+
+impl Outcome {
+    /// One-line summary for the learn-do store.
+    pub fn summary(&self) -> String {
+        format!("{}: {}", self.disposition.label(), self.action)
+    }
+}
+
 /// Where control-turn records go. A real seam (not a `cfg!(test)` branch): prod
 /// uses [`MemorySink`]; tests use a recording double and assert the sequence. So
 /// "did the loop log the right thing on the right turn?" — including across an
 /// escalation — is verifiable, which it wasn't when the sink no-op'd under test.
 pub trait ControlTurnSink: Send + Sync {
     fn record(&self, log: ControlTurnLog);
+
+    /// Record the per-action gate [`Outcome`] (auto-executed / confirmed /
+    /// declined / refused) — the sia loop's outcome stream. Captures the declined
+    /// and refused signals previously dropped to prose. Default no-op so test
+    /// sinks do no IO.
+    fn record_outcome(&self, _outcome: &Outcome) {}
 
     /// Record ONE engine escalation. The unified [`crate::engine_ladder`] emits
     /// this on every escalation across BOTH the build and control loops, so the
@@ -708,6 +759,16 @@ impl ControlTurnSink for MemorySink {
         if let Ok(mut store) = eri_inference::memory::MemoryStore::open_for(self.user_id.as_deref())
         {
             let _ = store.insert("engine_escalation", &workspace, &escalation_summary(event));
+        }
+    }
+
+    fn record_outcome(&self, outcome: &Outcome) {
+        // The sia outcome stream lands in the SAME user-scoped learn-do store as
+        // turns + escalations — one seam. Best-effort; never blocks the loop.
+        let workspace = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        if let Ok(mut store) = eri_inference::memory::MemoryStore::open_for(self.user_id.as_deref())
+        {
+            let _ = store.insert("control_outcome", &workspace, &outcome.summary());
         }
     }
 

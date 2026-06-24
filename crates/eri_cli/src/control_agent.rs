@@ -1079,6 +1079,11 @@ pub struct StepOutcome {
     /// — the input to the world-model proactive chain (P2: `observe_transition`).
     /// Excludes refused/declined/failed actions.
     pub executed: Vec<String>,
+    /// The per-action gate [`Outcome`](crate::control_turn::Outcome)s this step —
+    /// auto-executed / confirmed / declined / refused — the sia loop's signal
+    /// stream (P3 Slice 0). Recorded through the sink by `drive_control_loop`.
+    /// Coding-tool primitives are excluded (matching `executed`'s granularity).
+    pub outcomes: Vec<crate::control_turn::Outcome>,
 }
 
 /// The outcome of running one action through the gate, after asking the user if
@@ -1260,6 +1265,7 @@ pub async fn execute_tool_calls(
         );
         // ONE gate (the shared gauntlet); the main path records per-call and keeps
         // going to the next call regardless of this one's outcome.
+        use crate::control_turn::{Outcome, OutcomeKind};
         match gate_and_confirm(bridge, gate, confirm, &action, confidence).await {
             Gated::Ran { result, confirmed } => {
                 let verb = action.describe();
@@ -1267,6 +1273,14 @@ pub async fn execute_tool_calls(
                     format!("confirmed: {verb} -> {result}")
                 } else {
                     format!("{verb} -> {result}")
+                });
+                out.outcomes.push(Outcome {
+                    action: verb.clone(),
+                    disposition: if confirmed {
+                        OutcomeKind::Confirmed
+                    } else {
+                        OutcomeKind::AutoExecuted
+                    },
                 });
                 out.executed.push(verb);
                 out.results.push(tool_result(id, &result, false));
@@ -1279,6 +1293,10 @@ pub async fn execute_tool_calls(
                 // goal eri is pursuing.
                 out.log
                     .push(format!("refused: {} — {message}", action.describe()));
+                out.outcomes.push(Outcome {
+                    action: action.describe(),
+                    disposition: OutcomeKind::Refused,
+                });
                 out.results.push(tool_result(
                     id,
                     &format!("REFUSED (hand back to the user): {message}"),
@@ -1287,10 +1305,15 @@ pub async fn execute_tool_calls(
             }
             Gated::Declined(desc) => {
                 out.log.push(format!("declined: {desc}"));
+                out.outcomes.push(Outcome {
+                    action: action.describe(),
+                    disposition: OutcomeKind::Declined,
+                });
                 out.results
                     .push(tool_result(id, "user declined this action", false));
             }
             Gated::Failed(e) => {
+                // An execution error, not a gate decision — no outcome to learn from.
                 out.log.push(format!("{} failed: {e}", action.describe()));
                 out.results
                     .push(tool_result(id, &format!("error: {e}"), true));
@@ -2323,6 +2346,13 @@ pub(crate) async fn drive_control_loop(
             if std::env::var_os("ERI_DEBUG").is_some() {
                 let _ = writeln!(stdout, "[eri] {line}");
             }
+        }
+        // P3 Slice 0: record each per-action gate outcome (auto / confirm /
+        // decline / refuse) into the ONE sia outcome stream — through the SAME
+        // sink as transitions, so test sinks do no IO. Captures the decline +
+        // refuse signals that were dropped to prose before.
+        for outcome in &executed.outcomes {
+            sink.record_outcome(outcome);
         }
         // P2 proactive chains (Q16): record each consecutive executed action as a
         // weighted `next` transition in the world model — through the SINK, so
@@ -3400,6 +3430,7 @@ mod tests {
     struct RecordingSink {
         turns: Mutex<Vec<crate::control_turn::ControlTurnLog>>,
         escalations: Mutex<Vec<crate::engine_ladder::LadderEvent>>,
+        outcomes: Mutex<Vec<crate::control_turn::Outcome>>,
     }
     impl crate::control_turn::ControlTurnSink for RecordingSink {
         fn record(&self, log: crate::control_turn::ControlTurnLog) {
@@ -3408,6 +3439,9 @@ mod tests {
         fn record_escalation(&self, event: &crate::engine_ladder::LadderEvent) {
             self.escalations.lock().unwrap().push(event.clone());
         }
+        fn record_outcome(&self, outcome: &crate::control_turn::Outcome) {
+            self.outcomes.lock().unwrap().push(outcome.clone());
+        }
     }
     impl RecordingSink {
         fn logs(&self) -> Vec<crate::control_turn::ControlTurnLog> {
@@ -3415,6 +3449,9 @@ mod tests {
         }
         fn escalations(&self) -> Vec<crate::engine_ladder::LadderEvent> {
             self.escalations.lock().unwrap().clone()
+        }
+        fn outcomes(&self) -> Vec<crate::control_turn::Outcome> {
+            self.outcomes.lock().unwrap().clone()
         }
     }
 
@@ -3481,6 +3518,15 @@ mod tests {
         assert_eq!(logs.len(), 2);
         assert!(logs.iter().all(|l| l.engine == "local"));
         assert_eq!(logs[0].tool_names, vec!["open_app"]);
+        // P3 Slice 0: the open's gate outcome reached the sia stream through the
+        // SAME sink (held → confirmed here, since `confirm` returns true).
+        let outcomes = sink.outcomes();
+        assert_eq!(outcomes.len(), 1);
+        assert!(outcomes[0].action.contains("Safari"));
+        assert_eq!(
+            outcomes[0].disposition,
+            crate::control_turn::OutcomeKind::Confirmed
+        );
     }
 
     #[tokio::test]
@@ -4419,6 +4465,79 @@ mod tests {
         assert!(
             out.executed.iter().any(|a| a.contains("scroll")),
             "a chain-corroborated reversible action auto-runs through the gate's world handle"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_gate_outcome_stream_captures_every_disposition_including_refused_and_declined() {
+        // P3 Slice 0: every gated action emits ONE typed Outcome — auto-executed,
+        // confirmed, declined, refused — into out.outcomes (recorded through the
+        // sink by the loop). The decline + refuse signals, dropped to prose before,
+        // are now captured for sia to learn from.
+        use crate::control_turn::OutcomeKind;
+        let bridge = MockBridge::with_snapshot(graph());
+        let gate = ControlGate::default();
+
+        // confirm = YES: a confident reversible action AUTO-EXECUTES; an unforecast
+        // one is held then CONFIRMED; a sensitive one is REFUSED (before any ask).
+        let mut yes = |_: &str, _: Option<crate::control_safety::Permission>| true;
+        let calls = vec![
+            (
+                "1".into(),
+                "scroll".into(),
+                json!({ "direction": "down", "amount": 1, "confidence": 0.95 }),
+            ),
+            (
+                "2".into(),
+                "scroll".into(),
+                json!({ "direction": "down", "amount": 2 }),
+            ),
+            (
+                "3".into(),
+                "type".into(),
+                json!({ "text": "my password is hunter2" }),
+            ),
+        ];
+        let out = execute_tool_calls(&bridge, &gate, &mut yes, None, &calls).await;
+        assert_eq!(
+            out.outcomes
+                .iter()
+                .map(|o| o.disposition)
+                .collect::<Vec<_>>(),
+            vec![
+                OutcomeKind::AutoExecuted,
+                OutcomeKind::Confirmed,
+                OutcomeKind::Refused
+            ]
+        );
+        assert!(
+            out.outcomes
+                .iter()
+                .any(|o| o.disposition == OutcomeKind::Refused && o.action.contains("type")),
+            "the refused action is named — the negative signal sia learns from"
+        );
+
+        // confirm = NO: the held action is DECLINED — captured, not dropped.
+        let mut no = |_: &str, _: Option<crate::control_safety::Permission>| false;
+        let declined = execute_tool_calls(
+            &bridge,
+            &gate,
+            &mut no,
+            None,
+            &[(
+                "1".into(),
+                "scroll".into(),
+                json!({ "direction": "down", "amount": 1 }),
+            )],
+        )
+        .await;
+        assert_eq!(
+            declined
+                .outcomes
+                .iter()
+                .map(|o| o.disposition)
+                .collect::<Vec<_>>(),
+            vec![OutcomeKind::Declined]
         );
     }
 
