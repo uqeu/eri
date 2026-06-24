@@ -241,9 +241,9 @@ function Row({ title, description, action }: RowProps) {
   return (
     <div className="flex items-center justify-between gap-6 py-4">
       <div className="min-w-0 flex-1">
-        <div className="text-[14px] text-paper">{title}</div>
+        <div className="text-[14px] text-text">{title}</div>
         {description && (
-          <div className="mt-1 text-[13px] text-muted leading-relaxed">
+          <div className="mt-1 text-[13px] text-text-sec leading-relaxed">
             {description}
           </div>
         )}
@@ -263,14 +263,14 @@ function Section({ title, description, children }: SectionProps) {
   return (
     <section className="mt-10 first:mt-0">
       <div className="mb-2">
-        <h2 className="text-[15px] font-medium text-paper">{title}</h2>
+        <h2 className="text-[15px] font-medium text-text">{title}</h2>
         {description && (
-          <p className="mt-1 text-[12px] text-muted leading-relaxed">
+          <p className="mt-1 text-[12px] text-text-sec leading-relaxed">
             {description}
           </p>
         )}
       </div>
-      <div className="divide-y divide-white/[0.06] border-t border-white/[0.06]">
+      <div className="divide-y divide-border border-t border-border">
         {children}
       </div>
     </section>
@@ -441,15 +441,15 @@ export default function BillingPage() {
     : null;
 
   return (
-    <div className="max-w-3xl">
-      <h1 className="font-display text-3xl md:text-4xl tracking-tight text-paper">
+    <div className="max-w-3xl font-geist">
+      <h1 className="font-display text-[clamp(2rem,4vw,2.9rem)] font-600 leading-[1.04] tracking-[-0.03em] text-text">
         Settings
       </h1>
 
       {error && (
         <div
           role="alert"
-          className="mt-6 rounded-md border border-red-500/30 bg-red-500/5 px-4 py-3 text-[13px] text-red-300"
+          className="mt-6 rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-[13px] text-red-600"
         >
           {error}
         </div>
@@ -463,15 +463,15 @@ export default function BillingPage() {
               <PlanIcon />
             </div>
             <div className="min-w-0">
-              <h2 className="text-[18px] font-medium text-paper">
+              <h2 className="text-[18px] font-medium text-text">
                 eri {currentPlan.name} plan
               </h2>
               {isPaid && (
-                <p className="mt-0.5 text-[13px] text-paper/80">
+                <p className="mt-0.5 text-[13px] text-text-sec">
                   {currentPlan.blurb}
                 </p>
               )}
-              <p className="mt-0.5 text-[12px] text-muted">
+              <p className="mt-0.5 text-[12px] text-text-ter">
                 {renewLabel ?? (isPaid ? "Active" : "No subscription yet")}
               </p>
             </div>
@@ -479,7 +479,7 @@ export default function BillingPage() {
           <button
             type="button"
             onClick={() => setPicking((v) => !v)}
-            className="shrink-0 border border-white/15 hover:border-paper text-paper px-3.5 py-1.5 rounded-md text-[13px] transition"
+            className="shrink-0 rounded-full border border-border bg-bg-card px-4 py-2 text-[13.5px] text-text transition hover:border-[rgba(40,33,22,0.22)]"
           >
             {picking ? "Close" : "Adjust plan"}
           </button>
@@ -487,15 +487,15 @@ export default function BillingPage() {
 
         {/* Inline plan picker */}
         {picking && (
-          <div className="mt-2 rounded-lg border border-white/[0.08] bg-white/[0.015] p-5">
+          <div className="mt-2 rounded-2xl border border-border bg-bg-card p-5">
             <div className="flex items-center justify-between gap-4">
-              <h3 className="text-[14px] font-medium text-paper">
+              <h3 className="text-[14px] font-medium text-text">
                 Choose a plan
               </h3>
               <div
                 role="tablist"
                 aria-label="Billing cadence"
-                className="inline-flex rounded-full border border-white/10 bg-white/[0.02] p-0.5"
+                className="inline-flex rounded-full border border-border bg-bg-card-2 p-0.5"
               >
                 <button
                   type="button"
@@ -504,8 +504,8 @@ export default function BillingPage() {
                   onClick={() => setCadence("monthly")}
                   className={`px-3 py-1 text-[12px] rounded-full transition ${
                     cadence === "monthly"
-                      ? "bg-accent text-ink"
-                      : "text-muted hover:text-paper"
+                      ? "bg-accent text-[#1a1d00]"
+                      : "text-text-sec hover:text-text"
                   }`}
                 >
                   Monthly
@@ -517,8 +517,8 @@ export default function BillingPage() {
                   onClick={() => setCadence("yearly")}
                   className={`px-3 py-1 text-[12px] rounded-full transition ${
                     cadence === "yearly"
-                      ? "bg-accent text-ink"
-                      : "text-muted hover:text-paper"
+                      ? "bg-accent text-[#1a1d00]"
+                      : "text-text-sec hover:text-text"
                   }`}
                 >
                   Yearly
@@ -526,7 +526,7 @@ export default function BillingPage() {
               </div>
             </div>
 
-            <ul className="mt-4 divide-y divide-white/[0.06]">
+            <ul className="mt-4 divide-y divide-border">
               {PLAN_DEFS.map((plan) => {
                 const isCurrent = plan.slug === tier;
                 const price =
@@ -545,21 +545,21 @@ export default function BillingPage() {
                   >
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
-                        <span className="text-[14px] text-paper">
+                        <span className="text-[14px] text-text">
                           {plan.name}
                         </span>
                         {isCurrent && (
-                          <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded-sm bg-accent/20 text-accent border border-accent/30">
+                          <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-accent text-[#1a1d00]">
                             Current
                           </span>
                         )}
                       </div>
-                      <p className="mt-0.5 text-[12px] text-muted">
+                      <p className="mt-0.5 text-[12px] text-text-sec">
                         {plan.blurb}
                       </p>
                     </div>
-                    <div className="text-[13px] text-muted whitespace-nowrap">
-                      <span className="text-paper">{formatPrice(price)}</span>
+                    <div className="text-[13px] text-text-sec whitespace-nowrap">
+                      <span className="text-text">{formatPrice(price)}</span>
                       {suffix && <span className="ml-1">{suffix}</span>}
                     </div>
                     <div className="md:text-right">
@@ -568,27 +568,27 @@ export default function BillingPage() {
                           type="button"
                           onClick={action.onClick}
                           disabled={action.disabled}
-                          className={`px-3 py-1.5 rounded-md text-[12px] transition disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap ${
+                          className={`rounded-full px-4 py-2 text-[13.5px] transition disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap ${
                             action.style === "primary"
-                              ? "btn-primary"
-                              : "border border-white/15 hover:border-paper text-paper"
+                              ? "bg-[#16140f] font-600 text-white duration-200 hover:-translate-y-px"
+                              : "border border-border bg-bg-card text-text hover:border-[rgba(40,33,22,0.22)]"
                           }`}
                         >
                           {action.label}
                         </button>
                       ) : (
-                        <span className="text-[12px] text-muted">—</span>
+                        <span className="text-[12px] text-text-sec">—</span>
                       )}
                     </div>
                   </li>
                 );
               })}
             </ul>
-            <p className="mt-4 text-[12px] text-muted leading-relaxed">
+            <p className="mt-4 text-[12px] text-text-sec leading-relaxed">
               Need Teams or Enterprise?{" "}
               <a
                 href="mailto:phlotu@gmail.com?subject=Teams%20plan"
-                className="text-accent hover:underline"
+                className="text-text underline-offset-2 hover:underline"
               >
                 Contact sales
               </a>
@@ -607,7 +607,7 @@ export default function BillingPage() {
                   <span>Card on file — managed via Stripe</span>
                 </div>
               ) : (
-                <span className="text-muted">No payment method on file</span>
+                <span className="text-text-sec">No payment method on file</span>
               )
             }
             action={
@@ -616,7 +616,7 @@ export default function BillingPage() {
                   type="button"
                   onClick={() => void openPortal()}
                   disabled={pending !== null}
-                  className="border border-white/15 hover:border-paper text-paper px-3.5 py-1.5 rounded-md text-[13px] transition disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="rounded-full border border-border bg-bg-card px-4 py-2 text-[13.5px] text-text transition hover:border-[rgba(40,33,22,0.22)] disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   {pending === "portal" ? "Opening…" : "Update"}
                 </button>
@@ -643,11 +643,11 @@ export default function BillingPage() {
               <button
                 type="button"
                 disabled
-                className="inline-flex items-center gap-2 border border-white/15 text-paper/60 px-3.5 py-1.5 rounded-md text-[13px] cursor-not-allowed"
+                className="inline-flex items-center gap-2 rounded-full border border-border bg-bg-card px-4 py-2 text-[13.5px] text-text-ter cursor-not-allowed"
                 title="Coming soon"
               >
                 <span>Buy more</span>
-                <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded-sm bg-accent/20 text-accent border border-accent/30">
+                <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-accent text-[#1a1d00]">
                   Soon
                 </span>
               </button>
@@ -660,7 +660,7 @@ export default function BillingPage() {
               <button
                 type="button"
                 disabled
-                className="border border-white/15 text-paper/60 px-3.5 py-1.5 rounded-md text-[13px] cursor-not-allowed"
+                className="rounded-full border border-border bg-bg-card px-4 py-2 text-[13.5px] text-text-ter cursor-not-allowed"
                 title="Coming soon"
               >
                 Turn on
@@ -683,7 +683,7 @@ export default function BillingPage() {
                   type="button"
                   onClick={() => void openPortal()}
                   disabled={pending !== null}
-                  className="border border-white/15 hover:border-paper text-paper px-3.5 py-1.5 rounded-md text-[13px] transition disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="rounded-full border border-border bg-bg-card px-4 py-2 text-[13.5px] text-text transition hover:border-[rgba(40,33,22,0.22)] disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   View invoices
                 </button>
@@ -703,7 +703,7 @@ export default function BillingPage() {
                   type="button"
                   onClick={() => void openPortal()}
                   disabled={pending !== null}
-                  className="bg-red-500/80 hover:bg-red-500 text-paper px-3.5 py-1.5 rounded-md text-[13px] transition disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="rounded-full border border-red-300 bg-bg-card px-4 py-2 text-[13.5px] text-red-600 transition hover:bg-red-50 disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   Cancel
                 </button>

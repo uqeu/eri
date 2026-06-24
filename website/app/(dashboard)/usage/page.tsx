@@ -72,9 +72,9 @@ function BarChart({ data }: BarChartProps) {
         y1={padding.top + innerHeight}
         x2={padding.left + innerWidth}
         y2={padding.top + innerHeight}
-        stroke="rgba(255,255,255,0.1)"
+        stroke="rgba(40,33,22,0.12)"
       />
-      <text x={padding.left - 8} y={padding.top + 4} textAnchor="end" fontSize={10} fill="#8A8A8A">
+      <text x={padding.left - 8} y={padding.top + 4} textAnchor="end" fontSize={10} fill="#a39b8c">
         {compact(safeMax)}
       </text>
       <text
@@ -82,7 +82,7 @@ function BarChart({ data }: BarChartProps) {
         y={padding.top + innerHeight + 4}
         textAnchor="end"
         fontSize={10}
-        fill="#8A8A8A"
+        fill="#a39b8c"
       >
         0
       </text>
@@ -111,7 +111,7 @@ function BarChart({ data }: BarChartProps) {
                 y={padding.top + innerHeight + 16}
                 textAnchor="middle"
                 fontSize={10}
-                fill="#8A8A8A"
+                fill="#a39b8c"
               >
                 {shortDate(point.date)}
               </text>
@@ -165,58 +165,58 @@ export default function UsagePage() {
       : 0;
 
   return (
-    <div className="max-w-5xl">
-      <p className="text-xs uppercase tracking-[0.25em] text-accent">Usage</p>
-      <h1 className="mt-3 font-display text-4xl md:text-5xl tracking-tight">Usage history</h1>
+    <div className="max-w-5xl font-geist">
+      <p className="font-geist-mono text-[11px] uppercase tracking-[0.18em] text-text-ter">Usage</p>
+      <h1 className="mt-3 font-display text-[clamp(2rem,4vw,2.9rem)] font-600 leading-[1.04] tracking-[-0.03em] text-text">Usage history</h1>
 
       <div className="mt-10 grid gap-6 md:grid-cols-3">
-        <div className="border border-white/10 rounded-lg p-6 bg-white/[0.02]">
-          <div className="text-xs uppercase tracking-[0.2em] text-muted">eri credits</div>
-          <div className="mt-3 font-display text-3xl text-paper tabular-nums">
+        <div className="rounded-2xl border border-border bg-bg-card p-6">
+          <div className="font-geist-mono text-[11px] uppercase tracking-[0.18em] text-text-ter">eri credits</div>
+          <div className="mt-3 font-display text-3xl font-600 tracking-[-0.02em] text-text tabular-nums">
             {usage ? compact(usage.credits_used) : "—"}
           </div>
-          <div className="mt-2 text-sm text-muted">
+          <div className="mt-2 text-sm text-text-sec">
             of {usage ? compact(usage.credits_included) : "—"} included
           </div>
-          <div className="mt-4 h-2 w-full rounded-full bg-white/10 overflow-hidden">
+          <div className="mt-4 h-2 w-full rounded-full bg-bg-card-2 overflow-hidden">
             <div
               className="h-full bg-accent transition-all"
               style={{ width: `${percent}%` }}
             />
           </div>
-          <div className="mt-2 text-xs text-muted">{percent}% of plan used</div>
+          <div className="mt-2 text-xs text-text-sec">{percent}% of plan used</div>
         </div>
-        <div className="border border-white/10 rounded-lg p-6 bg-white/[0.02]">
-          <div className="text-xs uppercase tracking-[0.2em] text-muted">Tokens</div>
-          <div className="mt-3 font-display text-3xl text-paper tabular-nums">
+        <div className="rounded-2xl border border-border bg-bg-card p-6">
+          <div className="font-geist-mono text-[11px] uppercase tracking-[0.18em] text-text-ter">Tokens</div>
+          <div className="mt-3 font-display text-3xl font-600 tracking-[-0.02em] text-text tabular-nums">
             {usage ? usage.this_month_tokens.toLocaleString() : "—"}
           </div>
-          <div className="mt-2 text-sm text-muted">
+          <div className="mt-2 text-sm text-text-sec">
             this month · {usage ? usage.this_month_requests.toLocaleString() : "—"} requests
           </div>
         </div>
-        <div className="border border-white/10 rounded-lg p-6 bg-white/[0.02]">
-          <div className="text-xs uppercase tracking-[0.2em] text-muted">Plan</div>
-          <div className="mt-3 font-display text-3xl text-paper capitalize">
+        <div className="rounded-2xl border border-border bg-bg-card p-6">
+          <div className="font-geist-mono text-[11px] uppercase tracking-[0.18em] text-text-ter">Plan</div>
+          <div className="mt-3 font-display text-3xl font-600 tracking-[-0.02em] text-text capitalize">
             {(usage?.tier ?? user.tier).replace("_", " ")}
           </div>
-          <div className="mt-2 text-sm text-muted">
+          <div className="mt-2 text-sm text-text-sec">
             {usage ? `${compact(usage.remaining_included)} credits left` : ""}
           </div>
         </div>
       </div>
 
-      <section className="mt-10 border border-white/10 rounded-lg p-6 bg-white/[0.02]">
-        <h2 className="font-display text-xl tracking-tight">Daily credits · last 30 days</h2>
+      <section className="mt-10 rounded-2xl border border-border bg-bg-card p-6">
+        <h2 className="font-display text-[1.25rem] font-600 tracking-[-0.02em] text-text">Daily credits · last 30 days</h2>
         <div className="mt-6">
           {loading && !usage ? (
             <Skeleton className="h-[200px] w-full" />
           ) : error ? (
-            <p className="text-sm text-red-400">{error}</p>
+            <p className="text-sm text-red-600">{error}</p>
           ) : usage && usage.daily.some((d) => d.credits > 0) ? (
             <BarChart data={usage.daily} />
           ) : (
-            <p className="text-sm text-muted">No usage yet this period.</p>
+            <p className="text-sm text-text-sec">No usage yet this period.</p>
           )}
         </div>
       </section>
