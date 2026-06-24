@@ -217,6 +217,21 @@ export async function revokeAllOtherTokens(
   return rows.length;
 }
 
+/**
+ * Permanently delete a user's already-revoked tokens (the "clear history"
+ * action on the devices page). The `revoked_at IS NOT NULL` guard means this
+ * can only remove dead rows — it can never sign out a live device. Returns the
+ * count deleted.
+ */
+export async function deleteRevokedTokensForUser(userId: string): Promise<number> {
+  const rows = await sql()<{ id: string }[]>`
+    DELETE FROM api_tokens
+    WHERE user_id = ${userId} AND revoked_at IS NOT NULL
+    RETURNING id
+  `;
+  return rows.length;
+}
+
 export async function insertUsageRecord(input: UsageRecordInput): Promise<void> {
   const id = input.id ?? newUsageRecordId();
   await sql()`
