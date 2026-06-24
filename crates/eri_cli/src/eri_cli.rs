@@ -65,6 +65,7 @@ mod plugins;
 mod predict;
 mod proactive;
 mod project;
+mod reflection;
 mod remote;
 mod remote_recall;
 mod repl;
@@ -570,6 +571,14 @@ pub enum MemoryCommand {
     Remember { text: String },
     /// Ask the world model who you work with on a project.
     Who { project: String },
+    /// Run one cold-path reflection flush: the base engine reads your recent
+    /// observations and writes the entities/relations it infers into your world
+    /// model (provenance-tagged). A manual batch flush; an automatic cadence is a
+    /// later refinement.
+    Reflect {
+        #[arg(long, default_value_t = 50)]
+        limit: usize,
+    },
     /// Drop an observation by id, or "all" to clear everything.
     Forget { target: String },
 }
@@ -944,6 +953,7 @@ async fn dispatch(cli: Cli) -> anyhow::Result<()> {
             result
         }
         Command::Memory(MemoryCommand::Who { project }) => memory::who(&project),
+        Command::Memory(MemoryCommand::Reflect { limit }) => memory::reflect(limit).await,
         Command::Memory(MemoryCommand::Forget { target }) => {
             let result = memory::forget(&target);
             sync::spawn_best_effort();

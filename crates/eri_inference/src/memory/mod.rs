@@ -33,6 +33,7 @@ pub mod graph_bridge;
 pub mod keys;
 pub mod profile;
 pub mod profile_sync;
+pub mod reflection;
 pub mod style_writer;
 pub mod sync;
 pub mod world_recall;

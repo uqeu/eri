@@ -140,6 +140,36 @@ pub fn link_evidence(
     Ok(entity)
 }
 
+/// Like [`evidences`] but stamps the evidence edge with a `source` tag (e.g.
+/// "reflection") — provenance, so model-inferred facts stay distinguishable from
+/// directly observed ones (read it from the edge `metadata.source`).
+pub fn evidences_with_source(
+    graph: &Graph,
+    observation: &NodeId,
+    entity: &NodeId,
+    source: &str,
+) -> Result<(), GraphError> {
+    graph.insert_edge(
+        Edge::new(observation.clone(), entity.clone(), relation::EVIDENCES)
+            .with_metadata(json!({ "source": source })),
+    )?;
+    Ok(())
+}
+
+/// Like [`link_evidence`] but stamps the evidence with `source` provenance — the
+/// reflection pass's primitive (its facts are model-inferred, not observed).
+pub fn link_evidence_with_source(
+    graph: &Graph,
+    observation: &NodeId,
+    kind: &str,
+    canonical_name: &str,
+    source: &str,
+) -> Result<NodeId, GraphError> {
+    let entity = upsert_entity(graph, kind, canonical_name)?;
+    evidences_with_source(graph, observation, &entity, source)?;
+    Ok(entity)
+}
+
 /// The observations that evidence `entity`.
 pub fn evidence_for(graph: &Graph, entity: &NodeId) -> Result<Vec<Observation>, GraphError> {
     let neighbors = graph.neighbors(entity, Some(relation::EVIDENCES), Direction::In)?;
@@ -173,6 +203,16 @@ pub fn entities_of_kind(graph: &Graph, kind: &str) -> Result<Vec<Entity>, GraphE
         .query_by_kind(kind, ENTITY_SCAN_LIMIT)?
         .into_iter()
         .map(|node| Entity { node })
+        .collect())
+}
+
+/// The most recent observation nodes (newest first), capped at `limit` — the
+/// batch the cold-path reflection pass reads over.
+pub fn recent_observations(graph: &Graph, limit: usize) -> Result<Vec<Observation>, GraphError> {
+    Ok(graph
+        .query_by_kind(node_kind::OBSERVATION, limit)?
+        .into_iter()
+        .map(|node| Observation { node })
         .collect())
 }
 
@@ -297,6 +337,22 @@ fn osa_distance(a: &str, b: &str) -> usize {
 /// Relate `src` to `dst` with `relation`, valid from now (open-ended).
 pub fn relate(graph: &Graph, src: &NodeId, dst: &NodeId, relation: &str) -> Result<(), GraphError> {
     relate_at(graph, src, dst, relation, now_ms())
+}
+
+/// Like [`relate`] but stamps the relation edge with `source` provenance (e.g.
+/// "reflection"), valid from now — the reflection pass's relation primitive.
+pub fn relate_with_source(
+    graph: &Graph,
+    src: &NodeId,
+    dst: &NodeId,
+    relation: &str,
+    source: &str,
+) -> Result<(), GraphError> {
+    let edge = Edge::new(src.clone(), dst.clone(), relation).with_metadata(
+        json!({ "valid_from": now_ms(), "valid_to": Value::Null, "source": source }),
+    );
+    graph.insert_edge(edge)?;
+    Ok(())
 }
 
 /// Relate `src` to `dst` with `relation`, valid from `valid_from` (open-ended).

@@ -81,7 +81,9 @@ pub async fn ask_with_image(prompt: &str, images: &[std::path::PathBuf]) -> Resu
     }
     let prompt = prompt.trim();
     if prompt.is_empty() {
-        anyhow::bail!("ask needs a question to go with the image, e.g. eri ask --image shot.png \"what's on my screen\"");
+        anyhow::bail!(
+            "ask needs a question to go with the image, e.g. eri ask --image shot.png \"what's on my screen\""
+        );
     }
 
     // Build the image blocks first (fail fast on a bad path / unknown type).
@@ -134,8 +136,8 @@ details that aren't in the image. If something is unreadable or cut off, say so.
 /// Media type is inferred from the extension (png/jpeg/webp/gif); anything else
 /// is rejected with a clear error rather than mislabeled.
 fn image_block(path: &Path) -> Result<Value> {
-    let bytes = std::fs::read(path)
-        .with_context(|| format!("could not read image {}", path.display()))?;
+    let bytes =
+        std::fs::read(path).with_context(|| format!("could not read image {}", path.display()))?;
     let media_type = media_type_for(path)
         .with_context(|| format!("unsupported image type for {}", path.display()))?;
     let data = base64::engine::general_purpose::STANDARD.encode(&bytes);
@@ -384,7 +386,11 @@ async fn run_intent(
 /// Run an intent but COLLECT the streamed `text` events into a string instead
 /// of printing them — used by the interactive planner to capture the plan
 /// prose before opening the TUI. Token totals are ignored here.
-async fn capture_intent_text(intent: &str, prompt: &str, persona: Option<&str>) -> Result<String> {
+pub(crate) async fn capture_intent_text(
+    intent: &str,
+    prompt: &str,
+    persona: Option<&str>,
+) -> Result<String> {
     let creds = config::load()?;
     if !creds.is_signed_in() {
         anyhow::bail!("not signed in — run `eri auth login` first");

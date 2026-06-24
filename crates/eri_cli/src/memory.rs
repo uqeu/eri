@@ -82,6 +82,26 @@ pub fn who(project: &str) -> Result<()> {
     Ok(())
 }
 
+/// `eri memory reflect [--limit N]` — run one cold-path reflection flush: the
+/// base engine reads your recent observations and writes the entities/relations
+/// it infers into the world model (provenance-tagged, ADR-0007 §3). A manual
+/// batch flush — an automatic cadence is a later refinement. User-scoped.
+pub async fn reflect(limit: usize) -> Result<()> {
+    let user_id = config::load().ok().and_then(|c| c.user_id);
+    let written = crate::reflection::run_reflection(
+        &crate::reflection::ProxyReflectionClient,
+        user_id.as_deref(),
+        limit,
+    )
+    .await
+    .context("reflection flush")?;
+    println!(
+        "Reflected over your recent observations — updated {written} entit{} in your world model.",
+        if written == 1 { "y" } else { "ies" }
+    );
+    Ok(())
+}
+
 /// `eri brief` — a daily "here's your day" recap from what eri actually
 /// remembers. NO fabrication: it only reports real observations on record.
 /// Calendar + email join this once the user connects those (honest note).
