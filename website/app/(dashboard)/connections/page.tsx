@@ -50,9 +50,9 @@ function isConnectable(app: ToolkitItem): boolean {
 }
 
 function StatusBadge({ status }: { status?: Status }): ReactNode {
-  if (status === "active") return <span className="text-[12px] text-accent">Connected</span>;
-  if (status === "pending") return <span className="text-[12px] text-muted">Authorizing…</span>;
-  if (status === "error") return <span className="text-[12px] text-red-400">Needs attention</span>;
+  if (status === "active") return <span className="text-[12px] text-green-700">Connected</span>;
+  if (status === "pending") return <span className="text-[12px] text-text-sec">Authorizing…</span>;
+  if (status === "error") return <span className="text-[12px] text-red-600">Needs attention</span>;
   return null;
 }
 
@@ -60,12 +60,12 @@ function StatusBadge({ status }: { status?: Status }): ReactNode {
  *  default (managed OAuth), so the directory stays calm. */
 function AuthHint({ app }: { app: ToolkitItem }): ReactNode {
   if (app.authKind === "api_key") {
-    return <span className="rounded border border-white/[0.1] px-1.5 py-0.5 text-[10.5px] text-muted">API key</span>;
+    return <span className="rounded border border-border px-1.5 py-0.5 text-[10.5px] text-text-ter">API key</span>;
   }
   // A custom-OAuth app is only labelled "Setup required" while it has no auth
   // config; once configured it connects like any other, so drop the badge.
   if (app.authKind === "custom_oauth" && !isConnectable(app)) {
-    return <span className="rounded border border-white/[0.1] px-1.5 py-0.5 text-[10.5px] text-muted">Setup required</span>;
+    return <span className="rounded border border-border px-1.5 py-0.5 text-[10.5px] text-text-ter">Setup required</span>;
   }
   return null;
 }
@@ -246,11 +246,11 @@ export default function ConnectionsPage(): ReactNode {
   ];
 
   return (
-    <div className="mx-auto max-w-3xl px-5 py-10 sm:py-14">
+    <div className="mx-auto max-w-3xl px-5 py-10 sm:py-14 font-geist">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-[22px] font-medium text-paper">Connections</h1>
-          <p className="mt-1.5 max-w-prose text-[13px] leading-relaxed text-muted">
+          <h1 className="font-display text-[clamp(2rem,4vw,2.9rem)] font-600 leading-[1.04] tracking-[-0.03em] text-text">Connections</h1>
+          <p className="mt-1.5 max-w-prose text-[13px] leading-relaxed text-text-sec">
             Everything eri can act on for you. Connect an app with your own account —
             eri reads your email, checks your calendar, opens a PR. eri never sees your
             passwords.
@@ -258,16 +258,16 @@ export default function ConnectionsPage(): ReactNode {
         </div>
         <button
           onClick={() => void refresh()}
-          className="shrink-0 rounded-md border border-white/[0.1] px-3 py-1.5 text-[13px] text-paper transition-colors hover:bg-white/[0.04]"
+          className="shrink-0 rounded-full border border-border bg-bg-card px-4 py-2 text-[13.5px] text-text transition-colors hover:border-[rgba(40,33,22,0.22)]"
         >
           Refresh
         </button>
       </div>
 
       {locked ? (
-        <div className="mt-10 rounded-lg border border-white/[0.08] bg-white/[0.02] p-6">
-          <p className="text-[14px] text-paper">Connections are a Pro+ feature.</p>
-          <p className="mt-1.5 text-[13px] text-muted">Upgrade to let eri connect and act on your apps.</p>
+        <div className="mt-10 rounded-2xl border border-border bg-bg-card p-6">
+          <p className="text-[14px] text-text">Connections are a Pro+ feature.</p>
+          <p className="mt-1.5 text-[13px] text-text-sec">Upgrade to let eri connect and act on your apps.</p>
         </div>
       ) : (
         <div className="mt-8">
@@ -276,7 +276,7 @@ export default function ConnectionsPage(): ReactNode {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder={catalog.length ? `Search ${catalog.length} apps…` : "Search apps…"}
-            className="w-full rounded-lg border border-white/[0.1] bg-white/[0.02] px-4 py-2.5 text-[14px] text-paper placeholder:text-muted focus:border-white/[0.2] focus:outline-none"
+            className="w-full rounded-xl border border-border bg-bg-card px-4 py-2.5 text-[14px] text-text placeholder:text-text-ter focus:border-[rgba(40,33,22,0.22)] focus:outline-none"
           />
 
           <div className="mt-3 flex gap-2">
@@ -286,8 +286,8 @@ export default function ConnectionsPage(): ReactNode {
                 onClick={() => setFilter(f.id)}
                 className={`rounded-full px-3 py-1 text-[12.5px] transition-colors ${
                   filter === f.id
-                    ? "bg-white/[0.1] text-paper"
-                    : "border border-white/[0.08] text-muted hover:bg-white/[0.04]"
+                    ? "bg-bg-card-2 text-text font-500"
+                    : "border border-border text-text-sec hover:bg-bg-card-2"
                 }`}
               >
                 {f.label}
@@ -297,7 +297,7 @@ export default function ConnectionsPage(): ReactNode {
 
           <div className="mt-6 space-y-7">
             {groups.length === 0 ? (
-              <div className="rounded-lg border border-white/[0.08] px-5 py-8 text-center text-[13px] text-muted">
+              <div className="rounded-2xl border border-border bg-bg-card px-5 py-8 text-center text-[13px] text-text-sec">
                 {loading
                   ? "Loading the catalog…"
                   : filter === "connected"
@@ -307,8 +307,8 @@ export default function ConnectionsPage(): ReactNode {
             ) : (
               groups.map(([category, apps]) => (
                 <div key={category}>
-                  <h2 className="mb-2 text-[12px] font-medium uppercase tracking-wide text-muted">{category}</h2>
-                  <div className="overflow-hidden rounded-lg border border-white/[0.08]">
+                  <h2 className="mb-2 font-geist-mono text-[11px] font-medium uppercase tracking-[0.18em] text-text-ter">{category}</h2>
+                  <div className="overflow-hidden rounded-2xl border border-border bg-bg-card">
                     {apps.map((app, i) => {
                       const status = statuses[app.slug];
                       const isActive = status === "active";
@@ -317,7 +317,7 @@ export default function ConnectionsPage(): ReactNode {
                       return (
                         <div
                           key={app.slug}
-                          className={i > 0 ? "border-t border-white/[0.06]" : ""}
+                          className={i > 0 ? "border-t border-border" : ""}
                         >
                           <div className="flex items-center justify-between gap-4 px-5 py-3.5">
                             <div className="flex min-w-0 items-center gap-3">
@@ -325,15 +325,15 @@ export default function ConnectionsPage(): ReactNode {
                                 // eslint-disable-next-line @next/next/no-img-element
                                 <img src={app.logo} alt="" width={20} height={20} className="h-5 w-5 shrink-0 rounded" />
                               ) : (
-                                <div className="h-5 w-5 shrink-0 rounded bg-white/[0.06]" />
+                                <div className="h-5 w-5 shrink-0 rounded bg-bg-card-2" />
                               )}
                               <div className="min-w-0">
                                 <div className="flex items-center gap-2">
-                                  <span className="truncate text-[14px] font-medium text-paper">{app.name}</span>
+                                  <span className="truncate text-[14px] font-medium text-text">{app.name}</span>
                                   <AuthHint app={app} />
                                 </div>
                                 {app.description ? (
-                                  <div className="truncate text-[12.5px] text-muted">{app.description}</div>
+                                  <div className="truncate text-[12.5px] text-text-sec">{app.description}</div>
                                 ) : null}
                               </div>
                             </div>
@@ -343,12 +343,12 @@ export default function ConnectionsPage(): ReactNode {
                                 <button
                                   onClick={() => void disconnect(app.slug)}
                                   disabled={disconnecting === app.slug}
-                                  className="rounded-md border border-white/[0.1] px-3 py-1.5 text-[13px] text-muted transition-colors hover:bg-white/[0.04] hover:text-red-300 disabled:cursor-not-allowed disabled:opacity-40"
+                                  className="rounded-full border border-border bg-bg-card px-4 py-2 text-[13.5px] text-text-sec transition-colors hover:border-red-300 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40"
                                 >
                                   {disconnecting === app.slug ? "Removing…" : "Disconnect"}
                                 </button>
                               ) : !connectable ? (
-                                <span className="rounded-md border border-white/[0.06] px-3 py-1.5 text-[12.5px] text-muted">
+                                <span className="rounded-full border border-border bg-bg-card-2 px-4 py-2 text-[12.5px] text-text-ter">
                                   Needs setup
                                 </span>
                               ) : (
@@ -359,7 +359,7 @@ export default function ConnectionsPage(): ReactNode {
                                       : void submitConnect(app.slug)
                                   }
                                   disabled={connecting === app.slug}
-                                  className="rounded-md border border-white/[0.1] px-3 py-1.5 text-[13px] text-paper transition-colors hover:bg-white/[0.04] disabled:cursor-not-allowed disabled:opacity-40"
+                                  className="rounded-full border border-border bg-bg-card px-4 py-2 text-[13.5px] text-text transition-colors hover:border-[rgba(40,33,22,0.22)] disabled:cursor-not-allowed disabled:opacity-40"
                                 >
                                   {connecting === app.slug
                                     ? "Opening…"
@@ -376,7 +376,7 @@ export default function ConnectionsPage(): ReactNode {
                                 e.preventDefault();
                                 if (keyValue.trim()) void submitConnect(app.slug, keyValue.trim());
                               }}
-                              className="flex items-center gap-2 border-t border-white/[0.06] bg-white/[0.01] px-5 py-3"
+                              className="flex items-center gap-2 border-t border-border bg-bg-card-2 px-5 py-3"
                             >
                               <input
                                 type="password"
@@ -384,12 +384,12 @@ export default function ConnectionsPage(): ReactNode {
                                 value={keyValue}
                                 onChange={(e) => setKeyValue(e.target.value)}
                                 placeholder={`Paste your ${app.name} API key`}
-                                className="min-w-0 flex-1 rounded-md border border-white/[0.1] bg-white/[0.02] px-3 py-1.5 text-[13px] text-paper placeholder:text-muted focus:border-white/[0.2] focus:outline-none"
+                                className="min-w-0 flex-1 rounded-xl border border-border bg-bg-card px-3 py-1.5 text-[13px] text-text placeholder:text-text-ter focus:border-[rgba(40,33,22,0.22)] focus:outline-none"
                               />
                               <button
                                 type="submit"
                                 disabled={!keyValue.trim() || connecting === app.slug}
-                                className="rounded-md border border-white/[0.1] px-3 py-1.5 text-[13px] text-paper transition-colors hover:bg-white/[0.04] disabled:cursor-not-allowed disabled:opacity-40"
+                                className="rounded-full border border-border bg-bg-card px-4 py-2 text-[13.5px] text-text transition-colors hover:border-[rgba(40,33,22,0.22)] disabled:cursor-not-allowed disabled:opacity-40"
                               >
                                 {connecting === app.slug ? "Saving…" : "Save key"}
                               </button>
@@ -405,7 +405,7 @@ export default function ConnectionsPage(): ReactNode {
           </div>
 
           {totalMatched > shownCount ? (
-            <p className="mt-4 text-center text-[12px] text-muted">
+            <p className="mt-4 text-center text-[12px] text-text-sec">
               Showing {shownCount} of {totalMatched} — search to find a specific app.
             </p>
           ) : null}
@@ -414,8 +414,8 @@ export default function ConnectionsPage(): ReactNode {
 
       {toast && (
         <div
-          className={`fixed bottom-6 left-1/2 -translate-x-1/2 rounded-md px-4 py-2.5 text-[13px] shadow-lg ${
-            toast.kind === "success" ? "bg-accent/15 text-accent" : "bg-red-500/15 text-red-300"
+          className={`fixed bottom-6 left-1/2 -translate-x-1/2 rounded-xl border px-4 py-2.5 text-[13px] shadow-lg ${
+            toast.kind === "success" ? "border-border bg-bg-card text-text" : "border-red-300 bg-red-50 text-red-600"
           }`}
         >
           {toast.message}

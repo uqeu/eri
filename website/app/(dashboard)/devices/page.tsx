@@ -130,19 +130,19 @@ export default function DevicesPage(): JSX.Element | null {
   const revoked = (devices ?? []).filter((d) => d.revoked);
 
   return (
-    <div className="max-w-3xl">
-      <p className="text-xs uppercase tracking-[0.25em] text-accent">Account</p>
-      <h1 className="mt-3 font-display text-4xl md:text-5xl tracking-tight">
+    <div className="max-w-3xl font-geist">
+      <p className="font-geist-mono text-[11px] uppercase tracking-[0.18em] text-text-ter">Account</p>
+      <h1 className="mt-3 font-display text-[clamp(2rem,4vw,2.9rem)] font-600 leading-[1.04] tracking-[-0.03em] text-text">
         Devices
       </h1>
-      <p className="mt-3 text-[14px] text-muted">
+      <p className="mt-3 text-[14px] text-text-sec">
         Every signed-in Eri app or CLI you've authorized. Revoke any device to
         invalidate its bearer token instantly.
       </p>
 
       <div className="mt-10">
         {error && (
-          <div className="rounded-md border border-red-500/30 bg-red-500/[0.04] px-4 py-3 text-[13px] text-red-300">
+          <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-[13px] text-red-600">
             {error}
           </div>
         )}
@@ -150,9 +150,9 @@ export default function DevicesPage(): JSX.Element | null {
         {devices === null && !error && <SkeletonRows rows={3} />}
 
         {devices !== null && active.length === 0 && revoked.length === 0 && (
-          <div className="rounded-md border border-white/10 px-6 py-10 text-center">
-            <p className="text-[14px] text-paper">No devices yet.</p>
-            <p className="mt-2 text-[12px] text-muted">
+          <div className="rounded-2xl border border-border bg-bg-card px-6 py-10 text-center">
+            <p className="text-[14px] text-text">No devices yet.</p>
+            <p className="mt-2 text-[12px] text-text-sec">
               When you sign in from Eri, it will show up here.
             </p>
           </div>
@@ -161,7 +161,7 @@ export default function DevicesPage(): JSX.Element | null {
         {active.length > 0 && (
           <section>
             <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-[12px] uppercase tracking-[0.22em] text-muted">
+              <h2 className="font-geist-mono text-[11px] uppercase tracking-[0.18em] text-text-ter">
                 Active · {active.length}
               </h2>
               {active.length > 1 && (
@@ -169,7 +169,7 @@ export default function DevicesPage(): JSX.Element | null {
                   type="button"
                   disabled={revokingAll}
                   onClick={() => void revokeAll()}
-                  className="rounded-md border border-red-500/30 px-3 py-1 text-[12px] text-red-300 transition hover:border-red-500/60 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="rounded-full border border-red-300 bg-bg-card px-4 py-2 text-[13.5px] text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {revokingAll ? "Signing out…" : "Sign out all"}
                 </button>
@@ -179,14 +179,14 @@ export default function DevicesPage(): JSX.Element | null {
               {active.map((d) => (
                 <div
                   key={d.id}
-                  className="flex items-center justify-between rounded-md border border-white/10 px-4 py-3"
+                  className="flex items-center justify-between rounded-xl border border-border bg-bg-card px-4 py-3"
                 >
                   <div className="min-w-0">
-                    <div className="text-[14px] text-paper truncate">
+                    <div className="text-[14px] text-text truncate">
                       {d.label}
                     </div>
-                    <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted">
-                      <span className="font-mono">{shortId(d.id)}</span>
+                    <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-text-sec">
+                      <span className="font-geist-mono">{shortId(d.id)}</span>
                       <span>·</span>
                       <span>signed in {formatRelativeOrAbs(d.created_at)}</span>
                       <span>·</span>
@@ -199,7 +199,7 @@ export default function DevicesPage(): JSX.Element | null {
                     type="button"
                     disabled={revoking[d.id] === true}
                     onClick={() => void revoke(d.id)}
-                    className="ml-4 shrink-0 rounded-md border border-white/15 px-3 py-1.5 text-[12px] text-paper transition hover:border-paper disabled:cursor-not-allowed disabled:opacity-50"
+                    className="ml-4 shrink-0 rounded-full border border-red-300 bg-bg-card px-4 py-2 text-[13.5px] text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {revoking[d.id] === true ? "Revoking…" : "Revoke"}
                   </button>
@@ -211,21 +211,21 @@ export default function DevicesPage(): JSX.Element | null {
 
         {revoked.length > 0 && (
           <section className="mt-10">
-            <h2 className="text-[12px] uppercase tracking-[0.22em] text-muted mb-3">
+            <h2 className="font-geist-mono text-[11px] uppercase tracking-[0.18em] text-text-ter mb-3">
               Revoked · {revoked.length}
             </h2>
             <div className="space-y-2">
               {revoked.map((d) => (
                 <div
                   key={d.id}
-                  className="flex items-center justify-between rounded-md border border-white/[0.06] px-4 py-3 opacity-60"
+                  className="flex items-center justify-between rounded-xl border border-border bg-bg-card-2 px-4 py-3 opacity-60"
                 >
                   <div className="min-w-0">
-                    <div className="text-[14px] text-muted truncate">
+                    <div className="text-[14px] text-text-sec truncate">
                       {d.label}
                     </div>
-                    <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted">
-                      <span className="font-mono">{shortId(d.id)}</span>
+                    <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-text-sec">
+                      <span className="font-geist-mono">{shortId(d.id)}</span>
                       <span>·</span>
                       <span>signed in {formatRelativeOrAbs(d.created_at)}</span>
                       <span>·</span>
@@ -234,7 +234,7 @@ export default function DevicesPage(): JSX.Element | null {
                       </span>
                     </div>
                   </div>
-                  <span className="ml-4 shrink-0 text-[11px] uppercase tracking-[0.18em] text-muted">
+                  <span className="ml-4 shrink-0 text-[11px] uppercase tracking-[0.18em] text-text-ter">
                     Revoked
                   </span>
                 </div>
@@ -247,10 +247,10 @@ export default function DevicesPage(): JSX.Element | null {
       {toast && (
         <div
           role="status"
-          className={`fixed bottom-6 right-6 px-4 py-3 rounded-md text-[13px] border ${
+          className={`fixed bottom-6 right-6 px-4 py-3 rounded-xl text-[13px] border ${
             toast.kind === "success"
-              ? "border-accent/50 bg-accent/10 text-accent"
-              : "border-red-500/50 bg-red-500/10 text-red-300"
+              ? "border-border bg-bg-card text-text"
+              : "border-red-300 bg-red-50 text-red-600"
           }`}
         >
           {toast.message}

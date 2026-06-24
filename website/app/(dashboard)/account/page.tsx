@@ -43,12 +43,12 @@ interface SectionProps {
 
 function Section({ title, description, children }: SectionProps) {
   return (
-    <section className="border-t border-white/[0.06] py-10 first:border-t-0 first:pt-0">
+    <section className="border-t border-border py-10 first:border-t-0 first:pt-0">
       <div className="grid grid-cols-1 md:grid-cols-[200px_1fr] gap-8">
         <div>
-          <h2 className="text-[15px] font-medium text-paper">{title}</h2>
+          <h2 className="text-[15px] font-medium text-text">{title}</h2>
           {description && (
-            <p className="mt-1.5 text-[13px] text-muted leading-relaxed">
+            <p className="mt-1.5 text-[13px] text-text-sec leading-relaxed">
               {description}
             </p>
           )}
@@ -67,8 +67,8 @@ interface RowProps {
 function Row({ label, children }: RowProps) {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-[140px_1fr] gap-2 sm:gap-4 sm:items-center py-3 first:pt-0">
-      <div className="text-[13px] text-muted">{label}</div>
-      <div className="text-[14px] text-paper min-w-0">{children}</div>
+      <div className="text-[13px] text-text-sec">{label}</div>
+      <div className="text-[14px] text-text min-w-0">{children}</div>
     </div>
   );
 }
@@ -177,12 +177,12 @@ export default function AccountPage() {
   const googleLinked = user.oauth_provider === "google";
 
   return (
-    <div className="max-w-3xl">
-      <p className="text-xs uppercase tracking-[0.25em] text-accent">Account</p>
-      <h1 className="mt-3 font-display text-4xl md:text-5xl tracking-tight">
+    <div className="max-w-3xl font-geist">
+      <p className="font-geist-mono text-[11px] uppercase tracking-[0.18em] text-text-ter">Account</p>
+      <h1 className="mt-3 font-display text-[clamp(2rem,4vw,2.9rem)] font-600 leading-[1.04] tracking-[-0.03em] text-text">
         Settings
       </h1>
-      <p className="mt-3 text-[14px] text-muted">
+      <p className="mt-3 text-[14px] text-text-sec">
         Manage your profile, connected sign-in methods, and account security.
       </p>
 
@@ -195,7 +195,7 @@ export default function AccountPage() {
             <Row label="Email">
               <div className="flex items-center gap-2">
                 <span className="truncate">{user.email}</span>
-                <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] uppercase tracking-wider rounded-sm bg-white/5 text-muted">
+                <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] uppercase tracking-wider rounded-sm bg-bg-card-2 text-text-sec">
                   verified
                 </span>
               </div>
@@ -206,14 +206,14 @@ export default function AccountPage() {
                 value={displayName}
                 onChange={(e) => setDisplayName(e.target.value)}
                 placeholder="Your name"
-                className="w-full max-w-sm bg-transparent border border-white/10 rounded-md px-3 py-2 text-[14px] text-paper focus:border-accent focus:outline-none transition"
+                className="w-full max-w-sm bg-bg-card border border-border rounded-xl px-3 py-2 text-[14px] text-text placeholder:text-text-ter focus:border-[rgba(40,33,22,0.22)] focus:outline-none transition"
               />
             </Row>
             <Row label="Member since">
-              <span className="text-muted">{formatCreatedAt(user.created_at)}</span>
+              <span className="text-text-sec">{formatCreatedAt(user.created_at)}</span>
             </Row>
             <Row label="Plan">
-              <span className="inline-flex items-center px-2 py-0.5 text-[12px] rounded-sm bg-white/5 border border-white/10 capitalize">
+              <span className="inline-flex items-center px-2 py-0.5 text-[12px] rounded-full bg-bg-card-2 border border-border capitalize">
                 {user.tier.replace("_", " ")}
               </span>
             </Row>
@@ -221,7 +221,7 @@ export default function AccountPage() {
               <button
                 type="submit"
                 disabled={!dirtyProfile || savingProfile}
-                className="border border-white/15 hover:border-paper text-paper px-3.5 py-1.5 rounded-md text-[13px] transition disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:border-white/15"
+                className="rounded-full bg-[#16140f] px-4 py-2 font-geist text-[13.5px] font-600 text-white transition-transform duration-200 hover:-translate-y-px disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:translate-y-0"
               >
                 {savingProfile ? "Saving…" : "Save changes"}
               </button>
@@ -234,12 +234,12 @@ export default function AccountPage() {
           description="Sign-in methods linked to this account."
         >
           <div className="space-y-3">
-            <div className="flex items-center justify-between rounded-md border border-white/10 px-4 py-3">
+            <div className="flex items-center justify-between rounded-xl border border-border bg-bg-card px-4 py-3">
               <div className="flex items-center gap-3">
                 <GoogleGlyph />
                 <div>
-                  <div className="text-[14px] text-paper">Google</div>
-                  <div className="text-[12px] text-muted">
+                  <div className="text-[14px] text-text">Google</div>
+                  <div className="text-[12px] text-text-sec">
                     {googleLinked
                       ? `Signed in via Google as ${user.email}`
                       : "Not connected"}
@@ -247,17 +247,17 @@ export default function AccountPage() {
                 </div>
               </div>
               {googleLinked ? (
-                <span className="text-[12px] text-accent">Connected</span>
+                <span className="text-[12px] text-green-700">Connected</span>
               ) : (
-                <span className="text-[12px] text-muted">—</span>
+                <span className="text-[12px] text-text-sec">—</span>
               )}
             </div>
-            <div className="flex items-center justify-between rounded-md border border-white/10 px-4 py-3">
+            <div className="flex items-center justify-between rounded-xl border border-border bg-bg-card px-4 py-3">
               <div className="flex items-center gap-3">
-                <div className="h-4 w-4 rounded-sm bg-white/10" aria-hidden />
+                <div className="h-4 w-4 rounded-sm bg-bg-card-2" aria-hidden />
                 <div>
-                  <div className="text-[14px] text-paper">Email & password</div>
-                  <div className="text-[12px] text-muted">
+                  <div className="text-[14px] text-text">Email & password</div>
+                  <div className="text-[12px] text-text-sec">
                     {showPassword
                       ? "Password is set"
                       : "Not set — sign in with Google"}
@@ -265,9 +265,9 @@ export default function AccountPage() {
                 </div>
               </div>
               {showPassword ? (
-                <span className="text-[12px] text-accent">Active</span>
+                <span className="text-[12px] text-green-700">Active</span>
               ) : (
-                <span className="text-[12px] text-muted">—</span>
+                <span className="text-[12px] text-text-sec">—</span>
               )}
             </div>
           </div>
@@ -280,18 +280,18 @@ export default function AccountPage() {
           >
             <form onSubmit={changePassword} className="flex flex-col gap-4">
               <label className="flex flex-col gap-1.5">
-                <span className="text-[12px] text-muted">Current password</span>
+                <span className="text-[12px] text-text-sec">Current password</span>
                 <input
                   type="password"
                   required
                   autoComplete="current-password"
                   value={currentPassword}
                   onChange={(e) => setCurrentPassword(e.target.value)}
-                  className="w-full max-w-sm bg-transparent border border-white/10 rounded-md px-3 py-2 text-[14px] text-paper focus:border-accent focus:outline-none transition"
+                  className="w-full max-w-sm bg-bg-card border border-border rounded-xl px-3 py-2 text-[14px] text-text focus:border-[rgba(40,33,22,0.22)] focus:outline-none transition"
                 />
               </label>
               <label className="flex flex-col gap-1.5">
-                <span className="text-[12px] text-muted">New password</span>
+                <span className="text-[12px] text-text-sec">New password</span>
                 <input
                   type="password"
                   required
@@ -299,9 +299,9 @@ export default function AccountPage() {
                   autoComplete="new-password"
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
-                  className="w-full max-w-sm bg-transparent border border-white/10 rounded-md px-3 py-2 text-[14px] text-paper focus:border-accent focus:outline-none transition"
+                  className="w-full max-w-sm bg-bg-card border border-border rounded-xl px-3 py-2 text-[14px] text-text focus:border-[rgba(40,33,22,0.22)] focus:outline-none transition"
                 />
-                <span className="text-[11px] text-muted">
+                <span className="text-[11px] text-text-sec">
                   At least 8 characters.
                 </span>
               </label>
@@ -313,7 +313,7 @@ export default function AccountPage() {
                     currentPassword.length === 0 ||
                     newPassword.length < 8
                   }
-                  className="border border-white/15 hover:border-paper text-paper px-3.5 py-1.5 rounded-md text-[13px] transition disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:border-white/15"
+                  className="rounded-full bg-[#16140f] px-4 py-2 font-geist text-[13.5px] font-600 text-white transition-transform duration-200 hover:-translate-y-px disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:translate-y-0"
                 >
                   {savingPassword ? "Updating…" : "Update password"}
                 </button>
@@ -326,8 +326,8 @@ export default function AccountPage() {
           title="Delete account"
           description="Permanently remove your account and all associated data."
         >
-          <div className="rounded-md border border-red-500/20 bg-red-500/[0.03] px-4 py-4">
-            <p className="text-[13px] text-paper/80 leading-relaxed">
+          <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-4">
+            <p className="text-[13px] text-text-sec leading-relaxed">
               Deleting your account cancels any active subscription and
               permanently removes your iterations, voice samples, and billing
               history. This cannot be undone.
@@ -336,7 +336,7 @@ export default function AccountPage() {
               <button
                 type="button"
                 onClick={() => setDeleteOpen(true)}
-                className="border border-red-500/30 hover:border-red-400 hover:bg-red-500/10 text-red-300 px-3.5 py-1.5 rounded-md text-[13px] transition"
+                className="rounded-full border border-red-300 bg-bg-card px-4 py-2 text-[13.5px] text-red-600 transition hover:bg-red-50"
               >
                 Delete account
               </button>
@@ -348,10 +348,10 @@ export default function AccountPage() {
       {toast && (
         <div
           role="status"
-          className={`fixed bottom-6 right-6 px-4 py-3 rounded-md text-[13px] border ${
+          className={`fixed bottom-6 right-6 px-4 py-3 rounded-xl text-[13px] border ${
             toast.kind === "success"
-              ? "border-accent/50 bg-accent/10 text-accent"
-              : "border-red-500/50 bg-red-500/10 text-red-300"
+              ? "border-border bg-bg-card text-text"
+              : "border-red-300 bg-red-50 text-red-600"
           }`}
         >
           {toast.message}
@@ -362,21 +362,21 @@ export default function AccountPage() {
         <div
           role="dialog"
           aria-modal="true"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-6"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-6"
         >
-          <div className="w-full max-w-md border border-white/15 rounded-lg bg-ink p-6">
-            <h3 className="font-display text-2xl tracking-tight text-red-300">
+          <div className="w-full max-w-md border border-border rounded-2xl bg-bg-card p-6">
+            <h3 className="font-display text-2xl font-600 tracking-[-0.02em] text-red-600">
               Delete account?
             </h3>
-            <p className="mt-3 text-[13px] text-muted leading-relaxed">
+            <p className="mt-3 text-[13px] text-text-sec leading-relaxed">
               This cannot be undone. Type{" "}
-              <span className="text-paper font-medium">DELETE</span> to confirm.
+              <span className="text-text font-medium">DELETE</span> to confirm.
             </p>
             <input
               type="text"
               value={deleteConfirm}
               onChange={(e) => setDeleteConfirm(e.target.value)}
-              className="mt-4 w-full bg-transparent border border-white/15 rounded-md px-4 py-3 text-paper focus:border-red-400 focus:outline-none transition"
+              className="mt-4 w-full bg-bg-card border border-border rounded-xl px-4 py-3 text-text focus:border-red-400 focus:outline-none transition"
             />
             <div className="mt-6 flex justify-end gap-3">
               <button
@@ -385,7 +385,7 @@ export default function AccountPage() {
                   setDeleteOpen(false);
                   setDeleteConfirm("");
                 }}
-                className="border border-white/15 hover:border-paper text-paper px-3.5 py-1.5 rounded-md text-[13px] transition"
+                className="rounded-full border border-border bg-bg-card px-4 py-2 text-[13.5px] text-text transition hover:border-[rgba(40,33,22,0.22)]"
               >
                 Cancel
               </button>
@@ -395,7 +395,7 @@ export default function AccountPage() {
                 onClick={() => {
                   void deleteAccount();
                 }}
-                className="bg-red-500/80 hover:bg-red-500 text-paper px-3.5 py-1.5 rounded-md text-[13px] transition disabled:opacity-40 disabled:cursor-not-allowed"
+                className="rounded-full border border-red-300 bg-bg-card px-4 py-2 text-[13.5px] text-red-600 transition hover:bg-red-50 disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 {deleting ? "Deleting…" : "Delete forever"}
               </button>

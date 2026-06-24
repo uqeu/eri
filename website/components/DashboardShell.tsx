@@ -49,7 +49,7 @@ export function DashboardShell({ children }: DashboardShellProps) {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center text-muted">
+      <div className="theme-light bg-bg text-text min-h-screen flex items-center justify-center font-geist text-text-ter">
         Loading…
       </div>
     );
@@ -57,18 +57,19 @@ export function DashboardShell({ children }: DashboardShellProps) {
 
   if (!user) {
     return (
-      <div className="min-h-screen flex items-center justify-center text-muted">
+      <div className="theme-light bg-bg text-text min-h-screen flex items-center justify-center font-geist text-text-ter">
         {error ?? "Redirecting to sign in…"}
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen flex flex-col md:flex-row">
-      <header className="md:hidden flex items-center justify-between border-b border-white/10 px-6 py-4">
+    <div className="theme-light bg-bg text-text min-h-screen flex flex-col md:flex-row font-geist">
+      <header className="md:hidden flex items-center justify-between border-b border-border bg-bg-card px-6 py-4">
         <Link
           href="/dashboard"
-          className="font-display text-xl tracking-tight"
+          className="font-display text-xl text-text"
+          style={{ letterSpacing: "-0.05em" }}
         >
           eri
         </Link>
@@ -76,7 +77,7 @@ export function DashboardShell({ children }: DashboardShellProps) {
           type="button"
           onClick={() => setMobileOpen((open) => !open)}
           aria-label="Toggle navigation"
-          className="text-paper p-2 -mr-2"
+          className="text-text p-2 -mr-2"
         >
           <svg
             width="24"
@@ -108,32 +109,33 @@ export function DashboardShell({ children }: DashboardShellProps) {
       <aside
         className={`${
           mobileOpen ? "block" : "hidden"
-        } md:block md:w-64 md:min-h-screen border-b md:border-b-0 md:border-r border-white/10 bg-ink`}
+        } md:block md:w-64 md:min-h-screen md:shrink-0 border-b md:border-b-0 md:border-r border-border bg-bg-card`}
       >
         <div className="hidden md:flex items-center gap-3 px-6 py-6">
           <Link
             href="/dashboard"
-            className="font-display text-2xl tracking-tight hover:text-accent transition"
+            className="font-display text-2xl text-text transition-opacity hover:opacity-70"
+            style={{ letterSpacing: "-0.05em" }}
           >
             eri
           </Link>
         </div>
-        <div className="px-6 py-4 border-t border-b border-white/10 md:border-t-0">
+        <div className="px-5 py-4 border-t border-b border-border md:border-t-0">
           <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-full bg-accent text-ink flex items-center justify-center font-medium">
+            <div className="h-10 w-10 rounded-full bg-accent text-[#1a1d00] flex items-center justify-center font-geist text-[13px] font-600">
               {initials(user)}
             </div>
             <div className="min-w-0">
-              <div className="text-sm text-paper truncate">
+              <div className="text-[14px] text-text truncate">
                 {user.display_name ?? user.email}
               </div>
-              <div className="text-xs text-muted uppercase tracking-[0.2em]">
+              <div className="text-[11px] text-text-ter uppercase tracking-[0.18em]">
                 {user.tier}
               </div>
             </div>
           </div>
         </div>
-        <nav className="flex flex-col py-4">
+        <nav className="flex flex-col gap-0.5 px-3 py-4">
           {(user?.is_admin ? [...NAV, { href: "/admin", label: "Admin" }] : NAV).map((item) => {
             const active =
               pathname === item.href ||
@@ -142,10 +144,11 @@ export function DashboardShell({ children }: DashboardShellProps) {
               <Link
                 key={item.href}
                 href={item.href}
-                className={`px-6 py-3 text-sm transition border-l-2 ${
+                aria-current={active ? "page" : undefined}
+                className={`rounded-lg px-3 py-2 text-[14px] transition-colors ${
                   active
-                    ? "border-accent text-paper bg-white/5"
-                    : "border-transparent text-muted hover:text-paper hover:bg-white/5"
+                    ? "bg-bg-card-2 text-text font-500"
+                    : "text-text-sec hover:text-text hover:bg-bg-card-2"
                 }`}
               >
                 {item.label}
@@ -157,7 +160,7 @@ export function DashboardShell({ children }: DashboardShellProps) {
             onClick={() => {
               void signOut();
             }}
-            className="px-6 py-3 text-sm text-left text-muted hover:text-paper hover:bg-white/5 transition border-l-2 border-transparent"
+            className="mt-1 rounded-lg px-3 py-2 text-left text-[14px] text-text-sec hover:text-text hover:bg-bg-card-2 transition-colors"
           >
             Sign out
           </button>

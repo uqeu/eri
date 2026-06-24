@@ -110,25 +110,25 @@ export default function AdminPage() {
   }
   if (state === "forbidden") {
     return (
-      <div className="max-w-xl">
-        <h1 className="text-xl font-semibold">Admin</h1>
-        <p className="mt-2 text-sm opacity-70">
+      <div className="max-w-xl font-geist">
+        <h1 className="font-display text-xl font-600 tracking-[-0.02em] text-text">Admin</h1>
+        <p className="mt-2 text-sm text-text-sec">
           This view is restricted to administrators.
         </p>
       </div>
     );
   }
   if (state === "error" || !data) {
-    return <p className="text-sm text-red-400">Failed to load analytics.</p>;
+    return <p className="text-sm text-red-600">Failed to load analytics.</p>;
   }
 
   const { totals, by_model, top_users, audit } = data;
 
   return (
-    <div className="max-w-5xl space-y-8">
+    <div className="max-w-5xl space-y-8 font-geist">
       <header>
-        <h1 className="text-xl font-semibold">Admin analytics</h1>
-        <p className="text-sm opacity-60">Last {data.days} days · usage only, no prompt content.</p>
+        <h1 className="font-display text-[clamp(2rem,4vw,2.9rem)] font-600 leading-[1.04] tracking-[-0.03em] text-text">Admin analytics</h1>
+        <p className="text-sm text-text-sec">Last {data.days} days · usage only, no prompt content.</p>
       </header>
 
       <section className="grid grid-cols-2 gap-4 sm:grid-cols-3">
@@ -141,10 +141,10 @@ export default function AdminPage() {
       </section>
 
       <section>
-        <h2 className="mb-2 text-sm font-semibold uppercase opacity-60">Top users</h2>
+        <h2 className="mb-2 font-geist-mono text-[11px] font-medium uppercase tracking-[0.18em] text-text-ter">Top users</h2>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="text-left opacity-60">
+            <thead className="text-left text-text-ter">
               <tr>
                 <th className="py-1 pr-4">User</th>
                 <th className="py-1 pr-4">Tier</th>
@@ -156,13 +156,13 @@ export default function AdminPage() {
             </thead>
             <tbody>
               {top_users.map((u) => (
-                <tr key={u.user_id} className="border-t border-white/5">
+                <tr key={u.user_id} className="border-t border-border text-text">
                   <td className="py-1 pr-4">{u.email ?? u.user_id}</td>
                   <td className="py-1 pr-4">{u.tier ?? "-"}</td>
                   <td className="py-1 pr-4">{num(u.requests)}</td>
                   <td className="py-1 pr-4">{num(u.credits)}</td>
                   <td className="py-1 pr-4">{usd(u.cost_usd_micros)}</td>
-                  <td className="py-1 opacity-60">
+                  <td className="py-1 text-text-sec">
                     {u.last_active ? shortTs(u.last_active) : "-"}
                   </td>
                 </tr>
@@ -173,10 +173,10 @@ export default function AdminPage() {
       </section>
 
       <section>
-        <h2 className="mb-2 text-sm font-semibold uppercase opacity-60">By model</h2>
+        <h2 className="mb-2 font-geist-mono text-[11px] font-medium uppercase tracking-[0.18em] text-text-ter">By model</h2>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="text-left opacity-60">
+            <thead className="text-left text-text-ter">
               <tr>
                 <th className="py-1 pr-4">Model</th>
                 <th className="py-1 pr-4">Reqs</th>
@@ -187,7 +187,7 @@ export default function AdminPage() {
             </thead>
             <tbody>
               {by_model.map((m) => (
-                <tr key={m.model} className="border-t border-white/5">
+                <tr key={m.model} className="border-t border-border text-text">
                   <td className="py-1 pr-4">{m.model}</td>
                   <td className="py-1 pr-4">{num(m.requests)}</td>
                   <td className="py-1 pr-4">{num(m.tokens_in)}</td>
@@ -201,16 +201,16 @@ export default function AdminPage() {
       </section>
 
       <section>
-        <h2 className="mb-2 text-sm font-semibold uppercase opacity-60">Recent events</h2>
+        <h2 className="mb-2 font-geist-mono text-[11px] font-medium uppercase tracking-[0.18em] text-text-ter">Recent events</h2>
         {audit.length === 0 ? (
-          <p className="text-sm opacity-60">No audit events yet.</p>
+          <p className="text-sm text-text-sec">No audit events yet.</p>
         ) : (
           <ul className="space-y-1 text-sm">
             {audit.slice(0, 40).map((e) => (
-              <li key={e.id} className="flex gap-3 border-t border-white/5 py-1">
-                <span className="opacity-50">{shortTs(e.ts)}</span>
-                <span className="font-mono">{e.action}</span>
-                <span className="opacity-60">{e.user_id ?? "-"}</span>
+              <li key={e.id} className="flex gap-3 border-t border-border py-1">
+                <span className="text-text-ter">{shortTs(e.ts)}</span>
+                <span className="font-geist-mono text-text">{e.action}</span>
+                <span className="text-text-sec">{e.user_id ?? "-"}</span>
               </li>
             ))}
           </ul>
@@ -222,9 +222,9 @@ export default function AdminPage() {
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg border border-white/10 p-4">
-      <div className="text-xs uppercase opacity-50">{label}</div>
-      <div className="mt-1 text-lg font-semibold">{value}</div>
+    <div className="rounded-2xl border border-border bg-bg-card p-4">
+      <div className="font-geist-mono text-[11px] uppercase tracking-[0.18em] text-text-ter">{label}</div>
+      <div className="mt-1 font-display text-lg font-600 tracking-[-0.02em] text-text">{value}</div>
     </div>
   );
 }

@@ -151,164 +151,170 @@ export default function DashboardPage() {
   });
 
   return (
-    <div className="max-w-5xl">
-      <div>
-        <p className="text-xs uppercase tracking-[0.25em] text-accent">
-          Dashboard
-        </p>
-        <h1 className="mt-3 font-display text-4xl md:text-5xl tracking-tight">
+    <div className="max-w-5xl font-geist">
+      <header>
+        <h1 className="font-display text-[clamp(2rem,4vw,2.9rem)] font-600 leading-[1.04] tracking-[-0.03em] text-text">
           Welcome, {greeting}
         </h1>
-      </div>
+        <p className="mt-2 font-geist text-[15px] text-text-sec">
+          Your account, usage, and connected devices, all in one place.
+        </p>
+      </header>
 
-      <section className="mt-10 border border-accent/25 rounded-lg bg-accent/[0.035] p-6">
+      <section className="mt-9 rounded-2xl border border-border bg-bg-card p-6 md:p-7">
         <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
           <div>
-            <p className="text-xs uppercase tracking-[0.22em] text-accent">
-              First Run
+            <p className="font-geist-mono text-[11px] uppercase tracking-[0.18em] text-text-ter">
+              First run
             </p>
-            <h2 className="mt-2 font-display text-2xl tracking-tight text-paper">
+            <h2 className="mt-2 font-display text-[1.5rem] font-600 tracking-[-0.02em] text-text">
               Get from account to first shipped task.
             </h2>
           </div>
           <Link
             href="/docs/quickstart"
-            className="text-sm text-muted hover:text-paper transition"
+            className="font-geist text-[14px] text-text-sec transition-colors hover:text-text"
           >
             Quickstart →
           </Link>
         </div>
-        <div className="mt-5 grid gap-3 lg:grid-cols-5">
+        <div className="mt-6 grid gap-3 lg:grid-cols-5">
           {onboardingSteps.map((step, index) => (
             <Link
               key={step.id}
               href={step.href}
-              className="rounded-md border border-white/10 bg-black/20 p-4 transition hover:border-accent"
+              className="group rounded-xl border border-border bg-bg p-4 transition-colors hover:border-[rgba(40,33,22,0.22)]"
             >
               <div className="flex items-center justify-between gap-3">
-                <span className="font-mono text-[11px] text-muted">
+                <span className="font-geist-mono text-[11px] text-text-ter">
                   {String(index + 1).padStart(2, "0")}
                 </span>
                 <span
-                  className={`rounded-full px-2 py-0.5 text-[11px] ${
+                  className={`rounded-full px-2 py-0.5 font-geist text-[11px] ${
                     step.status === "done"
-                      ? "bg-accent text-ink"
-                      : "bg-white/10 text-muted"
+                      ? "bg-accent text-[#1a1d00]"
+                      : "bg-bg-card-2 text-text-sec"
                   }`}
                 >
                   {step.status === "done" ? "done" : "next"}
                 </span>
               </div>
-              <div className="mt-3 text-sm text-paper">{step.title}</div>
-              <p className="mt-2 text-[12px] leading-relaxed text-muted">
+              <div className="mt-3 font-geist text-[14px] font-500 text-text">
+                {step.title}
+              </div>
+              <p className="mt-1.5 font-geist text-[12.5px] leading-relaxed text-text-sec">
                 {step.body}
               </p>
-              <div className="mt-3 text-[12px] text-accent">{step.cta} →</div>
+              <div className="mt-3 font-geist text-[12.5px] text-text transition-colors group-hover:text-text">
+                {step.cta} →
+              </div>
             </Link>
           ))}
         </div>
       </section>
 
-      <div className="mt-10 grid gap-6 md:grid-cols-2">
-        <section className="border border-white/10 rounded-lg p-6 bg-white/[0.02]">
+      <div className="mt-6 grid gap-5 md:grid-cols-2">
+        <section className="rounded-2xl border border-border bg-bg-card p-6">
           <div className="flex items-center justify-between">
-            <h2 className="font-display text-xl tracking-tight">
+            <h2 className="font-display text-[1.25rem] font-600 tracking-[-0.02em] text-text">
               Subscription
             </h2>
-            <span className="text-xs uppercase tracking-[0.2em] text-accent border border-accent/40 rounded px-2 py-1">
+            <span className="rounded-full border border-border px-2.5 py-1 font-geist text-[11px] uppercase tracking-[0.16em] text-text">
               {subscription?.tier ?? user.tier}
             </span>
           </div>
-          <dl className="mt-6 space-y-3 text-sm">
+          <dl className="mt-6 space-y-3 font-geist text-[14px]">
             <div className="flex justify-between">
-              <dt className="text-muted">Status</dt>
-              <dd className="text-paper">
+              <dt className="text-text-sec">Status</dt>
+              <dd className="text-text">
                 {subscription?.status ?? "active"}
               </dd>
             </div>
             <div className="flex justify-between">
-              <dt className="text-muted">
+              <dt className="text-text-sec">
                 {subscription?.cancel_at_period_end ? "Ends" : "Renews"}
               </dt>
-              <dd className="text-paper">
+              <dd className="text-text">
                 {formatRenewal(subscription?.current_period_end ?? null)}
               </dd>
             </div>
           </dl>
-          <div className="mt-6 flex flex-wrap gap-3">
+          <div className="mt-6 flex flex-wrap items-center gap-4">
             <button
               type="button"
               onClick={openPortal}
               disabled={portalLoading || user.tier === "free"}
-              className="border border-white/20 hover:border-accent text-paper px-4 py-2 rounded-md text-sm transition disabled:opacity-50 disabled:cursor-not-allowed"
+              className="rounded-full bg-[#16140f] px-4 py-2 font-geist text-[13.5px] font-600 text-white transition-transform duration-200 hover:-translate-y-px disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:translate-y-0"
             >
               {portalLoading ? "Opening…" : "Manage billing"}
             </button>
             <Link
               href="/billing"
-              className="text-sm text-muted hover:text-paper transition self-center"
+              className="font-geist text-[14px] text-text-sec transition-colors hover:text-text"
             >
               Change plan →
             </Link>
           </div>
           {portalError && (
-            <p className="mt-3 text-sm text-red-400">{portalError}</p>
+            <p className="mt-3 font-geist text-[14px] text-red-600">{portalError}</p>
           )}
         </section>
 
-        <section className="border border-white/10 rounded-lg p-6 bg-white/[0.02]">
+        <section className="rounded-2xl border border-border bg-bg-card p-6">
           <div className="flex items-center justify-between">
-            <h2 className="font-display text-xl tracking-tight">This month</h2>
+            <h2 className="font-display text-[1.25rem] font-600 tracking-[-0.02em] text-text">
+              This month
+            </h2>
             <Link
               href="/usage"
-              className="text-xs text-muted hover:text-paper transition"
+              className="font-geist text-[13px] text-text-sec transition-colors hover:text-text"
             >
               Details →
             </Link>
           </div>
           <div className="mt-6 flex items-baseline gap-3">
-            <span className="font-display text-4xl text-paper tabular-nums">
+            <span className="font-display text-[2.4rem] font-600 leading-none tracking-[-0.03em] text-text tabular-nums">
               {usage ? formatTokens(usage.credits_used) : "—"}
             </span>
-            <span className="text-sm text-muted">
+            <span className="font-geist text-[14px] text-text-sec">
               of {usage ? formatTokens(usage.credits_included) : "—"} credits
             </span>
           </div>
-          <div className="mt-4 h-2 w-full rounded-full bg-white/10 overflow-hidden">
+          <div className="mt-4 h-2 w-full overflow-hidden rounded-full bg-bg-card-2">
             <div
-              className="h-full bg-accent transition-all"
+              className="h-full rounded-full bg-accent transition-all"
               style={{ width: `${percent}%` }}
             />
           </div>
-          <p className="mt-3 text-sm text-muted">
+          <p className="mt-3 font-geist text-[13.5px] text-text-sec">
             {usage ? formatTokens(usage.this_month_tokens) : "—"} tokens ·{" "}
             {usage ? usage.this_month_requests.toLocaleString() : "—"} requests this month
           </p>
         </section>
       </div>
 
-      <section className="mt-6 border border-white/10 rounded-lg p-6 bg-white/[0.02]">
+      <section className="mt-5 rounded-2xl border border-border bg-bg-card p-6">
         <div className="flex items-center justify-between">
-          <h2 className="font-display text-xl tracking-tight">
+          <h2 className="font-display text-[1.25rem] font-600 tracking-[-0.02em] text-text">
             Connected devices
           </h2>
           <Link
             href="/devices"
-            className="text-xs text-muted hover:text-paper transition"
+            className="font-geist text-[13px] text-text-sec transition-colors hover:text-text"
           >
             Manage →
           </Link>
         </div>
         {activeDevices === null ? (
-          <p className="mt-4 text-sm text-muted">Loading…</p>
+          <p className="mt-4 font-geist text-[14px] text-text-sec">Loading…</p>
         ) : activeDevices === 0 ? (
           <div className="mt-4">
-            <p className="text-sm text-paper">
+            <p className="font-geist text-[14px] text-text">
               No Eri device has connected to your account yet.
             </p>
-            <p className="mt-2 text-sm text-muted leading-relaxed">
+            <p className="mt-2 max-w-prose font-geist text-[14px] leading-relaxed text-text-sec">
               When Eri is open on your machine, run{" "}
-              <code className="font-mono text-[12px] bg-white/5 border border-white/10 rounded px-1.5 py-0.5">
+              <code className="rounded border border-border bg-bg-card-2 px-1.5 py-0.5 font-geist-mono text-[12px] text-text">
                 eri.account.signIn
               </code>{" "}
               from the command palette. We'll bring you back here to approve
@@ -316,44 +322,46 @@ export default function DashboardPage() {
             </p>
           </div>
         ) : (
-          <p className="mt-4 text-sm text-paper">
-            <span className="font-display text-3xl text-paper">
+          <p className="mt-4 flex items-baseline gap-2">
+            <span className="font-display text-[2rem] font-600 leading-none tracking-[-0.03em] text-text">
               {activeDevices}
             </span>
-            <span className="ml-2 text-muted">
+            <span className="font-geist text-[14px] text-text-sec">
               active {activeDevices === 1 ? "device" : "devices"}
             </span>
           </p>
         )}
       </section>
 
-      <section className="mt-10">
-        <h2 className="font-display text-xl tracking-tight">Quick links</h2>
+      <section className="mt-9">
+        <h2 className="font-display text-[1.25rem] font-600 tracking-[-0.02em] text-text">
+          Quick links
+        </h2>
         <div className="mt-4 grid gap-3 sm:grid-cols-3">
           <Link
             href="/install"
-            className="border border-white/10 rounded-lg p-5 hover:border-accent transition group"
+            className="group rounded-xl border border-border bg-bg-card p-5 transition-colors hover:border-[rgba(40,33,22,0.22)]"
           >
-            <div className="text-sm text-muted">Download</div>
-            <div className="mt-1 text-paper group-hover:text-accent transition">
+            <div className="font-geist text-[13px] text-text-ter">Download</div>
+            <div className="mt-1 font-geist text-[15px] font-500 text-text">
               Download eri
             </div>
           </Link>
           <Link
             href="/docs/ide"
-            className="border border-white/10 rounded-lg p-5 hover:border-accent transition group"
+            className="group rounded-xl border border-border bg-bg-card p-5 transition-colors hover:border-[rgba(40,33,22,0.22)]"
           >
-            <div className="text-sm text-muted">Agent Manager</div>
-            <div className="mt-1 text-paper group-hover:text-accent transition">
+            <div className="font-geist text-[13px] text-text-ter">Agent Manager</div>
+            <div className="mt-1 font-geist text-[15px] font-500 text-text">
               Open workbench guide
             </div>
           </Link>
           <a
             href="mailto:phlotu@gmail.com"
-            className="border border-white/10 rounded-lg p-5 hover:border-accent transition group"
+            className="group rounded-xl border border-border bg-bg-card p-5 transition-colors hover:border-[rgba(40,33,22,0.22)]"
           >
-            <div className="text-sm text-muted">Help</div>
-            <div className="mt-1 text-paper group-hover:text-accent transition">
+            <div className="font-geist text-[13px] text-text-ter">Help</div>
+            <div className="mt-1 font-geist text-[15px] font-500 text-text">
               Get support
             </div>
           </a>
