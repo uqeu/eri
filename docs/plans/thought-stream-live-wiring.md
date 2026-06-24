@@ -143,22 +143,3 @@ The terminal is a trust surface — it claims eri did real things. So:
 
 **Reference look:** `website/components/home/CapabilityGrid.tsx` (`TerminalStream`)
 + the `.cterm__*` classes in `website/app/globals.css`.
-
----
-
-## 6. Product requirements (from Khai)
-
-- **On/off toggle (required).** The thought-stream is user-controllable — a
-  setting to show or hide it. When **off**, eri still does everything; it just
-  doesn't surface the terminal. App-side preference (default on for the "watch
-  eri work" wow; let the user silence it). Persist per user.
-- **Fonts (match the website terminal exactly):**
-  - **Terminal body** (the streaming `$ … · … ✓ …` lines) → **Geist Mono**.
-    Stack: `"Geist Mono", ui-monospace, SFMono-Regular, monospace`. **12px**,
-    line-height **1.65**.
-  - **Title bar** (`eri · <App>`) → **Geist** (the sans), weight **600**, **12px**.
-  - Both from the Geist family (Vercel, free, on Google Fonts). If Geist Mono
-    isn't bundled in the native app, the `ui-monospace, SFMono-Regular` fallback
-    renders as SF Mono on macOS — nearly identical.
-  - Defined as CSS vars in `website/app/globals.css`:
-    `--font-geist` / `--font-geist-mono` — mirror them in the app's webview CSS.
