@@ -170,14 +170,16 @@ export interface AgentTurnResult {
 /** The model phone/proactive turns default to when the caller doesn't override. */
 export const DEFAULT_MODEL = "claude-sonnet-4-6";
 /**
- * The model phone *chat replies* use: Haiku is dramatically faster (lower
- * latency + TTFT) at ~90% of Sonnet's quality, which is the right trade for a
- * texting companion where speed is the felt experience. Heavier work still
- * escalates to the computer (control_computer); this is just the conversational
- * reply tier. Distinct from DEFAULT_MODEL so proactive/other callers are
- * untouched.
+ * The model phone *chat replies* use. eri is a real brain over text — it has to
+ * read the room and respond like a person (just say hi back to "hi"), not make
+ * weak-model misjudgments like grabbing a tool it wasn't asked for. So this is
+ * Sonnet: the judgment + instruction-following is the felt experience, more than
+ * a few hundred ms of latency. (Haiku 4.5 was faster but over-eagerly called
+ * tools despite the prompt; a tiered router can route genuinely trivial messages
+ * to a cheap tier later — quality first for now.) Kept distinct from
+ * DEFAULT_MODEL so the tier is a single, deliberate knob.
  */
-export const PHONE_REPLY_MODEL = "claude-haiku-4-5-20251001";
+export const PHONE_REPLY_MODEL = "claude-sonnet-4-6";
 /** Phone replies are short by nature; bound the turn so it fits the budget. */
 const DEFAULT_MAX_TOKENS = 1024;
 /** Bounded so a phone turn can't loop expensively (review H1). */
