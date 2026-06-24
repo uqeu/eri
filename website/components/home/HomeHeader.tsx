@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Menu, X, ArrowUpRight } from "lucide-react";
+import { signOut, useUser } from "@/lib/auth-client";
 
 // Homepage header: a floating glass pill that holds the eri wordmark, a slim
 // row of links, a Download CTA, and a sandwich menu. White and legible over
@@ -20,15 +21,6 @@ const PRIMARY: ReadonlyArray<{ href: string; label: string }> = [
   { href: "/docs", label: "Docs" },
 ];
 
-// The full set the sandwich menu reveals (primary + account).
-const MENU: ReadonlyArray<{ href: string; label: string; note: string }> = [
-  { href: "/phone", label: "Phone", note: "eri on iMessage" },
-  { href: "/pricing", label: "Pricing", note: "Plans and limits" },
-  { href: "/docs", label: "Docs", note: "Guides and reference" },
-  { href: "/careers", label: "Join us", note: "Help build eri" },
-  { href: "/sign-in", label: "Sign in", note: "Pick up where you left off" },
-];
-
 export function HomeHeader(): React.ReactElement {
   const [solid, setSolid] = useState(false);
   const [open, setOpen] = useState(false);
@@ -39,6 +31,23 @@ export function HomeHeader(): React.ReactElement {
   // (ink text) from the very top there, not white-on-white.
   const pathname = usePathname();
   const onHome = pathname === "/";
+  // Reflect the signed-in session in the marketing chrome so a logged-in user
+  // can always get back to their dashboard (and out) from any marketing page.
+  const { user } = useUser();
+  const firstName = (user?.display_name?.trim() || user?.email || "")
+    .split(/\s+|@/)
+    .filter(Boolean)[0];
+
+  // Account row in the menu swaps Sign in → Dashboard when signed in.
+  const menuItems: ReadonlyArray<{ href: string; label: string; note: string }> = [
+    { href: "/phone", label: "Phone", note: "eri on iMessage" },
+    { href: "/pricing", label: "Pricing", note: "Plans and limits" },
+    { href: "/docs", label: "Docs", note: "Guides and reference" },
+    { href: "/careers", label: "Join us", note: "Help build eri" },
+    user
+      ? { href: "/dashboard", label: "Dashboard", note: "Your account and usage" }
+      : { href: "/sign-in", label: "Sign in", note: "Pick up where you left off" },
+  ];
 
   useEffect(() => {
     const onScroll = (): void => setSolid(window.scrollY > 64);
@@ -144,36 +153,65 @@ export function HomeHeader(): React.ReactElement {
 
         {/* Right cluster */}
         <div className="flex shrink-0 items-center gap-1.5">
-          <Link
-            href="/download"
-            className="group relative hidden items-center gap-1.5 overflow-hidden rounded-full px-[18px] font-geist text-[14px] font-semibold outline-none transition-transform duration-300 hover:-translate-y-[1px] focus-visible:ring-2 focus-visible:ring-offset-2 sm:flex"
-            style={{
-              height: 40,
-              color: dark ? "#ffffff" : "#14110b",
-              background: dark ? "#16140f" : "rgba(255,255,255,0.95)",
-              boxShadow: dark
-                ? "0 8px 24px -10px rgba(20,16,8,0.5)"
-                : "0 10px 30px -10px rgba(16,8,26,0.35)",
-              transitionTimingFunction: ease,
-            }}
-          >
-            <span className="relative z-10">Download</span>
-            <ArrowUpRight
-              size={15}
-              strokeWidth={2.4}
-              className="relative z-10 transition-transform duration-300 group-hover:translate-x-[2px] group-hover:-translate-y-[2px]"
-              style={{ transitionTimingFunction: ease }}
-            />
-            {/* lime sweep on hover */}
-            <span
-              aria-hidden
-              className="absolute inset-0 -translate-x-full transition-transform duration-500 group-hover:translate-x-0"
+          {user ? (
+            // Signed in: an account chip that takes you straight to the
+            // dashboard, so the session is always one click away from the site.
+            <Link
+              href="/dashboard"
+              aria-label="Go to your dashboard"
+              className="group relative hidden items-center gap-1.5 rounded-full px-[18px] font-geist text-[14px] font-semibold outline-none transition-transform duration-300 hover:-translate-y-[1px] focus-visible:ring-2 focus-visible:ring-offset-2 sm:flex"
               style={{
-                background: `linear-gradient(90deg, transparent, ${ACCENT}38, transparent)`,
+                height: 40,
+                color: dark ? "#ffffff" : "#14110b",
+                background: dark ? "#16140f" : "rgba(255,255,255,0.95)",
+                boxShadow: dark
+                  ? "0 8px 24px -10px rgba(20,16,8,0.5)"
+                  : "0 10px 30px -10px rgba(16,8,26,0.35)",
                 transitionTimingFunction: ease,
               }}
-            />
-          </Link>
+            >
+              <span className="relative z-10 max-w-[140px] truncate capitalize">
+                {firstName || "Dashboard"}
+              </span>
+              <ArrowUpRight
+                size={15}
+                strokeWidth={2.4}
+                className="relative z-10 transition-transform duration-300 group-hover:translate-x-[2px] group-hover:-translate-y-[2px]"
+                style={{ transitionTimingFunction: ease }}
+              />
+            </Link>
+          ) : (
+            <Link
+              href="/download"
+              className="group relative hidden items-center gap-1.5 overflow-hidden rounded-full px-[18px] font-geist text-[14px] font-semibold outline-none transition-transform duration-300 hover:-translate-y-[1px] focus-visible:ring-2 focus-visible:ring-offset-2 sm:flex"
+              style={{
+                height: 40,
+                color: dark ? "#ffffff" : "#14110b",
+                background: dark ? "#16140f" : "rgba(255,255,255,0.95)",
+                boxShadow: dark
+                  ? "0 8px 24px -10px rgba(20,16,8,0.5)"
+                  : "0 10px 30px -10px rgba(16,8,26,0.35)",
+                transitionTimingFunction: ease,
+              }}
+            >
+              <span className="relative z-10">Download</span>
+              <ArrowUpRight
+                size={15}
+                strokeWidth={2.4}
+                className="relative z-10 transition-transform duration-300 group-hover:translate-x-[2px] group-hover:-translate-y-[2px]"
+                style={{ transitionTimingFunction: ease }}
+              />
+              {/* lime sweep on hover */}
+              <span
+                aria-hidden
+                className="absolute inset-0 -translate-x-full transition-transform duration-500 group-hover:translate-x-0"
+                style={{
+                  background: `linear-gradient(90deg, transparent, ${ACCENT}38, transparent)`,
+                  transitionTimingFunction: ease,
+                }}
+              />
+            </Link>
+          )}
 
           <button
             ref={buttonRef}
@@ -250,7 +288,7 @@ export function HomeHeader(): React.ReactElement {
           }}
         >
           <nav className="flex flex-col p-2.5">
-            {MENU.map((l, i) => (
+            {menuItems.map((l, i) => (
               <Link
                 key={l.href}
                 href={l.href}
@@ -282,6 +320,35 @@ export function HomeHeader(): React.ReactElement {
               </Link>
             ))}
 
+            {/* Sign out — only when there's a session to end. */}
+            {user && (
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setOpen(false);
+                  void signOut();
+                }}
+                className="group flex items-center justify-between rounded-2xl px-3.5 py-3 text-left outline-none transition-colors duration-200 hover:bg-[rgba(20,16,8,0.045)] focus-visible:bg-[rgba(20,16,8,0.06)]"
+                style={{
+                  opacity: open ? 1 : 0,
+                  transform: open ? "translateY(0)" : "translateY(6px)",
+                  transition: open
+                    ? `opacity 420ms ${ease} ${90 + menuItems.length * 55}ms, transform 480ms ${ease} ${90 + menuItems.length * 55}ms`
+                    : "opacity 120ms ease, transform 120ms ease",
+                }}
+              >
+                <span className="flex flex-col">
+                  <span className="font-geist text-[15px] font-semibold text-[#16140f]">
+                    Sign out
+                  </span>
+                  <span className="font-geist text-[12.5px] text-[#6c675c]">
+                    End this session
+                  </span>
+                </span>
+              </button>
+            )}
+
             {/* Download row inside the menu, for narrow screens */}
             <Link
               href="/download"
@@ -293,7 +360,7 @@ export function HomeHeader(): React.ReactElement {
                 opacity: open ? 1 : 0,
                 transform: open ? "translateY(0)" : "translateY(6px)",
                 transition: open
-                  ? `opacity 420ms ${ease} ${90 + MENU.length * 55}ms, transform 480ms ${ease} ${90 + MENU.length * 55}ms`
+                  ? `opacity 420ms ${ease} ${90 + menuItems.length * 55}ms, transform 480ms ${ease} ${90 + menuItems.length * 55}ms`
                   : "opacity 120ms ease, transform 120ms ease",
               }}
             >

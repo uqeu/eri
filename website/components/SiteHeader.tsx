@@ -22,8 +22,10 @@ const DASHBOARD_PREFIXES = [
   "/dashboard",
   "/billing",
   "/usage",
+  "/connections",
   "/devices",
   "/account",
+  "/admin",
 ];
 
 // Marketing routes that render their own light header (HomeHeader), so the

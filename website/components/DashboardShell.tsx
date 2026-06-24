@@ -155,12 +155,18 @@ export function DashboardShell({ children }: DashboardShellProps) {
               </Link>
             );
           })}
+          <Link
+            href="/"
+            className="mt-1 rounded-lg px-3 py-2 text-[14px] text-text-sec transition-colors hover:bg-bg-card-2 hover:text-text"
+          >
+            View site ↗
+          </Link>
           <button
             type="button"
             onClick={() => {
               void signOut();
             }}
-            className="mt-1 rounded-lg px-3 py-2 text-left text-[14px] text-text-sec hover:text-text hover:bg-bg-card-2 transition-colors"
+            className="rounded-lg px-3 py-2 text-left text-[14px] text-text-sec hover:text-text hover:bg-bg-card-2 transition-colors"
           >
             Sign out
           </button>
