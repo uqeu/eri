@@ -98,8 +98,8 @@ function BarChart({ data }: BarChartProps) {
               y={y}
               width={Math.max(barWidth, 1)}
               height={Math.max(barHeight, 0)}
-              fill="#E0FF4F"
-              opacity={point.credits > 0 ? 0.9 : 0.15}
+              fill="#3a3833"
+              opacity={point.credits > 0 ? 0.85 : 0.12}
             >
               <title>
                 {point.date}: {point.credits.toLocaleString()} credits
@@ -180,7 +180,7 @@ export default function UsagePage() {
           </div>
           <div className="mt-4 h-2 w-full rounded-full bg-bg-card-2 overflow-hidden">
             <div
-              className="h-full bg-accent transition-all"
+              className="h-full bg-text transition-all"
               style={{ width: `${percent}%` }}
             />
           </div>

@@ -122,7 +122,7 @@ export function DashboardShell({ children }: DashboardShellProps) {
         </div>
         <div className="px-5 py-4 border-t border-b border-border md:border-t-0">
           <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-full bg-accent text-[#1a1d00] flex items-center justify-center font-geist text-[13px] font-600">
+            <div className="h-10 w-10 rounded-full bg-text text-bg flex items-center justify-center font-geist text-[13px] font-600">
               {initials(user)}
             </div>
             <div className="min-w-0">
