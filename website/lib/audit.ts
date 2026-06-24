@@ -17,6 +17,7 @@ export type AuditAction =
   | "tier.changed"
   | "device.token_created"
   | "device.token_revoked"
+  | "device.history_cleared"
   | "quota.over_quota"
   | "quota.ghost_warning";
 

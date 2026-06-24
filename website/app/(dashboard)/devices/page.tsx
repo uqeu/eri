@@ -46,6 +46,7 @@ export default function DevicesPage(): JSX.Element | null {
   const [error, setError] = useState<string | null>(null);
   const [revoking, setRevoking] = useState<Record<string, boolean>>({});
   const [revokingAll, setRevokingAll] = useState<boolean>(false);
+  const [clearingRevoked, setClearingRevoked] = useState<boolean>(false);
   const [toast, setToast] = useState<Toast | null>(null);
 
   const load = useCallback(async (): Promise<void> => {
@@ -121,6 +122,32 @@ export default function DevicesPage(): JSX.Element | null {
       setToast({ kind: "error", message: "Network error." });
     } finally {
       setRevokingAll(false);
+    }
+  }
+
+  async function clearRevoked(): Promise<void> {
+    if (
+      !window.confirm(
+        "Clear the revoked device history? This only removes already-revoked entries, no active device is affected.",
+      )
+    ) {
+      return;
+    }
+    setClearingRevoked(true);
+    try {
+      const res = await authedFetch("/api/auth/devices/clear-revoked", {
+        method: "POST",
+      });
+      if (!res.ok) {
+        setToast({ kind: "error", message: "Could not clear history." });
+        return;
+      }
+      setToast({ kind: "success", message: "Revoked history cleared." });
+      await load();
+    } catch {
+      setToast({ kind: "error", message: "Network error." });
+    } finally {
+      setClearingRevoked(false);
     }
   }
 
@@ -211,9 +238,19 @@ export default function DevicesPage(): JSX.Element | null {
 
         {revoked.length > 0 && (
           <section className="mt-10">
-            <h2 className="font-geist-mono text-[11px] uppercase tracking-[0.18em] text-text-ter mb-3">
-              Revoked · {revoked.length}
-            </h2>
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="font-geist-mono text-[11px] uppercase tracking-[0.18em] text-text-ter">
+                Revoked · {revoked.length}
+              </h2>
+              <button
+                type="button"
+                disabled={clearingRevoked}
+                onClick={() => void clearRevoked()}
+                className="rounded-full border border-border bg-bg-card px-4 py-2 text-[13.5px] text-text-sec transition hover:border-[rgba(40,33,22,0.22)] hover:text-text disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {clearingRevoked ? "Clearing…" : "Clear history"}
+              </button>
+            </div>
             <div className="space-y-2">
               {revoked.map((d) => (
                 <div
