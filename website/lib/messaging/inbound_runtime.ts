@@ -34,6 +34,7 @@ import { cancelPending, confirmPending, enqueueCommand } from "@/lib/commands/qu
 import { handleInbound, type InboundDeps } from "@/lib/imessage/inbound";
 import { consumePairing, normalizeE164, resolveUserByPhone } from "@/lib/imessage/identity";
 import type { InboundMessage } from "@/lib/imessage/webhook";
+import { formatWorldModel, readRecallProjection } from "@/lib/messaging/recall";
 import { getUserSettings } from "@/lib/messaging/settings";
 import { shouldSpeak } from "@/lib/messaging/voice";
 import { ensureWithinQuota, recordUsage } from "@/lib/usage/quota";
@@ -370,6 +371,12 @@ export async function loadProfile(
   userId: string,
   query: string,
 ): Promise<{ profile: TierAProfile | null; dynamicContext: string }> {
+  // 0. The brain's world-model projection (ADR-0010) — the canonical recall, read
+  //    from the server-readable store. It LEADS the blend; the phone's own stores
+  //    below are coverage/fallback (Phase A strangler-fig). Best-effort: a null
+  //    projection just means the reply falls back to the existing TS recall.
+  const wm = formatWorldModel(await readRecallProjection(userId));
+
   // 1. Account identity — always available, cheap, the floor of "knows me".
   const identityFacts: string[] = [];
   try {
@@ -465,10 +472,18 @@ export async function loadProfile(
   } catch (e) {
     logEvent("inbound.style_load_failed", { userId, error: errMsg(e) });
   }
-  const communicationStyle = learnedStyle ?? syncedProfile?.communication_style ?? null;
+  // Style: the brain's projection wins where present (§8), else the learned/synced.
+  const communicationStyle = wm.style ?? learnedStyle ?? syncedProfile?.communication_style ?? null;
 
-  // Merge: identity → learned → synced facts (dedup, identity/learned lead).
-  const facts = [...identityFacts, ...learnedFacts, ...(syncedProfile?.facts ?? [])];
+  // Merge facts — the brain world-model LEADS (entities/relations + its profile
+  // facts), then identity, then the phone's own stores as coverage/fallback (§8).
+  const facts = [
+    ...wm.facts,
+    ...wm.profileFacts,
+    ...identityFacts,
+    ...learnedFacts,
+    ...(syncedProfile?.facts ?? []),
+  ];
   const seen = new Set<string>();
   const dedupedFacts = facts.filter((f) => {
     const k = f.trim().toLowerCase();
@@ -477,18 +492,24 @@ export async function loadProfile(
     return true;
   });
   const prefSeen = new Set<string>();
-  const preferences = [...preferenceFacts, ...(syncedProfile?.preferences ?? [])].filter((p) => {
+  const preferences = [...wm.preferences, ...preferenceFacts, ...(syncedProfile?.preferences ?? [])].filter((p) => {
     const k = p.trim().toLowerCase();
     if (!k || prefSeen.has(k)) return false;
     prefSeen.add(k);
     return true;
   });
-  if (dedupedFacts.length === 0 && preferences.length === 0 && !syncedProfile && !dynamicContext) {
+  // The "right now" slice (recent observations + predictions) leads the dynamic
+  // context; the brain's own dynamicContext + the synced one follow.
+  const blendedDynamic = [...wm.dynamic, wm.profileDynamicContext, dynamicContext]
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .join("\n");
+  if (dedupedFacts.length === 0 && preferences.length === 0 && !syncedProfile && !blendedDynamic) {
     return { profile: null, dynamicContext: "" };
   }
   return {
     profile: { facts: dedupedFacts, preferences, communication_style: communicationStyle },
-    dynamicContext,
+    dynamicContext: blendedDynamic,
   };
 }
 
