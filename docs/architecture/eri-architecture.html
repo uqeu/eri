@@ -92,7 +92,7 @@
     <div class="grp">Capabilities</div>
     <a href="#control">8 - Computer control</a>
     <a href="#phone-memory">9 - Phone &amp; two-tier memory</a>
-    <a href="#build">10 - Build (a capability)</a>
+    <a href="#build">10 - Drives your agents</a>
     <div class="grp">Platform</div>
     <a href="#infra">11 - Deploy &amp; infra</a>
     <a href="#data">12 - Data model</a>
@@ -117,7 +117,7 @@
       <div><span>What</span> &nbsp; eri = Engineered Relative Intelligence - the AI operating system for a person; your "second digital half"</div>
       <div><span>Company</span> &nbsp; Eri Labs - an AGI lab; the product is honest, the mission is bold</div>
       <div><span>One brain</span> &nbsp; one world model of you, reached from your computer and your phone; it learns, predicts, and acts</div>
-      <div><span>Base engine</span> &nbsp; Claude (the cortex / muscle) + a small local model (token-free low-level) + Mercury (IDE fast-lane)</div>
+      <div><span>Base engine</span> &nbsp; Claude (the cortex / muscle, + drives your other coding agents) + a small local model (token-free low-level) + Mercury (fast code edits)</div>
       <div><span>Core</span> &nbsp; Rust workspace (<code>eri_graph</code> world model, <code>eri_inference</code>, <code>eri_cli</code> control/brain, billing, coreutils)</div>
       <div><span>Cloud</span> &nbsp; Next.js 14 in <code>website/</code> on Vercel (<code>tryeri.ca</code>) + Supabase Postgres</div>
       <div><span>Stage</span> &nbsp; pre-launch alpha, zero users; no fake metrics, no release until it's whole</div>
@@ -144,12 +144,13 @@
     <h2 id="surfaces"><span class="tocnum">2</span>Surfaces</h2>
     <table>
       <tr><th>Surface</th><th>What it is</th><th>Where</th><th>State</th></tr>
-      <tr><td><b>eri app</b> (computer)</td><td>macOS app + always-on floating overlay; eri watches and acts on your machine hands-free, shows its thought-stream</td><td><code>apps/eri-agent-manager</code>, overlay, <code>crates/eri_cli</code> control</td><td><span class="pill ok">live wedge</span></td></tr>
-      <tr><td><b>eri phone</b> (iMessage)</td><td>Text eri; the same brain answers and can act on your computer remotely</td><td><code>website/</code> serverless (Spectrum / Photon transport)</td><td><span class="pill ok">M1 live</span></td></tr>
+      <tr><td><b>eri app</b> (computer)</td><td>The macOS app: eri watches and acts on your machine hands-free, and has its <b>own built-in terminal</b> where it codes and drives agentic dev (spins up Claude Code / Cursor / etc. sessions for you)</td><td><code>apps/eri-agent-manager</code>, <code>crates/eri_cli</code> control + terminal</td><td><span class="pill ok">live wedge</span></td></tr>
+      <tr><td><b>eri pill</b> (overlay)</td><td>The super-small always-on floating companion - summon with a hotkey, talk or type, watch eri's thought-stream; stays out of the way</td><td>transparent NSPanel overlay, <code>&#8984;&#8997;E</code></td><td><span class="pill ok">shipped</span></td></tr>
+      <tr><td><b>eri phone</b> (iMessage)</td><td>Text eri when you're away; the cloud half answers and acts for you even with the laptop off (via Composio connections)</td><td><code>website/</code> serverless (Spectrum / Photon)</td><td><span class="pill ok">M1 live</span></td></tr>
       <tr><td><b>eri website</b></td><td>Front door (download, pricing, auth) + host for the phone backend + all <code>/api/v1/*</code></td><td><code>website/</code> (Next.js 14, Vercel)</td><td><span class="pill ok">shipped</span></td></tr>
-      <tr><td><b>eri social</b></td><td>Your digital half's presence; eris connect on your behalf (a consented outward projection)</td><td>vision, grilling in design</td><td><span class="pill bad">vision</span></td></tr>
-      <tr><td><b>eri CLI / IDE</b></td><td>The Build capability's surfaces (Claude-Code-class harness + VSCodium panel)</td><td><code>crates/eri_cli</code>, <code>ide/extensions/eri-ai-panel</code></td><td><span class="pill ok">shipped</span></td></tr>
+      <tr><td><b>eri social</b></td><td>Your digital half's presence; eris connect on your behalf (a consented outward projection) - coming soon</td><td>vision, grilling in design</td><td><span class="pill bad">vision</span></td></tr>
     </table>
+    <p class="small muted"><b>No standalone AI IDE</b> (retired, ADR-0009). eri is a computer-use agent - it doesn't need its own editor; it <em>drives</em> the coding tools you already use. <a href="#build">&sect;10</a></p>
 
     <!-- 3 -->
     <h2 id="world-model"><span class="tocnum">3</span>The world model <span class="pill ok">shipped (P1)</span></h2>
@@ -257,13 +258,13 @@
     <div class="bad-note small"><b>Honest gap (being closed):</b> today the phone reply reads only shallow TS stores (<code>learned_facts</code> + <code>personalization_profiles</code>) - it does <em>not</em> yet read the Rust world model. The <a href="#recall">recall seam</a> is the bridge; until its live trigger + read/blend land, eri-on-phone is a personalized Sonnet, not yet the full P1-P3 brain. (M1 hygiene: Photon webhook 401 dedup.)</p></div>
 
     <!-- 10 -->
-    <h2 id="build"><span class="tocnum">10</span>Build - a capability, not the product <span class="pill ok">shipped</span></h2>
-    <p>The old "agentic AI IDE" is now <b>one capability</b> the brain can invoke (ADR-0009). The harness is real and deep - a Claude-Code / Codex-class agent loop - but it serves the digital human, it isn't the headline.</p>
+    <h2 id="build"><span class="tocnum">10</span>Build - eri drives your coding agents <span class="pill ok">shipped</span></h2>
+    <p>The old "agentic AI IDE" is <b>gone</b> (ADR-0009). eri is a computer-use agent, so it doesn't need its own editor - it <b>orchestrates the agentic-dev tools you already use</b>. You log in to whatever you code with (Claude / Claude Code, Cursor, Gemini, OpenAI, Perplexity); eri drives them.</p>
     <div class="grid g2">
-      <div class="card"><h3>The harness <span class="pill ok">shipped</span></h3><p class="small">Client-side agentic loop in the CLI (<code>build_agent.rs</code> / <code>eri_agent</code> SDK): tool superset (bash/grep/glob/apply_patch/todo), subagents, layered compaction, hooks lifecycle, custom commands + skills + plugins, worktrees, bash sandbox (seatbelt), MCP-as-tools, permission modes, observability, Python + Node SDK bindings. Workspace green.</p></div>
-      <div class="card"><h3>Engines for Build</h3><p class="small"><b>Claude</b> = the builder lane (multi-file, reasoning), token-metered. <b>Mercury 2</b> (Inception diffusion) = the IDE fast-lane for sub-second single-file edits, turn-metered (<code>bill:false</code>). A mode picker selects the Claude tier (<code>--mode fast/thinking/auto</code>).</p></div>
+      <div class="card"><h3>eri's built-in terminal</h3><p class="small">Lives inside the app. eri does its coding here - it spins up its own Claude Code sessions, types in your CLI, runs builds and tests, and steers the whole agentic loop. Half the time eri isn't the coder, it's the <em>director</em> of your coder.</p></div>
+      <div class="card"><h3>eri's own hands <span class="pill ok">shipped</span></h3><p class="small">When eri codes directly, it uses the in-house harness (<code>eri_agent</code> / <code>build_agent.rs</code>): tool superset, subagents, compaction, hooks, sandbox, MCP-as-tools, permission modes, Python/Node SDK bindings. An internal capability of the brain, not a product surface.</p></div>
     </div>
-    <p class="small muted">Also captured: eri can orchestrate <em>other</em> coding agents (Cursor / Claude Code) via computer control - "eri runs your coding agents" - an extension of the control wedge (<code>project_eri_coding_control</code>, not built).</p>
+    <p class="small muted">Engines: <b>Claude</b> drives reasoning + the agentic loop; the <b>local model</b> handles cheap low-level steps at zero cloud cost; <b>Mercury 2</b> stays available for sub-second single-file edits (no longer tied to an IDE panel). Same idea extends to any app - eri drives your terminal, your browser, your tools; computer use is the substrate (<code>project_eri_coding_control</code>).</p>
 
     <!-- 11 -->
     <h2 id="infra"><span class="tocnum">11</span>Deploy &amp; infra</h2>
@@ -275,7 +276,7 @@
       <div><span>DB</span> Supabase Postgres <code>zvwzcqsdjuvuvtxbnrlq</code> (free tier - can auto-pause)</div>
       <div><span>Phone</span> Spectrum / Photon webhooks (HMAC) - Vercel-serverless, no separate host</div>
     </div>
-    <div class="note small"><b>When does the brain need its own cloud host (Railway etc.)?</b> Not yet. Today: Vercel (website + phone) + Supabase (server-readable memory); the brain runs locally and pushes the recall projection. A dedicated compute host (or enclave) is the step <em>after</em> the recall seam - when the brain itself goes cloud-resident (ADR-0008) so it serves you with the laptop off. Don't provision it now.</div>
+    <div class="note small"><b>eri is going cloud-resident on Railway.</b> Today the brain runs locally and pushes the recall projection to Vercel + Supabase. Next, eri runs in the cloud (Railway) so it works <b>with your laptop off</b> - reaching your <b>Composio connections</b> (Gmail, Calendar, your apps) to read your stuff and act for you from your phone. This is the ADR-0008 cloud-resident step made concrete (Railway + Composio); it comes after the recall seam. <span class="pill blue">planned / building</span></div>
     <h3>Env (Vercel)</h3>
     <p class="kvs small"><code>ANTHROPIC_MASTER_KEY</code> <code>INCEPTION_MASTER_KEY</code> <code>OPENAI_MASTER_KEY</code> <code>GOOGLE_MASTER_KEY</code> <code>DATABASE_URL</code> <code>JWT_SECRET</code> <code>SUPABASE_*</code> <code>STRIPE_*</code> <code>GOOGLE_*</code> (OAuth) <code>PHOTON_WEBHOOK_SECRET</code> <code>NEXT_PUBLIC_BASE_URL</code> <code>ERI_SERVER_ENCRYPTION_KEY</code> (Tier-A at-rest)</p>
 
@@ -351,7 +352,7 @@
       <tr><td>P2 predict &rarr; gate &rarr; act</td><td>confirmation envelope, world-model forecast, unified gate</td><td><span class="pill ok">shipped</span></td></tr>
       <tr><td>P3 sia loop</td><td>observe&rarr;propose&rarr;admit&rarr;apply&rarr;measure&rarr;keep/revert; only-tightens invariant</td><td><span class="pill ok">shipped</span></td></tr>
       <tr><td>Recall seam (ADR-0010)</td><td>brain&rarr;phone projection; crates/ half done, live trigger + phone read/blend</td><td><span class="pill acc">finishing</span></td></tr>
-      <tr><td>Cloud-resident brain (ADR-0008)</td><td>confidential enclave - serves phone with the computer off</td><td><span class="pill blue">planned</span></td></tr>
+      <tr><td>Cloud-resident brain (ADR-0008)</td><td>Railway-hosted + Composio connections - serves your phone and acts with the computer off</td><td><span class="pill blue">planned</span></td></tr>
       <tr><td>P4 persona / voice, P5 own-model (LoRA)</td><td>growing personality; per-user fine-tuning (S-LoRA)</td><td><span class="pill blue">planned</span></td></tr>
       <tr><td>eri social</td><td>consented outward projection + eri-to-eri network</td><td><span class="pill bad">vision</span></td></tr>
     </table>
@@ -384,7 +385,7 @@
     lib/                        auth, tiers, usage/quota, inference/{proxy,providers}, proactive/
     supabase/migrations/        users, tokens, buckets, memory_blobs, personalization_profiles, ...
   apps/eri-agent-manager/       macOS app (the computer surface) + floating overlay
-  ide/extensions/eri-ai-panel/  VSCodium-fork IDE panel (Build capability)
+  ide/extensions/eri-ai-panel/  VSCodium-fork IDE panel  (RETIRED - ADR-0009; eri drives your editor instead)
   docs/adr/                     0001-0010   docs/contracts/   docs/competitive/
   CONTEXT.md                    glossary    docs/architecture/ this file</pre>
 
