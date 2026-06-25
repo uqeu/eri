@@ -126,33 +126,82 @@ pub const MAX_FLOOR: f32 = 0.95;
 /// refinement is conservative and reversible.
 pub const FLOOR_STEP: f32 = 0.05;
 
+/// One sia-raised confidence floor + the inputs the post-hoc calibration (Slice
+/// 3b) measures it against.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct Floor {
+    /// The raised auto-execute floor.
+    value: f32,
+    /// The undo count for this pattern WHEN the floor was raised — the baseline
+    /// calibration compares against ("did undos keep coming after the raise?").
+    support: usize,
+    /// Superseded by calibration (it didn't earn its keep): kept for audit
+    /// (bi-temporal — invalidate-not-delete), but no longer applied, so
+    /// [`floor_for`](ConfidencePolicy::floor_for) reverts it to the default.
+    superseded: bool,
+}
+
 /// Per-pattern confidence-floor overrides — the owned, refine-able confidence
-/// state (review #3). A pattern with no override uses [`DEFAULT_CONFIDENCE_FLOOR`],
-/// so an **empty policy is byte-for-byte today's behavior** (zero behavior change
-/// until sia raises a floor, and until the gate reads it at Slice 3a). Persisted
-/// per-user (the caller resolves the user-scoped path — fixing the cautions-global
-/// inconsistency).
+/// state (review #3). A pattern with no *active* override uses
+/// [`DEFAULT_CONFIDENCE_FLOOR`], so an **empty policy is byte-for-byte today's
+/// behavior**. Persisted per-user (the caller resolves the user-scoped path).
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct ConfidencePolicy {
-    floors: BTreeMap<String, f32>,
+    floors: BTreeMap<String, Floor>,
 }
 
 impl ConfidencePolicy {
-    /// The auto-execute confidence floor for `pattern` — a sia-raised override, or
-    /// the default when none.
+    /// The auto-execute confidence floor for `pattern` — an *active* sia-raised
+    /// override, or the default (when none, or the override was superseded by
+    /// calibration).
     pub fn floor_for(&self, pattern: &str) -> f32 {
         self.floors
             .get(pattern)
-            .copied()
+            .filter(|f| !f.superseded)
+            .map(|f| f.value)
             .unwrap_or(DEFAULT_CONFIDENCE_FLOOR)
     }
 
     /// Raise `pattern`'s floor one conservative, capped step (sia asks more readily
-    /// for it). Idempotent at [`MAX_FLOOR`]. Returns the new floor.
-    pub fn raise(&mut self, pattern: &str) -> f32 {
-        let next = (self.floor_for(pattern) + FLOOR_STEP).min(MAX_FLOOR);
-        self.floors.insert(pattern.to_string(), next);
-        next
+    /// for it), recording `support` (the undo count that earned it) as the
+    /// calibration baseline. Idempotent at [`MAX_FLOOR`]. Re-raising a superseded
+    /// floor starts fresh from the default. Returns the new floor.
+    pub fn raise(&mut self, pattern: &str, support: usize) -> f32 {
+        let value = (self.floor_for(pattern) + FLOOR_STEP).min(MAX_FLOOR);
+        self.floors.insert(
+            pattern.to_string(),
+            Floor {
+                value,
+                support,
+                superseded: false,
+            },
+        );
+        value
+    }
+
+    /// Mark `pattern`'s floor superseded — calibration found it didn't earn its
+    /// keep. Bi-temporal: the record stays (auditable), but it stops applying.
+    pub fn supersede(&mut self, pattern: &str) {
+        if let Some(f) = self.floors.get_mut(pattern) {
+            f.superseded = true;
+        }
+    }
+
+    /// The patterns with an ACTIVE raised floor — the set calibration revisits.
+    pub fn active_patterns(&self) -> Vec<String> {
+        self.floors
+            .iter()
+            .filter(|(_, f)| !f.superseded)
+            .map(|(p, _)| p.clone())
+            .collect()
+    }
+
+    /// The recorded support baseline for `pattern`'s active floor, if any.
+    fn support_of(&self, pattern: &str) -> Option<usize> {
+        self.floors
+            .get(pattern)
+            .filter(|f| !f.superseded)
+            .map(|f| f.support)
     }
 
     /// Persist to `path` (pretty JSON). The caller resolves a user-scoped path.
@@ -173,6 +222,84 @@ impl ConfidencePolicy {
             .and_then(|s| serde_json::from_str(&s).ok())
             .unwrap_or_default()
     }
+}
+
+/// The post-hoc verdict on one applied floor refinement (Slice 3b — the closed
+/// measurement loop, what makes it *learn* rather than apply heuristics).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Calibration {
+    /// The floor reduced repeat undos (none since the raise) — it earned its keep.
+    Kept,
+    /// Undos for the pattern kept coming after the raise — it didn't help; the
+    /// floor is superseded (reverted, bi-temporally).
+    Reverted,
+    /// Another mechanism (e.g. the always-ask caution) is ALSO responding to this
+    /// pattern, so the floor's effect is confounded — we can't credit OR blame it.
+    /// Left as-is (it only ever tightens, so it's harmless).
+    Confounded,
+}
+
+/// Measure one pattern's active floor against the named metric — *did raising it
+/// reduce repeat undos?* — and keep, revert, or leave-confounded. Pure: the IO
+/// (current undo count, whether the pattern is also cautioned) is supplied by the
+/// caller, so calibration is deterministic + fixture-testable.
+///
+/// `confounded` MUST be true when the floor isn't the *sole* responder for the
+/// pattern (e.g. it's also cautioned) — then we never credit the floor for work
+/// another mechanism did (the design caveat).
+pub fn calibrate(
+    policy: &mut ConfidencePolicy,
+    pattern: &str,
+    undone_now: usize,
+    confounded: bool,
+) -> Calibration {
+    let Some(support) = policy.support_of(pattern) else {
+        // No active floor for this pattern — nothing to calibrate.
+        return Calibration::Confounded;
+    };
+    if confounded {
+        return Calibration::Confounded;
+    }
+    if undone_now > support {
+        // Undos continued after the raise → it didn't reduce them → revert.
+        policy.supersede(pattern);
+        Calibration::Reverted
+    } else {
+        Calibration::Kept
+    }
+}
+
+/// Run the closed measurement loop over the signed-in user's ACTIVE floors (Slice
+/// 3b): for each, [`calibrate`] keeps / reverts / leaves-confounded, persisting
+/// any reversions. The current undo count and the confound check (is the pattern
+/// also cautioned, so the floor isn't the sole responder) are **injected**, so the
+/// IO stays at the edge and the decision stays pure. Best-effort; returns how many
+/// floors were reverted.
+pub fn calibrate_floors(
+    user_id: Option<&str>,
+    undone_count: impl Fn(&str) -> usize,
+    is_cautioned: impl Fn(&str) -> bool,
+) -> usize {
+    let Ok(path) = confidence_path(user_id) else {
+        return 0;
+    };
+    let mut policy = ConfidencePolicy::load(&path);
+    let mut reverted = 0;
+    for pattern in policy.active_patterns() {
+        if calibrate(
+            &mut policy,
+            &pattern,
+            undone_count(&pattern),
+            is_cautioned(&pattern),
+        ) == Calibration::Reverted
+        {
+            reverted += 1;
+        }
+    }
+    if reverted > 0 {
+        let _ = policy.save(&path);
+    }
+    reverted
 }
 
 /// The narrow surface sia may write — the three refine-able / *narrowing*
@@ -228,10 +355,10 @@ impl LiveRefinablePolicy {
 }
 
 impl RefinablePolicy for LiveRefinablePolicy {
-    fn raise_floor(&mut self, pattern: &str, _provenance: &Provenance) {
+    fn raise_floor(&mut self, pattern: &str, provenance: &Provenance) {
         if let Ok(path) = confidence_path(self.user_id.as_deref()) {
             let mut floors = ConfidencePolicy::load(&path);
-            floors.raise(pattern);
+            floors.raise(pattern, provenance.support);
             let _ = floors.save(&path);
         }
     }
@@ -317,11 +444,11 @@ mod tests {
     #[test]
     fn raising_a_floor_is_a_capped_conservative_step() {
         let mut pol = ConfidencePolicy::default();
-        let after = pol.raise("quit Slack");
+        let after = pol.raise("quit Slack", 2);
         assert!((after - (DEFAULT_CONFIDENCE_FLOOR + FLOOR_STEP)).abs() < 1e-6);
         // Repeated raises converge to the cap, never past it.
         for _ in 0..50 {
-            pol.raise("quit Slack");
+            pol.raise("quit Slack", 2);
         }
         assert_eq!(pol.floor_for("quit Slack"), MAX_FLOOR);
         // Other patterns are untouched — still the default.
@@ -333,7 +460,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("eri-sia-{}", std::process::id()));
         let path = dir.join("confidence.json");
         let mut pol = ConfidencePolicy::default();
-        pol.raise("quit Slack");
+        pol.raise("quit Slack", 2);
         pol.save(&path).expect("save");
         assert_eq!(
             ConfidencePolicy::load(&path).floor_for("quit Slack"),
@@ -371,13 +498,61 @@ mod tests {
         // auto-execute something it wouldn't have pre-learning.
         let mut pol = ConfidencePolicy::default();
         for _ in 0..3 {
-            pol.raise("open Safari");
+            pol.raise("open Safari", 2);
         }
-        pol.raise("quit Mail");
+        pol.raise("quit Mail", 2);
         assert!(pol.floor_for("open Safari") >= DEFAULT_CONFIDENCE_FLOOR);
         assert!(pol.floor_for("quit Mail") >= DEFAULT_CONFIDENCE_FLOOR);
         // A pattern sia never touched is exactly the default — unchanged.
         assert_eq!(pol.floor_for("anything else"), DEFAULT_CONFIDENCE_FLOOR);
+    }
+
+    #[test]
+    fn calibration_keeps_a_floor_with_no_new_undos() {
+        // The user stopped undoing the pattern after the raise → it earned its keep.
+        let mut pol = ConfidencePolicy::default();
+        pol.raise("open Safari", 2); // raised at undo count 2
+        assert_eq!(
+            calibrate(&mut pol, "open Safari", 2, false),
+            Calibration::Kept
+        );
+        assert!(pol.floor_for("open Safari") > DEFAULT_CONFIDENCE_FLOOR);
+    }
+
+    #[test]
+    fn calibration_reverts_a_floor_that_did_not_reduce_undos() {
+        // Undos kept coming after the raise → it didn't help → revert (superseded,
+        // bi-temporal), back to the default floor.
+        let mut pol = ConfidencePolicy::default();
+        pol.raise("open Safari", 2);
+        assert_eq!(
+            calibrate(&mut pol, "open Safari", 4, false),
+            Calibration::Reverted
+        );
+        assert_eq!(
+            pol.floor_for("open Safari"),
+            DEFAULT_CONFIDENCE_FLOOR,
+            "a reverted floor is back to the default"
+        );
+        // Superseded, not deleted (audit) — and no longer an active floor.
+        assert!(pol.active_patterns().is_empty());
+    }
+
+    #[test]
+    fn calibration_never_credits_or_blames_a_confounded_floor() {
+        // The pattern is ALSO cautioned → the floor isn't the sole responder, so a
+        // reduction (or not) in undos isn't the floor's doing (the design caveat).
+        // Left exactly as-is — harmless, since the floor only ever tightens.
+        let mut pol = ConfidencePolicy::default();
+        pol.raise("open Safari", 2);
+        assert_eq!(
+            calibrate(&mut pol, "open Safari", 9, true),
+            Calibration::Confounded
+        );
+        assert!(
+            pol.floor_for("open Safari") > DEFAULT_CONFIDENCE_FLOOR,
+            "a confounded floor is neither reverted nor credited — left active"
+        );
     }
 
     #[test]

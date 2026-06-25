@@ -1624,10 +1624,29 @@ async fn run_control_undo(live: bool, log_path: Option<&std::path::Path>) -> any
                             if let sia::Verdict::Accept(prov) =
                                 sia::accept(&proposal, log.undone_count(&desc))
                             {
-                                let mut policy = sia::LiveRefinablePolicy::new(user_id);
+                                let mut policy = sia::LiveRefinablePolicy::new(user_id.clone());
                                 sia::apply(&mut policy, &proposal, &prov);
                                 println!(
                                     "[eri] learning: I'll be more careful before \"{desc}\" (floor raised)."
+                                );
+                            }
+                            // Close the loop (Slice 3b): re-measure the active
+                            // floors against the trail — keep the ones that reduced
+                            // repeat undos, revert (bi-temporal supersede) the ones
+                            // that didn't. A floor ALSO covered by a caution is
+                            // confounded and left untouched, so calibration never
+                            // credits the floor for the caution's work.
+                            let perms = control_safety::PermissionStore::default_path()
+                                .map(|p| control_safety::PermissionStore::load(&p))
+                                .unwrap_or_default();
+                            let reverted = sia::calibrate_floors(
+                                user_id.as_deref(),
+                                |p| log.undone_count(p),
+                                |p| perms.is_cautioned(p),
+                            );
+                            if reverted > 0 {
+                                println!(
+                                    "[eri] re-checked my learning — reverted {reverted} floor(s) that weren't helping."
                                 );
                             }
                         }

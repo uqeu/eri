@@ -4590,8 +4590,8 @@ mod tests {
         // Apply through the real sia surface (accept → apply → raise_floor).
         struct InMemory<'a>(&'a mut sia::ConfidencePolicy);
         impl sia::RefinablePolicy for InMemory<'_> {
-            fn raise_floor(&mut self, p: &str, _: &sia::Provenance) {
-                self.0.raise(p);
+            fn raise_floor(&mut self, p: &str, prov: &sia::Provenance) {
+                self.0.raise(p, prov.support);
             }
             fn downweight_chain(&mut self, _: &str, _: &str, _: &sia::Provenance) {}
             fn caution(&mut self, _: &str, _: &sia::Provenance) {}
