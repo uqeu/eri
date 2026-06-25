@@ -1113,14 +1113,14 @@ fn primitive_tool_specs() -> Vec<Value> {
         }),
         json!({
             "name": "fill_credential",
-            "description": "Sign the user into the CURRENT site using a credential they saved with eri — WITHOUT you ever seeing the secret. Use this (never `type`) to enter a username or password on a login page: you pick the field, eri fills the saved value from the keystore. If nothing is saved for this site, eri hands the login back to the user. NEVER type a password yourself; that is always refused.",
+            "description": "Sign the user into the CURRENT site using a credential they saved with eri — WITHOUT you ever seeing the secret. Use this (never `type`) to enter a username, password, or 2FA code on a login page: you pick the field, eri fills the saved value (or, for `totp`, a freshly generated one-time code) from the keystore. If nothing is saved for this site, eri hands the login back to the user. NEVER type a password or 2FA code yourself; that is always refused.",
             "input_schema": {
                 "type": "object",
                 "properties": {
                     "field": {
                         "type": "string",
-                        "enum": ["username", "password"],
-                        "description": "Which saved field to fill into the focused input."
+                        "enum": ["username", "password", "totp"],
+                        "description": "Which saved field to fill: the username, the password, or a generated TOTP 2FA code."
                     }
                 },
                 "required": ["field"]

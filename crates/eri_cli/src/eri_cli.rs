@@ -78,6 +78,7 @@ mod session;
 mod sia;
 mod skills;
 mod sync;
+mod totp;
 mod trace;
 mod update;
 mod voice_control;
@@ -603,8 +604,15 @@ pub enum VaultCommand {
     },
     /// List saved logins — origins + usernames only, never the secret.
     List,
-    /// Forget a saved login: delete the Keychain secret, the metadata entry, and
-    /// any "always sign in here" grant for that site.
+    /// Attach a 2FA (TOTP) seed to a saved login so eri fills the current code at
+    /// sign-in. Prompts for the base32 seed WITHOUT echo; the seed stays in the
+    /// Keychain and the code is generated locally — neither is ever shown.
+    Totp {
+        /// The site origin the 2FA belongs to, e.g. "github.com".
+        origin: String,
+    },
+    /// Forget a saved login: delete the Keychain secret (+ any 2FA seed), the
+    /// metadata entry, and any "always sign in here" grant for that site.
     Forget {
         /// The site origin to forget, e.g. "github.com".
         origin: String,
@@ -991,6 +999,7 @@ async fn dispatch(cli: Cli) -> anyhow::Result<()> {
             credential_vault::cli_add(&origin, &username)
         }
         Command::Vault(VaultCommand::List) => credential_vault::cli_list(),
+        Command::Vault(VaultCommand::Totp { origin }) => credential_vault::cli_set_totp(&origin),
         Command::Vault(VaultCommand::Forget { origin }) => credential_vault::cli_forget(&origin),
         Command::Mcp(McpCommand::List) => repl::print_mcp_status(),
         Command::Mcp(McpCommand::Serve) => {
