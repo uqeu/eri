@@ -98,19 +98,19 @@ interface Beat {
 
 const BEATS: ReadonlyArray<Beat> = [
   {
-    title: "It replies with things you can tap.",
-    body: "No app to open, no commands to learn. Text eri the way you'd text a person who already knows your week, and it answers with a small mini app right in the thread (a time to pick, a payment to confirm, a draft to send) so one tap finishes the job.",
+    title: "It answers with something to tap.",
+    body: "Text eri the way you'd text a friend who already knows your week. It comes back with a small card right in the thread, a time to pick, a payment to confirm, a draft to send, and one tap finishes the job.",
     visual: <TextToDo />,
     wide: true,
   },
   {
     title: "Reach your Mac from anywhere.",
-    body: "Left a file open? Need a render kicked off? eri can drive your computer while you're away, with a confirmation before anything that matters.",
+    body: "Left a file open, or a render to kick off? eri can drive your Mac while you're away, and asks first before anything that matters.",
     visual: <RemoteControl />,
   },
   {
     title: "Pick up where you left off.",
-    body: "What you start on your phone is waiting on your Mac, and the other way round. One brain in the cloud means there's nothing to re-explain.",
+    body: "What you start on your phone is waiting on your Mac, and the other way round. One mind in the cloud, so there's nothing to re-explain.",
     visual: <CrossDevice />,
   },
 ];
@@ -129,7 +129,7 @@ export function PhoneProof(): React.ReactElement {
             textWrap: "balance",
           }}
         >
-          A real assistant, right in your messages.
+          Like texting someone who already knows you.
         </h2>
       </div>
 
