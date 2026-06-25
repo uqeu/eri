@@ -23,6 +23,8 @@ use serde::{Deserialize, Serialize};
 use eri_graph::{Graph, world};
 
 use super::profile::{self, Profile};
+use super::profile_sync::ProfileTransport;
+use super::sync::SyncError;
 
 /// Who a projection may leave the confidential boundary FOR (ADR-0010 §7). Today
 /// only the user's own devices; a future consented outward recipient (a specific
@@ -138,6 +140,12 @@ pub fn gate(projection: &mut RecallProjection, recipient: Recipient) {
     }
 }
 
+// NOTE: the live push trigger is a coordinated step with the phone window — see
+// docs/contracts/recall-projection-contract.md "Push integration". The server must
+// confirm it ignores unknown fields (then push the ProfileBody-superset to the
+// existing endpoint) or stand up a sibling endpoint with the SAME K_server + AAD,
+// so we never break the working Tier-A profile sync. push_recall is ready either way.
+
 /// How much of each slice the projection carries — keeps it Tier-A-small.
 #[derive(Clone, Copy, Debug)]
 pub struct Limits {
@@ -189,25 +197,49 @@ pub fn project_from_graph(
 }
 
 /// The user-scoped facade (ADR-0010 §2/§6): open the SIGNED-IN user's world graph
-/// and project it FOR `recipient`. **Single-principal** — it opens only
-/// `user_id`'s graph, so a projection can never contain another user's world.
-/// Best-effort: an unopenable graph yields an empty (version-stamped) projection.
+/// and memory, then project them FOR `recipient`. **Single-principal** — it opens
+/// only `user_id`'s stores, so a projection can never contain another user's
+/// world. Best-effort: an unopenable store simply contributes nothing.
 pub fn recall_projection(
     user_id: Option<&str>,
     recipient: Recipient,
     now_ms: u64,
 ) -> RecallProjection {
-    let Ok(graph) = super::world_recall::open_world_graph(user_id) else {
-        return RecallProjection {
+    // World-model fields, from the user's own world graph.
+    let mut projection = match super::world_recall::open_world_graph(user_id) {
+        Ok(graph) => project_from_graph(&graph, recipient, now_ms, &Limits::default()),
+        Err(_) => RecallProjection {
             version: PROJECTION_VERSION,
-            user_id: user_id.map(str::to_string),
             as_of: now_ms,
             ..Default::default()
-        };
+        },
     };
-    let mut projection = project_from_graph(&graph, recipient, now_ms, &Limits::default());
     projection.user_id = user_id.map(str::to_string);
+    // Compose the Tier-A profile (§6 "the existing profile alongside") from the
+    // user's own memory — `distill` already screens it via the same `looks_sensitive`.
+    if let Ok(store) = super::MemoryStore::open_for(user_id) {
+        projection.profile = super::profile::distill(&store.all(), now_ms);
+    }
+    // Defence in depth: gate the FULLY composed projection (world fields + profile)
+    // once more before it can leave. Nothing crosses the boundary ungated.
+    gate(&mut projection, recipient);
     projection
+}
+
+/// Push the recall projection to the server-readable Tier-A store, **riding the
+/// existing [`ProfileTransport`]** — the SAME endpoint + the SAME server-side
+/// `K_server`-at-rest encryption + AAD=`user_id` binding the Tier-A profile
+/// already gets (ADR-0010 §2; no new, weaker push path). The projection (which
+/// carries the profile) is the body. It is **gated once more right before it
+/// leaves** — nothing reaches the server ungated.
+pub fn push_recall(
+    transport: &dyn ProfileTransport,
+    projection: &mut RecallProjection,
+    recipient: Recipient,
+) -> Result<(), SyncError> {
+    gate(projection, recipient);
+    let body = serde_json::to_string(projection)?;
+    transport.upload(&body)
 }
 
 /// Top entities across all kinds, salience-ranked (salience = how many
@@ -473,6 +505,41 @@ mod tests {
         assert!(
             !pb.contains("Priya") && !pb.contains("atlas"),
             "user B's projection leaked user A's world"
+        );
+    }
+
+    #[test]
+    fn push_recall_gates_the_projection_before_it_leaves() {
+        // Defence in depth (ADR-0010): push_recall gates the fully-composed
+        // projection right before the transport sees it — a sensitive item that
+        // somehow reached the projection never crosses the boundary. Rides the
+        // existing ProfileTransport (the server K_server-encrypts it, AAD=user_id).
+        use std::cell::RefCell;
+        struct Capture(RefCell<String>);
+        impl ProfileTransport for Capture {
+            fn upload(&self, body: &str) -> Result<(), SyncError> {
+                *self.0.borrow_mut() = body.to_string();
+                Ok(())
+            }
+        }
+
+        let mut p = RecallProjection {
+            entities: vec![entity("Priya")],
+            recent_observations: vec![ProjectedObservation {
+                text: "my ssn is 000-00-0000".into(),
+                ts: 0,
+                kind: "fact".into(),
+            }],
+            ..Default::default()
+        };
+        let t = Capture(RefCell::new(String::new()));
+        push_recall(&t, &mut p, Recipient::OwnDevices).unwrap();
+
+        let body = t.0.borrow().to_lowercase();
+        assert!(body.contains("priya"), "benign content is pushed");
+        assert!(
+            !body.contains("ssn") && !body.contains("000-00-0000"),
+            "sensitive content is gated out BEFORE it reaches the transport"
         );
     }
 
