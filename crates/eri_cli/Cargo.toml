@@ -51,9 +51,19 @@ serde.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["full"] }
 url.workspace = true
+# Credential vault: wipe secret values from memory on drop. The secret value
+# only ever travels Keychain → bridge → OS field; zeroize scrubs the in-memory
+# copy rather than leaving it lingering in freed heap.
+zeroize.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
 # Tests only: build an in-memory world graph to exercise the predict step's
 # world-model read end-to-end through the gate's handle (no HOME IO).
 eri_graph = { path = "../eri_graph" }
+
+# macOS Keychain (Secure Enclave-backed) for the credential vault's secret
+# store — no hand-rolled crypto, secrets live in the OS keystore. macOS-only;
+# the `3` matches the version already resolved transitively in the lockfile.
+[target.'cfg(target_os = "macos")'.dependencies]
+security-framework = "3"

@@ -993,6 +993,7 @@ dependencies = [
  "eri_core",
  "eri_coreutils",
  "eri_git",
+ "eri_graph",
  "eri_hooks",
  "eri_index",
  "eri_inference",
@@ -1003,12 +1004,14 @@ dependencies = [
  "regex",
  "reqwest 0.12.24",
  "rustyline",
+ "security-framework 3.5.1",
  "sentry 0.48.2",
  "serde",
  "serde_json",
  "tempfile",
  "tokio",
  "url",
+ "zeroize",
 ]
 
 [[package]]
