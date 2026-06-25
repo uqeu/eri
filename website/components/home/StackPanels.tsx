@@ -116,7 +116,7 @@ function PhoneVisual(): React.ReactElement {
 const PANELS: readonly Panel[] = [
   {
     title: <>it runs your<br />whole computer.</>,
-    body: "Other AI agents are stuck in a browser tab. Eri uses everything on your machine: it ships code in Cursor, clears your Gmail, fixes your Sheets, and queues your Spotify. It even reads your screen as you watch something, so you can just ask it anything.",
+    body: "Other AI agents are stuck in a browser tab. Eri uses your whole machine, so once you teach it, it can do anything you can: ship code in Cursor, clear your Gmail, fix your Sheets, queue your Spotify. The more you show it, the more it becomes you.",
     bg: "#ffffff",
     visualSide: "right",
     visual: <ComputerVisual />,
