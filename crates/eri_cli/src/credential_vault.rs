@@ -679,12 +679,54 @@ pub fn cli_list() -> Result<()> {
             println!("No saved logins yet. Add one with `eri vault add <site> --username <you>`.");
             return Ok(());
         }
+        let perms = PermissionStore::default_path()
+            .map(|p| PermissionStore::load(&p))
+            .unwrap_or_default();
         println!("Saved logins (eri fills these without ever showing the secret):");
         for e in vault.entries() {
-            println!("  {}  —  {}", e.origin, e.username);
+            let totp = if e.totp_ref.is_some() { "  +2FA" } else { "" };
+            let trusted = if perms.is_credential_origin_allowed(&e.origin) {
+                "  ✓ trusted (no prompt)"
+            } else {
+                ""
+            };
+            println!("  {}  —  {}{totp}{trusted}", e.origin, e.username);
         }
         Ok(())
     }
+}
+
+/// `eri vault trust <origin>` — pre-authorize hands-free sign-in for a site, so
+/// eri fills your saved login there WITHOUT asking each time (the persisted
+/// per-origin "always" grant). Pure permission op — no Keychain access.
+pub fn cli_trust(origin: &str) -> Result<()> {
+    let path = PermissionStore::default_path()
+        .ok_or_else(|| anyhow::anyhow!("can't resolve the permission path (no HOME?)"))?;
+    let origin_norm = normalize_origin(origin);
+    if origin_norm.is_empty() {
+        anyhow::bail!("a site origin is required, e.g. `eri vault trust github.com`");
+    }
+    let mut perms = PermissionStore::load(&path);
+    perms.allow_credential_origin(&origin_norm);
+    perms.save(&path)?;
+    println!("Trusted {origin_norm} — eri will sign you in there without asking.");
+    Ok(())
+}
+
+/// `eri vault untrust <origin>` — revoke the "always sign in here" grant so eri
+/// asks again before filling. The saved login itself is kept.
+pub fn cli_untrust(origin: &str) -> Result<()> {
+    let path = PermissionStore::default_path()
+        .ok_or_else(|| anyhow::anyhow!("can't resolve the permission path (no HOME?)"))?;
+    let origin_norm = normalize_origin(origin);
+    let mut perms = PermissionStore::load(&path);
+    if perms.forget_credential_origin(&origin_norm) {
+        perms.save(&path)?;
+        println!("Untrusted {origin_norm} — eri will ask again before signing you in.");
+    } else {
+        println!("{origin_norm} wasn't trusted.");
+    }
+    Ok(())
 }
 
 /// `eri vault add <origin> --username <u>` — save a login. The password is read
