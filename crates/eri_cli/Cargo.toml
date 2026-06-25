@@ -57,6 +57,10 @@ url.workspace = true
 data-encoding = "2"
 hmac = "0.12"
 sha1 = "0.10"
+# RFC 4180 CSV parsing for `eri vault import` — password-manager exports have
+# quoted fields (commas/newlines in passwords + notes), so a real parser, not
+# a hand-rolled split.
+csv = "1"
 # Credential vault: wipe secret values from memory on drop. The secret value
 # only ever travels Keychain → bridge → OS field; zeroize scrubs the in-memory
 # copy rather than leaving it lingering in freed heap.
