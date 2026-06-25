@@ -253,19 +253,31 @@ export function PhoneShowcase(): React.ReactElement {
             </span>
           </div>
 
-          {/* Conversation header — frosted, like Messages. A contact with no
-              photo, so just the name, exactly like a real iMessage thread. */}
+          {/* Conversation header — frosted, like Messages: a circular contact
+              avatar centered, name + chevron beneath, exactly like a real 1:1
+              iMessage thread. */}
           <div
-            className="z-10 flex flex-col items-center gap-1 border-b border-black/[0.06] px-4 pb-2.5 pt-3"
+            className="z-10 flex flex-col items-center gap-1 border-b border-black/[0.06] px-4 pb-2 pt-2.5"
             style={{
               background: "rgba(249,249,251,0.86)",
               backdropFilter: "blur(12px)",
               WebkitBackdropFilter: "blur(12px)",
             }}
           >
-            <span className="flex items-center gap-1 font-geist text-[15px] font-semibold text-[#1d1d1f]">
+            <span
+              aria-hidden
+              className="grid size-[36px] place-items-center rounded-full font-display text-[13px] font-semibold"
+              style={{
+                background: "radial-gradient(circle at 38% 30%, #fff, #e0ff4f 58%, #c2dd2c)",
+                color: "#2a3300",
+                letterSpacing: "-0.05em",
+              }}
+            >
               eri
-              <svg width="7" height="11" viewBox="0 0 6 9" fill="none" aria-hidden>
+            </span>
+            <span className="mt-0.5 flex items-center gap-0.5 font-geist text-[12px] font-semibold text-[#1d1d1f]">
+              eri
+              <svg width="6" height="10" viewBox="0 0 6 9" fill="none" aria-hidden>
                 <path d="M1 1L5 4.5L1 8" stroke="#c4c4c8" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             </span>
@@ -279,6 +291,10 @@ export function PhoneShowcase(): React.ReactElement {
             data-lenis-prevent
             className="ph-thread flex flex-1 flex-col gap-2 px-3 py-3"
           >
+            {/* Conversation timestamp, like the top of a real Messages thread. */}
+            <div className="pb-1 pt-0.5 text-center font-geist text-[10.5px] text-[#8e8e93]">
+              <span className="font-semibold">Today</span> 9:41 AM
+            </div>
             {THREAD.slice(0, shown).map((line, idx) => (
               <Bubble key={idx} line={line} />
             ))}

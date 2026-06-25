@@ -9,7 +9,7 @@ import { PhoneProof } from "@/components/phone/PhoneProof";
 export const metadata: Metadata = {
   title: "eri in your messages, replying with things you can tap",
   description:
-    "The same eri lives in your messages across iMessage, WhatsApp, Telegram, Slack and Discord. Text it to get things done on the go, and it replies with little tap-able mini apps right in the thread, not just text. One mind, one memory, every device.",
+    "The same eri that runs your Mac is right there in your messages, across iMessage, WhatsApp, Telegram, Slack and Discord. Text it like you'd text a friend, and it texts back with a card you can tap to finish the job. One mind, one memory, every device.",
 };
 
 // Phone page — matches the polished light homepage. The same eri, now reachable

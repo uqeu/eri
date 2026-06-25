@@ -38,9 +38,8 @@ export function PhoneHero(): React.ReactElement {
           <p className="mt-6 max-w-[30rem] font-geist text-[17px] leading-[1.55] text-[#515154]">
             The same eri that runs your Mac is right there in your messages, on
             iMessage, WhatsApp, Telegram, Slack and Discord. Tell it what you
-            need on the go, and it replies with little mini apps you can tap, not
-            walls of text. Pick a time, confirm a payment, send the reply, all
-            without leaving the thread.
+            need, and it texts back with a card you can tap: pick a time, confirm
+            a payment, send the reply, right there in the thread.
           </p>
 
           <div className="mt-9 flex flex-wrap items-center gap-3">
