@@ -17,6 +17,10 @@ const QA: ReadonlyArray<{ q: string; a: string }> = [
     a: "It does things. Eri drives your real apps for you, clicking, typing, booking, sending. It writes and ships code, joins your calls, and reaches over 1,000 services. The chat is just how you point it, it isn’t the product.",
   },
   {
+    q: "How is this different from an AI browser?",
+    a: "AI browsers can only act inside their own window. Eri uses your whole computer: native apps, your terminal, your files, your phone. Driving a browser is just one of the things it does, alongside everything else on your machine.",
+  },
+  {
     q: "Can I undo what it does? Is it safe?",
     a: "Eri logs everything it does and can undo anything reversible. For things it can’t take back, like money, mass messages, or deletions, it stops and checks with you first.",
   },
