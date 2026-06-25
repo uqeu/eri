@@ -47,6 +47,7 @@ mod control_envelope;
 mod control_eval;
 mod control_safety;
 mod control_turn;
+mod credential_vault;
 mod engine_ladder;
 mod eri_config;
 mod gaze_focus;
@@ -477,6 +478,10 @@ pub enum Command {
     /// Memory — recall, remember, forget.
     #[command(subcommand)]
     Memory(MemoryCommand),
+    /// Saved-login vault: store credentials eri can fill hands-free without ever
+    /// exposing the secret to the model. Values are never printed.
+    #[command(subcommand)]
+    Vault(VaultCommand),
     /// MCP server setup and local connector status.
     #[command(subcommand)]
     Mcp(McpCommand),
@@ -582,6 +587,28 @@ pub enum MemoryCommand {
     },
     /// Drop an observation by id, or "all" to clear everything.
     Forget { target: String },
+}
+
+#[derive(Subcommand, Debug, PartialEq, Eq)]
+pub enum VaultCommand {
+    /// Save a login so eri can sign you in hands-free. Prompts for the password
+    /// WITHOUT echo; the value goes straight to the macOS Keychain and is never
+    /// printed or logged. Re-saving a site updates the stored login.
+    Add {
+        /// The site origin, e.g. "github.com".
+        origin: String,
+        /// The username / email for the login.
+        #[arg(long)]
+        username: String,
+    },
+    /// List saved logins — origins + usernames only, never the secret.
+    List,
+    /// Forget a saved login: delete the Keychain secret, the metadata entry, and
+    /// any "always sign in here" grant for that site.
+    Forget {
+        /// The site origin to forget, e.g. "github.com".
+        origin: String,
+    },
 }
 
 #[derive(Subcommand, Debug, PartialEq, Eq)]
@@ -960,6 +987,11 @@ async fn dispatch(cli: Cli) -> anyhow::Result<()> {
             sync::spawn_best_effort();
             result
         }
+        Command::Vault(VaultCommand::Add { origin, username }) => {
+            credential_vault::cli_add(&origin, &username)
+        }
+        Command::Vault(VaultCommand::List) => credential_vault::cli_list(),
+        Command::Vault(VaultCommand::Forget { origin }) => credential_vault::cli_forget(&origin),
         Command::Mcp(McpCommand::List) => repl::print_mcp_status(),
         Command::Mcp(McpCommand::Serve) => {
             let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
@@ -1474,6 +1506,16 @@ async fn run_control(
             .map(|p| action_log::ActionLog::load(p))
             .unwrap_or_default(),
     ));
+    // Credential vault (P0): saved-login autofill that never exposes the secret.
+    // Metadata sits next to the permission file; secrets live in the Keychain;
+    // fills are audited into the SAME `log` so they show in `--history`. With no
+    // saved entry (the common case today) every `fill_credential` hands back, so
+    // nothing changes until the user saves a login.
+    let gate = {
+        let vault = credential_vault::default_metadata_path()
+            .and_then(|path| credential_vault::open_vault(&path, std::sync::Arc::clone(&log)));
+        gate.with_vault(vault)
+    };
     let live_bridge = if live {
         control_agent::HttpBridge::from_env()
     } else {
