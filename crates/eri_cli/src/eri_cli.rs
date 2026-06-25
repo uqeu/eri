@@ -618,6 +618,17 @@ pub enum VaultCommand {
         /// The site origin the 2FA belongs to, e.g. "github.com".
         origin: String,
     },
+    /// Trust a site for hands-free sign-in: eri fills your saved login there
+    /// WITHOUT asking each time (the persisted per-origin "always" grant).
+    Trust {
+        /// The site origin to trust, e.g. "github.com".
+        origin: String,
+    },
+    /// Untrust a site: eri asks again before signing you in. The login is kept.
+    Untrust {
+        /// The site origin to untrust, e.g. "github.com".
+        origin: String,
+    },
     /// Forget a saved login: delete the Keychain secret (+ any 2FA seed), the
     /// metadata entry, and any "always sign in here" grant for that site.
     Forget {
@@ -1008,6 +1019,8 @@ async fn dispatch(cli: Cli) -> anyhow::Result<()> {
         Command::Vault(VaultCommand::List) => credential_vault::cli_list(),
         Command::Vault(VaultCommand::Import { file }) => credential_vault::cli_import(&file),
         Command::Vault(VaultCommand::Totp { origin }) => credential_vault::cli_set_totp(&origin),
+        Command::Vault(VaultCommand::Trust { origin }) => credential_vault::cli_trust(&origin),
+        Command::Vault(VaultCommand::Untrust { origin }) => credential_vault::cli_untrust(&origin),
         Command::Vault(VaultCommand::Forget { origin }) => credential_vault::cli_forget(&origin),
         Command::Mcp(McpCommand::List) => repl::print_mcp_status(),
         Command::Mcp(McpCommand::Serve) => {
