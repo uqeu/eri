@@ -22,8 +22,8 @@ use serde::{Deserialize, Serialize};
 
 use eri_graph::{Graph, world};
 
+use super::cloud::EriApiClient;
 use super::profile::{self, Profile};
-use super::profile_sync::ProfileTransport;
 use super::sync::SyncError;
 
 /// Who a projection may leave the confidential boundary FOR (ADR-0010 §7). Today
@@ -226,20 +226,114 @@ pub fn recall_projection(
     projection
 }
 
-/// Push the recall projection to the server-readable Tier-A store, **riding the
-/// existing [`ProfileTransport`]** — the SAME endpoint + the SAME server-side
-/// `K_server`-at-rest encryption + AAD=`user_id` binding the Tier-A profile
-/// already gets (ADR-0010 §2; no new, weaker push path). The projection (which
-/// carries the profile) is the body. It is **gated once more right before it
-/// leaves** — nothing reaches the server ungated.
+/// Path of the **sibling** recall endpoint — distinct from the Tier-A profile route
+/// on purpose. The profile PUT is *lossy* (it stores only `body.profile`, silently
+/// dropping every top-level world-model field), so the projection rides its own path
+/// with the SAME server-side `K_server`-at-rest encryption + AAD=`user_id` (ADR-0010
+/// §2). Confirmed with the phone window before wiring (the contract's "Push integration").
+const RECALL_PATH: &str = "/api/v1/memory/recall";
+
+/// The recall upload seam — a SEPARATE type from
+/// [`super::profile_sync::ProfileTransport`] so [`push_recall`] can never be handed
+/// the (lossy) profile transport by mistake; the wrong endpoint is unrepresentable.
+/// Carries the already-shaped JSON body; the transport has no opinion on its shape.
+pub trait RecallTransport {
+    fn upload(&self, body: &str) -> Result<(), SyncError>;
+}
+
+/// Production transport: a thin adapter over [`EriApiClient`] targeting
+/// [`RECALL_PATH`] — the same client backing the Tier-A/Tier-B transports, not a
+/// second copy of the plumbing.
+pub struct HttpRecallTransport {
+    client: EriApiClient,
+}
+
+impl HttpRecallTransport {
+    pub fn new(api_base: impl Into<String>, bearer: impl Into<String>) -> Self {
+        Self {
+            client: EriApiClient::with_base(api_base, bearer),
+        }
+    }
+
+    /// Adapt an already-built client (so one `EriApiClient` can back every transport
+    /// for a session).
+    pub fn from_client(client: EriApiClient) -> Self {
+        Self { client }
+    }
+}
+
+impl RecallTransport for HttpRecallTransport {
+    fn upload(&self, body: &str) -> Result<(), SyncError> {
+        self.client.put_json(RECALL_PATH, body)
+    }
+}
+
+/// The exact §1 wire body the `/memory/recall` route validates
+/// (`coerceRecallProjection`): **camelCase** keys, no `userId` (the server binds it
+/// from auth). Shaped separately from the internal [`RecallProjection`] so the wire
+/// contract is explicit and immune to internal struct churn — the same discipline as
+/// the profile body. A snake_case key here is silently coerced to empty on the phone
+/// (the precise silent-drop the sibling endpoint exists to avoid), so these field
+/// names are load-bearing — locked by `the_push_body_matches_the_phones_..._contract`.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RecallWire<'a> {
+    version: u32,
+    as_of: u64,
+    entities: &'a [ProjectedEntity],
+    relations: &'a [ProjectedRelation],
+    recent_observations: &'a [ProjectedObservation],
+    predictions: &'a [ProjectedPrediction],
+    profile: ProfileWire<'a>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProfileWire<'a> {
+    facts: &'a [String],
+    preferences: &'a [String],
+    /// A plain string on the wire (the route reads `str(p.communicationStyle)`); an
+    /// unlearned register is `""`, never null/absent.
+    communication_style: &'a str,
+    dynamic_context: &'a str,
+}
+
+/// Shape a gated [`RecallProjection`] into the route's camelCase §1 body.
+fn recall_upload_body(projection: &RecallProjection) -> Result<String, SyncError> {
+    let wire = RecallWire {
+        version: projection.version,
+        as_of: projection.as_of,
+        entities: &projection.entities,
+        relations: &projection.relations,
+        recent_observations: &projection.recent_observations,
+        predictions: &projection.predictions,
+        profile: ProfileWire {
+            facts: &projection.profile.facts,
+            preferences: &projection.profile.preferences,
+            communication_style: projection
+                .profile
+                .communication_style
+                .as_deref()
+                .unwrap_or(""),
+            dynamic_context: &projection.profile.dynamic_context,
+        },
+    };
+    Ok(serde_json::to_string(&wire)?)
+}
+
+/// Push the recall projection to the **sibling** server-readable store
+/// ([`RECALL_PATH`], NOT the lossy profile route) — same `K_server`-at-rest + AAD=
+/// `user_id` as the Tier-A profile (ADR-0010 §2). The projection is **gated once
+/// more right before it leaves** (defence in depth — nothing reaches the server
+/// ungated), then shaped to the route's exact camelCase §1 body. The caller owns the
+/// *when* (the sync tick); `as_of` carries the eventually-consistent stamp.
 pub fn push_recall(
-    transport: &dyn ProfileTransport,
+    transport: &dyn RecallTransport,
     projection: &mut RecallProjection,
     recipient: Recipient,
 ) -> Result<(), SyncError> {
     gate(projection, recipient);
-    let body = serde_json::to_string(projection)?;
-    transport.upload(&body)
+    transport.upload(&recall_upload_body(projection)?)
 }
 
 /// Top entities across all kinds, salience-ranked (salience = how many
@@ -516,7 +610,7 @@ mod tests {
         // existing ProfileTransport (the server K_server-encrypts it, AAD=user_id).
         use std::cell::RefCell;
         struct Capture(RefCell<String>);
-        impl ProfileTransport for Capture {
+        impl RecallTransport for Capture {
             fn upload(&self, body: &str) -> Result<(), SyncError> {
                 *self.0.borrow_mut() = body.to_string();
                 Ok(())
@@ -541,6 +635,68 @@ mod tests {
             !body.contains("ssn") && !body.contains("000-00-0000"),
             "sensitive content is gated out BEFORE it reaches the transport"
         );
+    }
+
+    #[test]
+    fn the_push_body_matches_the_phones_camelcase_wire_contract() {
+        // The sibling route (`coerceRecallProjection`) reads camelCase keys; a
+        // snake_case key is silently coerced to empty on the phone — the exact
+        // silent-drop the sibling endpoint exists to avoid. Lock the wire field
+        // names to the contract so an internal struct rename can't regress it.
+        use std::cell::RefCell;
+        struct Capture(RefCell<String>);
+        impl RecallTransport for Capture {
+            fn upload(&self, body: &str) -> Result<(), SyncError> {
+                *self.0.borrow_mut() = body.to_string();
+                Ok(())
+            }
+        }
+
+        let mut p = RecallProjection {
+            version: PROJECTION_VERSION,
+            as_of: 1_750_000_000_000,
+            recent_observations: vec![ProjectedObservation {
+                text: "paired with Priya on atlas".into(),
+                ts: 1,
+                kind: "fact".into(),
+            }],
+            predictions: vec![ProjectedPrediction {
+                after: "open editor".into(),
+                next: "run tests".into(),
+                count: 4,
+            }],
+            profile: Profile {
+                facts: vec!["builds eri".into()],
+                preferences: vec![],
+                dynamic_context: "today: shipped the recall push".into(),
+                communication_style: Some("lowercase, terse".into()),
+            },
+            ..Default::default()
+        };
+        let t = Capture(RefCell::new(String::new()));
+        push_recall(&t, &mut p, Recipient::OwnDevices).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&t.0.borrow()).unwrap();
+
+        // camelCase keys the route reads — present + correct.
+        assert_eq!(v["asOf"], 1_750_000_000_000_u64);
+        assert_eq!(
+            v["recentObservations"][0]["text"],
+            "paired with Priya on atlas"
+        );
+        assert_eq!(v["predictions"][0]["after"], "open editor");
+        assert_eq!(v["profile"]["communicationStyle"], "lowercase, terse");
+        assert_eq!(
+            v["profile"]["dynamicContext"],
+            "today: shipped the recall push"
+        );
+        // snake_case keys the route would IGNORE — must be absent.
+        assert!(
+            v["as_of"].is_null(),
+            "snake_case as_of must not be on the wire"
+        );
+        assert!(v["recent_observations"].is_null());
+        assert!(v["profile"]["communication_style"].is_null());
+        assert!(v["profile"]["dynamic_context"].is_null());
     }
 
     #[test]

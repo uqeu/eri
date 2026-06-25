@@ -20,6 +20,7 @@ use eri_inference::memory::{
     keys::{KeychainStore, k_user},
     profile,
     profile_sync::{HttpProfileTransport, push_profile},
+    recall::{HttpRecallTransport, Recipient, push_recall, recall_projection},
     sync::{HttpSyncTransport, MemorySync},
 };
 
@@ -29,6 +30,7 @@ use crate::config;
 pub struct SyncReport {
     pub observations: usize,
     pub profile_facts: usize,
+    pub projection_entities: usize,
 }
 
 fn now_ms() -> u64 {
@@ -58,11 +60,30 @@ fn sync_blocking(base: String, bearer: String, user_id: String) -> Result<SyncRe
 
     // Tier-A: distill + push the server-readable profile so phone eri knows you.
     let prof = profile::distill(&store.all(), now_ms());
-    push_profile(&HttpProfileTransport::new(base, bearer), &prof).context("Tier-A profile push")?;
+    push_profile(
+        &HttpProfileTransport::new(base.clone(), bearer.clone()),
+        &prof,
+    )
+    .context("Tier-A profile push")?;
+
+    // Tier-A: push the world-model PROJECTION to the SIBLING recall endpoint
+    // (ADR-0010) so phone eri draws on the brain's world model — distinct path,
+    // SAME K_server-at-rest + AAD=user_id, NEVER the lossy profile route (which
+    // would silently drop every world-model field). Eventually-consistent: the
+    // projection carries an `as_of` stamp; the phone answers from the last push.
+    let mut projection = recall_projection(Some(&user_id), Recipient::OwnDevices, now_ms());
+    let projection_entities = projection.entities.len();
+    push_recall(
+        &HttpRecallTransport::new(base, bearer),
+        &mut projection,
+        Recipient::OwnDevices,
+    )
+    .context("Tier-A recall push")?;
 
     Ok(SyncReport {
         observations: store.all().len(),
         profile_facts: prof.facts.len(),
+        projection_entities,
     })
 }
 
@@ -87,8 +108,8 @@ pub async fn run() -> Result<()> {
         .await
         .context("sync task panicked")??;
     println!(
-        "synced ✓  {} memories · {} profile facts pushed to phone eri",
-        report.observations, report.profile_facts
+        "synced ✓  {} memories · {} profile facts · {} world-model entities pushed to phone eri",
+        report.observations, report.profile_facts, report.projection_entities
     );
     Ok(())
 }
