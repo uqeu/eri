@@ -116,6 +116,68 @@ pub fn accept(proposal: &Proposal, support: usize) -> Verdict {
     })
 }
 
+// ── Slice 2a: the proactive-suggestion staleness producer ─────────────────────
+//
+// The first *behavioral* producer of a `DownweightChain` proposal. eri surfaces a
+// proactive suggestion ("after X you usually Y" — the top established chain). When
+// its OWN recent observations contradict it — the user kept doing X then something
+// other than Y, never Y — the suggestion has gone stale and eri is nagging. This is
+// the deferred chain-staleness/decay refinement: sia keeps its own predictions
+// calibrated against observed behavior, on the chain axis only.
+//
+// Derived, never an explicit "no": the signal is read from the ordered behavior
+// trail eri already keeps (the same source the suggestion itself is computed from),
+// so no new capture surface is added. The *effect* is a SOFT, reversible suppression
+// (Slice 2b's overlay) — suggest-less, never a hard kill — because a wrong
+// suppression is otherwise invisible (you won't see the suggestion to re-engage it).
+
+/// Inspect the ordered behavior `trail` (oldest → newest executed actions) and
+/// decide whether `suggested` — what eri surfaces after `context` — has gone stale.
+/// It's stale when, across the occurrences of `context` in the trail, the user
+/// followed it with `suggested` **zero** times and with something else at least
+/// [`MIN_SUPPORT`] times: eri keeps suggesting Y, the user keeps doing otherwise.
+///
+/// Returns the [`Proposal::DownweightChain`] to soft-suppress `context → suggested`
+/// plus the support (how many times it was passed over) for [`accept`], or `None`
+/// when the suggestion is still followed or only passed over as a one-off. Pure +
+/// deterministic — fixture-testable, no IO. The caller still routes the result
+/// through [`accept`] (refusal boundary + earns-its-keep) before applying.
+// Wired to the suppression overlay + surfacing in Slices 2b–2c; the scoped allow
+// marks exactly that not-yet-wired gap (removed when the loop calls it), not a dead
+// op — mirrors the `DownweightChain` producer-gap allow above.
+#[allow(dead_code)]
+pub fn stale_suggestion(
+    context: &str,
+    suggested: &str,
+    trail: &[String],
+) -> Option<(Proposal, usize)> {
+    let mut followed = 0usize;
+    let mut passed_over = 0usize;
+    for pair in trail.windows(2) {
+        if pair[0] != context {
+            continue;
+        }
+        if pair[1] == suggested {
+            followed += 1;
+        } else {
+            passed_over += 1;
+        }
+    }
+    // Still followed at least once → not stale; keep suggesting (don't suppress a
+    // suggestion the user sometimes takes). Passed over only once → a one-off, not
+    // a pattern. Only a clean, recurring miss earns a (reversible) suppression.
+    if followed > 0 || passed_over < MIN_SUPPORT {
+        return None;
+    }
+    Some((
+        Proposal::DownweightChain {
+            from: context.to_string(),
+            to: suggested.to_string(),
+        },
+        passed_over,
+    ))
+}
+
 // ── Slice 2: the RefinablePolicy surface ──────────────────────────────────────
 
 /// The most a confidence floor may be raised to — sia narrows (asks more) but
@@ -433,6 +495,91 @@ mod tests {
             to: "wire transfer $500 to account 12345".into(),
         };
         assert!(matches!(accept(&p, 5), Verdict::Reject(_)));
+    }
+
+    fn trail(actions: &[&str]) -> Vec<String> {
+        actions.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn a_suggestion_the_user_still_follows_is_not_stale() {
+        // After "open editor" eri suggests "run tests" — and the user keeps doing
+        // it. Nothing to suppress; eri should keep suggesting.
+        let t = trail(&["open editor", "run tests", "open editor", "run tests"]);
+        assert!(stale_suggestion("open editor", "run tests", &t).is_none());
+    }
+
+    #[test]
+    fn passing_a_suggestion_over_once_is_a_one_off_not_a_pattern() {
+        // Passed over a single time (< MIN_SUPPORT) — a one-off never justifies a
+        // policy change, exactly as the acceptance gate would also reject.
+        let t = trail(&["open editor", "check email"]);
+        assert!(stale_suggestion("open editor", "run tests", &t).is_none());
+    }
+
+    #[test]
+    fn repeatedly_passing_a_suggestion_over_proposes_a_soft_downweight() {
+        // eri keeps suggesting "run tests" after "open editor"; the user keeps doing
+        // "check email" instead and NEVER runs tests → the suggestion is stale.
+        let t = trail(&[
+            "open editor",
+            "check email",
+            "open editor",
+            "check email",
+            "open editor",
+            "reply on slack",
+        ]);
+        let (proposal, support) =
+            stale_suggestion("open editor", "run tests", &t).expect("stale suggestion");
+        assert_eq!(
+            proposal,
+            Proposal::DownweightChain {
+                from: "open editor".into(),
+                to: "run tests".into(),
+            }
+        );
+        assert_eq!(support, 3, "passed over three times");
+        // And the producer's result clears the acceptance gate as a well-supported,
+        // benign refinement — stamped sia, reversible downstream.
+        match accept(&proposal, support) {
+            Verdict::Accept(prov) => assert_eq!(prov.source, SIA_SOURCE),
+            other => panic!("expected Accept, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_mixed_history_where_the_user_sometimes_follows_is_not_stale() {
+        // Passed over twice but ALSO followed once — the suggestion still earns its
+        // place; suppressing it would be wrong (and invisible). Keep suggesting.
+        let t = trail(&[
+            "open editor",
+            "check email",
+            "open editor",
+            "run tests",
+            "open editor",
+            "check email",
+        ]);
+        assert!(stale_suggestion("open editor", "run tests", &t).is_none());
+    }
+
+    #[test]
+    fn a_stale_suggestion_that_crosses_the_refusal_boundary_is_still_never_applied() {
+        // Even a cleanly-passed-over suggestion is re-checked at the gate: if it
+        // names a refused action, sia must never fold it into policy.
+        let t = trail(&[
+            "unlock the vault",
+            "open notes",
+            "unlock the vault",
+            "open notes",
+        ]);
+        let (proposal, support) =
+            stale_suggestion("unlock the vault", "type my password into the field", &t)
+                .expect("passed over twice");
+        assert!(
+            control_safety::classify_refusal("type my password into the field").is_some(),
+            "precondition: the suggested action is refused at the live gate"
+        );
+        assert!(matches!(accept(&proposal, support), Verdict::Reject(_)));
     }
 
     #[test]
