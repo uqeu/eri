@@ -10,6 +10,35 @@ import { useEffect, useRef, useState } from "react";
 
 const EASE = "cubic-bezier(0.16,1,0.3,1)";
 
+// The real Messages typeface. Using the system stack means it renders as SF Pro
+// on Apple devices and Segoe UI on Windows — exactly what an iMessage thread looks
+// like, instead of our marketing font.
+const SF =
+  'system-ui, -apple-system, "SF Pro Text", "SF Pro Display", "Segoe UI", sans-serif';
+
+// The iMessage bubble tail (the little curl at the bottom corner). Filled with the
+// bubble's own color; mirrored for received (gray, left) bubbles.
+function BubbleTail({ you }: { readonly you: boolean }): React.ReactElement {
+  return (
+    <span
+      aria-hidden
+      className={`pointer-events-none absolute bottom-[-1px] h-[15px] w-[15px] ${
+        you ? "right-[-4px]" : "left-[-4px]"
+      }`}
+    >
+      <svg
+        viewBox="0 0 17 18"
+        preserveAspectRatio="none"
+        className={`h-full w-full ${you ? "" : "-scale-x-100"}`}
+        style={{ color: you ? "#0b84ff" : "#e9e9eb" }}
+        fill="currentColor"
+      >
+        <path d="M1.8 11C2.79 11 3.44 11.31 4.77 12.24C5.48 12.74 8.22 14.84 10.49 16.09C12.45 17.17 14.13 17.91 14.55 17.94C15.81 18.04 15.97 16.85 15.48 16.21C14.99 15.57 14.43 14.74 14.21 14.29C13.73 13.28 13.58 12.75 13.58 11.24C13.58 9.38 14.9 8 15.94 7.08C16.03 7 16.15 6.9 16.29 6.79C16.53 6.6 16.76 6.41 16.99 6.22V0H0V11H1.8Z" />
+      </svg>
+    </span>
+  );
+}
+
 type Sender = "you" | "eri";
 type Card = "reschedule" | "inbox" | "confirm";
 
@@ -244,7 +273,10 @@ export function PhoneShowcase(): React.ReactElement {
           />
 
           {/* Status bar */}
-          <div className="flex items-center justify-between px-7 pb-1 pt-3.5 font-geist text-[13px] font-semibold text-[#1d1d1f]">
+          <div
+            className="flex items-center justify-between px-7 pb-1 pt-3.5 text-[13px] font-semibold text-[#1d1d1f]"
+            style={{ fontFamily: SF }}
+          >
             <span>9:41</span>
             <span className="flex items-center gap-1.5" aria-hidden>
               <SignalGlyph />
@@ -275,7 +307,10 @@ export function PhoneShowcase(): React.ReactElement {
             >
               eri
             </span>
-            <span className="mt-0.5 flex items-center gap-0.5 font-geist text-[12px] font-semibold text-[#1d1d1f]">
+            <span
+              className="mt-0.5 flex items-center gap-0.5 text-[12px] font-semibold text-[#1d1d1f]"
+              style={{ fontFamily: SF }}
+            >
               eri
               <svg width="6" height="10" viewBox="0 0 6 9" fill="none" aria-hidden>
                 <path d="M1 1L5 4.5L1 8" stroke="#c4c4c8" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
@@ -292,7 +327,10 @@ export function PhoneShowcase(): React.ReactElement {
             className="ph-thread flex flex-1 flex-col gap-2 px-3 py-3"
           >
             {/* Conversation timestamp, like the top of a real Messages thread. */}
-            <div className="pb-1 pt-0.5 text-center font-geist text-[10.5px] text-[#8e8e93]">
+            <div
+              className="pb-1 pt-0.5 text-center text-[10.5px] text-[#8e8e93]"
+              style={{ fontFamily: SF }}
+            >
               <span className="font-semibold">Today</span> 9:41 AM
             </div>
             {THREAD.slice(0, shown).map((line, idx) => (
@@ -304,7 +342,7 @@ export function PhoneShowcase(): React.ReactElement {
           {/* Composer */}
           <div className="flex items-center gap-2 px-3 pb-5 pt-1.5">
             <div className="flex h-9 flex-1 items-center rounded-full border border-black/10 pl-3.5 pr-1">
-              <span className="font-geist text-[13px] text-[#a9a9ae]">iMessage</span>
+              <span className="text-[13px] text-[#a9a9ae]" style={{ fontFamily: SF }}>iMessage</span>
               <span
                 className="ml-auto grid size-7 place-items-center rounded-full"
                 style={{ background: "#0b84ff" }}
@@ -334,15 +372,17 @@ function Bubble({ line }: { readonly line: Line }): React.ReactElement {
     >
       <span
         className={[
-          "max-w-[83%] font-geist text-[13.5px] leading-[1.34]",
-          "px-3.5 py-2",
-          you
-            ? "rounded-[20px] rounded-br-[7px] text-white"
-            : "rounded-[20px] rounded-bl-[7px] text-[#1d1d1f]",
+          "relative max-w-[83%] text-[13.5px] leading-[1.32] tracking-[-0.01em]",
+          "rounded-[18px] px-3.5 py-2",
+          you ? "text-white" : "text-[#1d1d1f]",
         ].join(" ")}
-        style={you ? { background: "#0b84ff" } : { background: "#e9e9eb" }}
+        style={{
+          background: you ? "#0b84ff" : "#e9e9eb",
+          fontFamily: SF,
+        }}
       >
         {line.text}
+        <BubbleTail you={you} />
       </span>
       {line.card && <MiniApp card={line.card} />}
       <style>{`@keyframes phMsgIn{from{opacity:0;transform:translateY(7px) scale(0.97)}to{opacity:1;transform:none}}`}</style>
@@ -354,7 +394,7 @@ function TypingBubble(): React.ReactElement {
   return (
     <div className="flex items-start" style={{ animation: `phMsgIn 0.3s ${EASE} both` }}>
       <span
-        className="inline-flex items-center gap-1 rounded-[20px] rounded-bl-[7px] px-3.5 py-3"
+        className="relative inline-flex items-center gap-1 rounded-[18px] px-3.5 py-3"
         style={{ background: "#e9e9eb" }}
         aria-label="eri is typing"
       >
@@ -365,6 +405,7 @@ function TypingBubble(): React.ReactElement {
             style={{ animation: `phType 1.2s ${i * 0.18}s ease-in-out infinite` }}
           />
         ))}
+        <BubbleTail you={false} />
       </span>
       <style>{`@keyframes phType{0%,60%,100%{opacity:0.4;transform:translateY(0)}30%{opacity:1;transform:translateY(-3px)}}`}</style>
     </div>

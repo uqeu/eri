@@ -34,7 +34,6 @@ interface Toast {
 }
 
 type FilterMode = "popular" | "all" | "connected";
-type SortMode = "popular" | "az";
 
 /** Cap rendered rows so "All ~1,000" never janks the page; a search narrows it. */
 const MAX_RENDER = 300;
@@ -123,7 +122,6 @@ export default function ConnectionsPage(): ReactNode {
   const [query, setQuery] = useState<string>("");
   const [filter, setFilter] = useState<FilterMode>("popular");
   const [category, setCategory] = useState<string>(ALL_CATEGORIES);
-  const [sort, setSort] = useState<SortMode>("popular");
   const [loading, setLoading] = useState<boolean>(true);
   const [locked, setLocked] = useState<boolean>(false);
   const [connecting, setConnecting] = useState<string | null>(null);
@@ -239,8 +237,9 @@ export default function ConnectionsPage(): ReactNode {
       );
     }
 
-    // Popular tab is always rank-ordered; elsewhere the sort menu decides.
-    const byPopular = filter === "popular" || sort === "popular";
+    // Popular tab is rank-ordered (curated first); All / Connected are A-Z. No
+    // separate sort control — the tab implies the order.
+    const byPopular = filter === "popular";
     const sorted = [...pool].sort((a, b) => {
       if (byPopular) {
         const ra = popularRank(a.slug);
@@ -255,7 +254,7 @@ export default function ConnectionsPage(): ReactNode {
       shownCount: Math.min(sorted.length, MAX_RENDER),
       totalMatched: sorted.length,
     };
-  }, [catalog, connectable, statuses, query, filter, category, sort]);
+  }, [catalog, connectable, statuses, query, filter, category]);
 
   // Start an OAuth or API-key connection. `apiKey` is set only for the API-key
   // flow (the toolkit imports the key directly, with no consent redirect).
@@ -327,9 +326,9 @@ export default function ConnectionsPage(): ReactNode {
         <div>
           <h1 className="font-display text-[clamp(2rem,4vw,2.9rem)] font-600 leading-[1.04] tracking-[-0.03em] text-text">Connections</h1>
           <p className="mt-1.5 max-w-prose text-[13px] leading-relaxed text-text-sec">
-            Everything eri can act on for you. Connect an app with your own account —
-            eri reads your email, checks your calendar, opens a PR. eri never sees your
-            passwords.
+            Everything eri can act on for you. Connect an app with your own account.
+            eri reads your email, checks your calendar, opens a PR, and never sees
+            your passwords.
           </p>
         </div>
         <button
@@ -355,24 +354,29 @@ export default function ConnectionsPage(): ReactNode {
             className="w-full rounded-xl border border-border bg-bg-card px-4 py-2.5 text-[14px] text-text placeholder:text-text-ter focus:border-[rgba(40,33,22,0.22)] focus:outline-none"
           />
 
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            {FILTERS.map((f) => (
-              <button
-                key={f.id}
-                onClick={() => setFilter(f.id)}
-                className={`rounded-full px-3 py-1.5 text-[12.5px] transition-colors ${
-                  filter === f.id
-                    ? "bg-bg-card-2 text-text font-500"
-                    : "border border-border text-text-sec hover:bg-bg-card-2"
-                }`}
-              >
-                {f.label}
-              </button>
-            ))}
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+            {/* One segmented control picks the set — the tab implies the order
+                (Popular = curated/ranked, All = A-Z), so there's no separate
+                redundant sort menu. */}
+            <div className="inline-flex rounded-full bg-bg-card-2 p-1">
+              {FILTERS.map((f) => (
+                <button
+                  key={f.id}
+                  type="button"
+                  onClick={() => setFilter(f.id)}
+                  aria-pressed={filter === f.id}
+                  className={`rounded-full px-3.5 py-1.5 text-[12.5px] transition-colors ${
+                    filter === f.id
+                      ? "bg-bg-card text-text font-500 shadow-[0_1px_2px_rgba(17,17,19,0.08)]"
+                      : "text-text-sec hover:text-text"
+                  }`}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
 
-            <span className="mx-1 h-4 w-px bg-border" aria-hidden />
-
-            <label className="sr-only" htmlFor="cat-filter">Category</label>
+            <label className="sr-only" htmlFor="cat-filter">Filter by category</label>
             <select
               id="cat-filter"
               value={category}
@@ -383,17 +387,6 @@ export default function ConnectionsPage(): ReactNode {
               {categories.map((c) => (
                 <option key={c} value={c}>{c}</option>
               ))}
-            </select>
-
-            <label className="sr-only" htmlFor="sort-by">Sort by</label>
-            <select
-              id="sort-by"
-              value={sort}
-              onChange={(e) => setSort(e.target.value as SortMode)}
-              className={selectClass}
-            >
-              <option value="popular">Sort: Popular</option>
-              <option value="az">Sort: A–Z</option>
             </select>
           </div>
 
