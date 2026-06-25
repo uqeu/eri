@@ -782,6 +782,153 @@ pub fn cli_set_totp(origin: &str) -> Result<()> {
     }
 }
 
+/// One login parsed from an import file. Origin + username are plain; the
+/// password (and any TOTP seed) are [`Secret`]s from the moment they're read.
+struct ParsedLogin {
+    origin: String,
+    username: String,
+    password: Secret,
+    totp_seed: Option<Secret>,
+}
+
+/// The result of parsing an import file: the logins to add + how many rows were
+/// skipped (missing url/username/password).
+struct ImportParse {
+    logins: Vec<ParsedLogin>,
+    skipped: usize,
+}
+
+/// Parse a password-manager CSV export. Columns are detected by HEADER NAME, so
+/// Chrome (`name,url,username,password`), 1Password, and Bitwarden
+/// (`login_uri,login_username,login_password`) exports all work. Rows missing any
+/// of url/username/password are counted as skipped. Origins are normalized;
+/// passwords/seeds go straight into [`Secret`]s and are never logged. Pure +
+/// testable (no I/O — the caller reads the file).
+fn parse_import_csv(text: &str) -> Result<ImportParse> {
+    let mut rdr = csv::ReaderBuilder::new()
+        .flexible(true)
+        .from_reader(text.as_bytes());
+    let headers = rdr
+        .headers()
+        .context("the import file has no header row")?
+        .clone();
+    let col = |names: &[&str]| -> Option<usize> {
+        headers.iter().position(|h| {
+            let h = h.trim().to_lowercase();
+            names.iter().any(|n| h == *n)
+        })
+    };
+    let url_col = col(&["url", "website", "login_uri", "uri", "website url"])
+        .context("no url/website column found in the import file")?;
+    let user_col = col(&["username", "login_username", "user", "email", "login"])
+        .context("no username column found in the import file")?;
+    let pass_col = col(&["password", "login_password", "pass"])
+        .context("no password column found in the import file")?;
+    let totp_col = col(&["totp", "otpauth", "one-time password", "login_totp"]);
+
+    let mut logins = Vec::new();
+    let mut skipped = 0usize;
+    for rec in rdr.records() {
+        let Ok(rec) = rec else {
+            skipped += 1;
+            continue;
+        };
+        let cell = |i: usize| rec.get(i).unwrap_or("").trim().to_string();
+        let origin = normalize_origin(&cell(url_col));
+        let username = cell(user_col);
+        let password = cell(pass_col);
+        if origin.is_empty() || username.is_empty() || password.is_empty() {
+            skipped += 1;
+            continue;
+        }
+        let totp_seed = totp_col
+            .map(cell)
+            .and_then(|v| extract_totp_seed(&v))
+            .map(Secret::new);
+        logins.push(ParsedLogin {
+            origin,
+            username,
+            password: Secret::new(password),
+            totp_seed,
+        });
+    }
+    Ok(ImportParse { logins, skipped })
+}
+
+/// Pull a usable base32 TOTP seed from an export cell: either a raw seed, or the
+/// `secret=` parameter of an `otpauth://totp/...` URI (1Password's form). Returns
+/// `None` if empty or not a valid seed (so a bad cell is silently ignored, not a
+/// hard import failure).
+fn extract_totp_seed(value: &str) -> Option<String> {
+    let value = value.trim();
+    if value.is_empty() {
+        return None;
+    }
+    let candidate = if let Some(idx) = value.find("secret=") {
+        value[idx + "secret=".len()..]
+            .chars()
+            .take_while(|c| *c != '&')
+            .collect::<String>()
+    } else {
+        value.to_string()
+    };
+    // Validate by generating once; only keep seeds eri can actually use.
+    crate::totp::totp_now(&candidate).ok().map(|_| candidate)
+}
+
+/// `eri vault import <file>` — bulk-load logins from a password-manager CSV
+/// export. Passwords (and any 2FA seeds) go straight to the Keychain; nothing is
+/// printed. Reports how many were imported and how many incomplete rows skipped.
+pub fn cli_import(path: &str) -> Result<()> {
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = path;
+        anyhow::bail!("the credential vault needs the macOS Keychain");
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let text = std::fs::read_to_string(path)
+            .with_context(|| format!("reading the import file {path}"))?;
+        let parse = parse_import_csv(&text)?;
+        if parse.logins.is_empty() {
+            anyhow::bail!(
+                "no complete logins found in {path} (need url + username + password columns); skipped {} row(s)",
+                parse.skipped
+            );
+        }
+        let (vpath, mut vault) = cli_vault()?;
+        let mut imported = 0usize;
+        let mut with_totp = 0usize;
+        for login in parse.logins {
+            let secret_ref = format!("eri/vault/{}", login.origin);
+            let entry =
+                CredentialEntry::new(&login.origin, &login.origin, &login.username, &secret_ref);
+            vault.add(entry, login.password)?;
+            if let Some(seed) = login.totp_seed
+                && vault.set_totp(&login.origin, seed)?
+            {
+                with_totp += 1;
+            }
+            imported += 1;
+        }
+        vault.save(&vpath)?;
+        let totp_note = if with_totp > 0 {
+            format!(" ({with_totp} with 2FA)")
+        } else {
+            String::new()
+        };
+        let skip_note = if parse.skipped > 0 {
+            format!(", skipped {} incomplete row(s)", parse.skipped)
+        } else {
+            String::new()
+        };
+        println!(
+            "Imported {imported} login(s){totp_note}{skip_note}. eri will ask the first time it signs you into each."
+        );
+        Ok(())
+    }
+}
+
 /// Read a secret from the terminal WITHOUT echo (or, when input is piped, one
 /// line of stdin). The value goes straight into a [`Secret`] — it never touches
 /// the screen or a log. The keystroke buffer is itself zeroized on drop.
@@ -1247,5 +1394,75 @@ mod tests {
             "no 2FA configured → hand back"
         );
         assert!(bridge.filled_value().is_none());
+    }
+
+    #[test]
+    fn import_parses_chrome_format() {
+        let csv = "name,url,username,password\n\
+                   GitHub,https://github.com/login,you@email.com,hunter2\n";
+        let parse = parse_import_csv(csv).unwrap();
+        assert_eq!(parse.skipped, 0);
+        assert_eq!(parse.logins.len(), 1);
+        let l = &parse.logins[0];
+        assert_eq!(l.origin, "github.com");
+        assert_eq!(l.username, "you@email.com");
+        assert_eq!(l.password.expose_secret(), "hunter2");
+        assert!(l.totp_seed.is_none());
+    }
+
+    #[test]
+    fn import_parses_bitwarden_columns() {
+        let csv = "folder,favorite,type,name,login_uri,login_username,login_password\n\
+                   ,,login,GitHub,https://github.com,you@email.com,hunter2\n";
+        let parse = parse_import_csv(csv).unwrap();
+        assert_eq!(parse.logins.len(), 1);
+        assert_eq!(parse.logins[0].origin, "github.com");
+        assert_eq!(parse.logins[0].password.expose_secret(), "hunter2");
+    }
+
+    #[test]
+    fn import_handles_quoted_fields_with_commas() {
+        // A password containing a comma must survive (real RFC 4180 parsing).
+        let csv = "url,username,password\n\
+                   https://x.com,u,\"pa,ss,word\"\n";
+        let parse = parse_import_csv(csv).unwrap();
+        assert_eq!(parse.logins.len(), 1);
+        assert_eq!(parse.logins[0].password.expose_secret(), "pa,ss,word");
+    }
+
+    #[test]
+    fn import_skips_incomplete_rows() {
+        let csv = "url,username,password\n\
+                   https://a.com,user,pw\n\
+                   https://b.com,,nopass-username\n\
+                   ,orphan,pw\n";
+        let parse = parse_import_csv(csv).unwrap();
+        assert_eq!(parse.logins.len(), 1, "only the complete row imports");
+        assert_eq!(parse.logins[0].origin, "a.com");
+        assert_eq!(parse.skipped, 2, "the two incomplete rows are skipped");
+    }
+
+    #[test]
+    fn import_extracts_a_totp_seed_from_an_otpauth_uri() {
+        let seed = data_encoding::BASE32_NOPAD.encode(b"12345678901234567890");
+        let csv = format!(
+            "url,username,password,otpauth\n\
+             https://x.com,u,pw,otpauth://totp/x:u?secret={seed}&issuer=x\n"
+        );
+        let parse = parse_import_csv(&csv).unwrap();
+        assert_eq!(parse.logins.len(), 1);
+        assert_eq!(
+            parse.logins[0]
+                .totp_seed
+                .as_ref()
+                .map(|s| s.expose_secret()),
+            Some(seed.as_str())
+        );
+    }
+
+    #[test]
+    fn import_rejects_a_file_with_no_recognizable_columns() {
+        let csv = "colA,colB\n1,2\n";
+        assert!(parse_import_csv(csv).is_err());
     }
 }

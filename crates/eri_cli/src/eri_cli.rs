@@ -604,6 +604,13 @@ pub enum VaultCommand {
     },
     /// List saved logins — origins + usernames only, never the secret.
     List,
+    /// Bulk-import logins from a password-manager CSV export (Chrome, 1Password,
+    /// Bitwarden, …). Passwords + any 2FA seeds go straight to the Keychain;
+    /// nothing is printed. Reports how many were imported and skipped.
+    Import {
+        /// Path to the exported CSV file.
+        file: String,
+    },
     /// Attach a 2FA (TOTP) seed to a saved login so eri fills the current code at
     /// sign-in. Prompts for the base32 seed WITHOUT echo; the seed stays in the
     /// Keychain and the code is generated locally — neither is ever shown.
@@ -999,6 +1006,7 @@ async fn dispatch(cli: Cli) -> anyhow::Result<()> {
             credential_vault::cli_add(&origin, &username)
         }
         Command::Vault(VaultCommand::List) => credential_vault::cli_list(),
+        Command::Vault(VaultCommand::Import { file }) => credential_vault::cli_import(&file),
         Command::Vault(VaultCommand::Totp { origin }) => credential_vault::cli_set_totp(&origin),
         Command::Vault(VaultCommand::Forget { origin }) => credential_vault::cli_forget(&origin),
         Command::Mcp(McpCommand::List) => repl::print_mcp_status(),
