@@ -41,6 +41,13 @@ phone never calls the brain live):
 
 Empty/absent fields are valid (a fresh user projects `[]` / empty `profile`).
 
+> **Status (2026-06-25):** the four **world-model fields** (`entities`,
+> `relations`, `recentObservations`, `predictions`) are live as of the gathering
+> facade. The **`profile`** field is **empty until the sync slice lands** — it's
+> composed from the existing Tier-A distill at push time. Don't rely on `profile`
+> yet; the phone's existing `personalization_profiles` remains the style/preference
+> source until then (which the blend already does).
+
 ## Field semantics
 
 | field | from (brain) | use on the phone |
@@ -81,6 +88,29 @@ Today the phone has `learned_facts` + `personalization_profiles`. `recall(userId
   converge — prefer the brain's `profile` where present.
 - Retire the standalone `learned_facts` only once the projection demonstrably
   covers it (Phase C). Until then, blend; never drop the phone's store.
+
+## Push integration — confirm before the trigger goes live (producer → server)
+
+The brain pushes via `push_recall`, riding the **existing** `ProfileTransport`
+(same `EriApiClient`, same endpoint, same server-side **K_server**-at-rest + AAD=
+`user_id`). The body it sends is the projection JSON in §1 (the same shape you
+read). The push capability is built; the **sync-tick trigger is NOT wired yet** —
+on purpose, because sending the projection body to the current Tier-A endpoint
+could break the *working* profile sync that feeds live phone personalization.
+
+**One thing for the phone window to confirm, then we wire it:**
+
+- **Does the existing Tier-A endpoint ignore unknown fields?**
+  - **Yes** → the brain pushes a `ProfileBody`-**superset**: the current
+    `profile` / `dynamic_context` fields stay exactly where the server expects
+    them, and the world-model fields ride along (stored encrypted, read by the
+    phone). Non-breaking; the trigger is then a one-liner on the brain side.
+  - **No (strict validation)** → stand up a **sibling endpoint** with the SAME
+    K_server + AAD=`user_id` binding; the brain pushes the projection there. Same
+    encryption, distinct path — never a weaker one.
+
+Either way the server is confirmed before the trigger goes live. Don't migrate the
+existing profile push until the phone reads the projection (strangler-fig).
 
 ## Not in scope here
 
