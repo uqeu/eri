@@ -630,6 +630,34 @@ fn name_grounds(hay: &[String], name: &str) -> bool {
     hay.windows(needle.len()).any(|w| w == needle.as_slice())
 }
 
+/// Down-weight the learned chain `from_label` → `to_label` — reduce its
+/// transition count by one (it misfired). The sia loop's chain-refine op (P3): a
+/// decremented count weakens the "after X you usually Y" corroboration, and at 0
+/// it no longer reads as established. Stamps the edge `source = "sia"` for
+/// provenance (auditable). No-op if the transition was never learned. Reduces,
+/// never deletes — reversible.
+pub fn downweight_next(graph: &Graph, from_label: &str, to_label: &str) -> Result<(), GraphError> {
+    let Some(from) = find_action(graph, &normalize_name(from_label))? else {
+        return Ok(());
+    };
+    let to_needle = normalize_name(to_label);
+    for (edge, node) in graph.neighbors(&from, Some(relation::NEXT), Direction::Out)? {
+        if normalize_name(action_label(&node)) == to_needle {
+            let count = next_count(&edge).saturating_sub(1);
+            let mut meta = edge.metadata.clone();
+            if !meta.is_object() {
+                meta = json!({});
+            }
+            if let Some(obj) = meta.as_object_mut() {
+                obj.insert("count".into(), Value::from(count));
+                obj.insert("source".into(), Value::from("sia"));
+            }
+            return graph.update_edge_metadata(&edge.id, &meta);
+        }
+    }
+    Ok(())
+}
+
 fn edge_valid_at(edge: &Edge, at: u64) -> bool {
     let from = edge
         .metadata

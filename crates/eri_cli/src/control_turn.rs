@@ -664,6 +664,10 @@ pub enum OutcomeKind {
     Declined,
     /// The absolute boundary handed it back.
     Refused,
+    /// The user UNDID the action after it ran — the strongest negative signal
+    /// (it executed, and they took it back). Folded in from the trust trail so
+    /// undo is part of the one outcome stream, not a side-path (P3 Slice 3a).
+    Undone,
 }
 
 impl OutcomeKind {
@@ -674,6 +678,7 @@ impl OutcomeKind {
             OutcomeKind::Confirmed => "confirmed",
             OutcomeKind::Declined => "declined",
             OutcomeKind::Refused => "refused",
+            OutcomeKind::Undone => "undone",
         }
     }
 }

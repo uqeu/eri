@@ -1604,6 +1604,33 @@ async fn run_control_undo(live: bool, log_path: Option<&std::path::Path>) -> any
                                 );
                             }
                         }
+                        // P3 Slice 3a: undo is the strongest negative signal. Fold
+                        // it into the one outcome stream, then propose RAISING the
+                        // confidence floor for this pattern — gated by sia::accept
+                        // (earns its keep + the canonical refusal re-check), applied
+                        // user-scoped + reversible. sia can only tighten: the floor
+                        // rises (asks more), never loosens.
+                        {
+                            use crate::control_turn::ControlTurnSink as _;
+                            let user_id = config::load().ok().and_then(|c| c.user_id);
+                            let sink = control_turn::MemorySink::new(user_id.clone());
+                            sink.record_outcome(&control_turn::Outcome {
+                                action: desc.clone(),
+                                disposition: control_turn::OutcomeKind::Undone,
+                            });
+                            let proposal = sia::Proposal::RaiseFloor {
+                                pattern: desc.clone(),
+                            };
+                            if let sia::Verdict::Accept(prov) =
+                                sia::accept(&proposal, log.undone_count(&desc))
+                            {
+                                let mut policy = sia::LiveRefinablePolicy::new(user_id);
+                                sia::apply(&mut policy, &proposal, &prov);
+                                println!(
+                                    "[eri] learning: I'll be more careful before \"{desc}\" (floor raised)."
+                                );
+                            }
+                        }
                     }
                     other => {
                         println!("[eri] couldn't complete the undo ({other:?}); trail unchanged.");

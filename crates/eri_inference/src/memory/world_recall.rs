@@ -75,6 +75,16 @@ pub fn observe_transition(user_id: Option<&str>, from: &str, to: &str) -> io::Re
     world::link_next(&graph, from, to).map_err(|e| io::Error::other(format!("link_next: {e}")))
 }
 
+/// Down-weight the learned chain transition `from` → `to` in the user's world
+/// model — the sia loop's chain-refine op (P3): it weakens a misfiring "after X
+/// you usually Y". Best-effort; the seam stays in `eri_inference` (callers never
+/// name `eri_graph`).
+pub fn downweight_transition(user_id: Option<&str>, from: &str, to: &str) -> io::Result<()> {
+    let graph = open_world_graph(user_id)?;
+    world::downweight_next(&graph, from, to)
+        .map_err(|e| io::Error::other(format!("downweight_next: {e}")))
+}
+
 /// "After X you usually Y" — the successor actions for `action`, ranked by how
 /// often they followed it (Q16). Best-effort: an empty list on cold start or any
 /// error, so a missing world model simply yields no proactive suggestion.

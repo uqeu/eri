@@ -44,7 +44,9 @@ pub fn undo_plan_for(action: &ControlAction) -> UndoPlan {
             UndoPlan::Irreversible(format!("scrolled {direction} {amount}"))
         }
         ControlAction::Drag { .. } => UndoPlan::Irreversible("a drag".to_string()),
-        ControlAction::RunAppleScript(_) => UndoPlan::Irreversible("an AppleScript command".to_string()),
+        ControlAction::RunAppleScript(_) => {
+            UndoPlan::Irreversible("an AppleScript command".to_string())
+        }
         // Clipboard ops don't change app state eri reverses (write is harmless
         // until pasted; read changes nothing).
         ControlAction::ReadClipboard | ControlAction::WriteClipboard(_) => UndoPlan::Noop,
@@ -176,6 +178,16 @@ impl ActionLog {
             .filter(|(_, n)| *n >= threshold)
             .map(|(d, _)| d.to_string())
             .collect()
+    }
+
+    /// How many times `description` has been UNDONE in the trail — the support
+    /// the sia loop weighs a "raise the floor for this pattern" proposal against
+    /// (P3 Slice 3a). Pure.
+    pub fn undone_count(&self, description: &str) -> usize {
+        self.records
+            .iter()
+            .filter(|r| r.undone && r.description == description)
+            .count()
     }
 
     pub fn len(&self) -> usize {
