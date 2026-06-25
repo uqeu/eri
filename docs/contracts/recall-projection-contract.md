@@ -41,12 +41,13 @@ phone never calls the brain live):
 
 Empty/absent fields are valid (a fresh user projects `[]` / empty `profile`).
 
-> **Status (2026-06-25):** the four **world-model fields** (`entities`,
-> `relations`, `recentObservations`, `predictions`) are live as of the gathering
-> facade. The **`profile`** field is **empty until the sync slice lands** — it's
-> composed from the existing Tier-A distill at push time. Don't rely on `profile`
-> yet; the phone's existing `personalization_profiles` remains the style/preference
-> source until then (which the blend already does).
+> **Status (2026-06-25):** **all fields are live.** The four world-model fields
+> (`entities`, `relations`, `recentObservations`, `predictions`) come from the
+> gathering facade; the **`profile`** field is composed from the existing Tier-A
+> distill at push time. The brain now pushes the full projection on every sync tick
+> (`eri sync` and the post-write best-effort sync), so the phone's `recall(userId)`
+> reflects the last push (`asOf`). The phone's existing `personalization_profiles`
+> stays a blend fallback (strangler-fig), but `profile` is no longer empty.
 
 ## Field semantics
 
@@ -89,28 +90,29 @@ Today the phone has `learned_facts` + `personalization_profiles`. `recall(userId
 - Retire the standalone `learned_facts` only once the projection demonstrably
   covers it (Phase C). Until then, blend; never drop the phone's store.
 
-## Push integration — confirm before the trigger goes live (producer → server)
+## Push integration — RESOLVED + wired (producer → server)
 
-The brain pushes via `push_recall`, riding the **existing** `ProfileTransport`
-(same `EriApiClient`, same endpoint, same server-side **K_server**-at-rest + AAD=
-`user_id`). The body it sends is the projection JSON in §1 (the same shape you
-read). The push capability is built; the **sync-tick trigger is NOT wired yet** —
-on purpose, because sending the projection body to the current Tier-A endpoint
-could break the *working* profile sync that feeds live phone personalization.
+**Decision (2026-06-25): the SIBLING endpoint.** The phone window confirmed the
+existing Tier-A profile PUT is *lossy* — it stores only `JSON.stringify(body.profile)`,
+so a `ProfileBody`-superset would have **silently dropped every world-model field**
+(200-OK, projection gone). So the projection rides its own path:
 
-**One thing for the phone window to confirm, then we wire it:**
+- **`PUT /api/v1/memory/recall`** (`0029_recall_projections`, RLS-locked), with the
+  **same** server-side **K_server**-at-rest encryption + AAD=`user_id` as the profile
+  route. Distinct path, identical encryption — never a weaker one. The working profile
+  sync is untouched.
+- The brain pushes via `recall::push_recall`, over a dedicated `RecallTransport`
+  (a separate type from `ProfileTransport`, so the lossy profile endpoint is
+  *unrepresentable* as a recall target). The body is the **exact §1 camelCase shape**
+  (`asOf`, `recentObservations`, `communicationStyle`, …) the route's
+  `coerceRecallProjection` validates — a snake_case key would be silently coerced to
+  empty, so the wire field names are locked by a regression test.
+- **Trigger: wired on the sync tick** (`eri sync` + the post-write best-effort sync),
+  after the Tier-A profile push. The projection is gated once more right before it
+  leaves; `asOf` carries the eventually-consistent stamp.
 
-- **Does the existing Tier-A endpoint ignore unknown fields?**
-  - **Yes** → the brain pushes a `ProfileBody`-**superset**: the current
-    `profile` / `dynamic_context` fields stay exactly where the server expects
-    them, and the world-model fields ride along (stored encrypted, read by the
-    phone). Non-breaking; the trigger is then a one-liner on the brain side.
-  - **No (strict validation)** → stand up a **sibling endpoint** with the SAME
-    K_server + AAD=`user_id` binding; the brain pushes the projection there. Same
-    encryption, distinct path — never a weaker one.
-
-Either way the server is confirmed before the trigger goes live. Don't migrate the
-existing profile push until the phone reads the projection (strangler-fig).
+Strangler-fig preserved: the profile push is unchanged and still feeds phone
+personalization; the recall projection is additive beside it.
 
 ## Not in scope here
 
