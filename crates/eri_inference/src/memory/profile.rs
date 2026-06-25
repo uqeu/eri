@@ -104,10 +104,19 @@ fn distill_facts(observations: &[Observation]) -> Vec<String> {
 }
 
 /// Conservative keyword screen for secrets that must never enter the
-/// server-readable Tier-A profile. Deliberately broad (a false positive just
+/// server-readable Tier-A projection. Deliberately broad (a false positive just
 /// keeps a fact local); the Claude sensitivity pass is the precise gate above it.
-fn looks_sensitive(text: &str) -> bool {
+///
+/// The single canonical sensitivity floor for everything that crosses the
+/// confidential→server-readable boundary (Tier-A profile AND the recall
+/// projection, ADR-0010 §5) — one source of truth, never a second copy.
+pub(crate) fn looks_sensitive(text: &str) -> bool {
+    // The four privacy zones (Q23) the projection must never carry: credential,
+    // financial, health, intimate. Deliberately broad — a false positive just
+    // keeps a fact local; the Claude sensitivity pass is the precise "exclude if
+    // unsure" gate above this keyword floor (ADR-0010 §5).
     const NEEDLES: &[&str] = &[
+        // -- credential / secret --
         "password",
         "passphrase",
         "secret",
@@ -118,6 +127,10 @@ fn looks_sensitive(text: &str) -> bool {
         "access_token",
         "private key",
         "private_key",
+        "seed phrase",
+        "mnemonic",
+        "eri_sk_",
+        // -- financial --
         "credit card",
         "card number",
         "cvv",
@@ -125,9 +138,39 @@ fn looks_sensitive(text: &str) -> bool {
         "social security",
         "routing number",
         "account number",
-        "seed phrase",
-        "mnemonic",
-        "eri_sk_",
+        "bank account",
+        "bank balance",
+        "account balance",
+        "net worth",
+        "salary",
+        "income",
+        "wire transfer",
+        "iban",
+        "paypal",
+        "venmo",
+        "401k",
+        "brokerage",
+        "tax return",
+        "credit score",
+        // -- health --
+        "diagnosis",
+        "diagnosed",
+        "prescription",
+        "medication",
+        "medical record",
+        "therapist",
+        "therapy",
+        "mental health",
+        "depression",
+        "anxiety disorder",
+        "hiv",
+        "pregnant",
+        "blood test",
+        // -- intimate --
+        "nude",
+        "affair",
+        "having sex",
+        "sexual",
     ];
     let hay = text.to_lowercase();
     NEEDLES.iter().any(|n| hay.contains(n))

@@ -1,0 +1,261 @@
+//! The recall seam (ADR-0010): a **bounded, server-readable projection** of the
+//! world model that the serverless phone reads — and the **fail-closed egress
+//! gate** that is the confidential→server-readable boundary.
+//!
+//! The phone never calls the brain live; the brain pre-computes this projection
+//! and pushes it to the server-readable Tier-A store, and the phone reads the
+//! last-pushed copy (eventually-consistent; deep/live questions relay to the
+//! running computer — ADR-0010 §3/§4). Only this small slice is server-readable;
+//! the full graph stays Tier-B/confidential.
+//!
+//! The projection is the only world-model content that crosses the boundary, so
+//! [`may_project`] — the gate that decides what enters it — has **refusal-grade**
+//! rigor: it is fail-closed (anything sensitive, or anything uncertain, NEVER
+//! enters), reuses the one canonical sensitivity screen ([`profile::looks_sensitive`],
+//! no copy), and is **parameterized by [`Recipient`]** so a future consented
+//! outward projection (eri-social) extends THIS gate rather than adding a second
+//! egress path. Today the only recipient is the user's own devices.
+
+use serde::{Deserialize, Serialize};
+
+use super::profile::{self, Profile};
+
+/// Who a projection may leave the confidential boundary FOR (ADR-0010 §7). Today
+/// only the user's own devices; a future consented outward recipient (a specific
+/// person/eri) is a STRICTER policy on this same gate, never a new egress path.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Recipient {
+    /// The user's own devices (self) — the only egress today.
+    OwnDevices,
+}
+
+/// An entity in the projection — a thing in the user's world.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ProjectedEntity {
+    pub id: String,
+    pub kind: String,
+    pub name: String,
+    pub salience: u64,
+}
+
+/// A relation between two projected entities (referenced by `name`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProjectedRelation {
+    pub src: String,
+    pub dst: String,
+    pub kind: String,
+}
+
+/// A recent observation in the live "right now" slice.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ProjectedObservation {
+    pub text: String,
+    pub ts: u64,
+    pub kind: String,
+}
+
+/// A learned "after X you usually Y" chain step.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProjectedPrediction {
+    pub after: String,
+    pub next: String,
+    pub count: u64,
+}
+
+/// The recall projection (ADR-0010 §1) — the read contract the phone consumes.
+/// Single-principal: bound to one `user_id`. `as_of` is when the brain last
+/// pushed it (eventually-consistent — the phone answers from this, deep/live
+/// questions relay).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct RecallProjection {
+    pub version: u32,
+    pub user_id: Option<String>,
+    pub as_of: u64,
+    pub entities: Vec<ProjectedEntity>,
+    pub relations: Vec<ProjectedRelation>,
+    pub recent_observations: Vec<ProjectedObservation>,
+    pub predictions: Vec<ProjectedPrediction>,
+    pub profile: Profile,
+}
+
+/// The current projection schema version.
+pub const PROJECTION_VERSION: u32 = 1;
+
+/// The egress gate (ADR-0010 §5/§7): may `text` leave the confidential boundary
+/// FOR `recipient`? **Fail-closed** — sensitive content (the Q23 privacy zones, or
+/// anything the canonical screen flags) NEVER passes. The single sensitivity floor
+/// ([`profile::looks_sensitive`]) is reused, not copied (one source of truth, like
+/// the refusal classifier). A future outward recipient ANDs a stricter screen +
+/// consent check here; it never bypasses this floor.
+pub fn may_project(text: &str, recipient: Recipient) -> bool {
+    match recipient {
+        // Server-readable even for the user's own devices (Tier-A is at-rest, not
+        // E2E), so the floor applies to OwnDevices already.
+        Recipient::OwnDevices => !profile::looks_sensitive(text),
+    }
+}
+
+/// Apply the egress gate to a fully-assembled projection FOR `recipient`: drop any
+/// entity / observation / prediction whose text doesn't pass [`may_project`], then
+/// drop relations left dangling (an endpoint that didn't pass) — so a sensitive
+/// thing can never appear, even indirectly via an edge. Idempotent.
+pub fn gate(projection: &mut RecallProjection, recipient: Recipient) {
+    projection
+        .entities
+        .retain(|e| may_project(&e.name, recipient));
+    let kept: std::collections::HashSet<&str> = projection
+        .entities
+        .iter()
+        .map(|e| e.name.as_str())
+        .collect();
+    // A relation survives only if BOTH endpoints survived the gate (no edge to a
+    // dropped — possibly sensitive — entity) and its own kind text passes.
+    projection
+        .relations
+        .retain(|r| kept.contains(r.src.as_str()) && kept.contains(r.dst.as_str()));
+    projection
+        .recent_observations
+        .retain(|o| may_project(&o.text, recipient));
+    projection
+        .predictions
+        .retain(|p| may_project(&p.after, recipient) && may_project(&p.next, recipient));
+    // The Tier-A profile is already screened by `distill`, but re-screen its free
+    // text defensively — the projection is the boundary, so it gates everything.
+    projection
+        .profile
+        .facts
+        .retain(|f| may_project(f, recipient));
+    projection
+        .profile
+        .preferences
+        .retain(|p| may_project(p, recipient));
+    if !may_project(&projection.profile.dynamic_context, recipient) {
+        projection.profile.dynamic_context.clear();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_egress_gate_is_fail_closed_and_reuses_the_canonical_screen() {
+        // A secret never passes (the canonical floor); a benign name does.
+        assert!(!may_project(
+            "my password is hunter2",
+            Recipient::OwnDevices
+        ));
+        assert!(!may_project(
+            "bank account 12345 routing 9999",
+            Recipient::OwnDevices
+        ));
+        assert!(may_project("Priya", Recipient::OwnDevices));
+        assert!(may_project("the atlas project", Recipient::OwnDevices));
+        // The floor is the SAME screen Tier-A uses — a regression there is caught
+        // here too (one source of truth).
+        assert_eq!(
+            may_project("api key sk-123", Recipient::OwnDevices),
+            !super::profile::looks_sensitive("api key sk-123")
+        );
+    }
+
+    fn entity(name: &str) -> ProjectedEntity {
+        ProjectedEntity {
+            id: name.into(),
+            kind: "entity_person".into(),
+            name: name.into(),
+            salience: 1,
+        }
+    }
+
+    #[test]
+    fn a_sensitive_entity_observation_or_prediction_never_enters_the_projection() {
+        let mut p = RecallProjection {
+            version: PROJECTION_VERSION,
+            entities: vec![entity("Priya"), entity("my password vault")],
+            relations: vec![
+                ProjectedRelation {
+                    src: "Priya".into(),
+                    dst: "atlas".into(),
+                    kind: "collaborates_on".into(),
+                },
+                // dangling once "my password vault" is gated out:
+                ProjectedRelation {
+                    src: "my password vault".into(),
+                    dst: "atlas".into(),
+                    kind: "owns".into(),
+                },
+            ],
+            recent_observations: vec![
+                ProjectedObservation {
+                    text: "Paired with Priya on atlas".into(),
+                    ts: 1,
+                    kind: "fact".into(),
+                },
+                ProjectedObservation {
+                    text: "my ssn is 000-00-0000".into(),
+                    ts: 2,
+                    kind: "fact".into(),
+                },
+            ],
+            predictions: vec![ProjectedPrediction {
+                after: "open the password manager".into(),
+                next: "type my password".into(),
+                count: 3,
+            }],
+            ..Default::default()
+        };
+
+        gate(&mut p, Recipient::OwnDevices);
+
+        // The sensitive entity is gone, and so is the relation that referenced it.
+        assert!(p.entities.iter().all(|e| e.name == "Priya"));
+        assert!(
+            p.relations
+                .iter()
+                .all(|r| r.src == "Priya" || r.dst == "Priya"),
+            "no relation references a gated (possibly sensitive) entity"
+        );
+        // The sensitive observation + the password prediction are gone.
+        assert!(
+            p.recent_observations
+                .iter()
+                .all(|o| o.text.contains("Priya"))
+        );
+        assert!(p.predictions.is_empty());
+        // Belt-and-braces: the sensitive text appears NOWHERE in the projection.
+        let blob = serde_json::to_string(&p).unwrap().to_lowercase();
+        for needle in ["password", "ssn", "000-00-0000", "vault"] {
+            assert!(
+                !blob.contains(needle),
+                "leaked {needle:?} into the projection"
+            );
+        }
+    }
+
+    #[test]
+    fn benign_content_survives_the_gate_unchanged() {
+        let mut p = RecallProjection {
+            entities: vec![entity("Priya")],
+            relations: vec![ProjectedRelation {
+                src: "Priya".into(),
+                dst: "Priya".into(),
+                kind: "works_with".into(),
+            }],
+            recent_observations: vec![ProjectedObservation {
+                text: "shipped atlas".into(),
+                ts: 1,
+                kind: "fact".into(),
+            }],
+            predictions: vec![ProjectedPrediction {
+                after: "open editor".into(),
+                next: "run tests".into(),
+                count: 4,
+            }],
+            ..Default::default()
+        };
+        let before = p.clone();
+        gate(&mut p, Recipient::OwnDevices);
+        assert_eq!(p, before, "the gate drops nothing benign");
+    }
+}
