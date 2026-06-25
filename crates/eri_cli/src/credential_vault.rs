@@ -257,15 +257,21 @@ pub struct CredentialEntry {
     pub origin: String,
     /// Not secret; shown in the approval prompt ("sign you in as you@email").
     pub username: String,
-    /// Keychain key, e.g. "eri/vault/github.com". Never a value.
+    /// Keychain key for the PASSWORD, e.g. "eri/vault/github.com". Never a value.
     pub secret_ref: String,
+    /// Keychain key for the TOTP **seed**, if 2FA is configured for this site.
+    /// `None` = no TOTP. `#[serde(default)]` so pre-TOTP metadata still loads.
+    /// The seed never leaves the keystore; eri derives the code locally.
+    #[serde(default)]
+    pub totp_ref: Option<String>,
     pub created: String,
     pub last_used: Option<String>,
 }
 
 impl CredentialEntry {
-    /// Build a metadata entry. The secret itself is stored separately via the
-    /// [`SecretStore`]; nothing here is sensitive.
+    /// Build a metadata entry (password only). The secret itself is stored
+    /// separately via the [`SecretStore`]; nothing here is sensitive. Attach 2FA
+    /// later with [`with_totp_ref`](Self::with_totp_ref).
     pub fn new(
         id: impl Into<String>,
         origin: impl Into<String>,
@@ -277,6 +283,7 @@ impl CredentialEntry {
             origin: origin.into(),
             username: username.into(),
             secret_ref: secret_ref.into(),
+            totp_ref: None,
             created: String::new(),
             last_used: None,
         }
@@ -435,6 +442,35 @@ impl CredentialVault {
         };
         let entry = self.entries.remove(idx);
         let _ = self.store.delete(&entry.secret_ref);
+        if let Some(totp_ref) = &entry.totp_ref {
+            let _ = self.store.delete(totp_ref);
+        }
+        Ok(true)
+    }
+
+    /// Attach (or replace) the TOTP 2FA seed for an already-saved origin. The
+    /// seed is written to the keystore and the entry's `totp_ref` is set. Returns
+    /// false if there's no saved login for the origin yet (add one first).
+    pub fn set_totp(&mut self, origin: &str, seed: Secret) -> Result<bool> {
+        let norm = normalize_origin(origin);
+        if !self
+            .entries
+            .iter()
+            .any(|e| normalize_origin(&e.origin) == norm)
+        {
+            return Ok(false);
+        }
+        let totp_ref = format!("eri/vault/{norm}/totp");
+        self.store
+            .put(&totp_ref, seed)
+            .with_context(|| format!("storing the TOTP seed for {norm}"))?;
+        if let Some(entry) = self
+            .entries
+            .iter_mut()
+            .find(|e| normalize_origin(&e.origin) == norm)
+        {
+            entry.totp_ref = Some(totp_ref);
+        }
         Ok(true)
     }
 
@@ -553,29 +589,53 @@ impl CredentialVault {
         }
     }
 
-    /// Read the secret and hand it to the bridge — the ONLY place a value moves.
+    /// Resolve the value for `field` and hand it to the bridge — the ONLY place a
+    /// value moves. Field-aware:
+    /// - **Username** → the (non-secret) saved username.
+    /// - **Password** → the keystore secret at `secret_ref`.
+    /// - **Totp** → the current code, derived LOCALLY from the keystore seed at
+    ///   `totp_ref` (the seed never leaves; the model sees neither seed nor code).
+    ///   No TOTP configured for this site → [`NoMatch`] (hand back).
+    ///
     /// The [`Secret`] is consumed inside `fill_secret` and dropped (zeroized); it
-    /// is never returned, logged, or stringified. The access is audited by
-    /// origin + field, never the value.
+    /// is never returned, logged, or stringified. The access is audited by origin
+    /// + field, never the value.
     async fn fill_ready(
         &self,
         idx: usize,
         field: CredentialField,
         bridge: &dyn ControlBridge,
     ) -> Result<FillOutcome> {
-        let (secret_ref, origin) = {
+        let (origin, value) = {
             let e = &self.entries[idx];
-            (e.secret_ref.clone(), e.origin.clone())
+            let value = match field {
+                CredentialField::Username => Secret::new(e.username.clone()),
+                CredentialField::Password => self
+                    .store
+                    .get(&e.secret_ref)
+                    .with_context(|| format!("reading the saved password for {}", e.origin))?,
+                CredentialField::Totp => {
+                    let Some(totp_ref) = e.totp_ref.as_deref() else {
+                        // No 2FA saved here → fall through to the hand-back.
+                        return Ok(FillOutcome::NoMatch);
+                    };
+                    let seed = self
+                        .store
+                        .get(totp_ref)
+                        .with_context(|| format!("reading the TOTP seed for {}", e.origin))?;
+                    let code = crate::totp::totp_now(seed.expose_secret()).with_context(|| {
+                        format!("generating the one-time code for {}", e.origin)
+                    })?;
+                    Secret::new(code) // the seed Secret drops (zeroized) here
+                }
+            };
+            (e.origin.clone(), value)
         };
-        let secret = self
-            .store
-            .get(&secret_ref)
-            .with_context(|| format!("reading the saved credential for {origin}"))?;
-        // Keychain → bridge → OS field. `secret` is moved in and never comes back.
+        // Keychain → bridge → OS field. `value` is moved in and never comes back.
         bridge
-            .fill_secret(field, secret)
+            .fill_secret(field, value)
             .await
-            .with_context(|| format!("filling the saved credential for {origin}"))?;
+            .with_context(|| format!("filling the saved {} for {origin}", field.label()))?;
         if let Ok(mut log) = self.audit.lock() {
             log.record_credential_fill(&origin, field);
         }
@@ -687,6 +747,37 @@ pub fn cli_forget(origin: &str) -> Result<()> {
         } else {
             println!("No saved login for {origin_norm}.");
         }
+        Ok(())
+    }
+}
+
+/// `eri vault totp <origin>` — attach a 2FA seed to a saved login. The base32
+/// seed is read WITHOUT echo, validated, and stored in the Keychain; eri then
+/// generates the current code locally at sign-in. The seed is never printed.
+pub fn cli_set_totp(origin: &str) -> Result<()> {
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = origin;
+        anyhow::bail!("the credential vault needs the macOS Keychain");
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let origin_norm = normalize_origin(origin);
+        let seed = read_secret_no_echo(&format!("2FA seed (base32) for {origin_norm}: "))?;
+        if seed.expose_secret().is_empty() {
+            anyhow::bail!("no seed entered — nothing saved");
+        }
+        // Validate before storing so a typo'd seed is caught now, not at sign-in.
+        crate::totp::totp_now(seed.expose_secret())
+            .context("that doesn't look like a valid base32 TOTP seed")?;
+        let (path, mut vault) = cli_vault()?;
+        if !vault.set_totp(origin, seed)? {
+            anyhow::bail!(
+                "no saved login for {origin_norm} yet — add it first with `eri vault add {origin_norm} --username <you>`"
+            );
+        }
+        vault.save(&path)?;
+        println!("Saved 2FA for {origin_norm}. eri will fill the current code when you sign in.");
         Ok(())
     }
 }
@@ -1059,5 +1150,102 @@ mod tests {
             "secret must be deleted from the store on forget"
         );
         assert!(!vault.forget("github.com").unwrap(), "already gone → false");
+    }
+
+    #[tokio::test]
+    async fn fill_username_fills_the_username_not_the_password() {
+        // Field-aware fill: `username` types the saved username, NOT the password.
+        let store = InMemoryStore::new();
+        store
+            .put("eri/vault/example.com", Secret::new("hunter2"))
+            .unwrap();
+        let audit = Arc::new(Mutex::new(ActionLog::default()));
+        let mut vault = CredentialVault::new(Box::new(store), audit);
+        vault.add_entry(CredentialEntry::new(
+            "ex",
+            "example.com",
+            "you@email.com",
+            "eri/vault/example.com",
+        ));
+        let bridge = FakeBridge::at("example.com");
+        let mut perms = PermissionStore::default();
+        perms.allow_credential_origin("example.com");
+
+        let outcome = vault
+            .fill("example.com", CredentialField::Username, &perms, &bridge)
+            .await
+            .unwrap();
+        assert_eq!(outcome, FillOutcome::Filled);
+        assert_eq!(bridge.filled_value().as_deref(), Some("you@email.com"));
+        assert_ne!(
+            bridge.filled_value().as_deref(),
+            Some("hunter2"),
+            "the password must never be filled into the username field"
+        );
+    }
+
+    #[tokio::test]
+    async fn fill_totp_generates_a_code_not_the_seed() {
+        let seed = data_encoding::BASE32_NOPAD.encode(b"12345678901234567890");
+        let audit = Arc::new(Mutex::new(ActionLog::default()));
+        let mut vault = CredentialVault::new(Box::new(InMemoryStore::new()), audit.clone());
+        vault.add_entry(CredentialEntry::new(
+            "ex",
+            "example.com",
+            "you@email.com",
+            "eri/vault/example.com",
+        ));
+        // Attach 2FA via the same path the `eri vault totp` CLI uses.
+        assert!(
+            vault
+                .set_totp("example.com", Secret::new(seed.clone()))
+                .unwrap()
+        );
+        // set_totp on a site with no saved login returns false.
+        assert!(
+            !vault
+                .set_totp("unknown.com", Secret::new(seed.clone()))
+                .unwrap()
+        );
+        let bridge = FakeBridge::at("example.com");
+        let mut perms = PermissionStore::default();
+        perms.allow_credential_origin("example.com");
+
+        let outcome = vault
+            .fill("example.com", CredentialField::Totp, &perms, &bridge)
+            .await
+            .unwrap();
+        assert_eq!(outcome, FillOutcome::Filled);
+        let code = bridge.filled_value().unwrap();
+        assert_eq!(code.len(), 6, "a 6-digit code");
+        assert!(code.chars().all(|c| c.is_ascii_digit()));
+        assert_ne!(code, seed, "the seed must never be filled");
+        // Audited as a one-time code, never the seed.
+        let trail = audit.lock().unwrap().trail().join("\n");
+        assert!(trail.contains("one-time code"));
+        assert!(
+            !trail.contains(&seed),
+            "the seed leaked into the trail: {trail}"
+        );
+    }
+
+    #[tokio::test]
+    async fn fill_totp_without_a_seed_falls_through() {
+        // A site with a password but no 2FA configured → hand back, don't fill.
+        let (vault, _audit) = vault_with_github();
+        let bridge = FakeBridge::at("github.com");
+        let mut perms = PermissionStore::default();
+        perms.allow_credential_origin("github.com");
+
+        let outcome = vault
+            .fill("github.com", CredentialField::Totp, &perms, &bridge)
+            .await
+            .unwrap();
+        assert_eq!(
+            outcome,
+            FillOutcome::NoMatch,
+            "no 2FA configured → hand back"
+        );
+        assert!(bridge.filled_value().is_none());
     }
 }
