@@ -214,18 +214,22 @@ export default function ConnectionsPage(): ReactNode {
     });
   }, [connectable]);
 
-  // Filter → search → sort → cap. A flat, app-store-style list: the tabs pick the
-  // pool, the category menu narrows it, the sort menu orders it.
+  // Filter → search → sort → cap. A flat, app-store-style list. The tabs pick
+  // the pool, the category menu narrows it, and "Popular" is really a sort:
+  // it only shrinks the pool to the curated shortlist on the featured home
+  // (no category picked). The moment you open a section, Popular stops hiding
+  // anything and just floats the well-known apps to the top of that section.
   const { items, shownCount, totalMatched } = useMemo(() => {
     const q = query.trim().toLowerCase();
+    const inCategory = category !== ALL_CATEGORIES;
     let pool =
       filter === "connected"
         ? catalog.filter((a) => statuses[a.slug])
-        : filter === "popular"
+        : filter === "popular" && !inCategory
           ? connectable.filter((a) => POPULAR_RANK.has(a.slug))
           : connectable;
 
-    if (category !== ALL_CATEGORIES) {
+    if (inCategory) {
       pool = pool.filter((a) => (a.category || UNCATEGORIZED) === category);
     }
     if (q) {

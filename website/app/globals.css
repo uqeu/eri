@@ -1359,9 +1359,9 @@ html.lenis body { height: auto; }
   color: #1d1d1f;
 }
 .mini-pill--on {
-  background: #d9ff57;
-  border-color: #c9ef47;
-  color: #2a3300;
+  background: #0a84ff;
+  border-color: #0a84ff;
+  color: #fff;
 }
 
 /* toggle row (tell the room) */
@@ -1380,7 +1380,7 @@ html.lenis body { height: auto; }
   width: 34px;
   height: 20px;
   border-radius: 999px;
-  background: #d9ff57;
+  background: #34c759;
   position: relative;
   flex-shrink: 0;
 }
@@ -1443,7 +1443,7 @@ html.lenis body { height: auto; }
   font-weight: 600;
   letter-spacing: -0.01em;
 }
-.mini-btn--primary { background: #d9ff57; color: #2a3300; }
+.mini-btn--primary { background: #0a84ff; color: #fff; }
 .mini-btn--ghost {
   background: #f3f3f5;
   color: #515154;
