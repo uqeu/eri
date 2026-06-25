@@ -16,7 +16,11 @@
 //! outward projection (eri-social) extends THIS gate rather than adding a second
 //! egress path. Today the only recipient is the user's own devices.
 
+use std::collections::HashSet;
+
 use serde::{Deserialize, Serialize};
+
+use eri_graph::{Graph, world};
 
 use super::profile::{self, Profile};
 
@@ -134,6 +138,168 @@ pub fn gate(projection: &mut RecallProjection, recipient: Recipient) {
     }
 }
 
+/// How much of each slice the projection carries — keeps it Tier-A-small.
+#[derive(Clone, Copy, Debug)]
+pub struct Limits {
+    pub entities: usize,
+    pub relations: usize,
+    pub observations: usize,
+    pub predictions: usize,
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Self {
+            entities: 50,
+            relations: 100,
+            observations: 30,
+            predictions: 30,
+        }
+    }
+}
+
+/// Assemble + gate the recall projection from ONE world graph. Reads only this
+/// graph, so the projection contains only this graph's world — per-user isolation
+/// is by construction (the facade opens the signed-in user's own graph). Every
+/// field passes through the egress [`gate`] before it returns.
+pub fn project_from_graph(
+    graph: &Graph,
+    recipient: Recipient,
+    now_ms: u64,
+    limits: &Limits,
+) -> RecallProjection {
+    let entities = gather_entities(graph, limits.entities);
+    let relations = gather_relations(graph, &entities, limits.relations);
+    let recent_observations = gather_recent_observations(graph, limits.observations);
+    let predictions = gather_predictions(graph, limits.predictions);
+    let mut projection = RecallProjection {
+        version: PROJECTION_VERSION,
+        user_id: None,
+        as_of: now_ms,
+        entities,
+        relations,
+        recent_observations,
+        predictions,
+        profile: Profile::default(),
+    };
+    // The boundary gates EVERYTHING before it leaves (defence in depth — even
+    // though gather already only reads the user's graph).
+    gate(&mut projection, recipient);
+    projection
+}
+
+/// The user-scoped facade (ADR-0010 §2/§6): open the SIGNED-IN user's world graph
+/// and project it FOR `recipient`. **Single-principal** — it opens only
+/// `user_id`'s graph, so a projection can never contain another user's world.
+/// Best-effort: an unopenable graph yields an empty (version-stamped) projection.
+pub fn recall_projection(
+    user_id: Option<&str>,
+    recipient: Recipient,
+    now_ms: u64,
+) -> RecallProjection {
+    let Ok(graph) = super::world_recall::open_world_graph(user_id) else {
+        return RecallProjection {
+            version: PROJECTION_VERSION,
+            user_id: user_id.map(str::to_string),
+            as_of: now_ms,
+            ..Default::default()
+        };
+    };
+    let mut projection = project_from_graph(&graph, recipient, now_ms, &Limits::default());
+    projection.user_id = user_id.map(str::to_string);
+    projection
+}
+
+/// Top entities across all kinds, salience-ranked (salience = how many
+/// observations evidence the entity), capped.
+fn gather_entities(graph: &Graph, limit: usize) -> Vec<ProjectedEntity> {
+    let mut out: Vec<ProjectedEntity> = Vec::new();
+    for kind in world::ENTITY_KINDS {
+        let Ok(entities) = world::entities_of_kind(graph, kind) else {
+            continue;
+        };
+        for e in entities {
+            let salience = world::evidence_for(graph, e.id())
+                .map(|v| v.len() as u64)
+                .unwrap_or(0);
+            out.push(ProjectedEntity {
+                id: e.id().clone(),
+                kind: kind.to_string(),
+                name: e.canonical_name().to_string(),
+                salience,
+            });
+        }
+    }
+    out.sort_by(|a, b| {
+        b.salience
+            .cmp(&a.salience)
+            .then_with(|| a.name.cmp(&b.name))
+    });
+    out.truncate(limit);
+    out
+}
+
+/// Relations strictly AMONG the projected entities (by name) — no edge to an
+/// entity that didn't make the cut.
+fn gather_relations(
+    graph: &Graph,
+    entities: &[ProjectedEntity],
+    limit: usize,
+) -> Vec<ProjectedRelation> {
+    let names: HashSet<&str> = entities.iter().map(|e| e.name.as_str()).collect();
+    let mut out: Vec<ProjectedRelation> = Vec::new();
+    for e in entities {
+        for rel in [
+            world::relation::WORKS_WITH,
+            world::relation::COLLABORATES_ON,
+            world::relation::OWNS,
+            world::relation::USES,
+            world::relation::PART_OF,
+        ] {
+            let Ok(targets) = world::related(graph, &e.id, rel) else {
+                continue;
+            };
+            for t in targets {
+                let dst = t.canonical_name();
+                if names.contains(dst) {
+                    out.push(ProjectedRelation {
+                        src: e.name.clone(),
+                        dst: dst.to_string(),
+                        kind: rel.to_string(),
+                    });
+                }
+            }
+        }
+        if out.len() >= limit {
+            break;
+        }
+    }
+    out.truncate(limit);
+    out
+}
+
+/// The recent observations (newest first), capped.
+fn gather_recent_observations(graph: &Graph, limit: usize) -> Vec<ProjectedObservation> {
+    world::recent_observations(graph, limit)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|o| ProjectedObservation {
+            text: o.text().to_string(),
+            ts: o.learned_at(),
+            kind: "observation".to_string(),
+        })
+        .collect()
+}
+
+/// The established "after X you usually Y" chains, capped.
+fn gather_predictions(graph: &Graph, limit: usize) -> Vec<ProjectedPrediction> {
+    world::established_chains(graph, limit)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(after, next, count)| ProjectedPrediction { after, next, count })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -231,6 +397,83 @@ mod tests {
                 "leaked {needle:?} into the projection"
             );
         }
+    }
+
+    #[test]
+    fn project_from_graph_gathers_the_users_world_and_gates_it() {
+        use eri_graph::{Graph, world};
+        let g = Graph::open_in_memory().unwrap();
+        let priya = world::record_entity(&g, world::entity_kind::PERSON, "Priya").unwrap();
+        let atlas = world::record_entity(&g, world::entity_kind::PROJECT, "atlas").unwrap();
+        world::relate(&g, &priya, &atlas, world::relation::COLLABORATES_ON).unwrap();
+        // A sensitive entity that must NOT cross the boundary:
+        world::record_entity(&g, world::entity_kind::PROJECT, "my bank account 999").unwrap();
+        world::record_observation(&g, "Paired with Priya on atlas").unwrap();
+        world::link_next(&g, "open editor", "run tests").unwrap();
+        world::link_next(&g, "open editor", "run tests").unwrap();
+
+        let p = project_from_graph(&g, Recipient::OwnDevices, 123, &Limits::default());
+
+        assert!(p.entities.iter().any(|e| e.name == "Priya"));
+        assert!(p.entities.iter().any(|e| e.name == "atlas"));
+        assert!(
+            p.relations
+                .iter()
+                .any(|r| r.src == "Priya" && r.dst == "atlas")
+        );
+        assert!(
+            p.recent_observations
+                .iter()
+                .any(|o| o.text.contains("Priya"))
+        );
+        assert!(
+            p.predictions
+                .iter()
+                .any(|pr| pr.after == "open editor" && pr.next == "run tests" && pr.count == 2)
+        );
+        // The sensitive entity is gated out — the gather path still gates.
+        assert!(!p.entities.iter().any(|e| e.name.contains("bank account")));
+        assert_eq!((p.as_of, p.version), (123, PROJECTION_VERSION));
+    }
+
+    #[test]
+    fn a_projection_for_one_user_contains_nothing_from_another() {
+        // Per-user isolation (ADR-0010 §6): project_from_graph reads ONLY the graph
+        // it's handed, so user A's projection holds none of user B's world — and
+        // the facade opens only `user_id`'s graph. No cross-principal leak.
+        use eri_graph::{Graph, world};
+        let a = Graph::open_in_memory().unwrap();
+        world::record_entity(&a, world::entity_kind::PERSON, "Priya").unwrap();
+        world::record_entity(&a, world::entity_kind::PROJECT, "atlas").unwrap();
+        let b = Graph::open_in_memory().unwrap();
+        world::record_entity(&b, world::entity_kind::PERSON, "Bob").unwrap();
+        world::record_entity(&b, world::entity_kind::PROJECT, "zephyr").unwrap();
+
+        let pa = serde_json::to_string(&project_from_graph(
+            &a,
+            Recipient::OwnDevices,
+            0,
+            &Limits::default(),
+        ))
+        .unwrap();
+        let pb = serde_json::to_string(&project_from_graph(
+            &b,
+            Recipient::OwnDevices,
+            0,
+            &Limits::default(),
+        ))
+        .unwrap();
+
+        assert!(pa.contains("Priya") && pa.contains("atlas"));
+        assert!(
+            !pa.contains("Bob") && !pa.contains("zephyr"),
+            "user A's projection leaked user B's world"
+        );
+        assert!(pb.contains("Bob") && pb.contains("zephyr"));
+        assert!(
+            !pb.contains("Priya") && !pb.contains("atlas"),
+            "user B's projection leaked user A's world"
+        );
     }
 
     #[test]
