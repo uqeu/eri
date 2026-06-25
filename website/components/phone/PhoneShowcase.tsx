@@ -296,17 +296,14 @@ export function PhoneShowcase(): React.ReactElement {
               WebkitBackdropFilter: "blur(12px)",
             }}
           >
-            <span
+            {/* The real eri mark (dark, cream wordmark), cropped to a circle —
+                exactly how a contact photo renders in Messages. */}
+            <img
+              src="/eri-avatar.png"
+              alt=""
               aria-hidden
-              className="grid size-[36px] place-items-center rounded-full font-display text-[13px] font-semibold"
-              style={{
-                background: "radial-gradient(circle at 38% 30%, #fff, #e0ff4f 58%, #c2dd2c)",
-                color: "#2a3300",
-                letterSpacing: "-0.05em",
-              }}
-            >
-              eri
-            </span>
+              className="size-[36px] rounded-full object-cover"
+            />
             <span
               className="mt-0.5 flex items-center gap-0.5 text-[12px] font-semibold text-[#1d1d1f]"
               style={{ fontFamily: SF }}
@@ -424,10 +421,13 @@ function SignalGlyph(): React.ReactElement {
   );
 }
 function WifiGlyph(): React.ReactElement {
+  // Solid three-band wifi, the way iOS draws it in the status bar: filled
+  // shapes (no open arcs), so it renders crisp at small sizes.
   return (
-    <svg width="16" height="11" viewBox="0 0 16 12" fill="none">
-      <path d="M8 10.2a1.4 1.4 0 100-2.8 1.4 1.4 0 000 2.8Z" fill="#1d1d1f" />
-      <path d="M3.4 5.2A6.6 6.6 0 018 3.5a6.6 6.6 0 014.6 1.7M5.5 7.4A3.5 3.5 0 018 6.3a3.5 3.5 0 012.5 1.1" stroke="#1d1d1f" strokeWidth="1.3" strokeLinecap="round" />
+    <svg width="16" height="11" viewBox="0 0 16 12" fill="#1d1d1f" aria-hidden>
+      <path d="M8 1C4.1 1 1.5 2.6 0 4.3l1.7 1.6C2.7 4.6 4.8 3.5 8 3.5s5.3 1.1 6.3 2.4L16 4.3C14.5 2.6 11.9 1 8 1Z" />
+      <path d="M8 5.1C5.7 5.1 3.9 6 2.9 7.1l1.7 1.6C5.2 7.9 6.4 7.3 8 7.3s2.8.6 3.4 1.4l1.7-1.6C12.1 6 10.3 5.1 8 5.1Z" />
+      <circle cx="8" cy="10.3" r="1.45" />
     </svg>
   );
 }
