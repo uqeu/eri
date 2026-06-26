@@ -47,6 +47,7 @@ mod control_envelope;
 mod control_eval;
 mod control_safety;
 mod control_turn;
+mod credential_vault;
 mod engine_ladder;
 mod eri_config;
 mod gaze_focus;
@@ -77,6 +78,7 @@ mod session;
 mod sia;
 mod skills;
 mod sync;
+mod totp;
 mod trace;
 mod update;
 mod voice_control;
@@ -477,6 +479,10 @@ pub enum Command {
     /// Memory — recall, remember, forget.
     #[command(subcommand)]
     Memory(MemoryCommand),
+    /// Saved-login vault: store credentials eri can fill hands-free without ever
+    /// exposing the secret to the model. Values are never printed.
+    #[command(subcommand)]
+    Vault(VaultCommand),
     /// MCP server setup and local connector status.
     #[command(subcommand)]
     Mcp(McpCommand),
@@ -582,6 +588,53 @@ pub enum MemoryCommand {
     },
     /// Drop an observation by id, or "all" to clear everything.
     Forget { target: String },
+}
+
+#[derive(Subcommand, Debug, PartialEq, Eq)]
+pub enum VaultCommand {
+    /// Save a login so eri can sign you in hands-free. Prompts for the password
+    /// WITHOUT echo; the value goes straight to the macOS Keychain and is never
+    /// printed or logged. Re-saving a site updates the stored login.
+    Add {
+        /// The site origin, e.g. "github.com".
+        origin: String,
+        /// The username / email for the login.
+        #[arg(long)]
+        username: String,
+    },
+    /// List saved logins — origins + usernames only, never the secret.
+    List,
+    /// Bulk-import logins from a password-manager CSV export (Chrome, 1Password,
+    /// Bitwarden, …). Passwords + any 2FA seeds go straight to the Keychain;
+    /// nothing is printed. Reports how many were imported and skipped.
+    Import {
+        /// Path to the exported CSV file.
+        file: String,
+    },
+    /// Attach a 2FA (TOTP) seed to a saved login so eri fills the current code at
+    /// sign-in. Prompts for the base32 seed WITHOUT echo; the seed stays in the
+    /// Keychain and the code is generated locally — neither is ever shown.
+    Totp {
+        /// The site origin the 2FA belongs to, e.g. "github.com".
+        origin: String,
+    },
+    /// Trust a site for hands-free sign-in: eri fills your saved login there
+    /// WITHOUT asking each time (the persisted per-origin "always" grant).
+    Trust {
+        /// The site origin to trust, e.g. "github.com".
+        origin: String,
+    },
+    /// Untrust a site: eri asks again before signing you in. The login is kept.
+    Untrust {
+        /// The site origin to untrust, e.g. "github.com".
+        origin: String,
+    },
+    /// Forget a saved login: delete the Keychain secret (+ any 2FA seed), the
+    /// metadata entry, and any "always sign in here" grant for that site.
+    Forget {
+        /// The site origin to forget, e.g. "github.com".
+        origin: String,
+    },
 }
 
 #[derive(Subcommand, Debug, PartialEq, Eq)]
@@ -960,6 +1013,15 @@ async fn dispatch(cli: Cli) -> anyhow::Result<()> {
             sync::spawn_best_effort();
             result
         }
+        Command::Vault(VaultCommand::Add { origin, username }) => {
+            credential_vault::cli_add(&origin, &username)
+        }
+        Command::Vault(VaultCommand::List) => credential_vault::cli_list(),
+        Command::Vault(VaultCommand::Import { file }) => credential_vault::cli_import(&file),
+        Command::Vault(VaultCommand::Totp { origin }) => credential_vault::cli_set_totp(&origin),
+        Command::Vault(VaultCommand::Trust { origin }) => credential_vault::cli_trust(&origin),
+        Command::Vault(VaultCommand::Untrust { origin }) => credential_vault::cli_untrust(&origin),
+        Command::Vault(VaultCommand::Forget { origin }) => credential_vault::cli_forget(&origin),
         Command::Mcp(McpCommand::List) => repl::print_mcp_status(),
         Command::Mcp(McpCommand::Serve) => {
             let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
@@ -1474,6 +1536,16 @@ async fn run_control(
             .map(|p| action_log::ActionLog::load(p))
             .unwrap_or_default(),
     ));
+    // Credential vault (P0): saved-login autofill that never exposes the secret.
+    // Metadata sits next to the permission file; secrets live in the Keychain;
+    // fills are audited into the SAME `log` so they show in `--history`. With no
+    // saved entry (the common case today) every `fill_credential` hands back, so
+    // nothing changes until the user saves a login.
+    let gate = {
+        let vault = credential_vault::default_metadata_path()
+            .and_then(|path| credential_vault::open_vault(&path, std::sync::Arc::clone(&log)));
+        gate.with_vault(vault)
+    };
     let live_bridge = if live {
         control_agent::HttpBridge::from_env()
     } else {

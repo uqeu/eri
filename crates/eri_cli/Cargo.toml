@@ -51,9 +51,29 @@ serde.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["full"] }
 url.workspace = true
+# TOTP (RFC 6238) for the credential vault's 2FA codes — battle-tested RustCrypto
+# primitives (HMAC-SHA1) + base32, NOT hand-rolled crypto. Already resolved in
+# the workspace lockfile, so no new versions are pulled.
+data-encoding = "2"
+hmac = "0.12"
+sha1 = "0.10"
+# RFC 4180 CSV parsing for `eri vault import` — password-manager exports have
+# quoted fields (commas/newlines in passwords + notes), so a real parser, not
+# a hand-rolled split.
+csv = "1"
+# Credential vault: wipe secret values from memory on drop. The secret value
+# only ever travels Keychain → bridge → OS field; zeroize scrubs the in-memory
+# copy rather than leaving it lingering in freed heap.
+zeroize.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
 # Tests only: build an in-memory world graph to exercise the predict step's
 # world-model read end-to-end through the gate's handle (no HOME IO).
 eri_graph = { path = "../eri_graph" }
+
+# macOS Keychain (Secure Enclave-backed) for the credential vault's secret
+# store — no hand-rolled crypto, secrets live in the OS keystore. macOS-only;
+# the `3` matches the version already resolved transitively in the lockfile.
+[target.'cfg(target_os = "macos")'.dependencies]
+security-framework = "3"

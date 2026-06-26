@@ -236,6 +236,12 @@ pub enum Permission {
     DestructiveCommands,
     /// Open applications (low-risk; here so it can be explicitly managed).
     OpenApps,
+    /// Fill a SAVED credential (vault autofill). Distinct from the refusal on a
+    /// *model-dictated* secret: this never exposes the value, it asks the OS
+    /// keystore to type a stored one. The actual grant is **per-origin**
+    /// ([`PermissionStore::allow_credential_origin`]); this category exists so the
+    /// capability can be named and reasoned about, not granted blanket.
+    UseCredentials,
 }
 
 impl Permission {
@@ -245,8 +251,37 @@ impl Permission {
             Permission::DestructiveKeys => "use delete shortcuts",
             Permission::DestructiveCommands => "run destructive commands",
             Permission::OpenApps => "open applications",
+            Permission::UseCredentials => "fill saved credentials",
         }
     }
+}
+
+/// Normalize a site origin for credential matching: lowercase, trim, drop the
+/// scheme, any path/query, a leading `www.`, and a trailing port. So
+/// `https://www.GitHub.com/login`, `GITHUB.COM`, and `github.com:443` all
+/// resolve to the same `github.com`.
+///
+/// The credential vault and the per-origin allowlist BOTH run an origin through
+/// this before comparing, so a saved grant and a live fill can never miss each
+/// other on a cosmetic difference — and a look-alike host can never collide with
+/// a real one (the anti-phishing guard compares these normalized forms).
+pub fn normalize_origin(origin: &str) -> String {
+    let mut s = origin.trim().to_lowercase();
+    if let Some(rest) = s.strip_prefix("https://") {
+        s = rest.to_string();
+    } else if let Some(rest) = s.strip_prefix("http://") {
+        s = rest.to_string();
+    }
+    // Drop any path / query / fragment — keep the authority only.
+    if let Some(slash) = s.find('/') {
+        s.truncate(slash);
+    }
+    // Drop a trailing port (host:443) — the port isn't part of the identity.
+    if let Some(colon) = s.find(':') {
+        s.truncate(colon);
+    }
+    s = s.strip_prefix("www.").unwrap_or(&s).to_string();
+    s
 }
 
 /// Normalize an app name for denylist comparison: lowercase, trim, drop a
@@ -280,6 +315,13 @@ pub struct PermissionStore {
     /// actions. A persistent policy distilled from the action log, not a one-off.
     #[serde(default)]
     cautions: BTreeSet<String>,
+    /// Credential-vault: origins (normalized) the user said "always" to, so the
+    /// per-origin sign-in approval is asked once per site then remembered. NOT a
+    /// blanket [`Permission::UseCredentials`] grant — each site is opted in on its
+    /// own. `#[serde(default)]` so permission files written before the vault
+    /// existed still load.
+    #[serde(default)]
+    allowed_credential_origins: BTreeSet<String>,
 }
 
 impl PermissionStore {
@@ -318,7 +360,43 @@ impl PermissionStore {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.granted.is_empty() && self.denied_apps.is_empty() && self.cautions.is_empty()
+        self.granted.is_empty()
+            && self.denied_apps.is_empty()
+            && self.cautions.is_empty()
+            && self.allowed_credential_origins.is_empty()
+    }
+
+    // ── credential vault: per-origin "always sign me in here" grants ──
+
+    /// Remember that the user approved credential fills for this origin ("always
+    /// for this site"). Stored normalized so a later fill matches regardless of
+    /// scheme/`www.`/casing. (Used by tests + the interactive "always" persist
+    /// path and the P2 `eri vault forget`; the P0 live loop reads the grant via
+    /// [`is_credential_origin_allowed`](Self::is_credential_origin_allowed).)
+    #[allow(dead_code)]
+    pub fn allow_credential_origin(&mut self, origin: &str) {
+        let norm = normalize_origin(origin);
+        if !norm.is_empty() {
+            self.allowed_credential_origins.insert(norm);
+        }
+    }
+
+    /// Revoke a per-origin credential grant. Returns true if it was present.
+    pub fn forget_credential_origin(&mut self, origin: &str) -> bool {
+        self.allowed_credential_origins
+            .remove(&normalize_origin(origin))
+    }
+
+    /// Has the user already approved credential fills for this origin? Compared
+    /// on the normalized form, so the grant and the live fill can't miss.
+    pub fn is_credential_origin_allowed(&self, origin: &str) -> bool {
+        self.allowed_credential_origins
+            .contains(&normalize_origin(origin))
+    }
+
+    #[allow(dead_code)]
+    pub fn allowed_credential_origins(&self) -> impl Iterator<Item = &String> {
+        self.allowed_credential_origins.iter()
     }
 
     // ── P8: learned cautions (meta-policy reflexion over the action log) ──
@@ -514,7 +592,10 @@ mod tests {
         let added = store.absorb_cautions(vec!["open Safari".into(), "open Safari".into()]);
         assert_eq!(added, 1);
         assert!(store.is_cautioned("open Safari"));
-        assert!(store.is_cautioned("  open Safari  "), "trimmed lookup matches");
+        assert!(
+            store.is_cautioned("  open Safari  "),
+            "trimmed lookup matches"
+        );
         assert!(!store.is_cautioned("open Mail"));
         assert!(!store.is_empty(), "a caution makes the store non-empty");
         // Idempotent: re-absorbing the same one adds nothing.
@@ -579,6 +660,68 @@ mod tests {
         let loaded = PermissionStore::load(&path);
         assert!(loaded.is_granted(Permission::QuitApps));
         assert_eq!(loaded.denied_apps().count(), 0); // serde(default) → empty set
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn normalize_origin_strips_scheme_www_path_port() {
+        assert_eq!(
+            normalize_origin("https://www.GitHub.com/login"),
+            "github.com"
+        );
+        assert_eq!(normalize_origin("github.com"), "github.com");
+        assert_eq!(normalize_origin("GITHUB.COM:443"), "github.com");
+        assert_eq!(normalize_origin("  http://github.com/  "), "github.com");
+        // A look-alike host is a DIFFERENT normalized origin — the anti-phishing
+        // guard relies on this not collapsing to the real one.
+        assert_ne!(normalize_origin("github.com.evil.com"), "github.com");
+    }
+
+    #[test]
+    fn credential_origin_grant_roundtrips_and_normalizes() {
+        let dir = std::env::temp_dir().join(format!("eri_cred_test_{}", std::process::id()));
+        let path = dir.join("perms.json");
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let mut store = PermissionStore::default();
+        assert!(store.is_empty());
+        // "always for this site" — stored normalized.
+        store.allow_credential_origin("https://www.GitHub.com/login");
+        assert!(
+            !store.is_empty(),
+            "a credential grant makes the store non-empty"
+        );
+        // A live fill on any surface form of the same origin matches the grant.
+        assert!(store.is_credential_origin_allowed("github.com"));
+        assert!(store.is_credential_origin_allowed("http://github.com/sessions"));
+        // An unrelated (or look-alike) origin does NOT.
+        assert!(!store.is_credential_origin_allowed("evil.com"));
+        assert!(!store.is_credential_origin_allowed("github.com.evil.com"));
+
+        store.save(&path).unwrap();
+        let mut loaded = PermissionStore::load(&path);
+        assert!(loaded.is_credential_origin_allowed("github.com"));
+        // Revocation removes it and reports presence.
+        assert!(loaded.forget_credential_origin("github.com"));
+        assert!(!loaded.is_credential_origin_allowed("github.com"));
+        assert!(!loaded.forget_credential_origin("github.com")); // already gone
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn legacy_permission_file_without_credential_origins_still_loads() {
+        // A file written before the credential-origins field existed.
+        let dir = std::env::temp_dir().join(format!("eri_credlegacy_test_{}", std::process::id()));
+        let path = dir.join("perms.json");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(&path, r#"{"granted":["quit_apps"]}"#).unwrap();
+
+        let loaded = PermissionStore::load(&path);
+        assert!(loaded.is_granted(Permission::QuitApps));
+        assert_eq!(loaded.allowed_credential_origins().count(), 0); // serde(default)
 
         let _ = std::fs::remove_dir_all(&dir);
     }

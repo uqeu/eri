@@ -16,6 +16,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::control_agent::ControlAction;
+use crate::credential_vault::CredentialField;
 
 /// How (if at all) an action eri performed can be reversed. Total over
 /// [`ControlAction`] so every action eri can take has a defined undo story.
@@ -44,7 +45,14 @@ pub fn undo_plan_for(action: &ControlAction) -> UndoPlan {
             UndoPlan::Irreversible(format!("scrolled {direction} {amount}"))
         }
         ControlAction::Drag { .. } => UndoPlan::Irreversible("a drag".to_string()),
-        ControlAction::RunAppleScript(_) => UndoPlan::Irreversible("an AppleScript command".to_string()),
+        ControlAction::RunAppleScript(_) => {
+            UndoPlan::Irreversible("an AppleScript command".to_string())
+        }
+        // A saved-credential fill can't be auto-undone (it typed into a field eri
+        // can't faithfully clear); the message carries no value, just the fact.
+        ControlAction::FillCredential { .. } => {
+            UndoPlan::Irreversible("filled a saved credential".to_string())
+        }
         // Clipboard ops don't change app state eri reverses (write is harmless
         // until pasted; read changes nothing).
         ControlAction::ReadClipboard | ControlAction::WriteClipboard(_) => UndoPlan::Noop,
@@ -65,6 +73,11 @@ pub struct ActionRecord {
     pub description: String,
     pub undo: UndoPlan,
     pub undone: bool,
+    /// True for a credential-vault fill — the history view can show a key glyph.
+    /// The record's `description` carries the origin + field, never the value.
+    /// `#[serde(default)]` so action logs written before the vault still load.
+    #[serde(default)]
+    pub credential_access: bool,
 }
 
 /// What [`ActionLog::undo_last`] resolved: the inverse to actuate, a clear
@@ -106,10 +119,35 @@ impl ActionLog {
             description: action.describe(),
             undo: undo_plan_for(action),
             undone: false,
+            credential_access: false,
         });
         if self.records.len() > MAX_ACTIONS {
             let excess = self.records.len() - MAX_ACTIONS;
             self.records.drain(0..excess); // oldest-first
+        }
+        seq
+    }
+
+    /// Audit a credential-vault fill — the trust surface read by
+    /// `eri control --history`. The description records the **origin + field**
+    /// ("filled saved password for github.com") and the access is flagged, but
+    /// the secret VALUE is never passed in and so can never be recorded. This is
+    /// the only audit path for [`ControlAction::FillCredential`]; the generic
+    /// [`record`](Self::record) is bypassed because it lacks the origin (the
+    /// action carries no value AND no origin, by design).
+    pub fn record_credential_fill(&mut self, origin: &str, field: CredentialField) -> u64 {
+        let seq = self.next_seq;
+        self.next_seq += 1;
+        self.records.push(ActionRecord {
+            seq,
+            description: format!("filled saved {} for {origin}", field.label()),
+            undo: UndoPlan::Irreversible("filled a saved credential".to_string()),
+            undone: false,
+            credential_access: true,
+        });
+        if self.records.len() > MAX_ACTIONS {
+            let excess = self.records.len() - MAX_ACTIONS;
+            self.records.drain(0..excess);
         }
         seq
     }
@@ -347,6 +385,30 @@ mod tests {
     fn load_missing_file_is_an_empty_log_not_an_error() {
         let log = ActionLog::load(Path::new("/nonexistent/eri/control-actions.json"));
         assert!(log.is_empty());
+    }
+
+    #[test]
+    fn filling_a_saved_credential_is_irreversible() {
+        let plan = undo_plan_for(&ControlAction::FillCredential {
+            field: CredentialField::Password,
+        });
+        match plan {
+            UndoPlan::Irreversible(why) => assert!(why.contains("saved credential")),
+            other => panic!("expected Irreversible, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn credential_fill_audit_records_origin_and_field_not_value() {
+        let mut log = ActionLog::default();
+        log.record_credential_fill("github.com", CredentialField::Password);
+        let trail = log.trail().join("\n");
+        // Origin + field are named for the trust surface…
+        assert!(trail.contains("github.com"));
+        assert!(trail.contains("password"));
+        // …and the access is flagged + irreversible. No value is even available
+        // to leak — `record_credential_fill` takes no secret.
+        assert!(matches!(log.undo_last(), UndoOutcome::CantUndo(_)));
     }
 
     #[test]

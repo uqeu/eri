@@ -25,6 +25,7 @@ use eri_inference::memory::MemoryStore;
 
 use crate::action_log::ActionLog;
 use crate::control_turn::{ControlTurnSink, control_turn_log};
+use crate::credential_vault::{CredentialField, CredentialVault, FillOutcome, FillPlan, Secret};
 
 /// One node of the accessibility "screen graph" — a thing actually on screen.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -118,6 +119,15 @@ pub enum ControlAction {
     /// Put text on the system clipboard so it can be pasted elsewhere. Not
     /// executed until something pastes it, so not destructive on its own.
     WriteClipboard(String),
+    /// Fill a SAVED credential into the focused field — the vault path. Carries
+    /// only WHICH field (never the value): the secret is resolved from the
+    /// keystore and typed by the bridge, never seen by the model. This is the
+    /// ONLY way eri enters a secret; a model-dictated `Type("hunter2")` still
+    /// hits the refusal boundary. Routed through [`CredentialVault`] at the gate,
+    /// not the raw bridge. Undo is `Irreversible("filled a saved credential")`.
+    FillCredential {
+        field: CredentialField,
+    },
 }
 
 impl ControlAction {
@@ -129,6 +139,10 @@ impl ControlAction {
     pub fn is_risky(&self) -> bool {
         match self {
             ControlAction::QuitApp(_) => true,
+            // Entering a saved secret is consequential: it's routed through the
+            // vault's own per-origin approval, and it must NEVER auto-run on the
+            // unattended remote channel — so it's risky on both axes.
+            ControlAction::FillCredential { .. } => true,
             ControlAction::Key(combo) => is_destructive_combo(combo),
             ControlAction::Type(text) | ControlAction::RunAppleScript(text) => {
                 looks_destructive(text)
@@ -185,6 +199,9 @@ impl ControlAction {
             | ControlAction::MouseMove(..)
             | ControlAction::RunAppleScript(_)
             | ControlAction::ReadClipboard
+            // FillCredential already returned `true` from `is_risky` above, so
+            // this arm is never reached; listed to keep the match exhaustive.
+            | ControlAction::FillCredential { .. }
             | ControlAction::WriteClipboard(_) => false,
         }
     }
@@ -222,6 +239,9 @@ impl ControlAction {
             | ControlAction::MouseMove(..)
             | ControlAction::RunAppleScript(_)
             | ControlAction::ReadClipboard
+            // A credential fill has no grantable allowlist category — its
+            // authorization is the per-origin "always" grant, kept separately.
+            | ControlAction::FillCredential { .. }
             | ControlAction::WriteClipboard(_) => None,
         }
     }
@@ -245,6 +265,8 @@ impl ControlAction {
             | ControlAction::MouseMove(..)
             | ControlAction::RunAppleScript(_)
             | ControlAction::ReadClipboard
+            // A credential fill targets a site origin, not an app name.
+            | ControlAction::FillCredential { .. }
             | ControlAction::WriteClipboard(_) => None,
         }
     }
@@ -282,6 +304,8 @@ impl ControlAction {
             }
             ControlAction::ReadClipboard => "read the clipboard".into(),
             ControlAction::WriteClipboard(_) => "copy to the clipboard".into(),
+            // Names only the field, never the value or the origin.
+            ControlAction::FillCredential { field } => format!("fill saved {}", field.label()),
         }
     }
 }
@@ -361,6 +385,22 @@ pub trait ControlBridge: Send + Sync {
     async fn capture_region(&self, _x: i64, _y: i64, _w: i64, _h: i64) -> Result<String> {
         anyhow::bail!("region capture not supported by this bridge")
     }
+    /// Type/paste a SAVED secret into the focused field — the credential vault's
+    /// actuator and the ONLY path by which a secret value is entered. The
+    /// [`Secret`] is consumed and dropped (zeroized) here; it is never returned,
+    /// logged, stringified, or sent over the model/control-server stream. Default
+    /// unsupported — only the live macOS bridge implements the real fill.
+    async fn fill_secret(&self, _field: CredentialField, _secret: Secret) -> Result<String> {
+        anyhow::bail!("credential fill not supported by this bridge")
+    }
+    /// The frontmost browser tab's origin (e.g. "github.com"), if the bridge can
+    /// see one. The vault matches this against saved entries (the anti-phishing
+    /// guard). Default `None`: a bridge with no browser context behaves as if
+    /// nothing is saved here, so a credential fill falls through to the existing
+    /// hand-back. The macOS/browser bridge overrides this to supply the live URL.
+    async fn current_origin(&self) -> Option<String> {
+        None
+    }
 }
 
 /// Outcome of submitting an action to the gate.
@@ -396,6 +436,11 @@ pub struct ControlGate {
     /// Empty (`Default`) when signed-out — the predict step then uses the engine's
     /// own confidence, no IO.
     view: crate::predict::WorldView,
+    /// The credential vault — present only when configured. `None` (the default)
+    /// means a `FillCredential` action falls through to the existing hand-back,
+    /// so nothing regresses when no vault is wired. Shared (`Arc`) so the gate
+    /// stays `Clone` for the per-run rebuild in [`run_control_agent`].
+    vault: Option<Arc<CredentialVault>>,
 }
 
 impl ControlGate {
@@ -411,6 +456,7 @@ impl ControlGate {
             permissions,
             force_confirm_risky: false,
             view: Default::default(),
+            vault: None,
         }
     }
 
@@ -431,6 +477,14 @@ impl ControlGate {
         &self.view
     }
 
+    /// Attach the credential vault. Without it (the default), a `FillCredential`
+    /// action hands back exactly like the existing credential refusal — so wiring
+    /// a vault is purely additive. Chainable.
+    pub fn with_vault(mut self, vault: Option<Arc<CredentialVault>>) -> Self {
+        self.vault = vault;
+        self
+    }
+
     /// Seed the cross-turn predecessor the predict step reads — the action that
     /// executed in the prior turn. Called once per turn by the control loop.
     /// (Read it back via [`world_view`](Self::world_view).)
@@ -448,6 +502,7 @@ impl ControlGate {
             permissions,
             force_confirm_risky: true,
             view: Default::default(),
+            vault: None,
         }
     }
 
@@ -498,6 +553,14 @@ impl ControlGate {
         action: &ControlAction,
         confidence: f32,
     ) -> Result<Disposition> {
+        // (−1) Credential vault — the additive path. A `FillCredential` is routed
+        // through the vault (origin match → per-origin approval → Keychain fill),
+        // NEVER through the generic envelope/`apply`. The secret never enters this
+        // function: the gate only sees WHICH field. With no vault configured (or
+        // no saved entry for this origin), it hands back exactly like today.
+        if let ControlAction::FillCredential { field } = action {
+            return self.fill_credential(bridge, *field).await;
+        }
         // (0) App denylist — the user said "don't touch this app." A hard
         // boundary like a refusal: not run, and "yes" can't unlock it; only
         // removing the app from the denylist does.
@@ -583,15 +646,97 @@ impl ControlGate {
 
     /// Run a previously-held action after the user said yes. Refusals can never
     /// reach here (the gate never returns `NeedsConfirmation` for them), so this
-    /// stays a thin pass-through.
+    /// stays a thin pass-through — except a `FillCredential`, whose actual fill is
+    /// performed here (the user just approved it), still origin-guarded.
     pub async fn confirm(
         &self,
         bridge: &dyn ControlBridge,
         action: &ControlAction,
     ) -> Result<String> {
+        if let ControlAction::FillCredential { field } = action {
+            return self.confirm_credential(bridge, *field).await;
+        }
         apply(bridge, action).await
     }
+
+    /// Route a `FillCredential` through the vault (the `submit_confident`
+    /// intercept). Maps a [`FillOutcome`] to a [`Disposition`]; the secret never
+    /// surfaces here — only the field does. With no vault / no live origin / no
+    /// saved entry, it hands back exactly like the existing credential refusal,
+    /// so nothing regresses.
+    async fn fill_credential(
+        &self,
+        bridge: &dyn ControlBridge,
+        field: CredentialField,
+    ) -> Result<Disposition> {
+        let handback = || {
+            Disposition::Refused(
+                crate::control_safety::RefusalKind::Credential
+                    .handback_message()
+                    .to_string(),
+            )
+        };
+        let (Some(vault), Some(origin)) = (self.vault.as_ref(), bridge.current_origin().await)
+        else {
+            return Ok(handback());
+        };
+        // Unattended remote channel (security C1): NEVER auto-fill a credential,
+        // even on an "always" origin — resolve to a confirm prompt and let the
+        // fill happen only on explicit approval. `plan` is side-effect-free.
+        if self.force_confirm_risky {
+            return Ok(match vault.plan(&origin, &self.permissions) {
+                FillPlan::Match {
+                    origin, username, ..
+                } => Disposition::NeedsConfirmation(crate::credential_vault::approval_prompt(
+                    &origin, &username, field,
+                )),
+                FillPlan::OriginMismatch => {
+                    Disposition::Refused(ORIGIN_MISMATCH_HANDBACK.to_string())
+                }
+                FillPlan::NoMatch => handback(),
+            });
+        }
+        Ok(
+            match vault
+                .fill(&origin, field, &self.permissions, bridge)
+                .await?
+            {
+                FillOutcome::Filled => Disposition::Executed(format!("signed you into {origin}")),
+                FillOutcome::NeedsApproval(prompt) => Disposition::NeedsConfirmation(prompt),
+                FillOutcome::OriginMismatch => {
+                    Disposition::Refused(ORIGIN_MISMATCH_HANDBACK.to_string())
+                }
+                FillOutcome::NoMatch => handback(),
+            },
+        )
+    }
+
+    /// Perform an approved credential fill (the user said yes at the prompt).
+    /// Skips the per-origin grant check but keeps the origin guard.
+    async fn confirm_credential(
+        &self,
+        bridge: &dyn ControlBridge,
+        field: CredentialField,
+    ) -> Result<String> {
+        let handback = crate::control_safety::RefusalKind::Credential
+            .handback_message()
+            .to_string();
+        let (Some(vault), Some(origin)) = (self.vault.as_ref(), bridge.current_origin().await)
+        else {
+            return Ok(handback);
+        };
+        Ok(match vault.fill_approved(&origin, field, bridge).await? {
+            FillOutcome::Filled => format!("signed you into {origin}"),
+            FillOutcome::OriginMismatch => ORIGIN_MISMATCH_HANDBACK.to_string(),
+            FillOutcome::NoMatch | FillOutcome::NeedsApproval(_) => handback,
+        })
+    }
 }
+
+/// The anti-phishing hand-back: a saved login exists, but not for the frontmost
+/// origin, so eri refuses to enter it on a look-alike page.
+const ORIGIN_MISMATCH_HANDBACK: &str =
+    "That saved login is for a different site — I won't enter it on this page.";
 
 /// A keyboard shortcut that deletes/destroys, so it needs confirmation.
 fn is_destructive_combo(combo: &str) -> bool {
@@ -681,6 +826,13 @@ async fn apply(bridge: &dyn ControlBridge, action: &ControlAction) -> Result<Str
         ControlAction::RunAppleScript(s) => bridge.run_applescript(s).await,
         ControlAction::ReadClipboard => bridge.read_clipboard().await,
         ControlAction::WriteClipboard(s) => bridge.write_clipboard(s).await,
+        // A credential fill is NEVER actuated through the raw bridge here — it's
+        // intercepted at the gate ([`ControlGate::submit_confident`]) and routed
+        // through the [`CredentialVault`], which resolves the secret and calls
+        // `bridge.fill_secret`. Reaching this arm means the gate was bypassed.
+        ControlAction::FillCredential { .. } => {
+            anyhow::bail!("credential fills must route through the vault, not the raw bridge")
+        }
     }
 }
 
@@ -767,6 +919,15 @@ pub fn parse_action(name: &str, input: &Value) -> Result<ControlAction> {
         "write_clipboard" => s("text")
             .map(ControlAction::WriteClipboard)
             .ok_or_else(|| anyhow!("write_clipboard needs `text`")),
+        // The vault path: the model says WHICH field to fill, never a value. The
+        // secret is resolved + typed by the vault/bridge; the model never sees it.
+        "fill_credential" => {
+            let field = s("field")
+                .as_deref()
+                .and_then(CredentialField::from_wire)
+                .ok_or_else(|| anyhow!("fill_credential needs `field` (username/password)"))?;
+            Ok(ControlAction::FillCredential { field })
+        }
         other => Err(anyhow!("unknown control tool: {other}")),
     }
 }
@@ -948,6 +1109,21 @@ fn primitive_tool_specs() -> Vec<Value> {
                 "type": "object",
                 "properties": { "text": { "type": "string", "description": "Text to place on the clipboard." } },
                 "required": ["text"]
+            }
+        }),
+        json!({
+            "name": "fill_credential",
+            "description": "Sign the user into the CURRENT site using a credential they saved with eri — WITHOUT you ever seeing the secret. Use this (never `type`) to enter a username, password, or 2FA code on a login page: you pick the field, eri fills the saved value (or, for `totp`, a freshly generated one-time code) from the keystore. If nothing is saved for this site, eri hands the login back to the user. NEVER type a password or 2FA code yourself; that is always refused.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "field": {
+                        "type": "string",
+                        "enum": ["username", "password", "totp"],
+                        "description": "Which saved field to fill: the username, the password, or a generated TOTP 2FA code."
+                    }
+                },
+                "required": ["field"]
             }
         }),
         json!({
@@ -1603,6 +1779,13 @@ pub fn action_to_wire(action: &ControlAction) -> Value {
         ControlAction::RunAppleScript(s) => json!({ "kind": "run_applescript", "script": s }),
         ControlAction::ReadClipboard => json!({ "kind": "read_clipboard" }),
         ControlAction::WriteClipboard(s) => json!({ "kind": "write_clipboard", "text": s }),
+        // Carries only WHICH field, never the value — the secret-bearing wire
+        // message is the bridge's dedicated `fill_secret`, not this generic
+        // serializer (the vault routes the fill, so this arm is effectively dead
+        // weight kept for totality).
+        ControlAction::FillCredential { field } => {
+            json!({ "kind": "fill_credential", "field": field.as_wire() })
+        }
     }
 }
 
@@ -1769,6 +1952,17 @@ impl ControlBridge for LoggingBridge<'_> {
         // A read — forwarded unrecorded.
         self.inner.capture_region(x, y, w, h).await
     }
+    async fn fill_secret(&self, field: CredentialField, secret: Secret) -> Result<String> {
+        // Forward to the real bridge — MUST override, or the trait default would
+        // refuse the fill. Deliberately NOT recorded here: the credential audit
+        // (origin + field, never the value) is written by the vault itself into
+        // this same shared log, so recording here too would double-count.
+        self.inner.fill_secret(field, secret).await
+    }
+    async fn current_origin(&self) -> Option<String> {
+        // A read — forwarded so the vault sees the real frontmost origin.
+        self.inner.current_origin().await
+    }
 }
 
 /// The real actuation bridge: POSTs each action to a loopback endpoint hosted
@@ -1897,6 +2091,33 @@ impl ControlBridge for HttpBridge {
     async fn gaze(&self) -> Option<eri_coreutils::services::gaze::GazePoint> {
         let reply = self.post(json!({ "kind": "gaze" })).await.ok()?;
         parse_wire_gaze(&reply)
+    }
+    /// Hand the saved secret to the app to type into the focused field — the
+    /// legitimate "bridge → OS field" leg of the invariant path. The secret goes
+    /// to the LOCAL actuation app (the OS-field actuator), NOT the model or the
+    /// control-server stream. The `Secret` is consumed here and dropped
+    /// (zeroized) when this scope ends; `expose_secret` is read exactly once, to
+    /// build the wire body.
+    async fn fill_secret(&self, field: CredentialField, secret: Secret) -> Result<String> {
+        let reply = self
+            .post(json!({
+                "kind": "fill_secret",
+                "field": field.as_wire(),
+                "secret": secret.expose_secret(),
+            }))
+            .await?;
+        parse_wire_result(&reply)
+    }
+    /// Ask the app for the frontmost browser tab's origin. Best-effort like
+    /// `gaze`: any transport error or a reply without an origin yields `None`
+    /// (a credential fill then falls through to the existing hand-back).
+    async fn current_origin(&self) -> Option<String> {
+        let reply = self.post(json!({ "kind": "current_origin" })).await.ok()?;
+        reply
+            .get("origin")
+            .and_then(Value::as_str)
+            .filter(|o| !o.is_empty())
+            .map(str::to_string)
     }
 }
 
@@ -4053,8 +4274,8 @@ mod tests {
     #[test]
     fn tool_specs_cover_the_action_surface() {
         let specs = tool_specs();
-        // 17 primitive computer-control tools + 6 coding-environment tools.
-        assert_eq!(specs.len(), 23);
+        // 18 primitive computer-control tools + 6 coding-environment tools.
+        assert_eq!(specs.len(), 24);
         let names: Vec<&str> = specs
             .iter()
             .map(|s| s.get("name").and_then(Value::as_str).unwrap())
@@ -4076,6 +4297,7 @@ mod tests {
             "run_applescript",
             "read_clipboard",
             "write_clipboard",
+            "fill_credential",
             "capture_region",
             // Coding-environment surface, layered on top.
             "editor_open_file",
@@ -4931,5 +5153,245 @@ mod tests {
             bridge.calls(),
             vec!["key:cmd+p", "type:Cargo.toml", "key:enter"]
         );
+    }
+
+    // ───────────────────── credential vault: gate routing ─────────────────────
+
+    mod credential_gate {
+        use super::*;
+        use crate::control_safety::PermissionStore;
+        use crate::credential_vault::{
+            CredentialEntry, CredentialVault, InMemoryStore, SecretStore,
+        };
+
+        /// A bridge that reports a configurable origin and captures what
+        /// `fill_secret` received (to prove the fill + value), and panics if any
+        /// other actuation is reached — a credential must never go through `type`.
+        struct CredBridge {
+            origin: Option<String>,
+            filled: Mutex<Option<(CredentialField, String)>>,
+        }
+        impl CredBridge {
+            fn at(origin: &str) -> Self {
+                Self {
+                    origin: Some(origin.to_string()),
+                    filled: Mutex::new(None),
+                }
+            }
+            fn filled(&self) -> Option<(CredentialField, String)> {
+                self.filled.lock().unwrap().clone()
+            }
+        }
+        #[async_trait::async_trait]
+        impl ControlBridge for CredBridge {
+            async fn snapshot(&self) -> Result<ScreenGraph> {
+                unimplemented!()
+            }
+            async fn capture(&self) -> Result<String> {
+                unimplemented!()
+            }
+            async fn click(&self, _t: &ClickTarget) -> Result<String> {
+                unimplemented!()
+            }
+            async fn type_text(&self, _t: &str) -> Result<String> {
+                unimplemented!("a credential must never be typed")
+            }
+            async fn key(&self, _c: &str) -> Result<String> {
+                unimplemented!()
+            }
+            async fn open_app(&self, _n: &str) -> Result<String> {
+                unimplemented!()
+            }
+            async fn quit_app(&self, _n: &str) -> Result<String> {
+                unimplemented!()
+            }
+            async fn current_origin(&self) -> Option<String> {
+                self.origin.clone()
+            }
+            async fn fill_secret(&self, field: CredentialField, secret: Secret) -> Result<String> {
+                *self.filled.lock().unwrap() = Some((field, secret.expose_secret().to_string()));
+                Ok("filled".into())
+            }
+        }
+
+        fn github_vault(audit: Arc<Mutex<ActionLog>>) -> Arc<CredentialVault> {
+            let store = InMemoryStore::new();
+            store
+                .put("eri/vault/github.com", Secret::new("hunter2"))
+                .unwrap();
+            let mut vault = CredentialVault::new(Box::new(store), audit);
+            vault.add_entry(CredentialEntry::new(
+                "gh",
+                "github.com",
+                "you@email.com",
+                "eri/vault/github.com",
+            ));
+            Arc::new(vault)
+        }
+
+        fn fill() -> ControlAction {
+            ControlAction::FillCredential {
+                field: CredentialField::Password,
+            }
+        }
+
+        #[tokio::test]
+        async fn no_vault_falls_through_to_handback() {
+            // No vault configured → exactly the existing credential hand-back.
+            let gate = ControlGate::with_permissions(false, Default::default());
+            let bridge = CredBridge::at("github.com");
+            match gate.submit(&bridge, &fill()).await.unwrap() {
+                Disposition::Refused(msg) => assert!(msg.contains("yours to enter")),
+                other => panic!("expected Refused handback, got {other:?}"),
+            }
+        }
+
+        #[tokio::test]
+        async fn origin_mismatch_is_refused_without_filling() {
+            let audit = Arc::new(Mutex::new(ActionLog::default()));
+            let mut perms = PermissionStore::default();
+            perms.allow_credential_origin("github.com"); // even granted, origin guards
+            let gate =
+                ControlGate::with_permissions(false, perms).with_vault(Some(github_vault(audit)));
+            let bridge = CredBridge::at("evil.com");
+            assert!(matches!(
+                gate.submit(&bridge, &fill()).await.unwrap(),
+                Disposition::Refused(_)
+            ));
+            assert!(
+                bridge.filled().is_none(),
+                "nothing was filled on a mismatch"
+            );
+        }
+
+        #[tokio::test]
+        async fn first_use_needs_confirmation() {
+            let audit = Arc::new(Mutex::new(ActionLog::default()));
+            let gate = ControlGate::with_permissions(false, Default::default())
+                .with_vault(Some(github_vault(audit)));
+            let bridge = CredBridge::at("github.com");
+            match gate.submit(&bridge, &fill()).await.unwrap() {
+                Disposition::NeedsConfirmation(p) => {
+                    assert!(p.contains("github.com"));
+                    assert!(p.contains("password"));
+                }
+                other => panic!("expected NeedsConfirmation, got {other:?}"),
+            }
+            assert!(bridge.filled().is_none());
+        }
+
+        #[tokio::test]
+        async fn signs_in_and_audits_without_value_when_granted() {
+            let audit = Arc::new(Mutex::new(ActionLog::default()));
+            let mut perms = PermissionStore::default();
+            perms.allow_credential_origin("github.com");
+            let gate = ControlGate::with_permissions(false, perms)
+                .with_vault(Some(github_vault(Arc::clone(&audit))));
+            let bridge = CredBridge::at("github.com");
+            match gate.submit(&bridge, &fill()).await.unwrap() {
+                Disposition::Executed(msg) => assert!(msg.contains("github.com")),
+                other => panic!("expected Executed, got {other:?}"),
+            }
+            // The secret reached the bridge…
+            assert_eq!(bridge.filled().map(|(_, v)| v).as_deref(), Some("hunter2"));
+            // …and the audit names origin + field but NOT the value.
+            let trail = audit.lock().unwrap().trail().join("\n");
+            assert!(trail.contains("github.com") && trail.contains("password"));
+            assert!(
+                !trail.contains("hunter2"),
+                "secret leaked into the trail: {trail}"
+            );
+        }
+
+        #[tokio::test]
+        async fn confirming_a_first_use_signs_in() {
+            let audit = Arc::new(Mutex::new(ActionLog::default()));
+            let gate = ControlGate::with_permissions(false, Default::default())
+                .with_vault(Some(github_vault(audit)));
+            let bridge = CredBridge::at("github.com");
+            // First use asks…
+            assert!(matches!(
+                gate.submit(&bridge, &fill()).await.unwrap(),
+                Disposition::NeedsConfirmation(_)
+            ));
+            // …and approving performs the one-shot fill (origin-guarded).
+            let msg = gate.confirm(&bridge, &fill()).await.unwrap();
+            assert!(msg.contains("github.com"));
+            assert_eq!(bridge.filled().map(|(_, v)| v).as_deref(), Some("hunter2"));
+        }
+
+        #[tokio::test]
+        async fn remote_channel_confirms_even_when_granted() {
+            let audit = Arc::new(Mutex::new(ActionLog::default()));
+            let mut perms = PermissionStore::default();
+            perms.allow_credential_origin("github.com");
+            // Unattended remote: never auto-fill a credential, even on an "always"
+            // origin — it must bounce to confirm (security C1).
+            let gate = ControlGate::for_remote(perms).with_vault(Some(github_vault(audit)));
+            let bridge = CredBridge::at("github.com");
+            assert!(matches!(
+                gate.submit(&bridge, &fill()).await.unwrap(),
+                Disposition::NeedsConfirmation(_)
+            ));
+            assert!(bridge.filled().is_none(), "must not auto-fill remotely");
+        }
+
+        #[tokio::test]
+        async fn model_dictated_secret_still_refused_even_with_vault() {
+            // The additive vault path does NOT open a `type` bypass: a
+            // model-dictated password Type still hits the refusal boundary.
+            let audit = Arc::new(Mutex::new(ActionLog::default()));
+            let gate = ControlGate::with_permissions(false, Default::default())
+                .with_vault(Some(github_vault(audit)));
+            let bridge = CredBridge::at("github.com");
+            let d = gate
+                .submit(
+                    &bridge,
+                    &ControlAction::Type("my password is hunter2".into()),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                d,
+                Disposition::Refused(
+                    crate::control_safety::RefusalKind::Credential
+                        .handback_message()
+                        .to_string()
+                )
+            );
+        }
+
+        #[tokio::test]
+        async fn live_logging_bridge_forwards_the_fill_and_audits_once() {
+            // The live path fills through a LoggingBridge wrapping the real
+            // bridge. This guards two things: the LoggingBridge must FORWARD
+            // `fill_secret` to its inner (the trait default would refuse), and the
+            // credential audit must land EXACTLY once in the shared log (the vault
+            // records it; the LoggingBridge must not double-record).
+            let audit = Arc::new(Mutex::new(ActionLog::default()));
+            let mut perms = PermissionStore::default();
+            perms.allow_credential_origin("github.com");
+            let vault = github_vault(Arc::clone(&audit));
+            let inner = CredBridge::at("github.com");
+            let logging = LoggingBridge::new(&inner, Arc::clone(&audit));
+
+            let outcome = vault
+                .fill("github.com", CredentialField::Password, &perms, &logging)
+                .await
+                .unwrap();
+            assert_eq!(outcome, FillOutcome::Filled);
+            // The secret reached the real inner bridge (the wrapper forwarded it).
+            assert_eq!(inner.filled().map(|(_, v)| v).as_deref(), Some("hunter2"));
+            // Audited once — origin + field, never the value.
+            let trail = audit.lock().unwrap().trail();
+            let cred_lines = trail.iter().filter(|l| l.contains("github.com")).count();
+            assert_eq!(
+                cred_lines, 1,
+                "audited exactly once, not doubled: {trail:?}"
+            );
+            let joined = trail.join("\n");
+            assert!(joined.contains("password"));
+            assert!(!joined.contains("hunter2"));
+        }
     }
 }
