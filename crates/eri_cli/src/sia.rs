@@ -364,6 +364,122 @@ pub fn calibrate_floors(
     reverted
 }
 
+// ── Slice 2a · the reversible suppression overlay ─────────────────────────────
+//
+// A stale proactive suggestion (the [`stale_suggestion`] producer) is SOFT-
+// suppressed here: eri suggests it LESS, **never deletes it**. The overlay is kept
+// SEPARATE from the world graph's observed `NEXT` counts — those stay ground truth
+// (what the user actually did), so a resumed behaviour always resurfaces and a wrong
+// suppression is reversible. Mirrors [`ConfidencePolicy`]: an empty overlay is
+// byte-for-byte today's behaviour, every record is provenance-stamped (sia, via the
+// applying [`Provenance`]) and bi-temporally supersede-able — calibration (a later
+// slice) reverts a suppression the user's behaviour contradicts.
+
+// The overlay is read by the surfacing layer (Slice 3) and written by
+// `LiveRefinablePolicy::downweight_chain` + revisited by calibration (Slice 4); the
+// scoped allows below mark exactly that not-yet-wired gap (removed when wired), not
+// dead code — same treatment as the `stale_suggestion` producer above.
+
+/// One sia-applied soft suppression of a chain edge `from → to`.
+#[allow(dead_code)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct Suppression {
+    /// The edge, stored so [`SuppressionPolicy::active_edges`] reconstructs it
+    /// without parsing the map key.
+    from: String,
+    to: String,
+    /// The pass-over count WHEN the edge was suppressed — the baseline calibration
+    /// compares against ("did the user resume the suggestion after eri backed off?").
+    support: usize,
+    /// Superseded by calibration (it didn't earn its keep): kept for audit
+    /// (bi-temporal — invalidate-not-delete), but no longer applied, so
+    /// [`is_suppressed`](SuppressionPolicy::is_suppressed) reads `false` again.
+    superseded: bool,
+}
+
+/// Per-edge soft-suppression overlay — sia's reversible opinion about which
+/// proactive suggestions have gone stale, kept SEPARATE from the world graph's
+/// observed counts (ground truth). An edge with no *active* suppression surfaces
+/// normally, so an **empty overlay is exactly today's behavior**. Persisted per-user
+/// beside the world graph + confidence policy.
+#[allow(dead_code)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct SuppressionPolicy {
+    /// Keyed by the edge (unit-separator joined, so labels with arbitrary
+    /// punctuation can't collide); the value also carries `from`/`to`.
+    edges: BTreeMap<String, Suppression>,
+}
+
+/// Join an edge's endpoints into a collision-proof map key (the unit separator
+/// can't appear in an action label).
+#[allow(dead_code)]
+fn edge_key(from: &str, to: &str) -> String {
+    format!("{from}\u{1f}{to}")
+}
+
+#[allow(dead_code)]
+impl SuppressionPolicy {
+    /// Is the proactive suggestion `from → to` *actively* suppressed (so the
+    /// surfacing layer should suggest it less)? A superseded record reads `false`.
+    pub fn is_suppressed(&self, from: &str, to: &str) -> bool {
+        self.edges
+            .get(&edge_key(from, to))
+            .is_some_and(|s| !s.superseded)
+    }
+
+    /// Soft-suppress `from → to`, recording `support` (the pass-over count that
+    /// earned it) as the calibration baseline. Idempotent; re-suppressing a
+    /// superseded edge starts a fresh ACTIVE suppression.
+    pub fn suppress(&mut self, from: &str, to: &str, support: usize) {
+        self.edges.insert(
+            edge_key(from, to),
+            Suppression {
+                from: from.to_string(),
+                to: to.to_string(),
+                support,
+                superseded: false,
+            },
+        );
+    }
+
+    /// Mark `from → to` superseded — calibration found the suppression didn't earn
+    /// its keep (the user resumed it). Bi-temporal: the record stays (auditable),
+    /// but it stops applying, so the suggestion resurfaces.
+    pub fn supersede(&mut self, from: &str, to: &str) {
+        if let Some(s) = self.edges.get_mut(&edge_key(from, to)) {
+            s.superseded = true;
+        }
+    }
+
+    /// The edges with an ACTIVE suppression — the set calibration revisits.
+    pub fn active_edges(&self) -> Vec<(String, String)> {
+        self.edges
+            .values()
+            .filter(|s| !s.superseded)
+            .map(|s| (s.from.clone(), s.to.clone()))
+            .collect()
+    }
+
+    /// Persist to `path` (pretty JSON). The caller resolves a user-scoped path.
+    pub fn save(&self, path: &Path) -> std::io::Result<()> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let json = serde_json::to_string_pretty(self)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        std::fs::write(path, json)
+    }
+
+    /// Load, or an empty (= today's behavior) overlay if the file is absent or
+    /// unreadable — so a fresh user is exactly today's suggestions.
+    pub fn load(path: &Path) -> Self {
+        std::fs::read_to_string(path)
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default()
+    }
+}
+
 /// The narrow surface sia may write — the three refine-able / *narrowing*
 /// operations. It **cannot name the refusal list or widen a grant** (the hard
 /// line, structural — there is no such method). The concrete adapter (over the
@@ -617,6 +733,70 @@ mod tests {
         assert_eq!(
             ConfidencePolicy::load(Path::new("/nonexistent/eri/confidence.json")).floor_for("x"),
             DEFAULT_CONFIDENCE_FLOOR
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_empty_suppression_overlay_is_todays_behavior() {
+        // Nothing suppressed → every suggestion surfaces exactly as today.
+        let pol = SuppressionPolicy::default();
+        assert!(!pol.is_suppressed("open editor", "run tests"));
+        assert!(pol.active_edges().is_empty());
+    }
+
+    #[test]
+    fn suppressing_an_edge_demotes_only_that_suggestion() {
+        let mut pol = SuppressionPolicy::default();
+        pol.suppress("open editor", "run tests", 3);
+        assert!(pol.is_suppressed("open editor", "run tests"));
+        // A different edge — even sharing an endpoint — is untouched.
+        assert!(!pol.is_suppressed("open editor", "check email"));
+        assert!(!pol.is_suppressed("run tests", "open editor"));
+        assert_eq!(
+            pol.active_edges(),
+            vec![("open editor".to_string(), "run tests".to_string())]
+        );
+    }
+
+    #[test]
+    fn supersede_reverts_a_suppression_so_the_suggestion_resurfaces() {
+        // THE reversibility guard: a wrong suppression is invisible (you won't see
+        // the suggestion to re-engage it), so calibration MUST be able to revert it.
+        let mut pol = SuppressionPolicy::default();
+        pol.suppress("open editor", "run tests", 2);
+        pol.supersede("open editor", "run tests");
+        assert!(
+            !pol.is_suppressed("open editor", "run tests"),
+            "a superseded suppression no longer applies — the suggestion is back"
+        );
+        // Bi-temporal: the record is kept (auditable), it just stops applying.
+        assert!(pol.active_edges().is_empty());
+        // And re-suppressing a superseded edge starts a fresh ACTIVE suppression.
+        pol.suppress("open editor", "run tests", 4);
+        assert!(pol.is_suppressed("open editor", "run tests"));
+    }
+
+    #[test]
+    fn suppression_overlay_round_trips_and_a_missing_file_is_the_default() {
+        let dir = std::env::temp_dir().join(format!("eri-sia-supp-{}", std::process::id()));
+        let path = dir.join("suppression.json");
+        let mut pol = SuppressionPolicy::default();
+        pol.suppress("open editor", "run tests", 3);
+        pol.suppress("open Slack", "open Calendar", 2);
+        pol.supersede("open Slack", "open Calendar"); // superseded survives the round-trip
+        pol.save(&path).expect("save");
+
+        let loaded = SuppressionPolicy::load(&path);
+        assert!(loaded.is_suppressed("open editor", "run tests"));
+        assert!(
+            !loaded.is_suppressed("open Slack", "open Calendar"),
+            "a superseded suppression round-trips as inactive"
+        );
+        // A fresh user (no file) is exactly today's behavior, not an error.
+        assert!(
+            !SuppressionPolicy::load(Path::new("/nonexistent/eri/suppression.json"))
+                .is_suppressed("x", "y")
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
