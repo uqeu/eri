@@ -31,6 +31,7 @@ pub struct SyncReport {
     pub observations: usize,
     pub profile_facts: usize,
     pub projection_entities: usize,
+    pub recall_pushed: bool,
 }
 
 fn now_ms() -> u64 {
@@ -58,13 +59,17 @@ fn sync_blocking(base: String, bearer: String, user_id: String) -> Result<SyncRe
         .sync(&mut store)
         .context("Tier-B memory sync")?;
 
-    // Tier-A: distill + push the server-readable profile so phone eri knows you.
+    // Tier-A: two INDEPENDENT server-readable pushes — neither short-circuits the
+    // other. The profile push is best-effort (a failure is surfaced as a warning,
+    // never fatal): Tier-B already converged so memory is safe, and the newer
+    // world-model push must not be held hostage to a profile-push failure.
     let prof = profile::distill(&store.all(), now_ms());
-    push_profile(
+    if let Err(e) = push_profile(
         &HttpProfileTransport::new(base.clone(), bearer.clone()),
         &prof,
-    )
-    .context("Tier-A profile push")?;
+    ) {
+        eprintln!("eri: Tier-A profile push failed (continuing): {e}");
+    }
 
     // Tier-A: push the world-model PROJECTION to the SIBLING recall endpoint
     // (ADR-0010) so phone eri draws on the brain's world model — distinct path,
@@ -73,17 +78,30 @@ fn sync_blocking(base: String, bearer: String, user_id: String) -> Result<SyncRe
     // projection carries an `as_of` stamp; the phone answers from the last push.
     let mut projection = recall_projection(Some(&user_id), Recipient::OwnDevices, now_ms());
     let projection_entities = projection.entities.len();
-    push_recall(
+    eprintln!(
+        "eri: recall projection ready — {} entities · {} relations · {} observations · {} predictions",
+        projection.entities.len(),
+        projection.relations.len(),
+        projection.recent_observations.len(),
+        projection.predictions.len(),
+    );
+    let recall_pushed = match push_recall(
         &HttpRecallTransport::new(base, bearer),
         &mut projection,
         Recipient::OwnDevices,
-    )
-    .context("Tier-A recall push")?;
+    ) {
+        Ok(()) => true,
+        Err(e) => {
+            eprintln!("eri: Tier-A recall push failed (continuing): {e}");
+            false
+        }
+    };
 
     Ok(SyncReport {
         observations: store.all().len(),
         profile_facts: prof.facts.len(),
         projection_entities,
+        recall_pushed,
     })
 }
 
@@ -107,9 +125,14 @@ pub async fn run() -> Result<()> {
     let report = tokio::task::spawn_blocking(move || sync_blocking(base, bearer, user_id))
         .await
         .context("sync task panicked")??;
+    let recall = if report.recall_pushed {
+        format!("{} world-model entities pushed", report.projection_entities)
+    } else {
+        "world-model push FAILED (see warning above)".to_string()
+    };
     println!(
-        "synced ✓  {} memories · {} profile facts · {} world-model entities pushed to phone eri",
-        report.observations, report.profile_facts, report.projection_entities
+        "synced ✓  {} memories · {} profile facts · {}",
+        report.observations, report.profile_facts, recall
     );
     Ok(())
 }
