@@ -8,9 +8,10 @@
 //! tagging — while a base-engine [`Extractor`] is the pluggable upgrade for hard
 //! disambiguation (mocked in tests). The base engine never sits on this hot path.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use eri_graph::{Graph, GraphError, NodeId, world};
+use serde_json::Value;
 
 use super::Observation;
 use super::graph_bridge;
@@ -227,6 +228,70 @@ pub fn ingest_observation(
     Ok(obs_node)
 }
 
+/// What a bulk [`ingest_all`] did — for the CLI summary + tests.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct IngestReport {
+    /// New observation nodes written this run.
+    pub ingested: usize,
+    /// Observations already in the graph (matched by `source_id`) — skipped, so a
+    /// re-run never duplicates.
+    pub skipped: usize,
+    /// Distinct entities in the world model after the ingest.
+    pub entities: usize,
+}
+
+/// The most observation nodes one ingest scans for the already-ingested set.
+/// Generous for a per-person model; swap for an index if it ever bottlenecks.
+const INGEST_SCAN_LIMIT: usize = 100_000;
+
+/// Bulk-ingest `observations` into the world model via [`ingest_observation`],
+/// extracting entities/relations with `extractor`. **Idempotent** — an observation
+/// whose `source_id` is already a node is skipped, so re-running never duplicates —
+/// and **additive**: the JSON [`MemoryStore`](super::MemoryStore) is never touched,
+/// and every entity keeps an `EVIDENCES` link back to its source observation node
+/// (which carries `source_id`), the provenance an editable "where did this come from
+/// / forget this" memory UI reads. Best-effort per item is the caller's choice; here
+/// a single failure aborts the batch (a graph error is not per-observation).
+pub fn ingest_all(
+    graph: &Graph,
+    extractor: &impl Extractor,
+    observations: &[Observation],
+) -> Result<IngestReport, GraphError> {
+    let already = ingested_source_ids(graph)?;
+    let mut report = IngestReport::default();
+    for obs in observations {
+        if already.contains(obs.id.as_str()) {
+            report.skipped += 1;
+            continue;
+        }
+        ingest_observation(graph, extractor, obs)?;
+        report.ingested += 1;
+    }
+    report.entities = entity_count(graph)?;
+    Ok(report)
+}
+
+/// The `source_id`s of observation nodes already in the graph — the idempotency key
+/// so a re-ingest skips what's already modelled.
+fn ingested_source_ids(graph: &Graph) -> Result<HashSet<String>, GraphError> {
+    let mut ids = HashSet::new();
+    for node in graph.query_by_kind(world::node_kind::OBSERVATION, INGEST_SCAN_LIMIT)? {
+        if let Some(sid) = node.body.get("source_id").and_then(Value::as_str) {
+            ids.insert(sid.to_string());
+        }
+    }
+    Ok(ids)
+}
+
+/// Total entities across every kind — the ingest report's headline number.
+fn entity_count(graph: &Graph) -> Result<usize, GraphError> {
+    let mut n = 0;
+    for kind in world::ENTITY_KINDS {
+        n += world::entities_of_kind(graph, kind)?.len();
+    }
+    Ok(n)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -237,6 +302,74 @@ mod tests {
             body: body.into(),
             ..Default::default()
         }
+    }
+
+    fn fact_id(id: &str, body: &str) -> Observation {
+        Observation {
+            id: id.into(),
+            kind: "fact".into(),
+            body: body.into(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn ingest_all_extracts_entities_across_a_batch() {
+        let g = Graph::open_in_memory().unwrap();
+        let report = ingest_all(
+            &g,
+            &CueExtractor,
+            &[
+                fact_id("o1", "I work with Alice on the eri project"),
+                fact_id("o2", "deploys on vercel"),
+            ],
+        )
+        .unwrap();
+        assert_eq!(report.ingested, 2);
+        assert_eq!(report.skipped, 0);
+        assert!(report.entities >= 2, "Alice + eri at least, got {report:?}");
+    }
+
+    #[test]
+    fn ingest_all_is_idempotent_by_source_id() {
+        let g = Graph::open_in_memory().unwrap();
+        let obs = [
+            fact_id("o1", "I work with Alice on the eri project"),
+            fact_id("o2", "deploys on vercel"),
+        ];
+        let first = ingest_all(&g, &CueExtractor, &obs).unwrap();
+        assert_eq!((first.ingested, first.skipped), (2, 0));
+
+        // Re-running ingests nothing new — every observation's source_id is already
+        // a node, so it's skipped, and the entity count is unchanged.
+        let second = ingest_all(&g, &CueExtractor, &obs).unwrap();
+        assert_eq!((second.ingested, second.skipped), (0, 2));
+        assert_eq!(
+            second.entities, first.entities,
+            "no new entities on a re-run"
+        );
+    }
+
+    #[test]
+    fn an_ingested_entity_traces_back_to_its_source_observation() {
+        // The provenance the editable "where did this come from / forget this" memory
+        // UI depends on: an entity's evidence carries the source memory-store id.
+        let g = Graph::open_in_memory().unwrap();
+        ingest_all(
+            &g,
+            &CueExtractor,
+            &[fact_id("obs-42", "I work with Alice on the eri project")],
+        )
+        .unwrap();
+
+        let alice = world::find_entity(&g, world::entity_kind::PERSON, "Alice")
+            .unwrap()
+            .expect("Alice is an entity");
+        let evidence = world::evidence_for(&g, alice.id()).unwrap();
+        assert!(
+            evidence.iter().any(|o| o.source_id() == Some("obs-42")),
+            "Alice's evidence must point back to source observation obs-42"
+        );
     }
 
     #[test]

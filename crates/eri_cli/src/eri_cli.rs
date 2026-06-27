@@ -586,6 +586,10 @@ pub enum MemoryCommand {
         #[arg(long, default_value_t = 50)]
         limit: usize,
     },
+    /// Backfill the world model from your episodic memory: extract the
+    /// people/projects/relations in everything you've remembered into the world
+    /// graph (additive — your memories are untouched; idempotent — safe to re-run).
+    Ingest,
     /// Drop an observation by id, or "all" to clear everything.
     Forget { target: String },
 }
@@ -1008,6 +1012,7 @@ async fn dispatch(cli: Cli) -> anyhow::Result<()> {
         }
         Command::Memory(MemoryCommand::Who { project }) => memory::who(&project),
         Command::Memory(MemoryCommand::Reflect { limit }) => memory::reflect(limit).await,
+        Command::Memory(MemoryCommand::Ingest) => memory::ingest(),
         Command::Memory(MemoryCommand::Forget { target }) => {
             let result = memory::forget(&target);
             sync::spawn_best_effort();

@@ -119,6 +119,15 @@ impl Observation {
     pub fn id(&self) -> &NodeId {
         &self.node.id
     }
+
+    /// The id of the source memory-store observation this node was bridged from
+    /// (`graph_bridge::write_observation` stamps `source_id`), if any — the "where
+    /// did this come from / forget this" provenance link the memory UI reads off an
+    /// entity's evidence. `None` for nodes written without a source (e.g. a bare
+    /// [`record_observation`]).
+    pub fn source_id(&self) -> Option<&str> {
+        self.node.body.get("source_id").and_then(|v| v.as_str())
+    }
 }
 
 /// Record a raw observation, returning its node id.

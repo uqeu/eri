@@ -18,7 +18,7 @@ use eri_graph::{Graph, GraphError, world};
 use world::Entity;
 
 use super::Observation;
-use super::extraction::{CueExtractor, ingest_observation};
+use super::extraction::{CueExtractor, IngestReport, ingest_all, ingest_observation};
 
 // --- integration facade -------------------------------------------------------
 // Encapsulates `eri_graph` behind a user-scoped, best-effort API so call sites
@@ -51,6 +51,19 @@ pub fn model_observation(user_id: Option<&str>, obs: &Observation) -> io::Result
     ingest_observation(&graph, &CueExtractor, obs)
         .map_err(|e| io::Error::other(format!("world ingest: {e}")))?;
     Ok(())
+}
+
+/// Backfill the user's whole episodic store into their world model (additive,
+/// idempotent). Opens the user's [`MemoryStore`](super::MemoryStore) + world graph
+/// and runs the cue extractor over every observation — the bridge that makes the
+/// already-stored `eri remember` facts queryable as people/projects/relations, and
+/// the prerequisite that gives the cold-path reflection pass something to read.
+/// Re-running only ingests what's new (skips by `source_id`).
+pub fn ingest_store(user_id: Option<&str>) -> io::Result<IngestReport> {
+    let store = super::MemoryStore::open_for(user_id)?;
+    let graph = open_world_graph(user_id)?;
+    ingest_all(&graph, &CueExtractor, &store.all())
+        .map_err(|e| io::Error::other(format!("ingest store: {e}")))
 }
 
 /// The Tier-A "Key People / Active Projects" block for the user's world model,
