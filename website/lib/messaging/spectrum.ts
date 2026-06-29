@@ -17,6 +17,7 @@ import { Spectrum, typing, voice, type Message, type Space } from "spectrum-ts";
 import { imessage } from "@spectrum-ts/imessage";
 import type { InboundMessage } from "@/lib/imessage/webhook";
 import { logEvent, type InboundTransport } from "@/lib/messaging/inbound_runtime";
+import { withSendRetry } from "@/lib/messaging/send_retry";
 import { synthesizeSpeech, textForSpeech } from "@/lib/messaging/voice";
 
 /**
@@ -148,7 +149,7 @@ export function makeSpectrumTransport(space: Space): InboundTransport {
       for (const chunk of chunks) {
         if (!chunk.trim()) continue;
         try {
-          await space.send(chunk);
+          await withSendRetry(() => space.send(chunk));
         } catch (e) {
           // The REAL Photon outbound error — previously swallowed. This line names
           // the cause: bad creds (401/invalid_client), plan/quota (402/403), or a
