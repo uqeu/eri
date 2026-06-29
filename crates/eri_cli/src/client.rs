@@ -79,6 +79,29 @@ impl Client {
         response.json::<T>().await.context("parse JSON")
     }
 
+    /// POST a JSON body and return the raw `(status, body-text)` WITHOUT bailing on
+    /// a non-2xx — for callers that must branch on the status (e.g. a 402 quota gate
+    /// they handle gracefully) rather than have every non-2xx become an error.
+    pub async fn post_for_status<B: Serialize>(
+        &self,
+        path: &str,
+        body: &B,
+    ) -> Result<(reqwest::StatusCode, String)> {
+        let url = format!("{}{}", self.base_url, path);
+        let mut req = self
+            .inner
+            .post(&url)
+            .header("accept", "application/json")
+            .json(body);
+        if let Some(token) = &self.bearer {
+            req = req.bearer_auth(token);
+        }
+        let response = req.send().await.context("transport error")?;
+        let status = response.status();
+        let text = response.text().await.unwrap_or_default();
+        Ok((status, text))
+    }
+
     /// Open a streaming POST. Caller drives the stream — each yielded
     /// `String` is one complete decoded event (NDJSON-style; the
     /// caller does the JSON parse so different endpoints can ship

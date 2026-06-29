@@ -245,16 +245,29 @@ fn tokenize(s: &str) -> Vec<String> {
 /// invent nothing not in the text — the defensive parser is the backstop, not the
 /// first line of defense.
 pub fn reflection_prompt(observations: &[&str]) -> String {
-    let mut s = String::from(
-        "You are eri's reflection pass. Read these observations about one person and extract the \
-         entities and the relations between them that the text evidences.\n\
-         Respond with ONLY a JSON object of EXACTLY this shape (no prose, no markdown fences):\n\
-         {\"entities\":[{\"kind\":\"person|project|app|topic|place|life_event\",\"name\":\"name as written\"}],\
-         \"relations\":[{\"src\":\"entity name\",\"dst\":\"entity name\",\"relation\":\"works_with|collaborates_on|owns|uses|part_of\"}]}\n\
-         Rules: use ONLY names that literally appear in the observations; invent nothing; relate \
-         only entities you listed; if nothing is evidenced, return empty arrays.\n\n\
-         Observations:\n",
-    );
+    format!(
+        "{}\n\n{}",
+        reflection_system_prompt(),
+        reflection_observations(observations)
+    )
+}
+
+/// The reflection instruction — the `system` prompt of the base-engine call. Split
+/// out from the observations so the live client sends it as the Anthropic `system`
+/// field, separate from the user message.
+pub fn reflection_system_prompt() -> &'static str {
+    "You are eri's reflection pass. Read these observations about one person and extract the \
+     entities and the relations between them that the text evidences.\n\
+     Respond with ONLY a JSON object of EXACTLY this shape (no prose, no markdown fences):\n\
+     {\"entities\":[{\"kind\":\"person|project|app|topic|place|life_event\",\"name\":\"name as written\"}],\
+     \"relations\":[{\"src\":\"entity name\",\"dst\":\"entity name\",\"relation\":\"works_with|collaborates_on|owns|uses|part_of\"}]}\n\
+     Rules: use ONLY names that literally appear in the observations; invent nothing; relate \
+     only entities you listed; if nothing is evidenced, return empty arrays."
+}
+
+/// The observations as the base engine's user message — the numbered batch.
+pub fn reflection_observations(observations: &[&str]) -> String {
+    let mut s = String::from("Observations:\n");
     for (i, obs) in observations.iter().enumerate() {
         s.push_str(&format!("{}. {}\n", i + 1, obs.trim()));
     }
