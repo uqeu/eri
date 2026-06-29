@@ -12,7 +12,7 @@
 
 import { waitUntil } from "@vercel/functions";
 import { logEvent, processInbound } from "@/lib/messaging/inbound_runtime";
-import { getSpectrumApp, makeSpectrumTransport, spectrumMessageToInbound } from "@/lib/messaging/spectrum";
+import { describeSpectrumError, getSpectrumApp, makeSpectrumTransport, spectrumMessageToInbound } from "@/lib/messaging/spectrum";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,7 +25,9 @@ export async function POST(request: Request): Promise<Response> {
   try {
     app = await getSpectrumApp();
   } catch (e) {
-    logEvent("spectrum.app_init_failed", { error: e instanceof Error ? e.message : String(e) });
+    // The real init error — auth (bad creds), project-not-found, or suspended —
+    // so the 500's cause is greppable, not a generic "Internal server error".
+    logEvent("spectrum.app_init_failed", describeSpectrumError(e));
     return new Response(JSON.stringify({ error: "app_init" }), { status: 500 });
   }
 

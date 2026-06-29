@@ -26,7 +26,7 @@ import { synthesizeSpeech, textForSpeech } from "@/lib/messaging/voice";
  * init and before every send, so a send failure is usually that exchange — and
  * its status/body is what distinguishes bad creds from a plan/line problem.
  */
-function describeSpectrumError(e: unknown): Record<string, unknown> {
+export function describeSpectrumError(e: unknown): Record<string, unknown> {
   const out: Record<string, unknown> = { message: e instanceof Error ? e.message : String(e) };
   if (e instanceof Error) {
     out.name = e.name;
