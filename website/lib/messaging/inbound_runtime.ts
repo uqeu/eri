@@ -275,7 +275,16 @@ function makeConnectorDeps(): ConnectorDeps {
       const key = process.env.COMPOSIO_API_KEY;
       if (!key) throw new Error("COMPOSIO_API_KEY is not configured");
       const composio = new Composio({ apiKey: key });
-      const result = await composio.tools.execute(slug, { userId, arguments: args });
+      // @composio/core 0.10+ REQUIRES a toolkit version for manual execution — it
+      // throws "Toolkit version not specified" otherwise (silently caught upstream
+      // → "I couldn't check your email"). Use the latest action + skip the strict
+      // check; our row mappers are defensive against shape drift.
+      const result = await composio.tools.execute(slug, {
+        userId,
+        arguments: args,
+        version: "latest",
+        dangerouslySkipVersionCheck: true,
+      });
       return {
         data: (result?.data ?? {}) as Record<string, unknown>,
         error: result?.error ?? null,

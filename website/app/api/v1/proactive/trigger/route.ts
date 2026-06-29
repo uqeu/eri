@@ -169,7 +169,15 @@ function makeSignalDeps(): SignalDeps {
       // The SDK is constructed per call so a missing key fails at request time
       // (and is caught by fetchSignalsForUser → empty), never at module load.
       const composio = new Composio({ apiKey: requireComposioKey() });
-      const result = await composio.tools.execute(slug, { userId, arguments: args });
+      // @composio/core 0.10+ requires a toolkit version for manual execution (else
+      // it throws "Toolkit version not specified"). Latest action + skip the strict
+      // check; the signal mappers are defensive against shape drift.
+      const result = await composio.tools.execute(slug, {
+        userId,
+        arguments: args,
+        version: "latest",
+        dangerouslySkipVersionCheck: true,
+      });
       return {
         data: (result?.data ?? {}) as Record<string, unknown>,
         error: result?.error ?? null,
