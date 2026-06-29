@@ -10,6 +10,7 @@
     "lint": "next lint",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
+    "worker": "bun run scripts/spectrum-worker.ts",
     "demo:studio": "remotion studio remotion/index.ts",
     "demo:render": "remotion render remotion/index.ts EriLoop public/demos/eri-loop.mp4"
   },

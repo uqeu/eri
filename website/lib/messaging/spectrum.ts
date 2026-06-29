@@ -92,6 +92,13 @@ export function getSpectrumApp(): ReturnType<typeof createApp> {
   return appPromise;
 }
 
+/** Drop the memoized app so the next getSpectrumApp() builds a FRESH connection +
+ *  token. Used by the always-on streaming worker to fully re-establish on a
+ *  reconnect (a stale app's stream won't resume). */
+export function resetSpectrumApp(): void {
+  appPromise = null;
+}
+
 /** Map an inbound Spectrum message onto eri's existing InboundMessage shape so
  *  `handleInbound` is reused as-is. Non-text content (a shared link) maps to its
  *  URL; anything else yields empty text (the brain replies conversationally). */

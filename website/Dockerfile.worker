@@ -1,0 +1,24 @@
+# eri Spectrum streaming worker — always-on iMessage host (Railway).
+#
+# Bun runtime on purpose: it resolves the `@/*` tsconfig path aliases AND the
+# `@spectrum-ts/*` package export conditions that plain node/tsx cannot (the SDK
+# ships only `bun`/`import`/`types` conditions, so `node`/`tsx` throw
+# ERR_PACKAGE_PATH_NOT_EXPORTED). No bundling needed — bun runs the TS directly.
+#
+# Railway: set this service's Root Directory to `website`, builder = Dockerfile,
+# dockerfilePath = Dockerfile.worker (see railway.json).
+
+FROM oven/bun:1
+
+WORKDIR /app
+
+# Install deps first so the layer caches across source-only changes. No bun.lockb
+# in the repo → bun resolves from package.json (fine for a worker image).
+COPY package.json ./
+RUN bun install
+
+# App source (node_modules/.next excluded via .dockerignore).
+COPY . .
+
+# All config comes from the Railway environment — no .env.local in the image.
+CMD ["bun", "run", "scripts/spectrum-worker.ts"]
