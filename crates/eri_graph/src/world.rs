@@ -249,8 +249,32 @@ pub fn find_entity(graph: &Graph, kind: &str, name: &str) -> Result<Option<Entit
 /// Whether `entity`'s canonical name or any alias equals the already-normalized
 /// `needle`. The shared exact-match rule for resolution.
 fn name_matches(entity: &Entity, needle: &str) -> bool {
-    normalize_name(entity.canonical_name()) == needle
-        || entity.aliases().iter().any(|a| normalize_name(a) == needle)
+    let key = strip_entity_noun(needle);
+    strip_entity_noun(&normalize_name(entity.canonical_name())) == key
+        || entity
+            .aliases()
+            .iter()
+            .any(|a| strip_entity_noun(&normalize_name(a)) == key)
+}
+
+/// Project/app nouns stripped from an entity name for resolution, so "atlas" and
+/// "atlas project" resolve to ONE entity. The base-engine reflection pass names
+/// projects with their noun ("atlas project") while the cue extractor uses the bare
+/// name ("atlas"); without this they'd fork into two entities.
+const ENTITY_NAME_NOUNS: &[&str] = &["project", "app", "repo", "codebase", "startup"];
+
+/// Strip a single trailing project/app noun from an already-normalized name (no-op
+/// if the name is only the noun, so an entity literally named "project" survives).
+fn strip_entity_noun(normalized: &str) -> &str {
+    for noun in ENTITY_NAME_NOUNS {
+        if let Some(rest) = normalized.strip_suffix(noun) {
+            let rest = rest.trim_end();
+            if !rest.is_empty() {
+                return rest;
+            }
+        }
+    }
+    normalized
 }
 
 /// Resolve-or-create an entity. Resolution is layered, cheapest-first:
