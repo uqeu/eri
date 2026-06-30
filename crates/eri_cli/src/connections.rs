@@ -12,10 +12,12 @@
 //! testable with a mock, and prod wires [`HttpConnectionSource`]. Phase A runs
 //! on-device (computer-on); the always-on server-resident variant is Phase B.
 
+use std::io;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use eri_inference::memory::connections::{ConnectionObservation, ingest_connections};
 
@@ -64,6 +66,9 @@ pub struct BackfillReport {
     pub ingested: usize,
     pub dropped_sensitive: usize,
     pub entities: usize,
+    /// The newest observation `ts` seen — the cursor the continuous trigger advances
+    /// to, so the next on-sync pull only fetches what's newer.
+    pub newest_ts: u64,
 }
 
 /// Page size for the next fetch given the cap, or `None` to stop. Pure — the
@@ -95,6 +100,9 @@ pub async fn run_backfill(
             break;
         }
         report.fetched += page.observations.len();
+        for o in &page.observations {
+            report.newest_ts = report.newest_ts.max(o.ts_ms);
+        }
         // Q23-DROP before storage happens INSIDE ingest_connections (ADR-0012).
         let ingest = ingest_connections(user_id, &page.observations)
             .context("ingest connection observations")?;
@@ -153,6 +161,86 @@ pub async fn run(months: u32, max: usize) -> Result<()> {
         if report.entities == 1 { "y" } else { "ies" },
     );
     Ok(())
+}
+
+/// The incremental on-sync pull is small — the backfill is the onboarding; this
+/// keeps it fresh.
+const SYNC_PULL_CAP: usize = 200;
+
+/// The persisted per-user pull cursor (newest indexed `ts`), beside the world graph
+/// + the other sia state, so the next on-sync pull only fetches what's newer.
+#[derive(Serialize, Deserialize, Default)]
+struct Cursor {
+    since: u64,
+}
+
+/// Path of the per-user connections cursor.
+fn cursor_path(user_id: Option<&str>) -> io::Result<PathBuf> {
+    Ok(
+        eri_inference::memory::world_recall::world_graph_path_for(user_id)?
+            .with_file_name("connections_cursor.json"),
+    )
+}
+
+/// Read a cursor file (`0` if absent/unreadable — a fresh user pulls from `since=0`).
+fn read_cursor(path: &Path) -> u64 {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|s| serde_json::from_str::<Cursor>(&s).ok())
+        .map(|c| c.since)
+        .unwrap_or(0)
+}
+
+/// Persist a cursor.
+fn write_cursor(path: &Path, since: u64) -> io::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let json = serde_json::to_string(&Cursor { since }).map_err(io::Error::other)?;
+    std::fs::write(path, json)
+}
+
+fn load_cursor(user_id: Option<&str>) -> u64 {
+    cursor_path(user_id).map(|p| read_cursor(&p)).unwrap_or(0)
+}
+
+fn save_cursor(user_id: Option<&str>, since: u64) -> io::Result<()> {
+    write_cursor(&cursor_path(user_id)?, since)
+}
+
+/// The continuous on-sync trigger: pull connection observations NEWER than the
+/// persisted cursor, ingest them (Q23-screened), reflect once, and advance the
+/// cursor — so each `eri sync` keeps the world model fresh without re-indexing
+/// history. Bounded by [`SYNC_PULL_CAP`]; the reflect runs only when something new
+/// was ingested (no new data → no spend). Signed-out → a no-op.
+///
+/// Phase A: rides the explicit `eri sync` (the always-on schedule is Phase B). It is
+/// the caller's job to treat this as best-effort — a failure (e.g. the endpoint not
+/// yet live) must never break the surrounding sync.
+pub async fn sync_connections() -> Result<BackfillReport> {
+    let creds = crate::config::load()?;
+    if !creds.is_signed_in() {
+        return Ok(BackfillReport::default());
+    }
+    let user_id = creds.user_id.clone();
+    let since = load_cursor(user_id.as_deref());
+    let source = HttpConnectionSource::from_credentials(&creds)?;
+    let report = run_backfill(
+        &source,
+        &crate::reflection::ProxyReflectionClient,
+        user_id.as_deref(),
+        BackfillOptions {
+            since,
+            max_observations: SYNC_PULL_CAP,
+            page_size: PAGE_SIZE,
+            reflect_batch: REFLECT_BATCH,
+        },
+    )
+    .await?;
+    if report.newest_ts > since {
+        let _ = save_cursor(user_id.as_deref(), report.newest_ts);
+    }
+    Ok(report)
 }
 
 /// The cursor-fetch wire response from the website source endpoint.
@@ -300,6 +388,10 @@ mod tests {
             report.entities >= 1,
             "the reflect pass ran and wrote entities"
         );
+        assert_eq!(
+            report.newest_ts, 1,
+            "the cursor advances to the newest observation ts"
+        );
 
         unsafe {
             match prev.as_deref() {
@@ -307,5 +399,14 @@ mod tests {
                 None => std::env::remove_var("HOME"),
             }
         }
+    }
+
+    #[test]
+    fn the_cursor_round_trips_and_a_missing_file_is_zero() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("connections_cursor.json");
+        assert_eq!(read_cursor(&path), 0, "absent cursor → pull from since=0");
+        write_cursor(&path, 1_750_000_000_000).unwrap();
+        assert_eq!(read_cursor(&path), 1_750_000_000_000, "cursor round-trips");
     }
 }

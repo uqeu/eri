@@ -134,6 +134,23 @@ pub async fn run() -> Result<()> {
         "synced ✓  {} memories · {} profile facts · {}",
         report.observations, report.profile_facts, recall
     );
+
+    // Continuous auto-index (Phase A, ADR-0012): pull what's new from connected
+    // accounts since the cursor and fold it into the world model. Best-effort — a
+    // connections failure (e.g. the source endpoint not yet live) NEVER breaks the
+    // sync; surfaced only under ERI_DEBUG.
+    match crate::connections::sync_connections().await {
+        Ok(c) if c.ingested > 0 || c.dropped_sensitive > 0 => println!(
+            "auto-indexed ✓  {} from connected accounts ({} sensitive dropped) · {} entities",
+            c.ingested, c.dropped_sensitive, c.entities
+        ),
+        Ok(_) => {}
+        Err(e) => {
+            if std::env::var("ERI_DEBUG").is_ok() {
+                eprintln!("eri: connections auto-index skipped: {e:#}");
+            }
+        }
+    }
     Ok(())
 }
 
