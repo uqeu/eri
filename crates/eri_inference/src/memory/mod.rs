@@ -25,6 +25,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod cloud;
 pub mod collectors;
+pub mod connections;
 pub mod consolidation;
 pub mod embeddings;
 pub mod eventtime;
