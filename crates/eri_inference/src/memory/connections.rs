@@ -24,12 +24,15 @@ use super::world_recall::open_world_graph;
 /// A normalized observation from a connected account — the PASS-THROUGH shape the
 /// website source endpoint returns (metadata + snippet only; raw bodies live
 /// nowhere). `source_id` (e.g. `"gmail:<id>"` / `"gcal:<id>"`) is the idempotency +
-/// provenance key.
-#[derive(Clone, Debug)]
+/// provenance key. This is also the wire shape the website source endpoint returns
+/// (camelCase: `sourceId`/`text`/`kind`/`ts`).
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ConnectionObservation {
     pub source_id: String,
     pub text: String,
     pub kind: String,
+    #[serde(rename = "ts")]
     pub ts_ms: u64,
 }
 

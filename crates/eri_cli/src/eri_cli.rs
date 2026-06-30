@@ -41,6 +41,7 @@ mod commands;
 mod composio;
 mod composio_session;
 mod config;
+mod connections;
 mod control_agent;
 mod control_envelope;
 #[cfg(test)]
@@ -590,6 +591,15 @@ pub enum MemoryCommand {
     /// people/projects/relations in everything you've remembered into the world
     /// graph (additive — your memories are untouched; idempotent — safe to re-run).
     Ingest,
+    /// Auto-index the last N months of your connected accounts (Gmail/Calendar) into
+    /// the world model — privacy-screened (sensitive dropped before storage), capped,
+    /// one reflect pass. Phase A: runs on-device (indexes while the computer is on).
+    Backfill {
+        #[arg(long, default_value_t = 6)]
+        months: u32,
+        #[arg(long, default_value_t = 0)]
+        max: usize,
+    },
     /// Drop an observation by id, or "all" to clear everything.
     Forget { target: String },
 }
@@ -1013,6 +1023,9 @@ async fn dispatch(cli: Cli) -> anyhow::Result<()> {
         Command::Memory(MemoryCommand::Who { project }) => memory::who(&project),
         Command::Memory(MemoryCommand::Reflect { limit }) => memory::reflect(limit).await,
         Command::Memory(MemoryCommand::Ingest) => memory::ingest(),
+        Command::Memory(MemoryCommand::Backfill { months, max }) => {
+            connections::run(months, max).await
+        }
         Command::Memory(MemoryCommand::Forget { target }) => {
             let result = memory::forget(&target);
             sync::spawn_best_effort();
