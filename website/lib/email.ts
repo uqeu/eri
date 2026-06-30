@@ -90,6 +90,35 @@ function getErrorMessage(error: unknown): string {
   return "unknown error";
 }
 
+/**
+ * Send a plain-text internal OPS alert (no React template) — e.g. "the iMessage
+ * line looks down". Reuses the Resend client + FROM + the never-throw discipline.
+ * Falls back to a console log when RESEND isn't configured, so local/dev never
+ * blocks on it.
+ */
+export async function sendOpsAlertEmail(opts: {
+  to: string;
+  subject: string;
+  body: string;
+}): Promise<void> {
+  const resend = client();
+  if (!resend) {
+    console.log(`[email:ops-alert] RESEND unset; would alert ${opts.to}\nSubject: ${opts.subject}\n${opts.body}`);
+    return;
+  }
+  try {
+    const result = await resend.emails.send({
+      from: FROM,
+      to: opts.to,
+      subject: opts.subject,
+      text: opts.body,
+    });
+    if (result.error) console.error("[email:ops-alert] resend returned error", result.error);
+  } catch (error) {
+    console.error("[email:ops-alert] send failed", error);
+  }
+}
+
 export async function sendWelcomeEmail(opts: {
   to: string;
   displayName?: string;

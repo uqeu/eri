@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { runLineHealthCheck } from "@/lib/health/line_health";
 import { relayExpiredCommands, sweepPhoneTables } from "@/lib/imessage/cleanup";
 
 export const runtime = "nodejs";
@@ -26,5 +27,11 @@ export async function GET(request: Request): Promise<NextResponse> {
   }
   const swept = await sweepPhoneTables();
   const expiredCommands = await relayExpiredCommands();
-  return NextResponse.json({ ok: true, ...swept, expiredCommands }, { status: 200 });
+  // Liveness: actively probe the line + page (email) if it's been dark — so eri
+  // never goes silently dark again. Best-effort; must never break the sweep.
+  const lineHealth = await runLineHealthCheck().catch((e) => {
+    console.error("imessage.cron.line_health_failed", e instanceof Error ? e.message : e);
+    return { healthy: null, alerted: false };
+  });
+  return NextResponse.json({ ok: true, ...swept, expiredCommands, lineHealth }, { status: 200 });
 }
