@@ -119,6 +119,29 @@ export function spectrumMessageToInbound(space: Space, message: Message): Inboun
   };
 }
 
+/**
+ * Send an eri-INITIATED message over the business line (a proactive nudge). There
+ * is no inbound space, so resolve/create a 1:1 space from the user's handle via
+ * the iMessage provider — `create` works for an engaged user (resolves their
+ * existing conversation) AND cold (starts one, subject to the line's cold-outreach
+ * tier limits). Returns true only if every chunk landed; never throws, and logs
+ * the real Photon error so a failure is diagnosable (not swallowed like Sendblue).
+ */
+export async function sendProactiveMessage(to: string, chunks: string[]): Promise<boolean> {
+  try {
+    const app = await getSpectrumApp();
+    const space = await imessage(app).space.create(to);
+    for (const chunk of chunks) {
+      if (!chunk.trim()) continue;
+      await withSendRetry(() => space.send(chunk));
+    }
+    return true;
+  } catch (e) {
+    logEvent("proactive.spectrum_send_failed", { to, ...describeSpectrumError(e) });
+    return false;
+  }
+}
+
 /** A reply/typing transport bound to one Spectrum conversation. */
 export function makeSpectrumTransport(space: Space): InboundTransport {
   return {
