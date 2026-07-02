@@ -154,8 +154,10 @@ impl CodeJobRecord {
     /// The PR number once opened — for B4 follow-up routing / the P3 reply.
     /// Reads the settled outcome first, else the last `PrOpened` event.
     pub fn pr_number(&self) -> Option<u64> {
-        if let Some(CodeOutcome::Opened { number, .. }) = &self.outcome {
-            return Some(*number);
+        // A settled Opened OR Updated outcome carries the PR number; else fall
+        // back to the last PrOpened event (a still-running fresh job).
+        if let Some(n) = self.outcome.as_ref().and_then(CodeOutcome::pr_number) {
+            return Some(n);
         }
         self.events.iter().rev().find_map(|e| match e {
             CodeProgress::PrOpened { number, .. } => Some(*number),
@@ -265,6 +267,17 @@ mod tests {
             url: "u".into(),
         });
         assert_eq!(r.pr_number(), Some(123), "from the settled outcome");
+    }
+
+    #[test]
+    fn pr_number_surfaces_from_a_follow_up_updated_outcome() {
+        // A B4 follow-up settles Updated; the record must still route by PR number.
+        let mut r = CodeJobRecord::running(CodeJobId::new("job-4"), "eri-labs/eri");
+        r.settle(CodeOutcome::Updated {
+            number: 99,
+            url: "https://github.com/eri-labs/eri/pull/99".into(),
+        });
+        assert_eq!(r.pr_number(), Some(99));
     }
 
     #[test]

@@ -72,17 +72,27 @@ pub trait Committer: Send + Sync {
     async fn commit(&self, working_tree: &Path, message: &str) -> Result<String>;
 }
 
-/// A reference to an opened pull request.
+/// A reference to a pull request.
 pub struct PrRef {
     pub number: u64,
     pub url: String,
     pub title: String,
 }
 
-/// Opens a PR for a green, committed job. B3 implements this via the GitHub API;
-/// B2 injects a stub. The orchestration calls it ONLY after [`pr_gate`] passes.
-/// `progress` is the full emitted event stream so the author can build an
-/// eri-voice summary + the passing-test evidence into the PR body.
+/// What the terminal PR step did. `newly_opened` distinguishes a **fresh** PR
+/// (B3, `Opened` outcome) from a **follow-up** push to an EXISTING PR (B4 review
+/// loop, `Updated` outcome) — so the phone says "opened PR #123" vs "pushed
+/// another commit to PR #123", never the wrong one.
+pub struct PrOutcome {
+    pub pr: PrRef,
+    pub newly_opened: bool,
+}
+
+/// Finalises a green, committed job into a pull request. B3's `GitHubPrAuthor`
+/// opens a fresh PR; B4's follow-up author pushes another commit to an existing
+/// one. B2 injects a stub. Called ONLY after [`pr_gate`] passes. `progress` is
+/// the full emitted event stream so the author can build an eri-voice summary +
+/// the passing-test evidence into the PR body.
 #[async_trait]
 pub trait PrAuthor: Send + Sync {
     async fn open(
@@ -90,7 +100,7 @@ pub trait PrAuthor: Send + Sync {
         job: &CodeJob,
         commit_sha: &str,
         progress: &[CodeProgress],
-    ) -> Result<PrRef>;
+    ) -> Result<PrOutcome>;
 }
 
 /// The harness-in-sandbox [`CodeTurn`]. Orchestrates plan → (edit → test)* →
@@ -220,19 +230,25 @@ impl CodeTurn for SandboxCodeTurn {
             },
         );
 
-        let pr = self.pr_author.open(job, &sha, &events).await?;
-        let (number, url) = (pr.number, pr.url.clone());
-        Self::emit(
-            sink,
-            &mut events,
-            CodeProgress::PrOpened {
-                number,
-                url: pr.url,
-                title: pr.title,
-            },
-        );
-
-        Ok(CodeOutcome::Opened { number, url })
+        let done = self.pr_author.open(job, &sha, &events).await?;
+        let (number, url) = (done.pr.number, done.pr.url.clone());
+        if done.newly_opened {
+            // A fresh PR — stream the PrOpened milestone + the Opened outcome.
+            Self::emit(
+                sink,
+                &mut events,
+                CodeProgress::PrOpened {
+                    number,
+                    url: done.pr.url,
+                    title: done.pr.title,
+                },
+            );
+            Ok(CodeOutcome::Opened { number, url })
+        } else {
+            // A follow-up (B4): the PR already existed; the pushed commit updated
+            // it. The Committed event already streamed; settle as Updated.
+            Ok(CodeOutcome::Updated { number, url })
+        }
     }
 }
 
@@ -417,12 +433,22 @@ mod tests {
 
     struct CountingPrAuthor {
         number: u64,
+        newly_opened: bool,
         calls: AtomicUsize,
     }
     impl CountingPrAuthor {
         fn new(number: u64) -> Self {
             Self {
                 number,
+                newly_opened: true,
+                calls: AtomicUsize::new(0),
+            }
+        }
+        /// A follow-up author: it pushed to an EXISTING PR (B4), didn't open one.
+        fn follow_up(number: u64) -> Self {
+            Self {
+                number,
+                newly_opened: false,
                 calls: AtomicUsize::new(0),
             }
         }
@@ -437,12 +463,15 @@ mod tests {
             _job: &CodeJob,
             _sha: &str,
             _progress: &[CodeProgress],
-        ) -> Result<PrRef> {
+        ) -> Result<PrOutcome> {
             self.calls.fetch_add(1, Ordering::SeqCst);
-            Ok(PrRef {
-                number: self.number,
-                url: format!("https://github.com/eri-labs/eri/pull/{}", self.number),
-                title: "Fix".into(),
+            Ok(PrOutcome {
+                pr: PrRef {
+                    number: self.number,
+                    url: format!("https://github.com/eri-labs/eri/pull/{}", self.number),
+                    title: "Fix".into(),
+                },
+                newly_opened: self.newly_opened,
             })
         }
     }
@@ -523,6 +552,41 @@ mod tests {
             stages(&sink),
             vec!["plan", "edit", "test", "commit", "pr"],
             "the happy path streams plan→edit→test→commit→pr"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_follow_up_updates_the_existing_pr_without_a_pr_event() {
+        // B4: the terminal author reports newly_opened=false → the loop settles
+        // Updated (not Opened) and emits no PrOpened, since nothing was opened.
+        let harness = ScriptedHarness::new(vec![edited(&["cart.rs"], 10)]);
+        let tests = ScriptedTests::new(vec![report(true, "green")]);
+        let committer = StubCommitter::new("beef");
+        let pr = CountingPrAuthor::follow_up(123);
+        let turn = SandboxCodeTurn::new(
+            Box::new(harness),
+            Box::new(tests),
+            Box::new(committer),
+            Box::new(pr),
+            3,
+        );
+        let sink = RecordingSink::default();
+        let out = turn
+            .run(&job_with(CodeBudget::default()), &sink)
+            .await
+            .unwrap();
+        assert_eq!(
+            out,
+            CodeOutcome::Updated {
+                number: 123,
+                url: "https://github.com/eri-labs/eri/pull/123".into()
+            }
+        );
+        let st = stages(&sink);
+        assert!(st.contains(&"commit"), "a follow-up still commits");
+        assert!(
+            !st.contains(&"pr"),
+            "a follow-up opens nothing → no PrOpened event"
         );
     }
 

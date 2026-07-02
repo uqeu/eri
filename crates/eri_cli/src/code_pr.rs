@@ -27,7 +27,7 @@ use anyhow::{Result, anyhow, bail};
 use async_trait::async_trait;
 use serde_json::{Value, json};
 
-use crate::code_sandbox::{PrAuthor, PrRef};
+use crate::code_sandbox::{PrAuthor, PrOutcome, PrRef};
 use crate::code_turn::{CodeJob, CodeProgress};
 
 /// A pull request to open. `head` is the job branch (never the base).
@@ -100,7 +100,7 @@ impl PrAuthor for GitHubPrAuthor {
         job: &CodeJob,
         _commit_sha: &str,
         progress: &[CodeProgress],
-    ) -> Result<PrRef> {
+    ) -> Result<PrOutcome> {
         let wt = job.working_tree.as_path();
         let head = self.git.current_branch(wt).await?;
         let base = job
@@ -124,7 +124,70 @@ impl PrAuthor for GitHubPrAuthor {
             title: pr_title(job, progress),
             body: pr_body(job, progress),
         };
-        self.api.create(pr).await
+        let pr = self.api.create(pr).await?;
+        Ok(PrOutcome {
+            pr,
+            newly_opened: true,
+        })
+    }
+}
+
+/// The B4 review-loop author: a follow-up push to an **existing** PR. Given the
+/// user's "for PR #123, rename X, re-run", the job re-runs edit→test→green on the
+/// SAME branch (the PR's head) and this pushes the new commit — GitHub updates
+/// the open PR automatically, so there is NO new-PR API call. Reports the
+/// existing PR as `newly_opened: false` so the loop settles `Updated`, not
+/// `Opened`. Routed to the right job by `pr_number` on the [`crate::code_dispatch::CodeJobRecord`].
+pub struct FollowUpPrAuthor {
+    git: Box<dyn GitRemote>,
+    remote: String,
+    existing: PrRef,
+}
+
+impl FollowUpPrAuthor {
+    pub fn new(git: Box<dyn GitRemote>, remote: impl Into<String>, existing: PrRef) -> Self {
+        Self {
+            git,
+            remote: remote.into(),
+            existing,
+        }
+    }
+
+    /// Production follow-up author over `eri_git` for an existing PR `number`/`url`.
+    pub fn for_pr(number: u64, url: impl Into<String>) -> Self {
+        Self::new(
+            Box::new(GitRemoteCli),
+            "origin",
+            PrRef {
+                number,
+                url: url.into(),
+                title: String::new(),
+            },
+        )
+    }
+}
+
+#[async_trait]
+impl PrAuthor for FollowUpPrAuthor {
+    async fn open(
+        &self,
+        job: &CodeJob,
+        _commit_sha: &str,
+        _progress: &[CodeProgress],
+    ) -> Result<PrOutcome> {
+        // Push the new commit to the PR's head branch — GitHub updates the open
+        // PR in place. No create-PR call, no base-branch anything.
+        self.git
+            .push(job.working_tree.as_path(), &self.remote)
+            .await?;
+        Ok(PrOutcome {
+            pr: PrRef {
+                number: self.existing.number,
+                url: self.existing.url.clone(),
+                title: self.existing.title.clone(),
+            },
+            newly_opened: false,
+        })
     }
 }
 
@@ -509,12 +572,13 @@ mod tests {
             "origin",
             "main",
         );
-        let pr = author
+        let out = author
             .open(&job(), "deadbeef", &green_progress())
             .await
             .unwrap();
 
-        assert_eq!(pr.number, 7);
+        assert_eq!(out.pr.number, 7);
+        assert!(out.newly_opened, "a fresh PR was opened");
         assert_eq!(pushed.load(Ordering::SeqCst), 1, "the branch was pushed");
         let calls = calls.lock().unwrap();
         assert_eq!(calls.len(), 1);
@@ -567,5 +631,32 @@ mod tests {
         assert!(out.is_err(), "opening from the base branch is refused");
         assert_eq!(pushed.load(Ordering::SeqCst), 0, "nothing pushed");
         assert!(calls.lock().unwrap().is_empty(), "no PR opened");
+    }
+
+    #[tokio::test]
+    async fn follow_up_pushes_to_the_existing_pr_without_opening_a_new_one() {
+        // B4: "for PR #123, rename X, re-run" → push the new commit to the PR's
+        // head branch (GitHub updates the PR in place), report it as an update.
+        let pushed = Arc::new(AtomicUsize::new(0));
+        let author = FollowUpPrAuthor::new(
+            Box::new(SharedGit {
+                branch: "eri/fix".into(),
+                pushed: Arc::clone(&pushed),
+            }),
+            "origin",
+            PrRef {
+                number: 123,
+                url: "https://github.com/eri-labs/eri/pull/123".into(),
+                title: "Fix".into(),
+            },
+        );
+        let out = author.open(&job(), "sha", &green_progress()).await.unwrap();
+        assert!(!out.newly_opened, "a follow-up updates, it doesn't open");
+        assert_eq!(out.pr.number, 123, "it reports the EXISTING PR");
+        assert_eq!(
+            pushed.load(Ordering::SeqCst),
+            1,
+            "the new commit was pushed"
+        );
     }
 }

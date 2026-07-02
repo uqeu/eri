@@ -216,10 +216,24 @@ impl CodeProgress {
 /// content).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CodeOutcome {
-    Opened { number: u64, url: String },
-    TestsRed { summary: String },
-    Halted { reason: String },
-    Refused { reason: String },
+    Opened {
+        number: u64,
+        url: String,
+    },
+    /// A follow-up (B4 review loop) pushed another commit to an EXISTING PR.
+    Updated {
+        number: u64,
+        url: String,
+    },
+    TestsRed {
+        summary: String,
+    },
+    Halted {
+        reason: String,
+    },
+    Refused {
+        reason: String,
+    },
 }
 
 impl CodeOutcome {
@@ -229,6 +243,9 @@ impl CodeOutcome {
             CodeOutcome::Opened { number, url } => {
                 format!("done — opened PR #{number}: {url}")
             }
+            CodeOutcome::Updated { number, url } => {
+                format!("done — pushed another commit to PR #{number}: {url}")
+            }
             CodeOutcome::TestsRed { summary } => {
                 format!("stopped — tests still failing: {summary}")
             }
@@ -237,9 +254,21 @@ impl CodeOutcome {
         }
     }
 
-    /// True only when the job opened a PR (the happy path).
+    /// True only when the job opened a NEW PR (the happy path). A follow-up
+    /// `Updated` is false — it pushed to an existing PR, it didn't open one.
     pub fn opened_pr(&self) -> bool {
         matches!(self, CodeOutcome::Opened { .. })
+    }
+
+    /// The PR number this outcome touched — a freshly `Opened` one or an
+    /// `Updated` existing one. `None` for the non-PR terminals.
+    pub fn pr_number(&self) -> Option<u64> {
+        match self {
+            CodeOutcome::Opened { number, .. } | CodeOutcome::Updated { number, .. } => {
+                Some(*number)
+            }
+            _ => None,
+        }
     }
 
     /// The terminal wire envelope the phone reads when a job settles: a stable
@@ -249,6 +278,9 @@ impl CodeOutcome {
         let mut v = match self {
             CodeOutcome::Opened { number, url } => {
                 json!({ "kind": "opened", "number": number, "url": url })
+            }
+            CodeOutcome::Updated { number, url } => {
+                json!({ "kind": "updated", "number": number, "url": url })
             }
             CodeOutcome::TestsRed { summary } => {
                 json!({ "kind": "testsRed", "summary": summary })
@@ -646,6 +678,29 @@ mod tests {
         .summary();
         assert!(red.to_lowercase().contains("test"));
         assert_ne!(opened, red);
+    }
+
+    #[test]
+    fn updated_outcome_reports_a_follow_up_push() {
+        let up = CodeOutcome::Updated {
+            number: 123,
+            url: "https://github.com/x/y/pull/123".into(),
+        };
+        assert_eq!(up.wire()["kind"], "updated");
+        assert_eq!(up.wire()["number"], 123);
+        assert_eq!(up.pr_number(), Some(123));
+        assert!(!up.opened_pr(), "an update did NOT open a new PR");
+        assert!(up.summary().to_lowercase().contains("pushed"));
+        // Opened also carries a pr_number; the non-PR terminals don't.
+        assert_eq!(
+            CodeOutcome::Opened {
+                number: 5,
+                url: "u".into()
+            }
+            .pr_number(),
+            Some(5)
+        );
+        assert_eq!(CodeOutcome::Halted { reason: "x".into() }.pr_number(), None);
     }
 
     // ── the CodeTurn seam via the scripted stub ──
