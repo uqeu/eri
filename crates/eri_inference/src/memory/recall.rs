@@ -336,8 +336,12 @@ pub fn push_recall(
     transport.upload(&recall_upload_body(projection)?)
 }
 
-/// Top entities across all kinds, salience-ranked (salience = how many
-/// observations evidence the entity), capped.
+/// Top entities across all kinds, salience-ranked (salience = how many observations
+/// evidence the entity), capped. **Zero-evidence entities are skipped** — after a
+/// privacy purge erases the sensitive observations that evidenced an entity (e.g. a
+/// bank orphaned when its only evidence was a financial email), that entity has no
+/// remaining grounding and must NOT reach the server-readable projection (ADR-0012
+/// cleanup 2). An entity with no evidence is also just noise.
 fn gather_entities(graph: &Graph, limit: usize) -> Vec<ProjectedEntity> {
     let mut out: Vec<ProjectedEntity> = Vec::new();
     for kind in world::ENTITY_KINDS {
@@ -348,6 +352,9 @@ fn gather_entities(graph: &Graph, limit: usize) -> Vec<ProjectedEntity> {
             let salience = world::evidence_for(graph, e.id())
                 .map(|v| v.len() as u64)
                 .unwrap_or(0);
+            if salience == 0 {
+                continue;
+            }
             out.push(ProjectedEntity {
                 id: e.id().clone(),
                 kind: kind.to_string(),
@@ -534,7 +541,12 @@ mod tests {
         world::relate(&g, &priya, &atlas, world::relation::COLLABORATES_ON).unwrap();
         // A sensitive entity that must NOT cross the boundary:
         world::record_entity(&g, world::entity_kind::PROJECT, "my bank account 999").unwrap();
-        world::record_observation(&g, "Paired with Priya on atlas").unwrap();
+        // Evidence so the entities are grounded (0-evidence entities are skipped) — the
+        // bank one too, so it's dropped by the GATE (its name), not for lack of evidence.
+        let obs = world::record_observation(&g, "Paired with Priya on atlas").unwrap();
+        world::link_evidence(&g, &obs, world::entity_kind::PERSON, "Priya").unwrap();
+        world::link_evidence(&g, &obs, world::entity_kind::PROJECT, "atlas").unwrap();
+        world::link_evidence(&g, &obs, world::entity_kind::PROJECT, "my bank account 999").unwrap();
         world::link_next(&g, "open editor", "run tests").unwrap();
         world::link_next(&g, "open editor", "run tests").unwrap();
 
@@ -563,17 +575,41 @@ mod tests {
     }
 
     #[test]
+    fn a_zero_evidence_entity_is_excluded_from_the_projection() {
+        // Cleanup 2 (ADR-0012): after a purge erases the sensitive observations that
+        // evidenced a bank entity, that entity is orphaned (0 evidence) and must NOT
+        // reach the server-readable projection.
+        use eri_graph::{Graph, world};
+        let g = Graph::open_in_memory().unwrap();
+        let obs = world::record_observation(&g, "Paired with Priya").unwrap();
+        world::link_evidence(&g, &obs, world::entity_kind::PERSON, "Priya").unwrap();
+        world::record_entity(&g, world::entity_kind::PERSON, "RBC").unwrap(); // orphaned
+
+        let p = project_from_graph(&g, Recipient::OwnDevices, 0, &Limits::default());
+        assert!(
+            p.entities.iter().any(|e| e.name == "Priya"),
+            "an evidenced entity is projected"
+        );
+        assert!(
+            !p.entities.iter().any(|e| e.name == "RBC"),
+            "a 0-evidence (purge-orphaned) entity is excluded from Tier-A"
+        );
+    }
+
+    #[test]
     fn a_projection_for_one_user_contains_nothing_from_another() {
         // Per-user isolation (ADR-0010 §6): project_from_graph reads ONLY the graph
         // it's handed, so user A's projection holds none of user B's world — and
         // the facade opens only `user_id`'s graph. No cross-principal leak.
         use eri_graph::{Graph, world};
         let a = Graph::open_in_memory().unwrap();
-        world::record_entity(&a, world::entity_kind::PERSON, "Priya").unwrap();
-        world::record_entity(&a, world::entity_kind::PROJECT, "atlas").unwrap();
+        let oa = world::record_observation(&a, "Priya on atlas").unwrap();
+        world::link_evidence(&a, &oa, world::entity_kind::PERSON, "Priya").unwrap();
+        world::link_evidence(&a, &oa, world::entity_kind::PROJECT, "atlas").unwrap();
         let b = Graph::open_in_memory().unwrap();
-        world::record_entity(&b, world::entity_kind::PERSON, "Bob").unwrap();
-        world::record_entity(&b, world::entity_kind::PROJECT, "zephyr").unwrap();
+        let ob = world::record_observation(&b, "Bob on zephyr").unwrap();
+        world::link_evidence(&b, &ob, world::entity_kind::PERSON, "Bob").unwrap();
+        world::link_evidence(&b, &ob, world::entity_kind::PROJECT, "zephyr").unwrap();
 
         let pa = serde_json::to_string(&project_from_graph(
             &a,

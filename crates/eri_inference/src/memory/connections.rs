@@ -14,12 +14,39 @@
 
 use std::io;
 
-use eri_graph::{Graph, GraphError};
+use eri_graph::{Graph, GraphError, world};
 
 use super::Observation;
 use super::extraction::{CueExtractor, Extractor, ingest_all};
 use super::profile::looks_sensitive;
 use super::world_recall::open_world_graph;
+
+/// Generous cap on observation nodes scanned by a purge.
+const PURGE_SCAN_LIMIT: usize = 100_000;
+
+/// **Hard-erase** every stored observation whose text trips the Q23 screen
+/// ([`looks_sensitive`]) — remediation for observations that entered the graph
+/// BEFORE the precision pass existed (ADR-0012). A true erasure (via
+/// [`Graph::remove_node`]): the node and its evidence edges leave no trace, so an
+/// entity whose evidence was only sensitive obs is orphaned (0 evidence) and drops
+/// from the recall projection. Pure over a graph — fixture-testable. Returns the
+/// count erased.
+pub fn purge_sensitive_into(graph: &Graph) -> Result<usize, GraphError> {
+    let mut removed = 0;
+    for obs in world::recent_observations(graph, PURGE_SCAN_LIMIT)? {
+        if looks_sensitive(obs.text()) && graph.remove_node(obs.id())? {
+            removed += 1;
+        }
+    }
+    Ok(removed)
+}
+
+/// Purge sensitive observations from the signed-in user's world model (user-scoped
+/// wrapper over [`purge_sensitive_into`]).
+pub fn purge_sensitive(user_id: Option<&str>) -> io::Result<usize> {
+    let graph = open_world_graph(user_id)?;
+    purge_sensitive_into(&graph).map_err(|e| io::Error::other(format!("purge sensitive: {e}")))
+}
 
 /// A normalized observation from a connected account — the PASS-THROUGH shape the
 /// website source endpoint returns (metadata + snippet only; raw bodies live
@@ -107,7 +134,6 @@ pub fn ingest_connections(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use eri_graph::world;
 
     fn conn(source_id: &str, text: &str) -> ConnectionObservation {
         ConnectionObservation {
@@ -184,6 +210,46 @@ mod tests {
         .unwrap();
         assert_eq!(report.dropped_sensitive, 0);
         assert!(report.entities >= 2, "Priya + atlas, got {report:?}");
+    }
+
+    #[test]
+    fn purge_erases_sensitive_observations_and_orphans_their_entities() {
+        // Remediation for pre-gate leaks: a sensitive observation that slipped in
+        // before the precision pass is HARD-erased, and the entity whose only evidence
+        // was it is orphaned (0 evidence) — the basis for cleanup 2's projection drop.
+        let g = Graph::open_in_memory().unwrap();
+        // Inject BOTH via ingest_all (NO screen) — simulating storage from BEFORE the
+        // precision pass existed: a clean collaboration + a financial email (RBC).
+        let stored = [
+            to_observation(&conn("gmail:1", "I work with Priya on the atlas project")),
+            to_observation(&conn(
+                "gmail:2",
+                "met RBC about the Interac transfer, $1,500 deposited",
+            )),
+        ];
+        ingest_all(&g, &CueExtractor, &stored).unwrap();
+
+        let removed = purge_sensitive_into(&g).unwrap();
+        assert_eq!(removed, 1, "only the financial observation is erased");
+
+        let remaining = world::recent_observations(&g, 100).unwrap();
+        assert!(
+            remaining
+                .iter()
+                .all(|o| !o.text().to_lowercase().contains("interac")),
+            "no sensitive observation survives the purge"
+        );
+        assert!(
+            remaining.iter().any(|o| o.text().contains("atlas")),
+            "the clean observation is untouched"
+        );
+        // RBC's only evidence was the erased observation → it is now orphaned.
+        if let Some(rbc) = world::find_entity(&g, world::entity_kind::PERSON, "RBC").unwrap() {
+            assert!(
+                world::evidence_for(&g, rbc.id()).unwrap().is_empty(),
+                "the financial entity is orphaned (0 evidence) after the purge"
+            );
+        }
     }
 
     #[test]
