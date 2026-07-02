@@ -70,7 +70,8 @@ render each event as it arrives, not wait for a fixed sequence.
 ## Terminal — `CodeOutcome`
 
 ```jsonc
-{ "kind": "opened",   "number": 123, "url": "https://…/pull/123" }  // happy path: green → PR
+{ "kind": "opened",   "number": 123, "url": "https://…/pull/123" }  // happy path: green → new PR
+{ "kind": "updated",  "number": 123, "url": "https://…/pull/123" }  // B4 follow-up: pushed to an existing PR
 { "kind": "testsRed", "summary": "checkout still red after 3 attempts" }  // FAIL-CLOSED stop
 { "kind": "halted",   "reason": "token cap reached (400000/400000 tokens)" }  // recoverable
 { "kind": "refused",  "reason": "…" }  // absolute boundary handed back
@@ -152,7 +153,8 @@ branch rather than opening a new PR.
 | B1 | brain | CodeTurn seam + progress/outcome/budget + `pr_gate` + scripted stub | **shipped, tested** |
 | B2 | brain | harness-in-sandbox adapter (edit→test loop, fail-closed) + dispatch/repo-resolution + job record wire | **shipped, tested** |
 | B3 | brain | PR authoring — real `GitHubPrAuthor` (push branch + `POST /pulls`, eri-voice body + test evidence, never from base) | **shipped, tested** |
-| B4 | brain | review-comment loop ("change X, re-run" → another commit) | next |
+| B4 | brain | review-comment loop — `FollowUpPrAuthor` pushes another commit to the existing PR → `Updated` outcome (routed by `pr_number`) | **shipped, tested** |
+| — | brain | `eri code-job` — headless whole-loop command, JSONL to stdout (the worker's entry point) | **shipped, tested** |
 | P1 | phone | coding-intent classification on inbound → route to a CodeTurn job | — |
 | P2 | phone | job kickoff + streamed status (typing indicator + multi-bubble cadence) | — |
 | P3 | phone | PR-link reply + relay review comments back into the brain | — |
@@ -169,18 +171,44 @@ changes. The wire shape above is the only thing both lanes depend on.
 
 ## Remaining before go-live: the cloud worker (cross-surface)
 
-The brain pieces are done (B1–B3). One piece remains, and it spans both lanes:
-a **cloud worker** — a Vercel Function / cron that (1) receives the dispatched
-job, (2) `resolve_repo` + mint `job_id`, (3) spins the Vercel Sandbox, (4) clones
-with the user's GitHub token (also passed to `GitHubPrAuthor::from_token`), (5)
-runs `SandboxCodeTurn` (harness → tests → fail-closed → `GitHubPrAuthor`), (6)
-writes the `CodeJobRecord` rows the phone polls.
+All brain pieces are done (B1–B4). One piece remains — a **thin cloud worker** (a
+Vercel Function / cron). It does NOT drive the loop per step; the whole
+edit→test→green→commit→PR loop, the retries, and the fail-closed gate all live in
+Rust behind ONE command.
 
-**Mini-contract to settle with the phone lane** (how the Function invokes the
-Rust harness inside the sandbox): the `eri` binary is shipped into the sandbox
-and driven per step via `runCommand` — `git clone` → `eri` (harness edit) →
-`<repo test cmd>` (exit code → `Tested{passed}`) → commit → the PR call. The
-Function reads each command's stdout/exit and appends the matching
-`CodeProgress.wire()` to the record. Define: the exact `runCommand` invocation
-for the harness edit pass (args + how feedback is passed on a retry) and how the
-per-user GitHub token reaches both the clone remote and `GitHubPrAuthor`.
+### The mini-contract (resolved): `eri code-job`
+
+The worker's only job with the harness is: **run one command, stream its stdout.**
+
+```
+eri code-job \
+  --task "<the user's coding task>" \
+  --repo <path to the cloned working tree> \
+  [--slug owner/name]          # default: derived from the origin remote
+  [--base <branch>]            # default: the repo's default branch
+  [--test-cmd "<cmd>"]         # default: detected (cargo / npm / pytest / go)
+  [--budget-tokens 400000] [--budget-seconds 900] \
+  [--update-pr <N> --update-pr-url <url>]   # B4 follow-up: push to PR #N, don't open a new one
+```
+
+- **stdout is JSONL, one object per line.** Progress lines carry `stage`
+  (`CodeProgress.wire()`); the FINAL line carries `kind` (`CodeOutcome.wire()`).
+  The worker discriminates on `stage` vs `kind` and appends each line to the
+  `CodeJobRecord` row the phone polls. Diagnostics go to stderr — stdout is clean.
+- **GitHub token:** injected ONCE into the sandbox env as **`GITHUB_TOKEN`**. The
+  clone remote carries it (so `git push` reuses it) and `GitHubPrAuthor::from_token`
+  reads it. A follow-up (`--update-pr`) needs no fresh token — it pushes to the
+  existing PR branch whose remote already has it.
+- **Retries stay inside Rust.** The Function never sees or passes back the test
+  failure; `SandboxCodeTurn` loops edit→test and feeds the failure to the next
+  harness pass itself.
+
+### The worker's steps
+
+1. receive the dispatched job; `resolve_repo` (single-principal) + mint `job_id`.
+2. spin the Vercel Sandbox; inject `GITHUB_TOKEN`.
+3. `git clone` the repo (token in the remote); for a follow-up, check out the
+   PR's head branch.
+4. run `eri code-job …` (one command).
+5. stream its stdout → append each JSONL line to the `CodeJobRecord` row.
+6. tear the sandbox down; the phone reads the row and streams bubbles.

@@ -36,6 +36,7 @@ mod chat;
 mod checkpoint;
 mod client;
 mod code_dispatch;
+mod code_job;
 mod code_pr;
 mod code_sandbox;
 mod code_turn;
@@ -490,6 +491,45 @@ pub enum Command {
     /// exposing the secret to the model. Values are never printed.
     #[command(subcommand)]
     Vault(VaultCommand),
+
+    /// Run one coding job end-to-end (Phase 3): the eri-code harness edits until
+    /// the tests are green, commits, then opens (or, with --update-pr, updates) a
+    /// PR — streaming CodeProgress as JSONL to stdout. The cloud worker runs THIS
+    /// command inside the sandbox; it reads the GitHub token from `GITHUB_TOKEN`.
+    #[command(name = "code-job")]
+    CodeJob {
+        /// The coding task — what to fix or add.
+        #[arg(long)]
+        task: String,
+        /// Path to the (already-cloned) working tree.
+        #[arg(long, default_value = ".")]
+        repo: PathBuf,
+        /// `owner/name` slug for the PR API. Default: derived from origin.
+        #[arg(long)]
+        slug: Option<String>,
+        /// Base branch for the PR. Default: the repo's default branch.
+        #[arg(long)]
+        base: Option<String>,
+        /// Test command. Default: detected (cargo / npm / pytest / go).
+        #[arg(long = "test-cmd")]
+        test_cmd: Option<String>,
+        /// Per-job token ceiling.
+        #[arg(long = "budget-tokens", default_value_t = 400_000)]
+        budget_tokens: u64,
+        /// Per-job wall-clock ceiling, seconds.
+        #[arg(long = "budget-seconds", default_value_t = 900)]
+        budget_seconds: u64,
+        /// Follow-up (B4): push another commit to this EXISTING PR number
+        /// instead of opening a new one.
+        #[arg(long = "update-pr")]
+        update_pr: Option<u64>,
+        /// The existing PR's URL (used with --update-pr for the reply link).
+        #[arg(long = "update-pr-url")]
+        update_pr_url: Option<String>,
+        /// Inference depth: fast | thinking | auto.
+        #[arg(long, value_enum)]
+        mode: Option<Mode>,
+    },
     /// MCP server setup and local connector status.
     #[command(subcommand)]
     Mcp(McpCommand),
@@ -1042,6 +1082,33 @@ async fn dispatch(cli: Cli) -> anyhow::Result<()> {
             let result = memory::forget(&target);
             sync::spawn_best_effort();
             result
+        }
+        Command::CodeJob {
+            task,
+            repo,
+            slug,
+            base,
+            test_cmd,
+            budget_tokens,
+            budget_seconds,
+            update_pr,
+            update_pr_url,
+            mode,
+        } => {
+            let model = model_for_mode(resolve_mode(mode, &repo)).to_string();
+            code_job::run_code_job(code_job::CodeJobArgs {
+                task,
+                repo_path: repo,
+                slug,
+                base,
+                test_cmd,
+                budget_tokens,
+                budget_seconds,
+                update_pr,
+                update_pr_url,
+                model,
+            })
+            .await
         }
         Command::Vault(VaultCommand::Add { origin, username }) => {
             credential_vault::cli_add(&origin, &username)
