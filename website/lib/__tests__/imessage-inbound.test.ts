@@ -5,6 +5,7 @@ import {
   type InboundDeps,
 } from "../imessage/inbound";
 import type { InboundMessage } from "../imessage/webhook";
+import type { CodingIntent } from "../coding/intent";
 
 function msg(content: string): InboundMessage {
   return {
@@ -351,6 +352,69 @@ async function run() {
     assert.equal(out.branch, "errored");
     assert.equal(out.replyChunks[0], REPLY.errored);
     assert.equal(out.meter?.status, "error");
+  }
+
+  // ── Phase 3 P1: coding-intent routing ──────────────────────────────────────
+  // A coding task, with the dispatch dep wired → routed to the brain's CodeTurn
+  // job, NOT the chat model; replies with the job's ack; no phone-side meter (the
+  // brain meters the job's own tokens).
+  {
+    let ranTurn = false;
+    const seen: { intent: CodingIntent | null } = { intent: null };
+    const out = await handleInbound(
+      msg("the checkout test is failing in eri, fix it"),
+      "+1",
+      deps({
+        runTurn: async () => { ranTurn = true; throw new Error("should not chat"); },
+        dispatchCodingJob: async (_userId, intent) => { seen.intent = intent; return { ack: "on it — cloning eri 🌿" }; },
+      }),
+    );
+    assert.equal(out.branch, "coding");
+    assert.equal(ranTurn, false, "a coding task must not hit the chat model");
+    assert.equal(out.meter, null, "the brain meters the job, not the phone turn");
+    assert.equal(seen.intent?.verb, "fix", "the classified intent reaches the dispatch");
+    assert.deepEqual(out.replyChunks, ["on it — cloning eri 🌿"]);
+  }
+
+  // Dispatch declines (repo not linked / feature off) → fall through to normal chat.
+  {
+    const out = await handleInbound(
+      msg("fix the failing test in eri"),
+      "+1",
+      deps({ dispatchCodingJob: async () => null }),
+    );
+    assert.equal(out.branch, "answered", "a declined coding job falls through to chat");
+  }
+
+  // Non-coding text never reaches the coding dispatch, even when it's wired.
+  {
+    let dispatched = false;
+    const out = await handleInbound(
+      msg("what was I working on?"),
+      "+1",
+      deps({ dispatchCodingJob: async () => { dispatched = true; return { ack: "x" }; } }),
+    );
+    assert.equal(out.branch, "answered");
+    assert.equal(dispatched, false, "chat messages don't reach the coding dispatch");
+  }
+
+  // Additive: with NO dispatch dep wired (today's prod), a coding-shaped message
+  // is answered as normal chat — zero behavior change until P2 wires the contract.
+  {
+    const out = await handleInbound(msg("fix the failing test in eri"), "+1", deps());
+    assert.equal(out.branch, "answered");
+  }
+
+  // Over quota short-circuits before any coding dispatch (a job costs tokens too).
+  {
+    let dispatched = false;
+    const out = await handleInbound(
+      msg("fix the failing test in eri"),
+      "+1",
+      deps({ withinQuota: async () => false, dispatchCodingJob: async () => { dispatched = true; return { ack: "x" }; } }),
+    );
+    assert.equal(out.branch, "over_quota");
+    assert.equal(dispatched, false, "over-quota users don't kick off a coding job");
   }
 
   // eslint-disable-next-line no-console

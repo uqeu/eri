@@ -176,6 +176,22 @@ export function makeInboundDeps(): InboundDeps {
     webSearch: makeWebSearchDeps(),
     weather: makeWeatherDeps(),
     runVisionTurn: ({ imageUrl, prompt, system }) => runVisionTurn({ imageUrl, prompt, system }),
+    dispatchCodingJob: async (userId, intent) => {
+      // SHADOW MODE (Phase 3, P1): the classifier runs on real inbound traffic and
+      // we LOG every coding intent it flags — so we can validate precision before
+      // P2 wires the real job kickoff (mirrors the Q23 shadow-then-enforce posture).
+      // Return null → decline → the message falls through to normal chat, so this is
+      // additive with zero behavior change. Once the brain's CodeTurn contract lands,
+      // P2 replaces this body with the real kickoff + streamed status
+      // ("on it — cloning — tests green — PR #123 [link]").
+      logEvent("inbound.coding_intent_shadow", {
+        userId,
+        verb: intent.verb,
+        repo: intent.repo,
+        confidence: intent.confidence,
+      });
+      return null;
+    },
     loadConversation,
     recordConversation: recordExchange,
     recordSignal,

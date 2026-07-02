@@ -47,6 +47,7 @@ import {
 import type { CommandKind } from "@/lib/commands/queue";
 import { featureLocked } from "@/lib/feature_gate";
 import { isAffirmation, isCorrection, isNegation } from "@/lib/imessage/affirm";
+import { classifyCodingIntent, type CodingIntent } from "@/lib/coding/intent";
 import { formatReply } from "@/lib/imessage/format";
 import { extractPairingCode } from "@/lib/imessage/identity";
 import type { InboundMessage } from "@/lib/imessage/webhook";
@@ -80,6 +81,7 @@ export type InboundBranch =
   | "confirmed"
   | "cancelled"
   | "over_quota"
+  | "coding"
   | "answered"
   | "errored";
 
@@ -155,6 +157,16 @@ export interface InboundDeps {
   weather: WeatherDeps;
   /** Answer about a photo the user sent (Claude vision). Single-shot, no tools. */
   runVisionTurn(input: { imageUrl: string; prompt: string; system: string }): Promise<AgentTurnResultLike>;
+  /** Hand a classified coding task to the brain's CodeTurn job (Phase 3, P1). The
+   *  job runs in a cloud sandbox — clone → plan → edit → run tests → open a PR —
+   *  and streams status back over its own channel (P2). Returns an ack to text
+   *  the user immediately ("on it — cloning …"), or null to DECLINE (repo not
+   *  linked → P4 connect-flow, or the feature is off) so the message falls through
+   *  to normal chat. Optional: while unset (the CodeTurn contract isn't wired yet),
+   *  coding-shaped messages are answered as normal chat — additive, no behavior
+   *  change. Single-principal + reversible (opens a PR, never merges), so there's
+   *  no confirm gate here; merging/destructive stays gated on the computer. */
+  dispatchCodingJob?(userId: string, intent: CodingIntent): Promise<{ ack: string } | null>;
   /** Approve the user's latest awaiting-confirm command; returns its goal or null. */
   confirmPending(userId: string): Promise<{ goal: string } | null>;
   /** Cancel the user's latest awaiting-confirm command; true if there was one. */
@@ -210,6 +222,21 @@ export async function handleInbound(
 
   if (!(await deps.withinQuota(user.userId, user.tier))) {
     return { replyChunks: [REPLY.overQuota], meter: null, branch: "over_quota" };
+  }
+
+  // Coding task (Phase 3 wedge) → hand off to the brain's CodeTurn job instead of
+  // a chat turn. Gated on the dispatch dep: while it's unset (the contract isn't
+  // wired yet), a coding-shaped message just falls through to normal chat below —
+  // additive, zero behavior change. A declined dispatch (null: repo not linked /
+  // feature off) also falls through. No phone-side meter: the job meters its own
+  // tokens in the brain, so `meter` stays null (like a computer dispatch).
+  // Text only — a photo (even with a coding-ish caption) stays on the vision path.
+  if (deps.dispatchCodingJob && !msg.mediaUrl) {
+    const intent = classifyCodingIntent(msg.content);
+    if (intent) {
+      const ack = await deps.dispatchCodingJob(user.userId, intent);
+      if (ack) return { replyChunks: formatReply(ack.ack), meter: null, branch: "coding" };
+    }
   }
 
   const { profile, dynamicContext } = await deps.loadProfile(user.userId, msg.content);
