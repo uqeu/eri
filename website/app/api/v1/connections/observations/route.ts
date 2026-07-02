@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { authenticateApiBearer } from "@/lib/auth/api_tokens";
+import { autoIndexAllowed } from "@/lib/connections/autoindex_gate";
 import { makeConnectorDeps } from "@/lib/connections/connector_deps";
 import { DEFAULT_LIMIT, fetchObservations } from "@/lib/connections/observations";
 import { rateLimit } from "@/lib/rate_limit";
@@ -26,6 +27,12 @@ export async function GET(request: Request): Promise<Response> {
   const auth = await authenticateApiBearer(request.headers.get("authorization"));
   if (!auth) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+
+  // Rollout gate: don't index a real inbox at scale until the brain's precision
+  // pass is broadly validated. Off → empty + gated:true (distinct from "no data").
+  if (!autoIndexAllowed(auth.user.id, auth.user.email)) {
+    return NextResponse.json({ observations: [], nextCursor: null, gated: true });
   }
 
   const url = new URL(request.url);
