@@ -602,6 +602,11 @@ pub enum MemoryCommand {
         #[arg(long, default_value_t = 0)]
         max: usize,
     },
+    /// Hard-erase every stored observation that trips the Q23 privacy screen —
+    /// remediation for data indexed before the precision pass existed. Orphaned
+    /// entities (e.g. a bank whose only evidence was a financial email) drop from the
+    /// server-readable projection on the next sync.
+    Purge,
     /// Drop an observation by id, or "all" to clear everything.
     Forget { target: String },
 }
@@ -1025,6 +1030,7 @@ async fn dispatch(cli: Cli) -> anyhow::Result<()> {
         Command::Memory(MemoryCommand::Who { project }) => memory::who(&project),
         Command::Memory(MemoryCommand::Reflect { limit }) => memory::reflect(limit).await,
         Command::Memory(MemoryCommand::Ingest) => memory::ingest(),
+        Command::Memory(MemoryCommand::Purge) => memory::purge(),
         Command::Memory(MemoryCommand::Backfill { months, max }) => {
             connections::run(months, max).await
         }

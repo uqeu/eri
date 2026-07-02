@@ -122,6 +122,21 @@ pub fn ingest() -> Result<()> {
     Ok(())
 }
 
+/// `eri memory purge` — hard-erase every stored observation that trips the Q23
+/// privacy screen (remediation for data indexed before the precision pass). A true
+/// erasure via the world graph's `remove_node`; entities orphaned by it (0 evidence)
+/// drop from the recall projection on the next sync. User-scoped.
+pub fn purge() -> Result<()> {
+    let user_id = config::load().ok().and_then(|c| c.user_id);
+    let removed = eri_inference::memory::connections::purge_sensitive(user_id.as_deref())
+        .context("purge sensitive observations")?;
+    println!(
+        "Purged {removed} sensitive observation{} from your world model.",
+        if removed == 1 { "" } else { "s" }
+    );
+    Ok(())
+}
+
 /// `eri brief` — a daily "here's your day" recap from what eri actually
 /// remembers. NO fabrication: it only reports real observations on record.
 /// Calendar + email join this once the user connects those (honest note).
