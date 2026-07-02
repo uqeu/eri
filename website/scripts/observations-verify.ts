@@ -45,8 +45,9 @@ async function main(): Promise<void> {
     },
   };
 
-  const since = Date.now() - 14 * 24 * 60 * 60 * 1000; // last 14 days
+  const since = Number(process.argv[3] ?? "0"); // default since=0 (the brain's backfill call)
   const result = await fetchObservations(userId, deps, { since, limit: 5 });
+  console.log(`(since=${since})`);
   // eslint-disable-next-line no-console
   console.log(JSON.stringify(result, null, 2));
 }

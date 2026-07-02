@@ -146,8 +146,12 @@ async function fetchEmails(
 ): Promise<Observation[]> {
   try {
     const afterSec = Math.max(0, Math.floor(sinceMs / 1000));
+    // Gmail REJECTS `after:0` (returns zero rows) — an unbounded / since=0 fetch
+    // must be an EMPTY query, which returns the most-recent emails. Only add the
+    // `after:` clause for a real lower bound.
+    const query = afterSec > 0 ? `after:${afterSec}` : "";
     const result = await deps.executeTool(userId, GMAIL_FETCH_TOOL, {
-      query: `after:${afterSec}`,
+      query,
       max_results: limit,
     });
     return rowsFromResult(result, GMAIL_ROW_KEYS)
@@ -165,8 +169,11 @@ async function fetchEvents(
   limit: number,
 ): Promise<Observation[]> {
   try {
+    // since=0 must NOT become timeMin:1970 (that returns the oldest events, asc).
+    // For an unbounded fetch, floor to a recent window so "who you meet" is recent.
+    const timeMinMs = sinceMs > 0 ? sinceMs : Date.now() - 30 * 24 * 60 * 60 * 1000;
     const result = await deps.executeTool(userId, CALENDAR_LIST_TOOL, {
-      timeMin: new Date(Math.max(0, sinceMs)).toISOString(),
+      timeMin: new Date(timeMinMs).toISOString(),
       single_events: true,
       order_by: "startTime",
       max_results: limit,

@@ -103,6 +103,24 @@ async function run() {
   assert.deepEqual(none.observations, []);
   assert.equal(none.nextCursor, null);
 
+  // REGRESSION: since=0 must NOT build `after:0` (Gmail returns 0 rows for it) —
+  // it's an empty query; and calendar timeMin must be recent, not 1970.
+  {
+    let gmailQuery: unknown = "UNSET";
+    let calTimeMin = "UNSET";
+    const capturing: ConnectorDeps = {
+      activeToolkits: async () => new Set(["gmail", "googlecalendar"]),
+      executeTool: async (_userId: string, slug: string, args: Record<string, unknown>) => {
+        if (slug.includes("GMAIL")) gmailQuery = args.query;
+        else calTimeMin = String(args.timeMin);
+        return { successful: true, error: null, data: {} };
+      },
+    };
+    await fetchObservations("usr_x", capturing, { since: 0, limit: 10 });
+    assert.equal(gmailQuery, "", "since=0 → empty gmail query, never after:0");
+    assert.ok(!calTimeMin.startsWith("1970"), "since=0 → calendar timeMin is recent, not 1970");
+  }
+
   // eslint-disable-next-line no-console
   console.log("connections-observations.test.ts: all assertions passed");
 }
