@@ -25,6 +25,42 @@ fn open_creates_schema_in_tempdir() {
 }
 
 #[test]
+fn remove_node_hard_deletes_the_node_and_its_incident_edges() {
+    let graph = Graph::open_in_memory().unwrap();
+    let a = graph
+        .insert_node(Node::new("observation", json!({ "text": "sensitive" })))
+        .unwrap();
+    let b = graph
+        .insert_node(Node::new(
+            "entity_person",
+            json!({ "canonical_name": "Sam" }),
+        ))
+        .unwrap();
+    // An evidence edge from the observation to the entity.
+    graph
+        .insert_edge(Edge::new(a.clone(), b.clone(), edge_kind::CAUSED_BY))
+        .unwrap();
+
+    // Erase the observation: node gone, and its incident evidence edge gone (no
+    // dangling edge to the deleted node). `b` keeps its own auto session edge.
+    assert!(graph.remove_node(&a).unwrap(), "a node existed to remove");
+    assert!(graph.get_node(&a).unwrap().is_none(), "node hard-deleted");
+    assert!(
+        graph
+            .neighbors(&b, Some(edge_kind::CAUSED_BY), Direction::In)
+            .unwrap()
+            .is_empty(),
+        "the incident evidence edge to the erased node was removed (no dangling edge)"
+    );
+    // The other node is untouched; and remove is idempotent.
+    assert!(graph.get_node(&b).unwrap().is_some());
+    assert!(
+        !graph.remove_node(&a).unwrap(),
+        "removing an absent node is a no-op false"
+    );
+}
+
+#[test]
 fn insert_node_and_edge_then_read_back() {
     let graph = Graph::open_in_memory().unwrap();
     let a = graph

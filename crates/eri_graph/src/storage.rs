@@ -104,6 +104,19 @@ impl Store {
         Ok(())
     }
 
+    /// Hard-delete a node and EVERY edge incident to it (as `src` or `dst`). A true
+    /// erasure — distinct from the bi-temporal invalidation used elsewhere — for
+    /// privacy purges, where a sensitive node must leave no trace. Edges are removed
+    /// first so no dangling edge survives. Returns whether a node row was deleted.
+    pub fn remove_node(&self, id: &str) -> Result<bool, GraphError> {
+        self.conn
+            .execute("DELETE FROM edges WHERE src = ?1 OR dst = ?1", params![id])?;
+        let removed = self
+            .conn
+            .execute("DELETE FROM nodes WHERE id = ?1", params![id])?;
+        Ok(removed > 0)
+    }
+
     pub fn get_node(&self, id: &str) -> Result<Option<Node>, GraphError> {
         self.conn
             .query_row(
