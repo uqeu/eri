@@ -54,6 +54,8 @@ import type { InboundMessage } from "@/lib/imessage/webhook";
 export const REPLY = {
   notLinked:
     "Hey! I don't recognize this number yet 🌿 Run `eri phone link` on your computer and text me the code it gives you to connect.",
+  welcomeNew:
+    "hey, i'm eri 🌿 i don't know you yet — tap here to set yourself up, and i'll be linked to this number:",
   linked: 'You\'re linked! 🌿 Text me anything — I know your day. Try "what was I working on?"',
   locked: "Texting with eri is a Pro+ feature — upgrade at tryeri.ca to chat with me here.",
   overQuota:
@@ -106,6 +108,10 @@ export interface AgentTurnResultLike {
 export interface InboundDeps {
   consumePairing(code: string, e164: string): Promise<{ userId: string } | null>;
   resolveUserByPhone(e164: string): Promise<ResolvedUser | null>;
+  /** Mint + store a single-use magic sign-up link for an unknown number, so a
+   *  stranger can sign up and auto-link THIS number (hijack-proof). Returns the
+   *  absolute URL to text back. */
+  mintSignupLink(e164: string): Promise<string>;
   /** True when the user is within quota for an estimated turn. */
   withinQuota(userId: string, tier: string): Promise<boolean>;
   /** Build the context for this turn. `query` is the incoming message, used to
@@ -184,7 +190,15 @@ export async function handleInbound(
       const paired = await deps.consumePairing(code, e164);
       if (paired) return { replyChunks: [REPLY.linked], meter: null, branch: "paired" };
     }
-    return { replyChunks: [REPLY.notLinked], meter: null, branch: "not_linked" };
+    // Unknown number → text a magic sign-up link. Tap → sign up on web → the link
+    // auto-links THIS number (the number is fixed by the token, so it's hijack-proof).
+    let reply: string = REPLY.notLinked;
+    try {
+      reply = `${REPLY.welcomeNew}\n\n${await deps.mintSignupLink(e164)}`;
+    } catch {
+      // fall back to the generic reply if minting fails
+    }
+    return { replyChunks: [reply], meter: null, branch: "not_linked" };
   }
   if (featureLocked(user.tier, "phoneEri")) {
     return { replyChunks: [REPLY.locked], meter: null, branch: "locked" };

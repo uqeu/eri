@@ -33,6 +33,7 @@ import { rerank } from "@/lib/agent/rerank";
 import { cancelPending, confirmPending, enqueueCommand } from "@/lib/commands/queue";
 import { handleInbound, type InboundDeps } from "@/lib/imessage/inbound";
 import { consumePairing, normalizeE164, resolveUserByPhone } from "@/lib/imessage/identity";
+import { mintSignupLink } from "@/lib/phone/signup_link_db";
 import type { InboundMessage } from "@/lib/imessage/webhook";
 import { formatWorldModel, readRecallProjection } from "@/lib/messaging/recall";
 import { getUserSettings } from "@/lib/messaging/settings";
@@ -164,6 +165,7 @@ export function makeInboundDeps(): InboundDeps {
   return {
     consumePairing,
     resolveUserByPhone,
+    mintSignupLink,
     withinQuota: async (userId, tier) => (await ensureWithinQuota(userId, tier, 1000)).ok,
     loadProfile,
     runTurn: runAgentTurn,

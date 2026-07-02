@@ -21,6 +21,7 @@ function deps(over: Partial<InboundDeps> = {}): InboundDeps {
   return {
     consumePairing: async () => null,
     resolveUserByPhone: async () => ({ userId: "u1", tier: "pro_plus" }),
+    mintSignupLink: async () => "https://tryeri.ca/join?t=test123",
     withinQuota: async () => true,
     loadProfile: async () => ({ profile: { facts: ["likes tabs"] }, dynamicContext: "" }),
     runTurn: async () => ({ text: "**hi**", tokensIn: 10, tokensOut: 5, model: "claude-sonnet-4-6" }),
@@ -62,6 +63,18 @@ async function run() {
     const out = await handleInbound(msg("hello"), "+1", deps({ resolveUserByPhone: async () => null }));
     assert.equal(out.branch, "not_linked");
     assert.equal(out.meter, null);
+    assert.ok(out.replyChunks[0].includes("join?t=test123"), "unknown number gets a magic sign-up link");
+  }
+
+  // If minting the signup link fails, fall back to the generic reply (never crash).
+  {
+    const out = await handleInbound(
+      msg("hello"),
+      "+1",
+      deps({ resolveUserByPhone: async () => null, mintSignupLink: async () => { throw new Error("db down"); } }),
+    );
+    assert.equal(out.branch, "not_linked");
+    assert.deepEqual(out.replyChunks, [REPLY.notLinked]);
   }
 
   // A LINKED user texting something code-shaped is answered, not treated as pairing (L3).
