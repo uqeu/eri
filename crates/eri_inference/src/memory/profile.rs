@@ -152,6 +152,19 @@ pub(crate) fn looks_sensitive(text: &str) -> bool {
         "brokerage",
         "tax return",
         "credit score",
+        // real-email banking phrasings the keyword floor missed on live Gmail
+        // (2026-07-02) — still a floor, not exhaustive; the Claude precision pass is
+        // the real "exclude if unsure" gate above this.
+        "interac",
+        "e-transfer",
+        "etransfer",
+        "direct deposit",
+        "deposited",
+        "low balance",
+        "balance warning",
+        "overdraft",
+        "zelle",
+        "cash app",
         // -- health --
         "diagnosis",
         "diagnosed",
@@ -329,6 +342,24 @@ mod tests {
             "secrets must never reach Tier-A; got {:?}",
             p.facts
         );
+    }
+
+    #[test]
+    fn real_banking_email_phrasings_are_screened_as_sensitive() {
+        // The keyword floor missed these on live Gmail (2026-07-02) — financial
+        // content reached the server-readable projection. Lock the real phrasings so
+        // it can't regress (still a floor; the Claude precision pass is the real fix).
+        for text in [
+            "Interac e-Transfer: Your $1,500.00 transfer to ARAV KHANNA has been deposited",
+            "RBC Royal Bank Alerts: Low Balance Warning",
+            "Your direct deposit has arrived",
+            "Overdraft notice on your account",
+        ] {
+            assert!(
+                looks_sensitive(text),
+                "must be screened as sensitive: {text:?}"
+            );
+        }
     }
 
     #[test]
