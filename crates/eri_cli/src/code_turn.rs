@@ -241,6 +241,24 @@ impl CodeOutcome {
     pub fn opened_pr(&self) -> bool {
         matches!(self, CodeOutcome::Opened { .. })
     }
+
+    /// The terminal wire envelope the phone reads when a job settles: a stable
+    /// `kind` tag, the structured payload, and the brain-composed `text` (the
+    /// final bubble). Mirrors [`CodeProgress::wire`] for the outcome.
+    pub fn wire(&self) -> Value {
+        let mut v = match self {
+            CodeOutcome::Opened { number, url } => {
+                json!({ "kind": "opened", "number": number, "url": url })
+            }
+            CodeOutcome::TestsRed { summary } => {
+                json!({ "kind": "testsRed", "summary": summary })
+            }
+            CodeOutcome::Halted { reason } => json!({ "kind": "halted", "reason": reason }),
+            CodeOutcome::Refused { reason } => json!({ "kind": "refused", "reason": reason }),
+        };
+        v["text"] = json!(self.summary());
+        v
+    }
 }
 
 /// The fail-closed PR gate: a PR may open ONLY when the most recent test run
@@ -578,6 +596,40 @@ mod tests {
         );
         assert!(!CodeOutcome::Halted { reason: "x".into() }.opened_pr());
         assert!(!CodeOutcome::Refused { reason: "x".into() }.opened_pr());
+    }
+
+    #[test]
+    fn outcome_wire_carries_kind_payload_and_text() {
+        let opened = CodeOutcome::Opened {
+            number: 123,
+            url: "https://github.com/x/y/pull/123".into(),
+        }
+        .wire();
+        assert_eq!(opened["kind"], "opened");
+        assert_eq!(opened["number"], 123);
+        assert!(opened["text"].as_str().is_some_and(|t| t.contains("123")));
+
+        let red = CodeOutcome::TestsRed {
+            summary: "still red".into(),
+        }
+        .wire();
+        assert_eq!(red["kind"], "testsRed");
+        assert_eq!(red["summary"], "still red");
+
+        assert_eq!(
+            CodeOutcome::Halted {
+                reason: "cap".into()
+            }
+            .wire()["kind"],
+            "halted"
+        );
+        assert_eq!(
+            CodeOutcome::Refused {
+                reason: "no".into()
+            }
+            .wire()["kind"],
+            "refused"
+        );
     }
 
     #[test]

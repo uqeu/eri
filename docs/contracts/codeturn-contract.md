@@ -86,13 +86,72 @@ any PR authoring. No test run, or a red last run ⇒ no PR (`testsRed` outcome).
 The phone never needs to re-check this; it is enforced brain-side. eri is a real
 engineer, not a one-shot diff generator — it never ships red.
 
+## Cloud compute + the dispatch wire (B2)
+
+The phone is TS and can't call the Rust `CodeTurn` directly. The harness runs
+**cloud-side** so it works with the laptop closed — this is where the cloud-
+primary path actually lives.
+
+**Provider: Vercel Sandbox** (GA since Jan 2026). Chosen over E2B for launch:
+same-vendor as `website/`, so the worker creates the sandbox with the platform's
+own OIDC — no second vendor, no extra key. The Rust harness is a compiled binary,
+and every step maps 1:1 to a Sandbox `runCommand` whose exit code feeds the B2
+seams: `git clone` → `eri` (harness edit) → `<repo test cmd>` (exit code = the
+`Tested{passed}` that drives `pr_gate`) → commit. E2B (agent-tuned, free tier)
+stays a fallback; it doesn't change the clone→edit→test→capture flow.
+
+**Compute path: a cloud WORKER spins the sandbox** — a Vercel Function / cron
+background job, never the desktop (the desktop "use my machine" path is the
+SECONDARY option, ADR-0002, for laptop-on + local-repo). Laptop-closed is the
+whole wedge.
+
+**The ONE thing the operator provisions:** `VERCEL_TOKEN` (a Vercel access
+token, `vercel tokens add`) in the Vercel project env — needed only if the worker
+runs outside a Vercel Function; the Function path authenticates to Sandbox via
+OIDC with **zero** config. (When explicit, pair it with `VERCEL_TEAM_ID` +
+`VERCEL_PROJECT_ID`.) The per-user **GitHub token for `git clone` is NOT operator-
+provisioned** — it's the user's own OAuth (Composio GitHub / eri GitHub App),
+injected into the sandbox as an env var at creation, never in chat or logs.
+
+**Dispatch (brain-side, in the worker):**
+1. `resolve_repo(repo_hint, connected_repos)` → single-principal resolution:
+   `Resolved(owner/name)` runs the job; `NeedsConnect(hint)` → the phone's P4
+   connect-flow; `Ambiguous`/`NoHint` → the phone asks. Only the user's connected
+   repos are eligible — never a cross-user reach.
+2. mint a `job_id`, create the sandbox, clone with the user's GitHub token, run
+   the `SandboxCodeTurn`.
+
+**Progress transport: durable job-status rows** (Supabase; recommended over raw
+SSE — serverless-robust, survives disconnects). The worker writes a `CodeJobRecord`
+row the phone polls / subscribes to:
+
+```jsonc
+{
+  "job_id": "job_abc123",
+  "repo":   "eri-labs/eri",
+  "phase":  "running",            // → "settled" when done
+  "pr_number": 123,               // null until a PR opens (for P3 reply / B4 routing)
+  "events": [ /* CodeProgress.wire() envelopes, appended as they stream */ ],
+  "outcome": { /* CodeOutcome.wire(), null until settled */ }
+}
+```
+
+The phone reads new `events[]` and streams each `text` as a bubble; on `settled`
+it sends `outcome.text`. (SSE is an optional lower-latency add later; a frame is
+just one `CodeProgress.wire()`.)
+
+**Follow-up routing (B4):** a review comment ("for PR #123, rename X, re-run")
+routes back to the SAME job by `job_id` (the phone kept it from kickoff) or by
+`pr_number` on the record — the worker starts another attempt on the same PR
+branch rather than opening a new PR.
+
 ## Lane ownership + status
 
 | Slice | Lane | What | Status |
 |-------|------|------|--------|
 | B1 | brain | CodeTurn seam + progress/outcome/budget + `pr_gate` + scripted stub | **shipped, tested** |
-| B2 | brain | harness-in-sandbox adapter (clone → run harness → capture tests → fail-closed) | next |
-| B3 | brain | PR authoring (branch + commit + open PR, eri-voice summary + test evidence) | next |
+| B2 | brain | harness-in-sandbox adapter (edit→test loop, fail-closed) + dispatch/repo-resolution + job record wire | **shipped, tested** |
+| B3 | brain | PR authoring (branch + commit + open PR, eri-voice summary + test evidence) — the `PrAuthor` seam | next |
 | B4 | brain | review-comment loop ("change X, re-run" → another commit) | next |
 | P1 | phone | coding-intent classification on inbound → route to a CodeTurn job | — |
 | P2 | phone | job kickoff + streamed status (typing indicator + multi-bubble cadence) | — |
@@ -104,5 +163,7 @@ engineer, not a one-shot diff generator — it never ships red.
 The brain ships `ScriptedCodeTurn::new(events, outcome)` — a network-free stub
 that emits a fixed event sequence then settles on a fixed outcome. The phone lane
 can drive a full end-to-end (classify → kickoff → stream bubbles → PR-link reply)
-against the stub today, then swap in the sandbox adapter (B2) with zero phone
-changes. The wire shape above is the only thing both lanes depend on.
+against the stub today; the real `SandboxCodeTurn` (B2) now runs behind the SAME
+wire, so wiring the worker to it needs zero phone changes (only B3's real
+`PrAuthor` is still stubbed). The wire shape above is the only thing both lanes
+depend on.

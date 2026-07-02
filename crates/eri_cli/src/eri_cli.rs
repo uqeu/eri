@@ -35,6 +35,8 @@ mod build_turn;
 mod chat;
 mod checkpoint;
 mod client;
+mod code_dispatch;
+mod code_sandbox;
 mod code_turn;
 mod coding_agent;
 mod coding_control;
