@@ -151,7 +151,7 @@ branch rather than opening a new PR.
 |-------|------|------|--------|
 | B1 | brain | CodeTurn seam + progress/outcome/budget + `pr_gate` + scripted stub | **shipped, tested** |
 | B2 | brain | harness-in-sandbox adapter (edit→test loop, fail-closed) + dispatch/repo-resolution + job record wire | **shipped, tested** |
-| B3 | brain | PR authoring (branch + commit + open PR, eri-voice summary + test evidence) — the `PrAuthor` seam | next |
+| B3 | brain | PR authoring — real `GitHubPrAuthor` (push branch + `POST /pulls`, eri-voice body + test evidence, never from base) | **shipped, tested** |
 | B4 | brain | review-comment loop ("change X, re-run" → another commit) | next |
 | P1 | phone | coding-intent classification on inbound → route to a CodeTurn job | — |
 | P2 | phone | job kickoff + streamed status (typing indicator + multi-bubble cadence) | — |
@@ -163,7 +163,24 @@ branch rather than opening a new PR.
 The brain ships `ScriptedCodeTurn::new(events, outcome)` — a network-free stub
 that emits a fixed event sequence then settles on a fixed outcome. The phone lane
 can drive a full end-to-end (classify → kickoff → stream bubbles → PR-link reply)
-against the stub today; the real `SandboxCodeTurn` (B2) now runs behind the SAME
-wire, so wiring the worker to it needs zero phone changes (only B3's real
-`PrAuthor` is still stubbed). The wire shape above is the only thing both lanes
-depend on.
+against the stub today; the real `SandboxCodeTurn` (B2) + `GitHubPrAuthor` (B3)
+now run behind the SAME wire, so wiring the worker to them needs zero phone
+changes. The wire shape above is the only thing both lanes depend on.
+
+## Remaining before go-live: the cloud worker (cross-surface)
+
+The brain pieces are done (B1–B3). One piece remains, and it spans both lanes:
+a **cloud worker** — a Vercel Function / cron that (1) receives the dispatched
+job, (2) `resolve_repo` + mint `job_id`, (3) spins the Vercel Sandbox, (4) clones
+with the user's GitHub token (also passed to `GitHubPrAuthor::from_token`), (5)
+runs `SandboxCodeTurn` (harness → tests → fail-closed → `GitHubPrAuthor`), (6)
+writes the `CodeJobRecord` rows the phone polls.
+
+**Mini-contract to settle with the phone lane** (how the Function invokes the
+Rust harness inside the sandbox): the `eri` binary is shipped into the sandbox
+and driven per step via `runCommand` — `git clone` → `eri` (harness edit) →
+`<repo test cmd>` (exit code → `Tested{passed}`) → commit → the PR call. The
+Function reads each command's stdout/exit and appends the matching
+`CodeProgress.wire()` to the record. Define: the exact `runCommand` invocation
+for the harness edit pass (args + how feedback is passed on a retry) and how the
+per-user GitHub token reaches both the clone remote and `GitHubPrAuthor`.

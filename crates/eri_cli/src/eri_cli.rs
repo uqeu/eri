@@ -36,6 +36,7 @@ mod chat;
 mod checkpoint;
 mod client;
 mod code_dispatch;
+mod code_pr;
 mod code_sandbox;
 mod code_turn;
 mod coding_agent;

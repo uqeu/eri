@@ -81,9 +81,16 @@ pub struct PrRef {
 
 /// Opens a PR for a green, committed job. B3 implements this via the GitHub API;
 /// B2 injects a stub. The orchestration calls it ONLY after [`pr_gate`] passes.
+/// `progress` is the full emitted event stream so the author can build an
+/// eri-voice summary + the passing-test evidence into the PR body.
 #[async_trait]
 pub trait PrAuthor: Send + Sync {
-    async fn open(&self, job: &CodeJob, commit_sha: &str) -> Result<PrRef>;
+    async fn open(
+        &self,
+        job: &CodeJob,
+        commit_sha: &str,
+        progress: &[CodeProgress],
+    ) -> Result<PrRef>;
 }
 
 /// The harness-in-sandbox [`CodeTurn`]. Orchestrates plan → (edit → test)* →
@@ -213,7 +220,7 @@ impl CodeTurn for SandboxCodeTurn {
             },
         );
 
-        let pr = self.pr_author.open(job, &sha).await?;
+        let pr = self.pr_author.open(job, &sha, &events).await?;
         let (number, url) = (pr.number, pr.url.clone());
         Self::emit(
             sink,
@@ -425,7 +432,12 @@ mod tests {
     }
     #[async_trait]
     impl PrAuthor for CountingPrAuthor {
-        async fn open(&self, _job: &CodeJob, _sha: &str) -> Result<PrRef> {
+        async fn open(
+            &self,
+            _job: &CodeJob,
+            _sha: &str,
+            _progress: &[CodeProgress],
+        ) -> Result<PrRef> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             Ok(PrRef {
                 number: self.number,
