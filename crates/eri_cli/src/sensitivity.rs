@@ -16,7 +16,10 @@ use anyhow::Result;
 
 /// Cheap/fast — a binary SAFE/SENSITIVE classification, not generation.
 const SCREEN_MODEL: &str = "claude-haiku-4-5-20251001";
-const SCREEN_MAX_TOKENS: u32 = 512;
+/// Generous so a full page of verdicts is never truncated — a cut-off array parses
+/// as wrong-length and (fail-closed) drops the whole page, so this must fit
+/// `page_size` verdicts with margin (~8 tokens each).
+const SCREEN_MAX_TOKENS: u32 = 2048;
 
 /// A privacy screen over observation texts. `screen(texts)` returns one keep-flag per
 /// text, in order: `true` = SAFE to keep, `false` = DROP (sensitive OR unsure). A
@@ -38,9 +41,10 @@ fn screen_system_prompt() -> &'static str {
      salary, investments, account or card numbers)\n\
      - health or medical (conditions, diagnoses, medications, appointments, results)\n\
      - intimate or sexual\n\
-     Answer SAFE or SENSITIVE for each, in order. When in doubt, answer SENSITIVE \
-     (exclude if unsure). Respond with ONLY a JSON array of strings, exactly one per \
-     observation in order, each either \"SAFE\" or \"SENSITIVE\". No prose, no fences."
+     When in doubt, answer SENSITIVE (exclude if unsure). Respond with ONLY a JSON \
+     object mapping each observation's number (as a STRING key) to its verdict \
+     (\"SAFE\" or \"SENSITIVE\") — e.g. {\"1\":\"SAFE\",\"2\":\"SENSITIVE\"}. Include \
+     EVERY number from 1 to the count. No prose, no fences."
 }
 
 /// The numbered observations as the user message (1-based, matching the reply order).
@@ -52,20 +56,26 @@ fn screen_user_message(texts: &[&str]) -> String {
     s
 }
 
-/// Parse the model's reply into per-text keep flags. **FAIL-CLOSED**: only a
-/// well-formed JSON array of exactly `n` verdicts is trusted; a parse failure or a
-/// wrong length DROPS everything (all `false`). Per element, ONLY a case-insensitive
-/// `"safe"` keeps; anything else (SENSITIVE, "unsure", unknown) drops.
+/// Parse the model's index-keyed reply into per-text keep flags. **FAIL-CLOSED** and
+/// index-keyed so a miscount can never misalign: each observation `i` (1-based) is
+/// KEPT only if its own key maps to a case-insensitive `"safe"`. A missing key, any
+/// other verdict, or an unparseable reply → DROP (`false`). So a model that omits or
+/// mangles a few keys drops exactly those, never the whole page.
 fn parse_verdicts(reply: &str, n: usize) -> Vec<bool> {
-    let Ok(verdicts) = serde_json::from_str::<Vec<String>>(reply.trim()) else {
+    use std::collections::HashMap;
+    // Robust to ```json fences / stray prose — extract the JSON object.
+    let obj = match (reply.find('{'), reply.rfind('}')) {
+        (Some(a), Some(b)) if b > a => &reply[a..=b],
+        _ => return vec![false; n],
+    };
+    let Ok(map) = serde_json::from_str::<HashMap<String, String>>(obj) else {
         return vec![false; n];
     };
-    if verdicts.len() != n {
-        return vec![false; n];
-    }
-    verdicts
-        .iter()
-        .map(|v| v.trim().eq_ignore_ascii_case("safe"))
+    (1..=n)
+        .map(|i| {
+            map.get(&i.to_string())
+                .is_some_and(|v| v.trim().eq_ignore_ascii_case("safe"))
+        })
         .collect()
 }
 
@@ -82,7 +92,19 @@ impl SensitivityScreen for ClaudeSensitivityScreen {
         let user = screen_user_message(texts);
         // Over quota (None) → FAIL-CLOSED: we can't screen, so we keep nothing.
         match crate::inference::call(SCREEN_MODEL, SCREEN_MAX_TOKENS, system, &user).await? {
-            Some(reply) => Ok(parse_verdicts(&reply, texts.len())),
+            Some(reply) => {
+                let keep = parse_verdicts(&reply, texts.len());
+                if std::env::var("ERI_DEBUG").is_ok() {
+                    let kept = keep.iter().filter(|k| **k).count();
+                    eprintln!(
+                        "eri: privacy screen — batch {} · kept {} · dropped {}",
+                        texts.len(),
+                        kept,
+                        texts.len() - kept
+                    );
+                }
+                Ok(keep)
+            }
             None => Ok(vec![false; texts.len()]),
         }
     }
@@ -94,15 +116,17 @@ mod tests {
 
     #[test]
     fn a_well_formed_reply_maps_safe_to_keep_sensitive_to_drop() {
-        let keep = parse_verdicts(r#"["SAFE","SENSITIVE","safe"]"#, 3);
+        let keep = parse_verdicts(r#"{"1":"SAFE","2":"SENSITIVE","3":"safe"}"#, 3);
         assert_eq!(keep, vec![true, false, true]);
     }
 
     #[test]
-    fn a_wrong_length_reply_fails_closed_dropping_everything() {
-        // The model returned 2 verdicts for 3 observations — we can't trust the
-        // alignment, so DROP all (never guess which is which).
-        assert_eq!(parse_verdicts(r#"["SAFE","SAFE"]"#, 3), vec![false; 3]);
+    fn a_missing_key_drops_only_that_item_not_the_whole_page() {
+        // The model omitted key "2" (a real miscount) — index-keyed, so ONLY item 2
+        // fails closed; items 1 and 3 are still classified. This is why the page
+        // isn't lost to a single miscount (the bug the positional array had).
+        let keep = parse_verdicts(r#"{"1":"SAFE","3":"SAFE"}"#, 3);
+        assert_eq!(keep, vec![true, false, true]);
     }
 
     #[test]
@@ -112,9 +136,19 @@ mod tests {
     }
 
     #[test]
+    fn a_fenced_or_prose_wrapped_object_is_still_parsed() {
+        // haiku wraps the object in a ```json fence despite the instruction — the
+        // brace-extraction handles it.
+        assert_eq!(
+            parse_verdicts("```json\n{\"1\":\"SAFE\",\"2\":\"SENSITIVE\"}\n```", 2),
+            vec![true, false]
+        );
+    }
+
+    #[test]
     fn anything_that_is_not_exactly_safe_is_dropped() {
-        // "unsure", empty, or any non-SAFE token → drop (exclude if unsure).
-        let keep = parse_verdicts(r#"["unsure","","SAFE","maybe"]"#, 4);
+        // "unsure", empty, missing, or any non-SAFE token → drop (exclude if unsure).
+        let keep = parse_verdicts(r#"{"1":"unsure","2":"","3":"SAFE"}"#, 4);
         assert_eq!(keep, vec![false, false, true, false]);
     }
 
