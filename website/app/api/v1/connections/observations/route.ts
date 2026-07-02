@@ -30,9 +30,16 @@ export async function GET(request: Request): Promise<Response> {
 
   const url = new URL(request.url);
   const since = parseIntParam(url.searchParams.get("since"), 0);
+  // `before` (ms) walks BACKWARD through history: pass the previous nextCursor to
+  // page from newest toward oldest. 0/absent → newest overall.
+  const before = parseIntParam(url.searchParams.get("before"), 0);
   const limit = parseIntParam(url.searchParams.get("limit"), DEFAULT_LIMIT);
 
-  const result = await fetchObservations(auth.user.id, makeConnectorDeps(), { since, limit });
+  const result = await fetchObservations(auth.user.id, makeConnectorDeps(), {
+    since,
+    before: before > 0 ? before : null,
+    limit,
+  });
   return NextResponse.json(result);
 }
 

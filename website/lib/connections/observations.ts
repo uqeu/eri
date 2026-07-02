@@ -133,50 +133,82 @@ export function calendarToObservation(row: unknown): Observation | null {
 
 // ---- orchestration ----
 
+/** Composio's GMAIL_FETCH_EMAILS THROWS for max_results >= ~50 (verified live) —
+ *  page in safe chunks and accumulate via page_token to honor a large `limit`. */
+const PAGE_SIZE = 40;
+/** Backstop so a runaway page loop can't spin (limit<=MAX_LIMIT → <=5 real pages). */
+const MAX_PAGES = 8;
+
 function clampLimit(n: number): number {
   if (!Number.isFinite(n) || n <= 0) return DEFAULT_LIMIT;
   return Math.min(Math.floor(n), MAX_LIMIT);
 }
 
+/** The forward page token a Composio list result carries, if any. */
+function nextPageToken(result: { data: Record<string, unknown> }): string | undefined {
+  const t = result.data.nextPageToken ?? result.data.next_page_token;
+  return typeof t === "string" && t.length > 0 ? t : undefined;
+}
+
+/**
+ * Fetch up to `limit` emails in the (since, before] window, NEWEST-first, paging
+ * in PAGE_SIZE chunks via page_token so a large `limit` never trips Composio's
+ * per-call cap (>=50 throws). `since` → `after:`, `before` → `before:`, so the
+ * caller can walk backward through history by passing the previous nextCursor as
+ * `before`. `after:0`/empty since means an unbounded (recent-first) fetch.
+ */
 async function fetchEmails(
   userId: string,
   deps: ConnectorDeps,
   sinceMs: number,
+  beforeMs: number | null,
   limit: number,
 ): Promise<Observation[]> {
-  try {
-    const afterSec = Math.max(0, Math.floor(sinceMs / 1000));
-    // Gmail REJECTS `after:0` (returns zero rows) — an unbounded / since=0 fetch
-    // must be an EMPTY query, which returns the most-recent emails. Only add the
-    // `after:` clause for a real lower bound.
-    const query = afterSec > 0 ? `after:${afterSec}` : "";
-    const result = await deps.executeTool(userId, GMAIL_FETCH_TOOL, {
-      query,
-      max_results: limit,
-    });
-    return rowsFromResult(result, GMAIL_ROW_KEYS)
-      .map(emailToObservation)
-      .filter((o): o is Observation => o !== null);
-  } catch {
-    return [];
+  const clauses: string[] = [];
+  if (sinceMs > 0) clauses.push(`after:${Math.floor(sinceMs / 1000)}`);
+  if (beforeMs && beforeMs > 0) clauses.push(`before:${Math.floor(beforeMs / 1000)}`);
+  const query = clauses.join(" ");
+
+  const out: Observation[] = [];
+  let pageToken: string | undefined;
+  for (let page = 0; out.length < limit && page < MAX_PAGES; page++) {
+    let result;
+    try {
+      result = await deps.executeTool(userId, GMAIL_FETCH_TOOL, {
+        query,
+        max_results: Math.min(PAGE_SIZE, limit - out.length),
+        ...(pageToken ? { page_token: pageToken } : {}),
+      });
+    } catch {
+      break;
+    }
+    const rows = rowsFromResult(result, GMAIL_ROW_KEYS);
+    out.push(...rows.map(emailToObservation).filter((o): o is Observation => o !== null));
+    pageToken = nextPageToken(result);
+    if (!pageToken || rows.length === 0) break;
   }
+  return out;
 }
 
 async function fetchEvents(
   userId: string,
   deps: ConnectorDeps,
   sinceMs: number,
+  beforeMs: number | null,
   limit: number,
 ): Promise<Observation[]> {
   try {
     // since=0 must NOT become timeMin:1970 (that returns the oldest events, asc).
     // For an unbounded fetch, floor to a recent window so "who you meet" is recent.
+    // Calendar is a bounded window read (event volume is small — no deep paging);
+    // `before` narrows the ceiling via timeMax.
     const timeMinMs = sinceMs > 0 ? sinceMs : Date.now() - 30 * 24 * 60 * 60 * 1000;
     const result = await deps.executeTool(userId, CALENDAR_LIST_TOOL, {
       timeMin: new Date(timeMinMs).toISOString(),
+      ...(beforeMs && beforeMs > 0 ? { timeMax: new Date(beforeMs).toISOString() } : {}),
       single_events: true,
       order_by: "startTime",
-      max_results: limit,
+      max_results: Math.min(PAGE_SIZE, limit),
     });
     return rowsFromResult(result, CALENDAR_ROW_KEYS)
       .map(calendarToObservation)
@@ -187,19 +219,23 @@ async function fetchEvents(
 }
 
 /**
- * Fetch the bearer's recent observations since `since`, normalized + bounded.
- * Reads only the toolkits the user has active; an unconnected account simply
- * contributes nothing (never an error). Drops obvious secrets, de-dupes by
- * stable `sourceId`, sorts ascending by `ts`, caps at `limit`, and returns a
- * forward cursor (`nextCursor`) when more may remain. Never throws.
+ * Fetch the bearer's observations in the `(since, before)` window, normalized +
+ * bounded. `before` enables BACKWARD / deep paging: each call returns the newest
+ * `limit` observations older than `before` (absent → newest overall), and
+ * `nextCursor` is the OLDEST ts returned — the caller passes it back as `before`
+ * to walk further into history, stopping when `nextCursor` is null. Reads only
+ * active toolkits; unconnected → nothing (never an error). Drops obvious secrets,
+ * de-dupes by stable `sourceId`. Never throws.
  */
 export async function fetchObservations(
   userId: string,
   deps: ConnectorDeps,
-  opts: { since: number; limit: number },
+  opts: { since: number; before?: number | null; limit: number },
 ): Promise<ObservationsResult> {
   const limit = clampLimit(opts.limit);
   const since = Number.isFinite(opts.since) && opts.since > 0 ? Math.floor(opts.since) : 0;
+  const before =
+    opts.before != null && Number.isFinite(opts.before) && opts.before > 0 ? Math.floor(opts.before) : null;
 
   let active: Set<string>;
   try {
@@ -209,20 +245,21 @@ export async function fetchObservations(
   }
 
   const fetched: Observation[] = [];
-  if (active.has(GMAIL_TOOLKIT)) fetched.push(...(await fetchEmails(userId, deps, since, limit)));
-  if (active.has(CALENDAR_TOOLKIT)) fetched.push(...(await fetchEvents(userId, deps, since, limit)));
+  if (active.has(GMAIL_TOOLKIT)) fetched.push(...(await fetchEmails(userId, deps, since, before, limit)));
+  if (active.has(CALENDAR_TOOLKIT)) fetched.push(...(await fetchEvents(userId, deps, since, before, limit)));
 
   const seen = new Set<string>();
   const cleaned = fetched
-    .filter((o) => o.ts > since)
+    .filter((o) => o.ts > since && (before === null || o.ts < before))
     .filter((o) => !looksLikeSecret(o.text))
-    .filter((o) => (seen.has(o.sourceId) ? false : (seen.add(o.sourceId), true)))
-    .sort((a, b) => a.ts - b.ts);
+    .filter((o) => (seen.has(o.sourceId) ? false : (seen.add(o.sourceId), true)));
 
-  const observations = cleaned.slice(0, limit);
-  const nextCursor =
-    observations.length >= limit && observations.length > 0
-      ? observations[observations.length - 1].ts
-      : null;
+  // Newest-first, take the top `limit`; cursor = the OLDEST of those (walk older).
+  cleaned.sort((a, b) => b.ts - a.ts);
+  const page = cleaned.slice(0, limit);
+  const nextCursor = page.length >= limit && page.length > 0 ? page[page.length - 1].ts : null;
+
+  // Emit oldest→newest within the page (stable, matches the contract example).
+  const observations = [...page].sort((a, b) => a.ts - b.ts);
   return { observations, nextCursor };
 }

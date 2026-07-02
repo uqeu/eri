@@ -121,6 +121,49 @@ async function run() {
     assert.ok(!calTimeMin.startsWith("1970"), "since=0 → calendar timeMin is recent, not 1970");
   }
 
+  // REGRESSION: limit>=50 must NOT return empty (Composio caps a single call at
+  // ~40 and THROWS above) — page internally via page_token, capping each call.
+  {
+    const maxResultsSeen: number[] = [];
+    let served = 0;
+    const total = 95;
+    const pagingDeps: ConnectorDeps = {
+      activeToolkits: async () => new Set(["gmail"]),
+      executeTool: async (_userId: string, slug: string, args: Record<string, unknown>) => {
+        if (!slug.includes("GMAIL")) return { successful: true, error: null, data: {} };
+        maxResultsSeen.push(Number(args.max_results));
+        const want = Number(args.max_results) || 40;
+        const messages: Record<string, unknown>[] = [];
+        for (let i = 0; i < want && served < total; i += 1, served += 1) {
+          const ts = 2_000_000_000_000 - served * 1000; // unique, descending
+          messages.push({ messageId: `m${served}`, sender: `s${served}@x.com`, subject: `subj ${served}`, messageTimestamp: new Date(ts).toISOString() });
+        }
+        const more = served < total;
+        return { successful: true, error: null, data: { messages, ...(more ? { nextPageToken: `t${served}` } : {}) } };
+      },
+    };
+    const big = await fetchObservations("usr_x", pagingDeps, { since: 0, limit: 60 });
+    assert.equal(big.observations.length, 60, "limit=60 accumulates across pages, never empty");
+    assert.ok(maxResultsSeen.every((n) => n <= 40), "no single Composio call exceeds the safe cap");
+    assert.ok(maxResultsSeen.length >= 2, "actually paged (>1 call)");
+    assert.equal(big.nextCursor, big.observations[0].ts, "full page → nextCursor is the OLDEST ts (walk older)");
+  }
+
+  // BACKWARD paging: `before` becomes a Gmail `before:` clause alongside `after:`.
+  {
+    let q = "";
+    const capBefore: ConnectorDeps = {
+      activeToolkits: async () => new Set(["gmail"]),
+      executeTool: async (_userId: string, slug: string, args: Record<string, unknown>) => {
+        if (slug.includes("GMAIL")) q = String(args.query);
+        return { successful: true, error: null, data: {} };
+      },
+    };
+    await fetchObservations("usr_x", capBefore, { since: 1_000_000, before: 5_000_000, limit: 10 });
+    assert.ok(q.includes("after:1000"), "since → after:");
+    assert.ok(q.includes("before:5000"), "before → before: (backward paging)");
+  }
+
   // eslint-disable-next-line no-console
   console.log("connections-observations.test.ts: all assertions passed");
 }
