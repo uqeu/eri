@@ -28,11 +28,10 @@ use crate::sensitivity::SensitivityScreen;
 const MONTH_MS: u64 = 30 * 24 * 60 * 60 * 1000;
 /// Default cap on observations fetched per backfill (recent-N — bounded spend).
 const DEFAULT_MAX: usize = 1000;
-/// Per-fetch page size. Kept small (≤25) because the source endpoint's live Composio
-/// Gmail fetch returns empty above ~25 per page (observed 2026-07-02); paging in
-/// smaller chunks is robust to that cap. The backfill still reaches `max_observations`
-/// by following `nextCursor`.
-const PAGE_SIZE: usize = 25;
+/// Per-fetch page size — up to the endpoint's documented 200 ceiling (it honours
+/// large limits across the Composio per-call cap via internal paging). Kept at 100 so
+/// one screen batch stays well under the precision pass's response-token budget.
+const PAGE_SIZE: usize = 100;
 /// Most-recent ingested observations sent to the single batched reflect pass.
 const REFLECT_BATCH: usize = 200;
 
@@ -47,8 +46,12 @@ pub struct ConnectionFetch {
 /// so a fetch only ever sees the caller's own connected accounts.
 #[async_trait::async_trait]
 pub trait ConnectionSource: Send + Sync {
-    /// Fetch up to `limit` observations newer than `since` (ms epoch).
-    async fn fetch(&self, since: u64, limit: usize) -> Result<ConnectionFetch>;
+    /// Fetch a page: observations with `ts > since` (the floor) and — for backward,
+    /// deep paging — `ts < before` (the ceiling; `None` starts at newest). Up to
+    /// `limit`. `next_cursor` is the OLDEST `ts` in the page, passed back as `before`
+    /// to walk older; `None` when history under the floor is exhausted.
+    async fn fetch(&self, since: u64, before: Option<u64>, limit: usize)
+    -> Result<ConnectionFetch>;
 }
 
 /// How a backfill is bounded — every field a guard against unbounded spend.
@@ -97,11 +100,13 @@ pub async fn run_backfill(
     user_id: Option<&str>,
     opts: BackfillOptions,
 ) -> Result<BackfillReport> {
-    let mut cursor = opts.since;
+    // Backward, deep paging (ADR-0012 contract): a fixed `since` floor, walking
+    // `before` from newest toward oldest via each page's `next_cursor`.
+    let mut before: Option<u64> = None;
     let mut report = BackfillReport::default();
     while let Some(want) = next_page(report.fetched, &opts) {
         let page = source
-            .fetch(cursor, want)
+            .fetch(opts.since, before, want)
             .await
             .context("fetch connections")?;
         if page.observations.is_empty() {
@@ -134,8 +139,9 @@ pub async fn run_backfill(
         report.ingested += ingest.ingested;
         report.dropped_sensitive += ingest.dropped_sensitive;
         match page.next_cursor {
-            Some(c) if c != cursor => cursor = c,
-            // No cursor, or it didn't advance → stop (don't spin on the same page).
+            // Walk older: the page's oldest ts becomes the next `before` ceiling.
+            Some(oldest) if Some(oldest) != before => before = Some(oldest),
+            // null (history exhausted) or non-advancing → stop (never spin a page).
             _ => break,
         }
     }
@@ -298,8 +304,16 @@ impl HttpConnectionSource {
 
 #[async_trait::async_trait]
 impl ConnectionSource for HttpConnectionSource {
-    async fn fetch(&self, since: u64, limit: usize) -> Result<ConnectionFetch> {
-        let path = format!("/api/v1/connections/observations?since={since}&limit={limit}");
+    async fn fetch(
+        &self,
+        since: u64,
+        before: Option<u64>,
+        limit: usize,
+    ) -> Result<ConnectionFetch> {
+        let mut path = format!("/api/v1/connections/observations?since={since}&limit={limit}");
+        if let Some(before) = before {
+            path.push_str(&format!("&before={before}"));
+        }
         let resp: ConnectionFetchResponse = self.client.get_json(&path).await?;
         Ok(ConnectionFetch {
             observations: resp.observations,
@@ -344,13 +358,23 @@ mod tests {
     }
     #[async_trait::async_trait]
     impl ConnectionSource for ScriptedSource {
-        async fn fetch(&self, _since: u64, limit: usize) -> Result<ConnectionFetch> {
+        async fn fetch(
+            &self,
+            _since: u64,
+            _before: Option<u64>,
+            limit: usize,
+        ) -> Result<ConnectionFetch> {
             let mut pages = self.pages.lock().unwrap();
             let page = pages.pop_front().unwrap_or_default();
             // Honour the requested cap (the real endpoint does too).
             let observations: Vec<_> = page.into_iter().take(limit).collect();
-            // Advance the cursor while pages remain; None when drained.
-            let next_cursor = if pages.is_empty() { None } else { Some(1) };
+            // A distinct, decreasing `before` cursor while pages remain (backward
+            // paging); None when drained (history exhausted).
+            let next_cursor = if pages.is_empty() {
+                None
+            } else {
+                Some(pages.len() as u64)
+            };
             Ok(ConnectionFetch {
                 observations,
                 next_cursor,
