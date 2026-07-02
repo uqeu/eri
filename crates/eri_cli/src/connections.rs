@@ -22,6 +22,7 @@ use serde::{Deserialize, Serialize};
 use eri_inference::memory::connections::{ConnectionObservation, ingest_connections};
 
 use crate::reflection::{ReflectionClient, run_reflection};
+use crate::sensitivity::SensitivityScreen;
 
 /// ~1 month in ms — the backfill window unit.
 const MONTH_MS: u64 = 30 * 24 * 60 * 60 * 1000;
@@ -67,6 +68,9 @@ pub struct BackfillOptions {
 pub struct BackfillReport {
     pub fetched: usize,
     pub ingested: usize,
+    /// Dropped by the Claude precision screen (the "exclude if unsure" gate).
+    pub screened_out: usize,
+    /// Dropped by the deterministic keyword floor inside ingest (defense in depth).
     pub dropped_sensitive: usize,
     pub entities: usize,
     /// The newest observation `ts` seen — the cursor the continuous trigger advances
@@ -88,6 +92,7 @@ fn next_page(fetched: usize, opts: &BackfillOptions) -> Option<usize> {
 /// then do ONE batched reflect pass over the most-recent ingested observations.
 pub async fn run_backfill(
     source: &dyn ConnectionSource,
+    screen: &dyn SensitivityScreen,
     reflect: &dyn ReflectionClient,
     user_id: Option<&str>,
     opts: BackfillOptions,
@@ -102,13 +107,30 @@ pub async fn run_backfill(
         if page.observations.is_empty() {
             break;
         }
-        report.fetched += page.observations.len();
+        let page_len = page.observations.len();
+        report.fetched += page_len;
         for o in &page.observations {
             report.newest_ts = report.newest_ts.max(o.ts_ms);
         }
-        // Q23-DROP before storage happens INSIDE ingest_connections (ADR-0012).
-        let ingest = ingest_connections(user_id, &page.observations)
-            .context("ingest connection observations")?;
+        // PRECISION pass (ADR-0012 / ADR-0010 §5): the Claude "exclude if unsure"
+        // screen ABOVE the keyword floor. FAIL-CLOSED — a screen error drops the whole
+        // page (never ingest unscreened data). Only SAFE-cleared observations proceed.
+        let texts: Vec<&str> = page.observations.iter().map(|o| o.text.as_str()).collect();
+        let keep = screen
+            .screen(&texts)
+            .await
+            .unwrap_or_else(|_| vec![false; texts.len()]);
+        let safe: Vec<ConnectionObservation> = page
+            .observations
+            .into_iter()
+            .zip(keep)
+            .filter_map(|(o, k)| k.then_some(o))
+            .collect();
+        report.screened_out += page_len - safe.len();
+        // The keyword floor (ADR-0012) runs again inside ingest_connections — defense
+        // in depth for anything the precision pass cleared.
+        let ingest =
+            ingest_connections(user_id, &safe).context("ingest connection observations")?;
         report.ingested += ingest.ingested;
         report.dropped_sensitive += ingest.dropped_sensitive;
         match page.next_cursor {
@@ -145,6 +167,7 @@ pub async fn run(months: u32, max: usize) -> Result<()> {
     let source = HttpConnectionSource::from_credentials(&creds)?;
     let report = run_backfill(
         &source,
+        &crate::sensitivity::ClaudeSensitivityScreen,
         &crate::reflection::ProxyReflectionClient,
         creds.user_id.as_deref(),
         BackfillOptions {
@@ -155,11 +178,12 @@ pub async fn run(months: u32, max: usize) -> Result<()> {
         },
     )
     .await?;
+    let dropped = report.screened_out + report.dropped_sensitive;
     println!(
-        "Indexed {} connection observation{} ({} sensitive dropped) — {} entit{} in your world model.",
+        "Indexed {} connection observation{} ({} dropped by the privacy screen) — {} entit{} in your world model.",
         report.ingested,
         if report.ingested == 1 { "" } else { "s" },
-        report.dropped_sensitive,
+        dropped,
         report.entities,
         if report.entities == 1 { "y" } else { "ies" },
     );
@@ -230,6 +254,7 @@ pub async fn sync_connections() -> Result<BackfillReport> {
     let source = HttpConnectionSource::from_credentials(&creds)?;
     let report = run_backfill(
         &source,
+        &crate::sensitivity::ClaudeSensitivityScreen,
         &crate::reflection::ProxyReflectionClient,
         user_id.as_deref(),
         BackfillOptions {
@@ -343,6 +368,25 @@ mod tests {
         }
     }
 
+    /// A screen that keeps everything — isolates the orchestration from the live
+    /// precision pass (the fail-closed policy itself is unit-tested in `sensitivity`).
+    struct KeepAllScreen;
+    #[async_trait::async_trait]
+    impl SensitivityScreen for KeepAllScreen {
+        async fn screen(&self, texts: &[&str]) -> Result<Vec<bool>> {
+            Ok(vec![true; texts.len()])
+        }
+    }
+
+    /// A screen that drops everything — proves the precision pass gates ingest.
+    struct DropAllScreen;
+    #[async_trait::async_trait]
+    impl SensitivityScreen for DropAllScreen {
+        async fn screen(&self, texts: &[&str]) -> Result<Vec<bool>> {
+            Ok(vec![false; texts.len()])
+        }
+    }
+
     #[allow(clippy::await_holding_lock)] // current-thread test; HOME isolation held across await
     #[tokio::test]
     async fn backfill_ingests_drops_sensitive_and_reflects_once() {
@@ -369,6 +413,7 @@ mod tests {
         };
         let report = run_backfill(
             &source,
+            &KeepAllScreen,
             &MockReflect,
             None,
             BackfillOptions {
@@ -395,6 +440,59 @@ mod tests {
             report.newest_ts, 1,
             "the cursor advances to the newest observation ts"
         );
+
+        unsafe {
+            match prev.as_deref() {
+                Some(v) => std::env::set_var("HOME", v),
+                None => std::env::remove_var("HOME"),
+            }
+        }
+    }
+
+    #[allow(clippy::await_holding_lock)] // current-thread test; HOME isolation held across await
+    #[tokio::test]
+    async fn the_precision_screen_gates_ingest_fail_closed() {
+        // FAIL-CLOSED launch gate: when the screen drops everything (an error, a
+        // malformed reply, or a genuine sensitive verdict), NOTHING is ingested — even
+        // a benign-looking observation. You can't leak what you never store.
+        let _lock = crate::config::ENV_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let dir = tempfile::TempDir::new().unwrap();
+        let prev = std::env::var("HOME").ok();
+        unsafe {
+            std::env::set_var("HOME", dir.path());
+        }
+
+        let source = ScriptedSource {
+            pages: Mutex::new(
+                vec![vec![obs(
+                    "gmail:1",
+                    "I work with Priya on the atlas project",
+                )]]
+                .into(),
+            ),
+        };
+        let report = run_backfill(
+            &source,
+            &DropAllScreen,
+            &MockReflect,
+            None,
+            BackfillOptions {
+                since: 0,
+                max_observations: 1000,
+                page_size: 100,
+                reflect_batch: 200,
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(report.fetched, 1);
+        assert_eq!(
+            report.ingested, 0,
+            "the precision screen gated it → nothing ingested"
+        );
+        assert_eq!(report.screened_out, 1, "counted as a precision drop");
 
         unsafe {
             match prev.as_deref() {

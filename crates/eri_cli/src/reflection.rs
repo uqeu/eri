@@ -9,8 +9,7 @@
 //! production wires the real proxy and tests inject a recorded transcript (no
 //! live model), keeping the cold path deterministic + CI-safe.
 
-use anyhow::{Context, Result};
-use serde::Serialize;
+use anyhow::Result;
 
 use eri_inference::memory::reflection;
 
@@ -20,11 +19,6 @@ const REFLECTION_MODEL: &str = "claude-haiku-4-5-20251001";
 
 /// A small cap — the response is a compact JSON entity/relation reading, not prose.
 const REFLECTION_MAX_TOKENS: u32 = 1024;
-
-/// The reflection path on the proxy — the Anthropic-shaped `/v1/messages` endpoint
-/// (replaces the deprecated `/agent/run {intent:"reflect"}`, which never recognized
-/// the intent).
-const INFERENCE_PATH: &str = "/api/v1/inference/messages";
 
 /// The base-engine call the reflection pass makes. A seam: prod wires
 /// [`ProxyReflectionClient`] (eri tokens via the proxy); tests inject a mock that
@@ -61,86 +55,22 @@ pub async fn run_reflection(
     Ok(written)
 }
 
-/// One message in the Anthropic `/v1/messages` body.
-#[derive(Serialize)]
-struct InferenceMessage<'a> {
-    role: &'a str,
-    content: &'a str,
-}
-
-/// The Anthropic-shaped `/v1/messages` request the reflection pass sends: the
-/// instruction as `system`, the observations as the single user message,
-/// non-streaming.
-#[derive(Serialize)]
-struct InferenceRequest<'a> {
-    model: &'a str,
-    max_tokens: u32,
-    system: &'a str,
-    messages: [InferenceMessage<'a>; 1],
-    stream: bool,
-}
-
-/// Build the request body — pure, so the wire shape is unit-tested without a call.
-fn inference_request<'a>(system: &'a str, observations: &'a str) -> InferenceRequest<'a> {
-    InferenceRequest {
-        model: REFLECTION_MODEL,
-        max_tokens: REFLECTION_MAX_TOKENS,
-        system,
-        messages: [InferenceMessage {
-            role: "user",
-            content: observations,
-        }],
-        stream: false,
-    }
-}
-
-/// Extract the assistant text from an Anthropic `/v1/messages` response — concat
-/// every `text` content block. Defensive: a missing/oddly-shaped body yields `""`
-/// (the downstream `parse_reflection` then writes nothing), never an error.
-fn extract_message_text(response_json: &str) -> Result<String> {
-    let v: serde_json::Value =
-        serde_json::from_str(response_json).context("parse inference response")?;
-    Ok(v.get("content")
-        .and_then(|c| c.as_array())
-        .map(|blocks| {
-            blocks
-                .iter()
-                .filter(|b| b.get("type").and_then(|t| t.as_str()) == Some("text"))
-                .filter_map(|b| b.get("text").and_then(|t| t.as_str()))
-                .collect::<String>()
-        })
-        .unwrap_or_default())
-}
-
-/// Reflection is background work, so the proxy's over-quota 402 is a **deferral**,
-/// not an error — we simply try again on the next flush.
-fn is_quota_deferral(status: u16) -> bool {
-    status == 402
-}
-
-/// Production [`ReflectionClient`]: routes the reflection call through the eri proxy
-/// (eri tokens) at the Anthropic-shaped `/v1/messages` endpoint. Live IO —
-/// exercised end-to-end on the real binary, never in CI (CI uses a mock).
+/// Production [`ReflectionClient`]: routes the reflection call through the shared
+/// [`crate::inference::call`] proxy seam (Anthropic-shaped `/v1/messages`, eri
+/// tokens). Live IO — exercised end-to-end on the real binary, never in CI (CI uses
+/// a mock).
 pub struct ProxyReflectionClient;
 
 #[async_trait::async_trait]
 impl ReflectionClient for ProxyReflectionClient {
     async fn reflect(&self, system: &str, observations: &str) -> Result<Option<String>> {
-        let creds = crate::config::load()?;
-        if !creds.is_signed_in() {
-            anyhow::bail!("not signed in — run `eri auth login` first");
-        }
-        let client = crate::client::Client::from_credentials(&creds)?;
-        let (status, body) = client
-            .post_for_status(INFERENCE_PATH, &inference_request(system, observations))
-            .await?;
-        if is_quota_deferral(status.as_u16()) {
-            return Ok(None);
-        }
-        if !status.is_success() {
-            anyhow::bail!("reflection HTTP {}: {}", status.as_u16(), body);
-        }
-        Ok(Some(extract_message_text(&body)?))
+        crate::inference::call(
+            REFLECTION_MODEL,
+            REFLECTION_MAX_TOKENS,
+            system,
+            observations,
+        )
+        .await
     }
 }
 
@@ -160,37 +90,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn inference_request_is_the_anthropic_messages_shape() {
-        // The exact wire shape the proxy validates: model, system, a single user
-        // message with the observations, non-streaming.
-        let v = serde_json::to_value(inference_request("SYS", "1. obs")).unwrap();
-        assert_eq!(v["model"], REFLECTION_MODEL);
-        assert_eq!(v["system"], "SYS");
-        assert_eq!(v["stream"], false);
-        assert_eq!(v["messages"][0]["role"], "user");
-        assert_eq!(v["messages"][0]["content"], "1. obs");
-        assert!(v["max_tokens"].as_u64().unwrap() > 0);
-    }
-
-    #[test]
-    fn extract_message_text_concats_anthropic_text_blocks() {
-        let resp = r#"{"content":[{"type":"text","text":"{\"entities\":[]}"}],"usage":{}}"#;
-        assert_eq!(extract_message_text(resp).unwrap(), r#"{"entities":[]}"#);
-    }
-
-    #[test]
-    fn extract_message_text_is_defensive_on_a_malformed_response() {
-        // No content array → "" (the defensive parser downstream writes nothing).
-        assert_eq!(extract_message_text(r#"{"error":"x"}"#).unwrap(), "");
-    }
-
-    #[test]
-    fn over_quota_402_is_a_deferral_not_an_error() {
-        assert!(is_quota_deferral(402), "402 over_quota defers");
-        assert!(!is_quota_deferral(200));
-        assert!(!is_quota_deferral(500));
-    }
+    // The inference request/response/quota helpers now live in `crate::inference`
+    // (shared with the ingest privacy screen); their unit tests moved there too.
 
     // The env lock is held across the await to keep HOME isolated for the whole
     // flush; `#[tokio::test]` is current-thread, so the guard never crosses a real
