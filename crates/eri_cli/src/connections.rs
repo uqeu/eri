@@ -27,8 +27,11 @@ use crate::reflection::{ReflectionClient, run_reflection};
 const MONTH_MS: u64 = 30 * 24 * 60 * 60 * 1000;
 /// Default cap on observations fetched per backfill (recent-N — bounded spend).
 const DEFAULT_MAX: usize = 1000;
-/// Per-fetch page size.
-const PAGE_SIZE: usize = 100;
+/// Per-fetch page size. Kept small (≤25) because the source endpoint's live Composio
+/// Gmail fetch returns empty above ~25 per page (observed 2026-07-02); paging in
+/// smaller chunks is robust to that cap. The backfill still reaches `max_observations`
+/// by following `nextCursor`.
+const PAGE_SIZE: usize = 25;
 /// Most-recent ingested observations sent to the single batched reflect pass.
 const REFLECT_BATCH: usize = 200;
 
