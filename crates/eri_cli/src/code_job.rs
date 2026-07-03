@@ -287,15 +287,42 @@ impl Harness for HarnessAdapter {
     }
 }
 
-/// The real committer over `eri_git` — `git add -A` + commit, returns the sha.
+/// The real committer over `eri_git`. Commits pending changes (`git add -A` +
+/// commit) ONLY when the tree is dirty; when it's already clean — the harness has
+/// its own `git_commit` tool and often commits its work itself — it returns HEAD
+/// instead of an EMPTY commit, so a job is one clean commit per step, not two.
 struct GitCommitter;
 
 #[async_trait]
 impl Committer for GitCommitter {
     async fn commit(&self, working_tree: &Path, message: &str) -> Result<String> {
-        eri_git::commit_iteration(working_tree, message, &[])
-            .map_err(|e| anyhow!("git commit: {e}"))
+        let clean = eri_git::status_porcelain(working_tree)
+            .map_err(|e| anyhow!("git status: {e}"))?
+            .trim()
+            .is_empty();
+        if clean {
+            // Nothing to commit — the harness already committed. Return HEAD, not
+            // an --allow-empty no-op commit (which is noise on a real PR).
+            head_sha(working_tree)
+        } else {
+            eri_git::commit_iteration(working_tree, message, &[])
+                .map_err(|e| anyhow!("git commit: {e}"))
+        }
     }
+}
+
+/// The current HEAD commit sha of a repo.
+fn head_sha(repo: &Path) -> Result<String> {
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .map_err(|e| anyhow!("git rev-parse: {e}"))?;
+    if !out.status.success() {
+        bail!("git rev-parse HEAD failed in {repo:?}");
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
 /// A path made workspace-relative (falls back to the full path if not under it).
@@ -403,5 +430,48 @@ mod tests {
         // Degenerate tasks fall back to a valid branch, never an empty ref.
         assert_eq!(job_branch_name(""), "eri/job");
         assert_eq!(job_branch_name("!!!"), "eri/job");
+    }
+
+    #[tokio::test]
+    async fn git_committer_skips_a_clean_tree_and_commits_a_dirty_one() {
+        // A real git repo (no network/token/harness). The old --allow-empty
+        // committer would add an empty commit on a clean tree — one clean commit
+        // per step is the contract for real PRs.
+        let dir = tempfile::TempDir::new().unwrap();
+        let p = dir.path();
+        let git = |args: &[&str]| {
+            std::process::Command::new("git")
+                .arg("-C")
+                .arg(p)
+                .args(args)
+                .output()
+                .unwrap()
+        };
+        git(&["init", "-q"]);
+        git(&["config", "user.email", "t@e.st"]);
+        git(&["config", "user.name", "t"]);
+        std::fs::write(p.join("a.txt"), "1").unwrap();
+        git(&["add", "-A"]);
+        git(&["commit", "-q", "-m", "init"]);
+        let count = || -> usize {
+            let o = git(&["rev-list", "--count", "HEAD"]);
+            String::from_utf8_lossy(&o.stdout).trim().parse().unwrap()
+        };
+        let head0 = head_sha(p).unwrap();
+
+        let committer = GitCommitter;
+        // Clean tree → returns HEAD, adds NO commit.
+        let sha_clean = committer
+            .commit(p, "must not add an empty commit")
+            .await
+            .unwrap();
+        assert_eq!(sha_clean, head0, "clean tree → HEAD, no empty commit");
+        assert_eq!(count(), 1, "no commit was added to a clean tree");
+
+        // Dirty tree → exactly ONE new commit.
+        std::fs::write(p.join("b.txt"), "2").unwrap();
+        let sha_dirty = committer.commit(p, "add b").await.unwrap();
+        assert_ne!(sha_dirty, head0, "a new commit sha");
+        assert_eq!(count(), 2, "exactly one new commit for the pending change");
     }
 }
