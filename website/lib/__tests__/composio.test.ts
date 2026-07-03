@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { isValidToolkit } from "../composio/accounts";
-import { composioMcpUrl, normalizeStatus } from "../composio/client";
+import { composioMcpUrl, describeComposioError, normalizeStatus } from "../composio/client";
 import {
   handleConnect,
   handleDisconnect,
@@ -115,6 +115,24 @@ async function run() {
   // (the slug is "github", not "github-issues") — locks what the operator sets.
   assert.equal(authConfigEnvKey("github"), "COMPOSIO_AUTH_CONFIG_GITHUB");
   assert.equal(authConfigEnvKey("github-issues"), "COMPOSIO_AUTH_CONFIG_GITHUB_ISSUES");
+
+  // describeComposioError surfaces the HIDDEN 400 reason: a stainless APIError
+  // carries `status` + the parsed JSON body on `error` — the actual Composio reason.
+  {
+    const apiErr = Object.assign(new Error("400 Bad Request"), {
+      status: 400,
+      error: { error: { message: "toolkit github requires scopes", type: "bad_request" } },
+    });
+    const d = describeComposioError(apiErr);
+    assert.equal(d.status, 400);
+    assert.deepEqual(d.body, { error: { message: "toolkit github requires scopes", type: "bad_request" } });
+    assert.ok(d.message.includes("400"));
+    // A plain error (no status/body) still yields a message, never throws.
+    const plain = describeComposioError(new Error("boom"));
+    assert.equal(plain.status, undefined);
+    assert.equal(plain.message, "boom");
+    assert.equal(describeComposioError("weird").message, "weird");
+  }
 
   // listFreshConnections — refreshes pending accounts so they flip to active.
   {

@@ -146,6 +146,21 @@ function composio(): Composio {
   return new Composio({ apiKey: requireEnv("COMPOSIO_API_KEY") });
 }
 
+/** Extract the diagnostic detail from a Composio SDK error. A stainless `APIError`
+ *  carries the HTTP `status` and the parsed JSON body on `error` — the REAL reason a
+ *  request was rejected, otherwise hidden behind a generic message. Pure + tested. */
+export function describeComposioError(err: unknown): { status?: number; body?: unknown; message: string } {
+  if (err && typeof err === "object") {
+    const e = err as { status?: unknown; error?: unknown; message?: unknown };
+    return {
+      status: typeof e.status === "number" ? e.status : undefined,
+      body: "error" in e ? e.error : undefined,
+      message: typeof e.message === "string" ? e.message : String(err),
+    };
+  }
+  return { message: String(err) };
+}
+
 /**
  * Production adapter over the official `@composio/core` SDK. Per-toolkit auth
  * configs are resolved by `lib/composio/auth_config` (env COMPOSIO_AUTH_CONFIG_<SLUG>),
@@ -220,11 +235,17 @@ export class ComposioApiClient implements ComposioClient {
     try {
       req = await composio().toolkits.authorize(userId, toolkit, authConfigId ?? undefined);
     } catch (err) {
-      // A connect attempted WITHOUT our own auth config that fails almost always
-      // means this toolkit needs a custom OAuth app we haven't registered yet
-      // (e.g. github before COMPOSIO_AUTH_CONFIG_GITHUB is set) — Composio 502s on
-      // authorize. Surface that as a clear "not set up" signal, not a raw vendor
-      // error. When a config IS present, a failure is a genuine outage → rethrow.
+      // Surface the HIDDEN reason first — Composio's 400 body lives on the APIError
+      // (`status` + parsed `error`), otherwise swallowed into a generic 502. This is
+      // how we diagnose github's `POST /connected_accounts → 400` (gmail/spotify
+      // authorize fine on the same code+SDK, so the rejected field is github-specific).
+      const detail = describeComposioError(err);
+      console.log(
+        JSON.stringify({ event: "composio.authorize_failed", toolkit, hasAuthConfig: authConfigId != null, ...detail }),
+      );
+      // No config AND it failed → most likely the toolkit needs our own OAuth app we
+      // haven't registered (needs_setup). A present config that still fails is a real
+      // rejection → composio_error; the log above says exactly why.
       if (authConfigId == null) throw new AuthConfigMissingError(toolkit);
       throw err;
     }
