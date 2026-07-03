@@ -5,6 +5,7 @@ import { resolveRepoAgainst } from "../coding/resolve";
 import { runCodeJob, SANDBOX_CLONE_DIR, type WorkerDeps } from "../coding/worker";
 import { makeCodeJobClient, type CodeClientDeps } from "../coding/client";
 import { codeJobEnabled } from "../coding/flag";
+import { extractAccessToken } from "../coding/github_token";
 import type { CodeJobStore } from "../coding/job_store";
 import type { CodeJobRecord, CodeOutcome, CodeProgress } from "../coding/contract";
 
@@ -193,6 +194,23 @@ async function run() {
     assert.equal(codeJobEnabled({ ERI_CODEJOB_ENABLED: "true", ERI_CODEJOB_ALLOWLIST: "u1,u2" }, "u1"), true);
     assert.equal(codeJobEnabled({ ERI_CODEJOB_ENABLED: "true", ERI_CODEJOB_ALLOWLIST: "u1,u2" }, "u9"), false, "allowlist gates");
     assert.equal(codeJobEnabled({ ERI_CODEJOB_ENABLED: "true", ERI_CODEJOB_ALLOWLIST: "u1" }), false, "allowlist set but no userId → off");
+  }
+
+  // ── extractAccessToken: pull the GitHub token from a Composio account, any shape ─
+  {
+    // Composio nests the credential differently across auth schemes / versions, so
+    // the extractor searches the response rather than hard-coding a path.
+    assert.equal(extractAccessToken({ data: { access_token: "ght_a" } }), "ght_a");
+    assert.equal(extractAccessToken({ val: { access_token: "ght_b" } }), "ght_b");
+    assert.equal(extractAccessToken({ state: { val: { access_token: "ght_c" } } }), "ght_c");
+    assert.equal(extractAccessToken({ connectionParams: { access_token: "ght_d" } }), "ght_d");
+    assert.equal(extractAccessToken({ access_token: "ght_e" }), "ght_e");
+    // access_token wins over a generic token when both are present.
+    assert.equal(extractAccessToken({ token: "generic", data: { access_token: "ght_win" } }), "ght_win");
+    // no credential → null (worker halts safe, never a bogus token).
+    assert.equal(extractAccessToken({ status: "active", id: "ca_1" }), null);
+    assert.equal(extractAccessToken(null), null);
+    assert.equal(extractAccessToken({ access_token: "   " }), null, "blank token ignored");
   }
 
   // eslint-disable-next-line no-console

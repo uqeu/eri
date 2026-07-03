@@ -7,9 +7,11 @@
  */
 
 import { randomBytes } from "node:crypto";
+import { Composio } from "@composio/core";
 import { sql } from "@/lib/db";
 import { sendProactiveMessage } from "@/lib/messaging/spectrum";
 import type { RepoResolution } from "./contract";
+import { extractAccessToken } from "./github_token";
 import type { StatusSink } from "./stream";
 import type { RunCodeJobInput } from "./worker";
 
@@ -49,14 +51,31 @@ export async function connectGithubUrl(_userId: string, _hint: string | null): P
 }
 
 /**
- * The user's GitHub token for `git clone`. DEPLOY-SEAM: the raw-token source
- * (Composio raw-credential export or the eri GitHub App installation token) is
- * wired at deploy. Until then this returns null → the worker settles the job as
- * `halted` ("reconnect GitHub"), which fails CLOSED — never a cross-user reach,
- * never a crash.
+ * The user's GitHub token for `git clone`, from THEIR Composio GitHub connection
+ * (a custom-OAuth app registered via COMPOSIO_AUTH_CONFIG_GITHUB, so the token is
+ * ours to read). Look up their active connected account → fetch it → extract the
+ * access token. Fails CLOSED: no connection / no key / no token in the response /
+ * any error → null, so the worker settles the job as `halted` ("reconnect
+ * GitHub"), never a cross-user reach, never a crash.
+ * LIVE-VERIFY: confirm `connectedAccounts.get` actually returns the token for the
+ * custom-OAuth github config once a real GitHub is connected.
  */
-export async function getUserGithubToken(_userId: string): Promise<string | null> {
-  return null;
+export async function getUserGithubToken(userId: string): Promise<string | null> {
+  try {
+    const rows = await sql()<{ connected_account_id: string | null }[]>`
+      SELECT connected_account_id FROM composio_accounts
+      WHERE user_id = ${userId} AND toolkit = 'github' AND status = 'active'
+      ORDER BY updated_at DESC LIMIT 1
+    `;
+    const id = rows[0]?.connected_account_id;
+    if (!id) return null;
+    const key = process.env.COMPOSIO_API_KEY;
+    if (!key) return null;
+    const account = await new Composio({ apiKey: key }).connectedAccounts.get(id);
+    return extractAccessToken(account);
+  } catch {
+    return null;
+  }
 }
 
 /** Resolve the user's verified phone number (for cold outbound status texts). */
