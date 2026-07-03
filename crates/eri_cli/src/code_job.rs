@@ -93,6 +93,25 @@ pub fn parse_github_slug(remote_url: &str) -> Option<(String, String)> {
     Some((owner.to_string(), name.to_string()))
 }
 
+/// A safe job branch name derived from the task — `eri/<slug>`. A FRESH job runs
+/// on this (never the default branch), so [`GitHubPrAuthor`] can open a PR from
+/// it (it refuses to open from the base branch). Deterministic + pure.
+pub fn job_branch_name(task: &str) -> String {
+    let mut slug = task
+        .to_ascii_lowercase()
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .collect::<Vec<_>>()
+        .join("-");
+    slug.truncate(40);
+    let slug = slug.trim_end_matches('-');
+    if slug.is_empty() {
+        "eri/job".to_string()
+    } else {
+        format!("eri/{slug}")
+    }
+}
+
 /// The resolved inputs for one `eri code-job` run.
 pub struct CodeJobArgs {
     pub task: String,
@@ -104,6 +123,9 @@ pub struct CodeJobArgs {
     pub budget_seconds: u64,
     pub update_pr: Option<u64>,
     pub update_pr_url: Option<String>,
+    /// Job branch for a fresh PR; `None` = derived from the task. Ignored for a
+    /// follow-up (it stays on the existing PR's head branch).
+    pub branch: Option<String>,
     pub model: String,
 }
 
@@ -150,6 +172,19 @@ pub async fn run_code_job(args: CodeJobArgs) -> Result<()> {
             max_seconds: args.budget_seconds,
         },
     };
+
+    // A FRESH job must run on a NEW branch: the harness commits to the current
+    // branch and the PR author refuses to open FROM the base/default branch (PRs
+    // only, never push to default). A follow-up (--update-pr) stays on the PR's
+    // head branch the worker checked out, so it does NOT re-branch.
+    if args.update_pr.is_none() {
+        let branch = args
+            .branch
+            .clone()
+            .unwrap_or_else(|| job_branch_name(&job.task));
+        eri_git::create_branch_if_needed(&job.working_tree, &branch)
+            .map_err(|e| anyhow!("create job branch '{branch}': {e}"))?;
+    }
 
     let turn = SandboxCodeTurn::new(
         Box::new(HarnessAdapter { model: args.model }),
@@ -343,5 +378,20 @@ mod tests {
     fn rejects_a_non_github_remote() {
         assert_eq!(parse_github_slug("https://gitlab.com/x/y.git"), None);
         assert_eq!(parse_github_slug("not a url"), None);
+    }
+
+    #[test]
+    fn job_branch_name_is_a_clean_eri_slug() {
+        let b = job_branch_name("add a /health route + a test");
+        assert!(b.starts_with("eri/"), "prefixed: {b}");
+        assert!(b.contains("health"), "reflects the task: {b}");
+        // Clean after the prefix — no spaces, no extra slashes, no punctuation.
+        assert!(
+            !b["eri/".len()..].contains(['/', ' ', '+']),
+            "safe branch slug: {b}"
+        );
+        // Degenerate tasks fall back to a valid branch, never an empty ref.
+        assert_eq!(job_branch_name(""), "eri/job");
+        assert_eq!(job_branch_name("!!!"), "eri/job");
     }
 }

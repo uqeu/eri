@@ -526,6 +526,9 @@ pub enum Command {
         /// The existing PR's URL (used with --update-pr for the reply link).
         #[arg(long = "update-pr-url")]
         update_pr_url: Option<String>,
+        /// Job branch for a fresh PR (default: derived from the task).
+        #[arg(long)]
+        branch: Option<String>,
         /// Inference depth: fast | thinking | auto.
         #[arg(long, value_enum)]
         mode: Option<Mode>,
@@ -1097,6 +1100,7 @@ async fn dispatch(cli: Cli) -> anyhow::Result<()> {
             budget_seconds,
             update_pr,
             update_pr_url,
+            branch,
             mode,
         } => {
             let model = model_for_mode(resolve_mode(mode, &repo)).to_string();
@@ -1110,6 +1114,7 @@ async fn dispatch(cli: Cli) -> anyhow::Result<()> {
                 budget_seconds,
                 update_pr,
                 update_pr_url,
+                branch,
                 model,
             })
             .await
