@@ -43,10 +43,11 @@ export type CodeProgress =
   | { stage: "commit"; text: string; sha?: string; message?: string }
   | { stage: "pr"; text: string; number?: number; url?: string; title?: string };
 
-/** Terminal kind of a job. `opened` is the happy path; `testsRed` is the
- *  fail-closed stop (never ships red); `halted` is recoverable (budget); `refused`
- *  is the absolute boundary handed back. */
-export type CodeOutcomeKind = "opened" | "testsRed" | "halted" | "refused";
+/** Terminal kind of a job. `opened` is the happy path (a fresh PR); `updated` is a
+ *  B4 follow-up (another commit pushed to an EXISTING PR's branch, routed by
+ *  pr_number); `testsRed` is the fail-closed stop (never ships red); `halted` is
+ *  recoverable (budget); `refused` is the absolute boundary handed back. */
+export type CodeOutcomeKind = "opened" | "updated" | "testsRed" | "halted" | "refused";
 
 /**
  * The terminal result. `text` is the brain-composed final bubble
