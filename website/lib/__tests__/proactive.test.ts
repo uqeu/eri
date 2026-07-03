@@ -4,6 +4,7 @@ import {
   isQuietHour,
   MAX_PER_DAY,
   MIN_GAP_MS,
+  proactiveEnabled,
   type GateState,
 } from "../proactive/gate";
 import { composeProactivePrompt, isSkip, SKIP_SENTINEL } from "../proactive/compose";
@@ -170,6 +171,16 @@ function deps(over: Partial<ProactiveDeps> = {}): ProactiveDeps {
   // a thrown dep → errored, never crashes the sweep
   const threw = await dispatchProactive("u1", trigger(), deps({ loadProfile: async () => { throw new Error("db down"); } }));
   assert.equal(threw.branch, "errored");
+
+  // Kill-switch: enabled by default (unset/blank/true), OFF only for an explicit
+  // falsey value — so setting PROACTIVE_ENABLED=false stops the sweep with no deploy.
+  assert.equal(proactiveEnabled(undefined), true, "unset → enabled (no behavior change)");
+  assert.equal(proactiveEnabled(""), true, "blank → enabled");
+  assert.equal(proactiveEnabled("true"), true);
+  assert.equal(proactiveEnabled("1"), true);
+  for (const off of ["false", "FALSE", "0", "off", "no", " false "]) {
+    assert.equal(proactiveEnabled(off), false, `"${off}" stops the sweep`);
+  }
 
   console.log("proactive.test.ts: all assertions passed");
 })();

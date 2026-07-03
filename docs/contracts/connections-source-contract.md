@@ -9,9 +9,16 @@
 ## The endpoint
 
 ```
-GET /api/v1/connections/observations?since=<ms>&limit=<n>
+GET /api/v1/connections/observations?since=<ms>&before=<ms>&limit=<n>
 Auth: Bearer eri_sk_…   (single-principal — the caller's OWN connected accounts only)
 ```
+
+- `since` — floor (ms); only observations NEWER than this (0/absent = no floor).
+- `before` — ceiling (ms) for **backward / deep paging**: only observations OLDER
+  than this (absent = newest overall). Pass the previous `nextCursor` here to walk
+  from newest toward oldest.
+- `limit` — up to 200 per page. Honoured across the Composio per-call cap (~40)
+  by internal `page_token` paging, so a large `limit` never returns empty.
 
 **PASS-THROUGH, never a store.** Fetch the bearer's Gmail / Calendar live via the
 existing Composio plumbing (`lib/proactive/signals.ts` already does the fetch),
@@ -39,15 +46,18 @@ nowhere = nothing to leak.)
   - No full bodies, no attachments, no raw HTML.
 - `kind` — `"email"` | `"calendar"` (extensible).
 - `ts` — event time, ms epoch (received / start).
-- `nextCursor` — opaque-ish ms cursor; `null` (or absent) when the window is exhausted.
-  The brain pages until `nextCursor` is null, the page is empty, or its cap is hit.
+- `nextCursor` — the **OLDEST `ts`** in this page (ms). Pass it back as `before` to
+  get the next-older page; `null` when the page wasn't full (history exhausted).
+  So a deep backfill = `since=<floor>`, then loop `before=nextCursor` until null.
+  (Observations within a page are ordered oldest→newest, but paging walks BACKWARD.)
 
 Empty/absent fields are fine. Honour `limit` (the brain caps spend by paging in
 bounded chunks). An unconnected account simply contributes nothing (not an error).
 
 ## What the brain does with it (so the contract is mutual)
 
-1. Pages `since` → `nextCursor`, bounded by a hard `max_observations` cap (recent-N).
+1. Pages BACKWARD (`before=nextCursor`) from newest toward oldest, bounded by a
+   hard `max_observations` cap and/or a `since` floor — deep history, not just recent-N.
 2. **Q23-DROPS** any observation whose `text` trips `looks_sensitive`
    (credential / financial / health / intimate) **before it is stored** — ADR-0012.
    So even if a sensitive snippet comes through, it never enters the world model. (You
