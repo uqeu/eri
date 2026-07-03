@@ -24,7 +24,7 @@ import {
   type ToolResult,
 } from "@/lib/agent/connectors";
 import { runVisionTurn } from "@/lib/agent/vision";
-import { analyzeCommunicationStyle } from "@/lib/agent/style";
+import { analyzeCadence, analyzeCommunicationStyle, type CadenceFacet } from "@/lib/agent/style";
 import { mapBraveResults, type WebSearchDeps } from "@/lib/agent/web_search";
 import type { WeatherDeps } from "@/lib/agent/weather";
 import { embedText, normalizeForEmbedding, toPgVectorLiteral } from "@/lib/agent/embeddings";
@@ -38,6 +38,7 @@ import { sqlCodeJobStore } from "@/lib/coding/job_store";
 import { startCodingJob } from "@/lib/coding/kickoff";
 import { connectGithubUrl, kickCodeJob, mintJobId, resolveRepoLive } from "@/lib/coding/live";
 import { consumePairing, normalizeE164, resolveUserByPhone } from "@/lib/imessage/identity";
+import { mintSignupLink } from "@/lib/phone/signup_link_db";
 import type { InboundMessage } from "@/lib/imessage/webhook";
 import { formatWorldModel, readRecallProjection } from "@/lib/messaging/recall";
 import { getUserSettings } from "@/lib/messaging/settings";
@@ -169,6 +170,7 @@ export function makeInboundDeps(): InboundDeps {
   return {
     consumePairing,
     resolveUserByPhone,
+    mintSignupLink,
     withinQuota: async (userId, tier) => (await ensureWithinQuota(userId, tier, 1000)).ok,
     loadProfile,
     runTurn: runAgentTurn,
@@ -307,7 +309,16 @@ function makeConnectorDeps(): ConnectorDeps {
       const key = process.env.COMPOSIO_API_KEY;
       if (!key) throw new Error("COMPOSIO_API_KEY is not configured");
       const composio = new Composio({ apiKey: key });
-      const result = await composio.tools.execute(slug, { userId, arguments: args });
+      // @composio/core 0.10+ REQUIRES a toolkit version for manual execution — it
+      // throws "Toolkit version not specified" otherwise (silently caught upstream
+      // → "I couldn't check your email"). Use the latest action + skip the strict
+      // check; our row mappers are defensive against shape drift.
+      const result = await composio.tools.execute(slug, {
+        userId,
+        arguments: args,
+        version: "latest",
+        dangerouslySkipVersionCheck: true,
+      });
       return {
         data: (result?.data ?? {}) as Record<string, unknown>,
         error: result?.error ?? null,
@@ -492,20 +503,27 @@ export async function loadProfile(
     }
   }
 
-  // Learned communication style: distilled from how the user actually writes.
+  // Learned communication style + cadence: distilled from how the user actually
+  // writes/paces. Both from the same recent-messages pull.
   let learnedStyle: string | null = null;
+  let tsCadence: CadenceFacet | null = null;
   try {
     const styleRows = await sql()<{ content: string }[]>`
       SELECT content FROM conversation_turns
       WHERE user_id = ${userId} AND role = 'user'
       ORDER BY created_at DESC LIMIT 60
     `;
-    learnedStyle = analyzeCommunicationStyle(styleRows.map((r) => r.content));
+    const messages = styleRows.map((r) => r.content);
+    learnedStyle = analyzeCommunicationStyle(messages);
+    tsCadence = analyzeCadence(messages);
   } catch (e) {
     logEvent("inbound.style_load_failed", { userId, error: errMsg(e) });
   }
-  // Style: the brain's projection wins where present (§8), else the learned/synced.
+  // Style + cadence: the brain's projection wins where present (§8), else the
+  // phone's own learned facet (strangler-fig fallback), else single-bubble.
   const communicationStyle = wm.style ?? learnedStyle ?? syncedProfile?.communication_style ?? null;
+  const cadence =
+    wm.cadence ?? (tsCadence ? { descriptor: tsCadence.descriptor, maxBubbles: tsCadence.maxBubbles } : null);
 
   // Merge facts — the brain world-model LEADS (entities/relations + its profile
   // facts), then identity, then the phone's own stores as coverage/fallback (§8).
@@ -540,7 +558,12 @@ export async function loadProfile(
     return { profile: null, dynamicContext: "" };
   }
   return {
-    profile: { facts: dedupedFacts, preferences, communication_style: communicationStyle },
+    profile: {
+      facts: dedupedFacts,
+      preferences,
+      communication_style: communicationStyle,
+      ...(cadence ? { cadence } : {}),
+    },
     dynamicContext: blendedDynamic,
   };
 }

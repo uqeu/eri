@@ -49,12 +49,15 @@ import { featureLocked } from "@/lib/feature_gate";
 import { isAffirmation, isCorrection, isNegation } from "@/lib/imessage/affirm";
 import { classifyCodingIntent, type CodingIntent } from "@/lib/coding/intent";
 import { formatReply } from "@/lib/imessage/format";
+import { splitIntoBubbles } from "@/lib/messaging/bubbles";
 import { extractPairingCode } from "@/lib/imessage/identity";
 import type { InboundMessage } from "@/lib/imessage/webhook";
 
 export const REPLY = {
   notLinked:
     "Hey! I don't recognize this number yet 🌿 Run `eri phone link` on your computer and text me the code it gives you to connect.",
+  welcomeNew:
+    "hey, i'm eri 🌿 i don't know you yet — tap here to set yourself up, and i'll be linked to this number:",
   linked: 'You\'re linked! 🌿 Text me anything — I know your day. Try "what was I working on?"',
   locked: "Texting with eri is a Pro+ feature — upgrade at tryeri.ca to chat with me here.",
   overQuota:
@@ -108,6 +111,10 @@ export interface AgentTurnResultLike {
 export interface InboundDeps {
   consumePairing(code: string, e164: string): Promise<{ userId: string } | null>;
   resolveUserByPhone(e164: string): Promise<ResolvedUser | null>;
+  /** Mint + store a single-use magic sign-up link for an unknown number, so a
+   *  stranger can sign up and auto-link THIS number (hijack-proof). Returns the
+   *  absolute URL to text back. */
+  mintSignupLink(e164: string): Promise<string>;
   /** True when the user is within quota for an estimated turn. */
   withinQuota(userId: string, tier: string): Promise<boolean>;
   /** Build the context for this turn. `query` is the incoming message, used to
@@ -196,7 +203,15 @@ export async function handleInbound(
       const paired = await deps.consumePairing(code, e164);
       if (paired) return { replyChunks: [REPLY.linked], meter: null, branch: "paired" };
     }
-    return { replyChunks: [REPLY.notLinked], meter: null, branch: "not_linked" };
+    // Unknown number → text a magic sign-up link. Tap → sign up on web → the link
+    // auto-links THIS number (the number is fixed by the token, so it's hijack-proof).
+    let reply: string = REPLY.notLinked;
+    try {
+      reply = `${REPLY.welcomeNew}\n\n${await deps.mintSignupLink(e164)}`;
+    } catch {
+      // fall back to the generic reply if minting fails
+    }
+    return { replyChunks: [reply], meter: null, branch: "not_linked" };
   }
   if (featureLocked(user.tier, "phoneEri")) {
     return { replyChunks: [REPLY.locked], meter: null, branch: "locked" };
@@ -240,6 +255,10 @@ export async function handleInbound(
   }
 
   const { profile, dynamicContext } = await deps.loadProfile(user.userId, msg.content);
+  // How many bubbles eri may mirror back for this user (1 = terse single reply).
+  // From the learned cadence facet (brain projection or the TS fallback); absent
+  // → 1, which makes the reply split identical to the old single-message behavior.
+  const maxBubbles = profile?.cadence?.maxBubbles ?? 1;
   // The running conversation so eri remembers what was just said (not a one-off AI).
   const history = await deps.loadConversation(user.userId);
   const started = deps.now();
@@ -256,7 +275,7 @@ export async function handleInbound(
       await deps.recordConversation(user.userId, msg.content || "(sent a photo)", turn.text);
       await deps.recordSignal(user.userId, msg.content || "(photo)", turn.text, turn.model);
       return {
-        replyChunks: formatReply(turn.text),
+        replyChunks: splitIntoBubbles(turn.text, maxBubbles),
         meter: {
           userId: user.userId,
           model: turn.model,
