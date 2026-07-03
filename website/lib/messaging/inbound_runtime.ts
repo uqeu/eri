@@ -32,6 +32,11 @@ import { fuseRRF, RECALL_CANDIDATE_LIMIT } from "@/lib/agent/memory_recall";
 import { rerank } from "@/lib/agent/rerank";
 import { cancelPending, confirmPending, enqueueCommand } from "@/lib/commands/queue";
 import { handleInbound, type InboundDeps } from "@/lib/imessage/inbound";
+import { makeCodeJobClient } from "@/lib/coding/client";
+import { codeJobEnabled } from "@/lib/coding/flag";
+import { sqlCodeJobStore } from "@/lib/coding/job_store";
+import { startCodingJob } from "@/lib/coding/kickoff";
+import { connectGithubUrl, kickCodeJob, mintJobId, resolveRepoLive } from "@/lib/coding/live";
 import { consumePairing, normalizeE164, resolveUserByPhone } from "@/lib/imessage/identity";
 import type { InboundMessage } from "@/lib/imessage/webhook";
 import { formatWorldModel, readRecallProjection } from "@/lib/messaging/recall";
@@ -177,20 +182,31 @@ export function makeInboundDeps(): InboundDeps {
     weather: makeWeatherDeps(),
     runVisionTurn: ({ imageUrl, prompt, system }) => runVisionTurn({ imageUrl, prompt, system }),
     dispatchCodingJob: async (userId, intent) => {
-      // SHADOW MODE (Phase 3, P1): the classifier runs on real inbound traffic and
-      // we LOG every coding intent it flags — so we can validate precision before
-      // P2 wires the real job kickoff (mirrors the Q23 shadow-then-enforce posture).
-      // Return null → decline → the message falls through to normal chat, so this is
-      // additive with zero behavior change. Once the brain's CodeTurn contract lands,
-      // P2 replaces this body with the real kickoff + streamed status
-      // ("on it — cloning — tests green — PR #123 [link]").
-      logEvent("inbound.coding_intent_shadow", {
-        userId,
-        verb: intent.verb,
-        repo: intent.repo,
-        confidence: intent.confidence,
+      // Kill-switch (ERI_CODEJOB_ENABLED, default OFF). While off → SHADOW: classify
+      // + log, decline (null) → the message falls through to normal chat, so this is
+      // additive with ZERO behavior change (mirrors the Q23 shadow-then-enforce
+      // posture — validate precision on real traffic before turning it on).
+      if (!codeJobEnabled(process.env, userId)) {
+        logEvent("inbound.coding_intent_shadow", {
+          userId,
+          verb: intent.verb,
+          repo: intent.repo,
+          confidence: intent.confidence,
+        });
+        return null;
+      }
+      // LIVE: resolve the repo single-principal → start the job → return the instant
+      // ack. The worker (POST /api/v1/code/run) runs `eri code-job` in a Vercel
+      // Sandbox and streams status bubbles; a review comment later routes back to the
+      // same job via relayReviewComment. needs_connect / ambiguous → a helpful ack.
+      const client = makeCodeJobClient({ store: sqlCodeJobStore(), mintJobId, kick: kickCodeJob });
+      const kickoff = await startCodingJob(userId, intent, {
+        client,
+        resolveRepo: resolveRepoLive,
+        connectUrl: connectGithubUrl,
       });
-      return null;
+      logEvent("inbound.coding_kickoff", { userId, verb: intent.verb, repo: intent.repo, kind: kickoff.kind });
+      return { ack: kickoff.ack };
     },
     loadConversation,
     recordConversation: recordExchange,
