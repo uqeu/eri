@@ -252,7 +252,17 @@ impl Harness for HarnessAdapter {
                 .enable_all()
                 .build()
                 .map_err(|e| anyhow!("harness runtime: {e}"))?;
-            rt.block_on(crate::build_agent::run_build_agent(&prompt, &wt, &model))
+            // narrate=false is LOAD-BEARING: stdout is reserved for the JSONL
+            // progress stream the worker parses line by line. The default
+            // `run_build_agent` narrates the model's text to stdout, which would
+            // interleave prose into the JSONL and break the parse. Run headless.
+            let opts = crate::build_agent::LoopOpts {
+                narrate: false,
+                ..Default::default()
+            };
+            rt.block_on(crate::build_agent::run_headless(
+                &prompt, &wt, &model, &opts,
+            ))
         })
         .await
         .map_err(|e| anyhow!("harness task failed: {e}"))??;
