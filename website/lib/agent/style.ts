@@ -83,3 +83,38 @@ export function analyzeCommunicationStyle(messages: string[]): string | null {
 
   return `${casing}, ${length}, ${emoji}, ${formality}`;
 }
+
+/** A learned texting-cadence facet: how eri should PACE its bubbles for this user. */
+export interface CadenceFacet {
+  /** Human phrase for the prompt ("fires short, quick texts…"). */
+  descriptor: string;
+  /** How many bubbles eri may use to mirror their rhythm (1 = terse, single reply). */
+  maxBubbles: number;
+}
+
+/**
+ * Distill how the user PACES their texting from their recent messages — the
+ * cadence sibling of `analyzeCommunicationStyle`. Short, quick messages invite a
+ * couple of brief bubbles; fuller messages a single reply. Null until there's
+ * enough signal (the same floor), so eri replies single-bubble until it's learned
+ * the person.
+ *
+ * v1 proxies cadence from average length; the canonical brain's projected
+ * `cadence` (true bursts-per-turn from message timestamps) supersedes this where
+ * present (strangler-fig, same as register). Pure + unit-tested.
+ */
+export function analyzeCadence(messages: string[]): CadenceFacet | null {
+  const msgs = messages.map((m) => m.trim()).filter((m) => m.length > 0);
+  if (msgs.length < MIN_MESSAGES_FOR_STYLE) return null;
+
+  const avgWords =
+    msgs.reduce((n, m) => n + m.split(/\s+/).filter(Boolean).length, 0) / msgs.length;
+
+  if (avgWords < 6) {
+    return { maxBubbles: 3, descriptor: "fires short, quick texts — a couple of brief bubbles feels natural" };
+  }
+  if (avgWords < 14) {
+    return { maxBubbles: 2, descriptor: "fairly brief — one or two short messages" };
+  }
+  return { maxBubbles: 1, descriptor: "writes fuller messages — usually one reply is right" };
+}
