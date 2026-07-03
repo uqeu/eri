@@ -12,6 +12,7 @@ import {
 import type { ComposioAccountRow } from "../composio/accounts";
 import {
   authConfigEnvKey,
+  AuthConfigMissingError,
   hasAuthConfig,
   isConnectable,
   markConnectable,
@@ -95,6 +96,25 @@ async function run() {
     assert.equal(out.branch, "composio_error");
     assert.equal(out.redirectUrl, undefined);
   }
+
+  // A connect for a toolkit that needs our OWN auth config but has none registered
+  // (github before COMPOSIO_AUTH_CONFIG_GITHUB is set) → needs_setup, NOT a raw 502.
+  {
+    let toolkitSeen: string | null = null;
+    const deps: ConnectDeps = {
+      initiate: async (_u, tk) => { throw new AuthConfigMissingError(tk); },
+      record: async () => { throw new Error("must not record a failed connect"); },
+    };
+    const out = await handleConnect("u1", "github", deps);
+    assert.equal(out.branch, "needs_setup");
+    assert.equal(out.redirectUrl, undefined);
+    void toolkitSeen;
+  }
+
+  // Slug → env-key contract: github's config lives in COMPOSIO_AUTH_CONFIG_GITHUB
+  // (the slug is "github", not "github-issues") — locks what the operator sets.
+  assert.equal(authConfigEnvKey("github"), "COMPOSIO_AUTH_CONFIG_GITHUB");
+  assert.equal(authConfigEnvKey("github-issues"), "COMPOSIO_AUTH_CONFIG_GITHUB_ISSUES");
 
   // listFreshConnections — refreshes pending accounts so they flip to active.
   {

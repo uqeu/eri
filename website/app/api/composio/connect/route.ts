@@ -52,6 +52,16 @@ export async function POST(request: Request): Promise<Response> {
       return NextResponse.json({ redirectUrl: outcome.redirectUrl });
     case "invalid_toolkit":
       return NextResponse.json({ error: "invalid_toolkit" }, { status: 400 });
+    case "needs_setup":
+      // The toolkit needs its own OAuth config (COMPOSIO_AUTH_CONFIG_<SLUG>) and
+      // none is registered yet — a clear, honest message, NOT a raw 502.
+      return NextResponse.json(
+        {
+          error: "not_configured",
+          message: `${typeof toolkit === "string" ? toolkit : "That app"} isn't set up for eri yet — an admin needs to register its connection config.`,
+        },
+        { status: 409 },
+      );
     case "composio_error":
       return NextResponse.json({ error: "composio_unavailable" }, { status: 502 });
   }

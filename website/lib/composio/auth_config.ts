@@ -31,6 +31,19 @@ import type { AuthKind, ToolkitInfo } from "@/lib/composio/client";
 
 type Env = Record<string, string | undefined>;
 
+/**
+ * Thrown when an OAuth connect is attempted for a toolkit that needs our OWN auth
+ * config (custom OAuth — e.g. github) but none is registered yet
+ * (`COMPOSIO_AUTH_CONFIG_<SLUG>` unset). The connect can't succeed, so we surface a
+ * clear "not set up yet" instead of a raw vendor 502.
+ */
+export class AuthConfigMissingError extends Error {
+  constructor(public readonly toolkit: string) {
+    super(`no Composio auth config registered for "${toolkit}"`);
+    this.name = "AuthConfigMissingError";
+  }
+}
+
 /** The env-var name that would hold `toolkit`'s auth-config slug. */
 export function authConfigEnvKey(toolkit: string): string {
   return `COMPOSIO_AUTH_CONFIG_${toolkit.toUpperCase().replace(/[^A-Z0-9]/g, "_")}`;

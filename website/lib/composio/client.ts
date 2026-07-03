@@ -16,7 +16,7 @@
  */
 
 import { AuthScheme, Composio } from "@composio/core";
-import { resolveAuthConfigId } from "@/lib/composio/auth_config";
+import { AuthConfigMissingError, resolveAuthConfigId } from "@/lib/composio/auth_config";
 
 /** One initiated connection: the hosted URL to open (empty for API-key links,
  *  which complete server-side with no consent screen), plus Composio's account id. */
@@ -216,7 +216,18 @@ export class ComposioApiClient implements ComposioClient {
     // doesn't exist and returns the hosted consent URL. Passing our registered
     // `authConfigId` is what makes a custom-OAuth toolkit (our own app) work;
     // omitting it falls back to Composio's managed app.
-    const req = await composio().toolkits.authorize(userId, toolkit, authConfigId ?? undefined);
+    let req: { id?: string; redirectUrl?: string | null };
+    try {
+      req = await composio().toolkits.authorize(userId, toolkit, authConfigId ?? undefined);
+    } catch (err) {
+      // A connect attempted WITHOUT our own auth config that fails almost always
+      // means this toolkit needs a custom OAuth app we haven't registered yet
+      // (e.g. github before COMPOSIO_AUTH_CONFIG_GITHUB is set) — Composio 502s on
+      // authorize. Surface that as a clear "not set up" signal, not a raw vendor
+      // error. When a config IS present, a failure is a genuine outage → rethrow.
+      if (authConfigId == null) throw new AuthConfigMissingError(toolkit);
+      throw err;
+    }
     if (!req.id || !req.redirectUrl) {
       throw new Error(`composio authorize returned no redirect for "${toolkit}"`);
     }
