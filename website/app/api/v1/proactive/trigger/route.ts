@@ -23,6 +23,7 @@ import { sendProactiveMessage } from "@/lib/messaging/spectrum";
 import type { CalendarSignal, EmailSignal } from "@/lib/proactive/detect";
 import { detectTriggers } from "@/lib/proactive/detect";
 import { dispatchProactive, type ProactiveDeps } from "@/lib/proactive/dispatch";
+import { isQuietHour, proactiveEnabled } from "@/lib/proactive/gate";
 import {
   CALENDAR_TOOLKIT,
   GMAIL_TOOLKIT,
@@ -51,6 +52,12 @@ export async function GET(request: Request): Promise<NextResponse> {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
+  // Emergency kill-switch — set PROACTIVE_ENABLED=false to STOP the sweep instantly
+  // (no deploy). Short-circuit BEFORE any work so zero Gmail/Composio fetches run.
+  if (!proactiveEnabled(process.env.PROACTIVE_ENABLED)) {
+    return NextResponse.json({ ok: true, disabled: true }, { status: 200 });
+  }
+
   const nowMs = Date.now();
   const deps = makeDeps();
 
@@ -74,7 +81,7 @@ export async function GET(request: Request): Promise<NextResponse> {
     );
   }
 
-  const counts = { candidates: 0, triggers: 0, sent: 0, gated: 0, skipped: 0, errored: 0, no_phone: 0 };
+  const counts = { candidates: 0, triggers: 0, sent: 0, gated: 0, skipped: 0, errored: 0, no_phone: 0, quiet: 0 };
 
   const candidates = await sql()<{ user_id: string }[]>`
     SELECT DISTINCT user_id FROM phone_links
@@ -84,6 +91,13 @@ export async function GET(request: Request): Promise<NextResponse> {
   counts.candidates = candidates.length;
 
   for (const { user_id } of candidates) {
+    // Quiet hours → skip the Gmail/Composio fetch ENTIRELY. No nudge can go out now
+    // (decideGate returns "quiet_hours"), so fetching signals is pure waste — this
+    // is the bulk of the cost. Same local-time window + tz resolution the gate uses.
+    if (isQuietHour(localHourInTz(nowMs, userTimezone(user_id)))) {
+      counts.quiet++;
+      continue;
+    }
     let triggers: ProactiveTrigger[];
     try {
       const signals = await fetchSignals(user_id);

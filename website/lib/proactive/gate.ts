@@ -50,6 +50,18 @@ export function isQuietHour(hour: number): boolean {
   return hour >= QUIET_START_HOUR || hour < QUIET_END_HOUR;
 }
 
+/**
+ * Emergency kill-switch for the whole proactive sweep. Enabled by DEFAULT (env
+ * unset/blank) so behavior is unchanged; setting `PROACTIVE_ENABLED` to a falsey
+ * value ("false"/"0"/"off"/"no") STOPS the cron instantly with no code deploy —
+ * the route short-circuits to a 200 no-op, so no Gmail/Composio fetch runs at all.
+ */
+export function proactiveEnabled(value: string | undefined): boolean {
+  if (value == null) return true;
+  const v = value.trim().toLowerCase();
+  return !(v === "false" || v === "0" || v === "off" || v === "no");
+}
+
 /** Decide whether a single trigger may be sent right now. Pure. */
 export function decideGate(trigger: ProactiveTrigger, state: GateState): GateDecision {
   if (state.alreadySent) return { send: false, reason: "duplicate" };
