@@ -162,16 +162,24 @@ pub fn recovery_directive(error_text: &str) -> String {
     }
 
     let body = match recovery {
-        Recovery::Restart => "Take a screenshot. The editor or its agent looks frozen — restart it \
-             (close and reopen, or force-quit and get back into the session), then resume the task.",
-        Recovery::Dismiss => "Take a screenshot. A dialog or popup is likely blocking — read it, \
-             dismiss or answer it appropriately, then resume.",
-        Recovery::Wait => "The agent is probably still working — wait a few seconds, then look at \
-             the screen again before acting (don't re-send into a half-finished response).",
+        Recovery::Restart => {
+            "Take a screenshot. The editor or its agent looks frozen — restart it \
+             (close and reopen, or force-quit and get back into the session), then resume the task."
+        }
+        Recovery::Dismiss => {
+            "Take a screenshot. A dialog or popup is likely blocking — read it, \
+             dismiss or answer it appropriately, then resume."
+        }
+        Recovery::Wait => {
+            "The agent is probably still working — wait a few seconds, then look at \
+             the screen again before acting (don't re-send into a half-finished response)."
+        }
         // Unknown → look first, then recover as the screen dictates.
-        _ => "Take a screenshot to see what's actually on screen, diagnose what went wrong, and \
+        _ => {
+            "Take a screenshot to see what's actually on screen, diagnose what went wrong, and \
              recover: restart if it's frozen, dismiss if a dialog is blocking, wait if it's still \
-             thinking. If it's an API/usage limit or a login prompt, STOP and tell the user.",
+             thinking. If it's an API/usage limit or a login prompt, STOP and tell the user."
+        }
     };
     format!("{head} {body}")
 }
@@ -182,25 +190,55 @@ mod tests {
 
     #[test]
     fn classifies_the_blockers_eri_cannot_fix_first() {
-        assert_eq!(Blocker::classify("Error: rate limit exceeded"), Blocker::ApiLimit);
-        assert_eq!(Blocker::classify("You are out of credits"), Blocker::ApiLimit);
-        assert_eq!(Blocker::classify("HTTP 429 Too Many Requests"), Blocker::ApiLimit);
-        assert_eq!(Blocker::classify("Please sign in to continue"), Blocker::AuthExpired);
+        assert_eq!(
+            Blocker::classify("Error: rate limit exceeded"),
+            Blocker::ApiLimit
+        );
+        assert_eq!(
+            Blocker::classify("You are out of credits"),
+            Blocker::ApiLimit
+        );
+        assert_eq!(
+            Blocker::classify("HTTP 429 Too Many Requests"),
+            Blocker::ApiLimit
+        );
+        assert_eq!(
+            Blocker::classify("Please sign in to continue"),
+            Blocker::AuthExpired
+        );
         assert_eq!(Blocker::classify("401 unauthorized"), Blocker::AuthExpired);
     }
 
     #[test]
     fn classifies_softer_blockers() {
-        assert_eq!(Blocker::classify("Cursor is not responding"), Blocker::Frozen);
-        assert_eq!(Blocker::classify("A dialog asks: do you want to allow access"), Blocker::Popup);
-        assert_eq!(Blocker::classify("the agent is still generating a response"), Blocker::StillWorking);
-        assert_eq!(Blocker::classify("element not found at point"), Blocker::Unknown);
+        assert_eq!(
+            Blocker::classify("Cursor is not responding"),
+            Blocker::Frozen
+        );
+        assert_eq!(
+            Blocker::classify("A dialog asks: do you want to allow access"),
+            Blocker::Popup
+        );
+        assert_eq!(
+            Blocker::classify("the agent is still generating a response"),
+            Blocker::StillWorking
+        );
+        assert_eq!(
+            Blocker::classify("element not found at point"),
+            Blocker::Unknown
+        );
     }
 
     #[test]
     fn recovery_maps_each_blocker() {
-        assert_eq!(Recovery::for_blocker(Blocker::ApiLimit), Recovery::HandBackToUser);
-        assert_eq!(Recovery::for_blocker(Blocker::AuthExpired), Recovery::HandBackToUser);
+        assert_eq!(
+            Recovery::for_blocker(Blocker::ApiLimit),
+            Recovery::HandBackToUser
+        );
+        assert_eq!(
+            Recovery::for_blocker(Blocker::AuthExpired),
+            Recovery::HandBackToUser
+        );
         assert_eq!(Recovery::for_blocker(Blocker::Frozen), Recovery::Restart);
         assert_eq!(Recovery::for_blocker(Blocker::Popup), Recovery::Dismiss);
         assert_eq!(Recovery::for_blocker(Blocker::StillWorking), Recovery::Wait);
@@ -225,9 +263,15 @@ mod tests {
     #[test]
     fn directive_tells_eri_to_look_and_restart_when_frozen() {
         let d = recovery_directive("the editor is not responding");
-        assert!(d.to_lowercase().contains("screenshot"), "eri should look first");
+        assert!(
+            d.to_lowercase().contains("screenshot"),
+            "eri should look first"
+        );
         assert!(d.to_lowercase().contains("restart"));
-        assert!(!d.contains("STOP"), "a frozen editor is recoverable, not a hand-back");
+        assert!(
+            !d.contains("STOP"),
+            "a frozen editor is recoverable, not a hand-back"
+        );
     }
 
     #[test]

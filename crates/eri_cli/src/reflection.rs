@@ -13,20 +13,29 @@ use anyhow::Result;
 
 use eri_inference::memory::reflection;
 
+/// The cheap, fast model the cold-path reflection runs on — it's a background
+/// extraction, not a user turn, so it never needs the frontier engine.
+const REFLECTION_MODEL: &str = "claude-haiku-4-5-20251001";
+
+/// A small cap — the response is a compact JSON entity/relation reading, not prose.
+const REFLECTION_MAX_TOKENS: u32 = 1024;
+
 /// The base-engine call the reflection pass makes. A seam: prod wires
 /// [`ProxyReflectionClient`] (eri tokens via the proxy); tests inject a mock that
-/// returns a recorded transcript.
+/// returns a recorded transcript. `system` is the reflection instruction,
+/// `observations` the user message. Returns `None` when reflection was **deferred**
+/// (e.g. over quota) — background work is never a hard failure.
 #[async_trait::async_trait]
 pub trait ReflectionClient: Send + Sync {
-    /// Send `prompt` to the base engine and return its raw text response.
-    async fn reflect(&self, prompt: &str) -> Result<String>;
+    async fn reflect(&self, system: &str, observations: &str) -> Result<Option<String>>;
 }
 
 /// Run one cold-path reflection flush for the signed-in user over their most
-/// recent `limit` observations: collect the batch, build the prompt, call the
-/// base engine, and apply the response (grounded, provenance-tagged,
-/// user-scoped). Returns the number of entities written. Best-effort over
-/// untrusted output — an empty batch or a garbage response simply writes nothing.
+/// recent `limit` observations: collect the batch, send the instruction (`system`)
+/// together with the observations (the user message) to the base engine, and apply
+/// the response (grounded, provenance-tagged, user-scoped). Returns the number of
+/// entities written. Best-effort over untrusted output — an empty batch, a deferral
+/// (over quota), or a garbage response simply writes nothing.
 pub async fn run_reflection(
     client: &dyn ReflectionClient,
     user_id: Option<&str>,
@@ -36,21 +45,32 @@ pub async fn run_reflection(
     if batch.is_empty() {
         return Ok(0);
     }
-    let prompt = reflection::reflection_prompt(&batch.texts());
-    let response = client.reflect(&prompt).await?;
+    let system = reflection::reflection_system_prompt();
+    let observations = reflection::reflection_observations(&batch.texts());
+    let Some(response) = client.reflect(system, &observations).await? else {
+        // Deferred (e.g. over quota) — try again on the next flush, no entities now.
+        return Ok(0);
+    };
     let written = reflection::apply_batch(user_id, &batch, &response)?;
     Ok(written)
 }
 
-/// Production [`ReflectionClient`]: routes the reflection prompt through the eri
-/// proxy (eri tokens), like every other base-engine call. Live IO — exercised
-/// end-to-end on the real binary, never in CI (CI uses a mock).
+/// Production [`ReflectionClient`]: routes the reflection call through the shared
+/// [`crate::inference::call`] proxy seam (Anthropic-shaped `/v1/messages`, eri
+/// tokens). Live IO — exercised end-to-end on the real binary, never in CI (CI uses
+/// a mock).
 pub struct ProxyReflectionClient;
 
 #[async_trait::async_trait]
 impl ReflectionClient for ProxyReflectionClient {
-    async fn reflect(&self, prompt: &str) -> Result<String> {
-        crate::agent::capture_intent_text("reflect", prompt, None).await
+    async fn reflect(&self, system: &str, observations: &str) -> Result<Option<String>> {
+        crate::inference::call(
+            REFLECTION_MODEL,
+            REFLECTION_MAX_TOKENS,
+            system,
+            observations,
+        )
+        .await
     }
 }
 
@@ -65,10 +85,13 @@ mod tests {
 
     #[async_trait::async_trait]
     impl ReflectionClient for MockReflectionClient {
-        async fn reflect(&self, _prompt: &str) -> Result<String> {
-            Ok(self.response.clone())
+        async fn reflect(&self, _system: &str, _observations: &str) -> Result<Option<String>> {
+            Ok(Some(self.response.clone()))
         }
     }
+
+    // The inference request/response/quota helpers now live in `crate::inference`
+    // (shared with the ingest privacy screen); their unit tests moved there too.
 
     // The env lock is held across the await to keep HOME isolated for the whole
     // flush; `#[tokio::test]` is current-thread, so the guard never crosses a real
@@ -142,7 +165,7 @@ mod tests {
         struct NeverClient;
         #[async_trait::async_trait]
         impl ReflectionClient for NeverClient {
-            async fn reflect(&self, _prompt: &str) -> Result<String> {
+            async fn reflect(&self, _system: &str, _observations: &str) -> Result<Option<String>> {
                 panic!("must not call the base engine with no observations")
             }
         }

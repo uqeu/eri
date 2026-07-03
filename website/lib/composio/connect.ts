@@ -12,8 +12,9 @@ import {
   type ComposioAccountRow,
   type ConnectionStatus,
 } from "@/lib/composio/accounts";
+import { AuthConfigMissingError } from "@/lib/composio/auth_config";
 
-export type ConnectBranch = "ok" | "invalid_toolkit" | "composio_error";
+export type ConnectBranch = "ok" | "invalid_toolkit" | "needs_setup" | "composio_error";
 
 export interface ConnectOutcome {
   branch: ConnectBranch;
@@ -55,7 +56,11 @@ export async function handleConnect(
     const { connectedAccountId, redirectUrl } = await deps.initiate(userId, toolkit, opts);
     await deps.record({ userId, toolkit, connectedAccountId, status: "pending" });
     return { branch: "ok", redirectUrl };
-  } catch {
+  } catch (err) {
+    // A toolkit that needs our own OAuth config but has none registered yet isn't a
+    // vendor failure — it's "not set up". Surface that distinctly so the route
+    // returns a clear message instead of a 502.
+    if (err instanceof AuthConfigMissingError) return { branch: "needs_setup" };
     return { branch: "composio_error" };
   }
 }

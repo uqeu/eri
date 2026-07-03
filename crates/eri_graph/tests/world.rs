@@ -79,6 +79,31 @@ fn upserting_the_same_entity_twice_resolves_to_one() {
 }
 
 #[test]
+fn a_bare_name_and_its_noun_variant_resolve_to_one_project() {
+    let g = Graph::open_in_memory().unwrap();
+
+    // The cue extractor records "atlas"; the reflection pass records "atlas project".
+    // They must resolve to ONE project, not fork (the dedup that keeps the world
+    // model clean across the two extractors).
+    let a = world::upsert_entity(&g, world::entity_kind::PROJECT, "atlas").unwrap();
+    let b = world::upsert_entity(&g, world::entity_kind::PROJECT, "atlas project").unwrap();
+    assert_eq!(a, b, "'atlas' and 'atlas project' are one project");
+
+    // And the reverse order ("harbor app" first, then "harbor").
+    let c = world::upsert_entity(&g, world::entity_kind::PROJECT, "harbor app").unwrap();
+    let d = world::upsert_entity(&g, world::entity_kind::PROJECT, "harbor").unwrap();
+    assert_eq!(c, d, "'harbor app' and 'harbor' are one project");
+
+    assert_eq!(
+        world::entities_of_kind(&g, world::entity_kind::PROJECT)
+            .unwrap()
+            .len(),
+        2,
+        "exactly two distinct projects: atlas and harbor"
+    );
+}
+
+#[test]
 fn upsert_keeps_distinct_names_and_kinds_separate() {
     let g = Graph::open_in_memory().unwrap();
 

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>eri - Architecture Reference</title>
+<title>eri - Architecture &amp; Vision Reference</title>
 <style>
   :root{
     --bg:#0e0f10; --panel:#161719; --panel2:#1c1d20; --line:#2b2c30;
@@ -44,6 +44,7 @@
   .pill.ok{color:var(--ok);border-color:#27543f}
   .pill.bad{color:var(--warn);border-color:#5a322c}
   .pill.acc{color:var(--accent);border-color:#46591f}
+  .pill.blue{color:var(--blue);border-color:#2c3f5a}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;
     padding:18px 20px;margin:14px 0}
   .grid{display:grid;gap:12px}
@@ -68,365 +69,339 @@
   .kvs span{color:var(--accent)}
   .note{border-left:3px solid var(--accent-dim);background:#13180a55;padding:10px 14px;border-radius:0 8px 8px 0;margin:14px 0}
   .bad-note{border-left:3px solid var(--warn);background:#1a0f0d55;padding:10px 14px;border-radius:0 8px 8px 0;margin:14px 0}
+  .blue-note{border-left:3px solid var(--blue);background:#0d131a55;padding:10px 14px;border-radius:0 8px 8px 0;margin:14px 0}
   footer{color:var(--dim);font-size:12px;border-top:1px solid var(--line);margin-top:50px;padding-top:18px}
   .tocnum{color:var(--dim);font-family:var(--mono);font-size:12px;margin-right:6px}
+  .legend{display:flex;flex-wrap:wrap;gap:10px;margin:10px 0 4px}
 </style>
 </head>
 <body>
 <div class="wrap">
   <nav>
     <p class="brand"><b>eri</b> arch</p>
-    <p class="tag">production reference - keep updated</p>
-    <div class="grp">Foundations</div>
-    <a href="#overview">1 - Overview &amp; product</a>
+    <p class="tag">source of truth - keep updated</p>
+    <div class="grp">The product</div>
+    <a href="#overview">1 - North star</a>
     <a href="#surfaces">2 - Surfaces</a>
-    <a href="#infra">3 - Deploy &amp; infra</a>
-    <a href="#data">4 - Data model</a>
-    <div class="grp">Systems</div>
-    <a href="#auth">5 - Auth</a>
-    <a href="#billing">6 - Billing &amp; plans</a>
-    <a href="#economics">6b - Pricing &amp; economics</a>
-    <a href="#inference">7 - Inference</a>
-    <div class="grp">Code generation</div>
-    <a href="#codegen">8 - Code-gen (current)</a>
-    <a href="#target">8b - Target agentic loop</a>
-    <a href="#capabilities">8c - Agent capability layer</a>
-    <a href="#cli-parity">8d - CLI parity + roadmap</a>
-    <a href="#phone-memory">8e - Phone eri &amp; memory</a>
-    <a href="#models">9 - Model IDs</a>
+    <div class="grp">The one brain</div>
+    <a href="#world-model">3 - World model</a>
+    <a href="#loop">4 - Predict &rarr; gate &rarr; act</a>
+    <a href="#sia">5 - The sia learning loop</a>
+    <a href="#safety">6 - Safety spine</a>
+    <a href="#recall">7 - Recall seam (brain&harr;phone)</a>
+    <div class="grp">Capabilities</div>
+    <a href="#control">8 - Computer control</a>
+    <a href="#phone-memory">9 - Phone &amp; two-tier memory</a>
+    <a href="#build">10 - Drives your agents</a>
+    <div class="grp">Platform</div>
+    <a href="#infra">11 - Deploy &amp; infra</a>
+    <a href="#data">12 - Data model</a>
+    <a href="#auth">13 - Auth</a>
+    <a href="#billing">14 - Billing &amp; economics</a>
+    <a href="#inference">15 - Inference</a>
+    <div class="grp">Vision &amp; landscape</div>
+    <a href="#social">16 - eri social (vision)</a>
+    <a href="#landscape">17 - Competitive landscape</a>
     <div class="grp">Meta</div>
+    <a href="#roadmap">Roadmap &amp; ADRs</a>
+    <a href="#models">Model IDs</a>
     <a href="#repo">Repo map</a>
-    <a href="#status">Status &amp; TODO</a>
+    <a href="#status">Status</a>
   </nav>
 
   <main>
-    <h1>eri - Architecture Reference</h1>
-    <p class="lede">The single source of truth for how eri is built: every surface, service, data flow and design decision across the production stack. Read this first; never re-derive it. <span class="muted">Last updated 2026-06-14.</span></p>
+    <h1>eri - Architecture &amp; Vision Reference</h1>
+    <p class="lede">The single source of truth for what eri is and how it's built: the one brain, every surface, the safety spine, and the roadmap to the digital human. Read this first; never re-derive it. <span class="muted">Last updated 2026-06-25.</span></p>
 
     <div class="card kvs" style="margin-top:20px">
-      <div><span>Product</span> &nbsp; agentic AI IDE - voice + personalization, "learns about you"</div>
-      <div><span>Engines</span> &nbsp; Mercury (fast diffusion edits) + Claude (builds &amp; reasoning)</div>
-      <div><span>Web/API</span> &nbsp; Next.js 14 in <code>website/</code> on Vercel, domain <code>tryeri.ca</code></div>
-      <div><span>DB</span> &nbsp; Supabase Postgres <code>zvwzcqsdjuvuvtxbnrlq</code></div>
-      <div><span>Core</span> &nbsp; Rust workspace (CLI, inference, router, control, billing, coreutils)</div>
-      <div><span>Stage</span> &nbsp; pre-launch alpha, plan-gated "eri credits"</div>
+      <div><span>What</span> &nbsp; eri = Engineered Relative Intelligence - the AI operating system for a person; your "second digital half"</div>
+      <div><span>Company</span> &nbsp; Eri Labs - an AGI lab; the product is honest, the mission is bold</div>
+      <div><span>One brain</span> &nbsp; one world model of you, reached from your computer and your phone; it learns, predicts, and acts</div>
+      <div><span>Base engine</span> &nbsp; Claude (the cortex / muscle, + drives your other coding agents) + a small local model (token-free low-level) + Mercury (fast code edits)</div>
+      <div><span>Core</span> &nbsp; Rust workspace (<code>eri_graph</code> world model, <code>eri_inference</code>, <code>eri_cli</code> control/brain, billing, coreutils)</div>
+      <div><span>Cloud</span> &nbsp; Next.js 14 in <code>website/</code> on Vercel (<code>tryeri.ca</code>) + Supabase Postgres</div>
+      <div><span>Stage</span> &nbsp; pre-launch alpha, zero users; no fake metrics, no release until it's whole</div>
+    </div>
+
+    <div class="legend small muted" style="margin-top:14px">
+      <span class="pill ok">shipped</span> built + tested + committed &nbsp;
+      <span class="pill acc">in progress</span> being built now &nbsp;
+      <span class="pill blue">planned</span> designed, not built &nbsp;
+      <span class="pill bad">vision</span> direction, not yet designed
     </div>
 
     <!-- 1 -->
-    <h2 id="overview"><span class="tocnum">1</span>Overview &amp; product</h2>
-    <p>eri is an <b>agentic AI IDE</b>: the user describes what they want in natural language (or voice), and eri builds/edits real apps, learning the user's preferences over time. Positioning is "agentic + personalized + learns about you" - never literal "AGI". The model strategy is a two-engine split:</p>
-    <div class="grid g2">
-      <div class="card"><span class="pill acc">Mercury</span><h3>Fast lane - instant edits</h3><p class="small">Inception Labs diffusion model (<code>mercury-2</code>). Sub-second surgical single-file edits via SEARCH/REPLACE. Effectively free at provider level (&lt;$0.005/turn); metered as <b>turns</b>, not tokens.</p></div>
-      <div class="card"><span class="pill acc">Claude</span><h3>Builder lane - real work</h3><p class="small">Anthropic Sonnet for full builds, multi-file work, and reasoning. Metered against the plan's <b>token budget</b>. Opus blocked on the shared proxy by cost-guard.</p></div>
+    <h2 id="overview"><span class="tocnum">1</span>North star</h2>
+    <p>eri is <b>one digital human you create to your liking</b> - a world model of <em>you</em> (your people, projects, habits, voice, life) that lives with you across devices, learns continuously, predicts what you'll want, and acts on your behalf. The posture is an <b>AGI lab whose product stays honest</b>: we say "adaptive / learns you / your other half", never literal present-tense "AGI" or "sentient" (legal + credibility). "AGI grows one person at a time."</p>
+    <div class="grid g3">
+      <div class="card"><span class="pill acc">knows you</span><h3>World model</h3><p class="small">A persistent, bi-temporal graph of your world (people / projects / observations / predictions) with provenance. The top concept; memory is one component of it. <a href="#world-model">&sect;3</a></p></div>
+      <div class="card"><span class="pill acc">acts for you</span><h3>Computer control</h3><p class="small">Hands-free eyes + voice that drive your actual computer, gated by a confirmation envelope so it's safe. The launch wedge. <a href="#control">&sect;8</a></p></div>
+      <div class="card"><span class="pill acc">grows with you</span><h3>sia loop</h3><p class="small">It learns from outcomes (undo = "ask next time"), admitting only changes that earn their keep, and can only make itself <em>more</em> careful. <a href="#sia">&sect;5</a></p></div>
     </div>
-    <p class="small muted">Each paid plan ships a Claude token allowance + a Mercury turn allowance ("eri credits"). See <a href="#billing">Billing</a>.</p>
-    <p class="small"><b>Engine routing (locked) - split by surface + shape, not just fast-vs-deep:</b> Mercury can't tool-call, so it can't drive an agentic loop - its home is <b>IDE live edits</b> (Cmd-K / inline / quick-fix), turn-metered. The agentic tool-use loop is intrinsically Claude-shaped, so the <b>CLI is Claude-only</b> (builds / iterations / plans), token-metered. A <b>mode picker</b> (like the big labs) selects the Claude <i>tier</i> in the CLI - <code>--mode fast</code> (Haiku) / <code>thinking</code> (Sonnet, default) / <code>auto</code> - not Mercury-vs-Claude; the IDE gets an Instant / Thinking / Auto toggle. See <a href="#target">8b</a>.</p>
+    <div class="note small"><b>One brain, three surfaces.</b> There is exactly one canonical brain (Rust, <code>crates/</code>). The computer app, the phone (iMessage), and the website are <em>windows</em> into it - never separate brains. A future cloud-resident enclave (<a href="#safety">ADR-0008</a>) is where the brain ultimately lives so it serves you with the laptop off. Build (the old "AI IDE") is now <b>one capability</b> of this brain, not the product (<a href="#build">&sect;10</a>, ADR-0009).</p></div>
 
     <!-- 2 -->
     <h2 id="surfaces"><span class="tocnum">2</span>Surfaces</h2>
     <table>
-      <tr><th>Surface</th><th>What</th><th>Where</th></tr>
-      <tr><td><b>eri CLI</b></td><td>Rust binary <code>eri</code>: build, iterate, ship, ask, plan, test, refactor, auth, agent, memory, mcp, doctor</td><td><code>crates/eri_cli</code> &rarr; <code>target/release/eri</code></td></tr>
-      <tr><td><b>IDE extension</b></td><td>VSCodium-fork panel - chat, agents, account, ship, terminals, slash</td><td><code>ide/extensions/eri-ai-panel</code></td></tr>
-      <tr><td><b>Agent Manager</b></td><td>Standalone macOS WKWebView app (Antigravity-style); the product surface, bridged to the real CLI</td><td><code>apps/eri-agent-manager</code>, <code>scripts/eri_agent_manager.swift</code></td></tr>
-      <tr><td><b>Website + API</b></td><td>Marketing site, dashboard, auth pages, and all <code>/api/v1/*</code> endpoints</td><td><code>website/</code> (Next.js 14)</td></tr>
+      <tr><th>Surface</th><th>What it is</th><th>Where</th><th>State</th></tr>
+      <tr><td><b>eri app</b> (computer)</td><td>The macOS app: eri watches and acts on your machine hands-free, and has its <b>own built-in terminal</b> where it codes and drives agentic dev (spins up Claude Code / Cursor / etc. sessions for you)</td><td><code>apps/eri-agent-manager</code>, <code>crates/eri_cli</code> control + terminal</td><td><span class="pill ok">live wedge</span></td></tr>
+      <tr><td><b>eri pill</b> (overlay)</td><td>The super-small always-on floating companion - summon with a hotkey, talk or type, watch eri's thought-stream; stays out of the way</td><td>transparent NSPanel overlay, <code>&#8984;&#8997;E</code></td><td><span class="pill ok">shipped</span></td></tr>
+      <tr><td><b>eri phone</b> (iMessage)</td><td>Text eri when you're away; the cloud half answers and acts for you even with the laptop off (via Composio connections)</td><td><code>website/</code> serverless (Spectrum / Photon)</td><td><span class="pill ok">M1 live</span></td></tr>
+      <tr><td><b>eri website</b></td><td>Front door (download, pricing, auth) + host for the phone backend + all <code>/api/v1/*</code></td><td><code>website/</code> (Next.js 14, Vercel)</td><td><span class="pill ok">shipped</span></td></tr>
+      <tr><td><b>eri social</b></td><td>Your digital half's presence; eris connect on your behalf (a consented outward projection) - coming soon</td><td>vision, grilling in design</td><td><span class="pill bad">vision</span></td></tr>
     </table>
+    <p class="small muted"><b>No standalone AI IDE</b> (retired, ADR-0009). eri is a computer-use agent - it doesn't need its own editor; it <em>drives</em> the coding tools you already use. <a href="#build">&sect;10</a></p>
 
     <!-- 3 -->
-    <h2 id="infra"><span class="tocnum">3</span>Deploy &amp; infra</h2>
+    <h2 id="world-model"><span class="tocnum">3</span>The world model <span class="pill ok">shipped (P1)</span></h2>
+    <p>The brain is <b>one graph</b> (<code>crates/eri_graph</code>, ADR-0007). Everything - entities, relations, observations, learned action-chains - is nodes and edges in a single store, so the model of you is unified, not scattered across tables.</p>
+    <div class="grid g2">
+      <div class="card"><h3>What it holds</h3><ul class="small">
+        <li><b>Entities</b> - people / projects / apps, salience-ranked by evidence count.</li>
+        <li><b>Relations</b> - <code>collaborates_on</code>, <code>related</code>, &hellip; typed edges between entities.</li>
+        <li><b>Observations</b> - the raw "what happened", with provenance back to source.</li>
+        <li><b>Chains</b> - learned "after X you usually Y" with weighted <code>NEXT</code> edges (predictions).</li>
+      </ul></div>
+      <div class="card"><h3>How it stays honest</h3><ul class="small">
+        <li><b>Bi-temporal</b> - <code>valid_from</code>/<code>valid_to</code>; facts are <em>invalidated, not deleted</em>, so history is auditable.</li>
+        <li><b>Provenance</b> - every node/edge carries its source (observed vs. <code>reflection</code> vs. <code>sia</code>); inferred &ne; observed.</li>
+        <li><b>Typo-tolerant resolution</b> - OSA edit-distance entity merge, conservative, so "Priya" / "priya" don't fork.</li>
+      </ul></div>
+    </div>
+    <h3>How it fills: reflection <span class="pill ok">shipped</span></h3>
+    <p class="small">Ingest stays zero-token and deterministic (<code>CueExtractor</code>, the hot path). A separate <b>cold-path reflection pass</b> (ADR-0007 &sect;3, <code>eri memory reflect</code>) batches recent observations &rarr; one base-engine call &rarr; structured entities/relations &rarr; gated into the graph. Defensive over untrusted model output: malformed JSON &rarr; empty, unknown kinds dropped, dangling relations dropped, grounded (an entity named in no source text is dropped - no fabrication), provenance <code>source="reflection"</code>. Seam lives in <code>eri_inference::memory</code>; <code>eri_cli</code> never names <code>eri_graph</code> in prod.</p>
+
+    <!-- 4 -->
+    <h2 id="loop"><span class="tocnum">4</span>Predict &rarr; gate &rarr; act <span class="pill ok">shipped (P2)</span></h2>
+    <p>Every action eri takes passes through a <b>confirmation envelope</b> (ADR-0006). The brain predicts a confidence, classifies reversibility, and the gate decides: auto-execute only when <em>reversible &amp; confident &amp; known</em>; anything irreversible, sensitive, or novel always asks.</p>
+    <div class="flow">
+      <span class="node">action proposed</span><span class="arrow">&rarr;</span>
+      <span class="node acc">predict confidence</span><span class="arrow">(model self-report + world-model forecast + cross-turn corroboration)</span>
+    </div>
+    <div class="flow">
+      <span class="node acc">gate</span><span class="arrow">denylist &rarr; refusal (absolute) &rarr; caution &rarr; grant &rarr; confidence floor</span><span class="arrow">&rarr;</span>
+      <span class="node">auto-run</span><span class="arrow">/</span><span class="node warn">hold for confirm</span><span class="arrow">/</span><span class="node warn">refuse</span>
+    </div>
+    <ul class="small">
+      <li><b>Reversibility taxonomy</b> + clamped confidence; the predict step is one deep module (<code>predict::confidence_for</code> over a <code>WorldView</code> handle - the opened world graph + cross-turn cursor as one value).</li>
+      <li><b>Three independent axes</b>, never conflated: the <em>refusal</em> boundary (absolute), the <em>grant</em> axis (explicit or sia-earned, always announced), and the <em>chain/confidence</em> axis (what sia refines). <a href="#safety">&sect;6</a></li>
+      <li>Files: <code>crates/eri_cli/src/{control_envelope,predict,control_agent,control_safety}.rs</code>. One unified gate (<code>gate_and_confirm</code>) across the main, coding, and fast-lane paths - no duplicated confirm logic.</li>
+    </ul>
+
+    <!-- 5 -->
+    <h2 id="sia"><span class="tocnum">5</span>The sia learning loop <span class="pill ok">shipped (P3)</span></h2>
+    <p>eri gets better from its own outcomes - <b>no weight-training in v1</b> (ADR-0007 &sect;5): it refines world-model / chain / confidence state only. The loop is closed end-to-end:</p>
+    <div class="flow">
+      <span class="node">observe</span><span class="arrow">&rarr;</span><span class="node">propose</span><span class="arrow">&rarr;</span>
+      <span class="node acc">admit (earns-its-keep)</span><span class="arrow">&rarr;</span><span class="node">apply</span><span class="arrow">&rarr;</span>
+      <span class="node acc">measure</span><span class="arrow">&rarr;</span><span class="node">keep / revert</span>
+    </div>
+    <table>
+      <tr><th>Stage</th><th>What</th></tr>
+      <tr><td><b>observe</b></td><td>one typed <code>Outcome</code> stream (AutoExecuted / Confirmed / Declined / Refused / Undone) through the existing <code>ControlTurnSink</code> - consolidated, not a parallel sink.</td></tr>
+      <tr><td><b>admit</b></td><td><code>sia::accept</code> - a pure gate: re-checks the <em>canonical</em> <code>classify_refusal</code> (no copy), requires support &ge; 2 (a one-off never changes policy), stamps provenance <code>source="sia"</code>, bi-temporal so it's reversible.</td></tr>
+      <tr><td><b>apply</b></td><td>only via <code>RefinablePolicy</code> - a narrow type with exactly three ops (raise floor / downweight chain / caution). It <em>cannot name</em> the refusal list or widen a grant: the hard safety line is enforced by the type, not by convention.</td></tr>
+      <tr><td><b>measure</b></td><td><code>calibrate</code> - did the change actually reduce repeat undos? keep / revert (bi-temporal supersede). Confounded signals (two mechanisms on one pattern) are left alone, never falsely credited.</td></tr>
+    </table>
+    <div class="note small"><b>THE invariant - sia only tightens.</b> Floors only rise (never below the default), chains only weaken, cautions only add. No sequence of accepted refinements can make the gate auto-execute something it wouldn't have before. sia can only make eri <em>more</em> careful, never more reckless - proven by test.</div>
+    <p class="small muted"><b>Honest state:</b> the loop is a complete, safe machine, but its observable prod effect is currently small - the undo signal is largely covered by the pre-existing always-ask caution, so the floor mechanism waits for finer signals the caution doesn't cover (genuine future work). Files: <code>crates/eri_cli/src/sia.rs</code>.</p>
+
+    <!-- 6 -->
+    <h2 id="safety"><span class="tocnum">6</span>The safety spine</h2>
+    <p>This is the part we protect hardest. It is the difference between a loyal digital half and a liability.</p>
+    <div class="grid g2">
+      <div class="card"><span class="pill bad">absolute</span><h3>Refusal boundary</h3><p class="small">Credentials, money movement, CAPTCHAs, and access-control changes are <b>never</b> grantable - not by the user, not by sia, not by any observed instruction. Checked last + independently, never widened. <code>control_safety::REFUSAL_PATTERNS</code> / <code>classify_refusal</code> is the one source of truth.</p></div>
+      <div class="card"><span class="pill acc">single principal</span><h3>Loyalty</h3><p class="small">eri serves one person. No third-party egress; instructions found in observed content (web pages, emails, docs) are <em>data, not commands</em>. Loyalty &ne; blind obedience - it stays honest with you.</p></div>
+      <div class="card"><span class="pill ok">confidential</span><h3>The core stays private</h3><p class="small">The full world model is confidential: E2E (<code>K_user</code>) today &rarr; an operator-can't-read enclave at the <a href="#recall">ADR-0008</a> end-state. Only a small, gated projection is ever server-readable. <a href="#recall">&sect;7</a></p></div>
+      <div class="card"><span class="pill ok">alive-but-honest</span><h3>Disclosure</h3><p class="small">eri presents as real, never as biological-human; it discloses it's an AI and never optimizes to deceive that it's a person. Goes in the ToS.</p></div>
+    </div>
+    <div class="bad-note small"><b>Privacy zones (Q23)</b> - health, financial, intimate, and credential content - are filtered <em>before</em> anything leaves the confidential boundary, fail-closed (over-exclusion is acceptable). <b>Loyalty egress (Q24)</b> - any projection goes only to the user's own devices, keyed to <code>user_id</code>. These two gates are what a future <a href="#social">social layer</a> must extend deliberately, never bolt past.</div>
+
+    <!-- 7 -->
+    <h2 id="recall"><span class="tocnum">7</span>Recall seam - brain &harr; phone <span class="pill acc">brain half shipped (ADR-0010)</span></h2>
+    <p>The bridge that makes the world model show up when you text eri. The serverless phone <b>cannot</b> call the local Rust brain live, so the brain pre-computes a <b>bounded, privacy-gated projection</b> and pushes it to the server-readable store the phone already reads. The phone does one cheap DB read.</p>
+    <div class="flow">
+      <span class="node">Rust brain</span><span class="arrow"><code>recall_projection(user_id, recipient)</code> &rarr;</span>
+      <span class="node acc">gate (fail-closed)</span><span class="arrow">push (Tier-A sync) &rarr;</span>
+      <span class="node">server store</span><span class="arrow">&rarr;</span>
+      <span class="node">phone reads + blends &rarr; prompt</span>
+    </div>
+    <ul class="small">
+      <li><b>Contract:</b> <code>recall(userId) &rarr; { entities, relations, recentObservations, predictions }</code> (+ the Tier-A profile) - maps 1:1 to <code>world_recall</code>. Top-N / salience-capped (&le;32KB).</li>
+      <li><b>The gate is the new confidential&rarr;server-readable boundary</b> - reuses the one canonical <code>looks_sensitive</code> screen (all four Q23 zones), drops sensitive entities/observations/predictions + any dangling relation. Tested with a serialized-blob leak check; per-user isolation proven cross-principal.</li>
+      <li><b>Recipient-parameterized from day one</b> (<code>Recipient::OwnDevices</code> today) so the future <a href="#social">eri-social</a> egress extends the same gate instead of opening a second path.</li>
+      <li><b>Strangler-fig:</b> the projection blends beside the phone's existing <code>learned_facts</code> (Phase A) &rarr; becomes source of truth &rarr; those tables demote to cache. Never a second TS brain.</li>
+      <li><b>Status:</b> crates/ half (boundary + gather + isolation + push capability) <span class="pill ok">done</span>. The live trigger + the phone read/blend are the coordinated finish with the phone window (endpoint: superset vs sibling). Files: <code>crates/eri_inference/src/memory/recall.rs</code>; contract <code>docs/contracts/recall-projection-contract.md</code>.</li>
+    </ul>
+
+    <!-- 8 -->
+    <h2 id="control"><span class="tocnum">8</span>Computer control - the wedge <span class="pill ok">live, verified on-device</span></h2>
+    <p>Hands-free <b>eyes + voice</b> that drive your real computer. This is the launch wedge and the whitespace no rival owns: own-machine, hands-free, gated, token-frugal.</p>
+    <table>
+      <tr><th>Layer</th><th>What</th><th>State</th></tr>
+      <tr><td><b>Eyes</b></td><td>screen capture (in-process <code>xcap</code>) + gaze; eri sees what you see</td><td><span class="pill ok">shipped</span></td></tr>
+      <tr><td><b>Voice</b></td><td>voice &rarr; classify (regex &rarr; LLM router) &rarr; control, with spoken reply (<code>voice_control.rs</code>)</td><td><span class="pill ok">shipped</span></td></tr>
+      <tr><td><b>Tiered actuation</b></td><td>Tier-0 deterministic fast-lane &rarr; small local model (Qwen, 0 cloud tokens) &rarr; Claude escalation (<code>control_turn.rs</code>)</td><td><span class="pill ok">shipped</span></td></tr>
+      <tr><td><b>Trust layer</b></td><td>action log + honest undo (<code>eri control --history/--undo</code>); proactive suggestions ("after X you usually Y"), anti-annoyance gated</td><td><span class="pill ok">shipped</span></td></tr>
+      <tr><td><b>The gate</b></td><td>every action through the <a href="#loop">confirmation envelope</a> + <a href="#safety">refusal boundary</a></td><td><span class="pill ok">shipped</span></td></tr>
+    </table>
+    <p class="small muted">Token-frugal by design (eri = a cloud-token tool): the deterministic fast-lane and the local model handle low-level work at zero cloud cost; Claude is reserved for genuine reasoning + escalation. Captured in <code>project_eri_computer_control</code> / <code>project_eri_token_router</code>.</p>
+
+    <!-- 9 -->
+    <h2 id="phone-memory"><span class="tocnum">9</span>Phone eri &amp; two-tier memory <span class="pill ok">M1 live</span></h2>
+    <p>The same eri, reached by texting a phone number (iMessage via <b>Spectrum / Photon</b>, replacing Sendblue) - the cloud half of one brain, serverless on Vercel, Sonnet for the reply. <span class="muted">ADR-0001 (memory: adopt patterns not a Python engine; two-tier sync), ADR-0002 (transport + polled command queue).</span></p>
+    <div class="grid g2">
+      <div class="card"><span class="pill acc">Tier-A</span><h3>Personalization projection <span class="pill ok">server-readable</span></h3><p class="small">A small (&le;32KB) projection - static facts + preference rollups + live <code>dynamic_context</code> - the phone injects to sound like your eri. Encrypted <b>at rest</b> with <code>K_server</code> (defense-in-depth, not E2E). The <a href="#recall">recall seam</a> extends this to carry the world-model slice. <code>personalization_profiles</code> + <code>/api/v1/memory/profile</code>.</p></div>
+      <div class="card"><span class="pill acc">Tier-B</span><h3>Memory blob <span class="pill ok">E2E</span></h3><p class="small">Your <b>full</b> observation log, E2E-encrypted with <code>K_user</code> (HKDF over a stored per-user salt, stable across token rotation). The cloud holds only opaque bytes. Deep/private questions <b>relay</b> to the running computer eri, which holds the keys. <code>memory_blobs</code> + <code>/api/v1/memory/sync</code>.</p></div>
+    </div>
+    <p class="small"><b>The sync seam</b> (<code>crates/eri_inference/src/memory/</code>): <code>MemorySync</code> over a <code>SyncTransport</code> trait round-trips the encrypted blob; <code>apply_merge</code> = union + last-write-wins by <code>ts_ms</code> + tombstones (a <code>/forget</code> can't resurrect from a stale copy). Crypto is pure-Rust RustCrypto (<code>aes-gcm</code>/<code>hkdf</code>/<code>sha2</code>), offline-capable.</p>
+    <div class="bad-note small"><b>Honest gap (being closed):</b> today the phone reply reads only shallow TS stores (<code>learned_facts</code> + <code>personalization_profiles</code>) - it does <em>not</em> yet read the Rust world model. The <a href="#recall">recall seam</a> is the bridge; until its live trigger + read/blend land, eri-on-phone is a personalized Sonnet, not yet the full P1-P3 brain. (M1 hygiene: Photon webhook 401 dedup.)</p></div>
+
+    <!-- 10 -->
+    <h2 id="build"><span class="tocnum">10</span>Build - eri drives your coding agents <span class="pill ok">shipped</span></h2>
+    <p>The old "agentic AI IDE" is <b>gone</b> (ADR-0009). eri is a computer-use agent, so it doesn't need its own editor - it <b>orchestrates the agentic-dev tools you already use</b>. You log in to whatever you code with (Claude / Claude Code, Cursor, Gemini, OpenAI, Perplexity); eri drives them.</p>
+    <div class="grid g2">
+      <div class="card"><h3>eri's built-in terminal</h3><p class="small">Lives inside the app. eri does its coding here - it spins up its own Claude Code sessions, types in your CLI, runs builds and tests, and steers the whole agentic loop. Half the time eri isn't the coder, it's the <em>director</em> of your coder.</p></div>
+      <div class="card"><h3>eri's own hands <span class="pill ok">shipped</span></h3><p class="small">When eri codes directly, it uses the in-house harness (<code>eri_agent</code> / <code>build_agent.rs</code>): tool superset, subagents, compaction, hooks, sandbox, MCP-as-tools, permission modes, Python/Node SDK bindings. An internal capability of the brain, not a product surface.</p></div>
+    </div>
+    <p class="small muted">Engines: <b>Claude</b> drives reasoning + the agentic loop; the <b>local model</b> handles cheap low-level steps at zero cloud cost; <b>Mercury 2</b> stays available for sub-second single-file edits (no longer tied to an IDE panel). Same idea extends to any app - eri drives your terminal, your browser, your tools; computer use is the substrate (<code>project_eri_coding_control</code>).</p>
+
+    <!-- 11 -->
+    <h2 id="infra"><span class="tocnum">11</span>Deploy &amp; infra</h2>
     <div class="card kvs">
-      <div><span>Vercel project</span> eri &middot; <code>prj_FNJ7zfK5cAYQe1nbwgMX5xAPt6Mb</code></div>
-      <div><span>Vercel team</span> khais-projects &middot; <code>team_p7ecMAZywXhusDKaWaigWiYY</code></div>
+      <div><span>Vercel project</span> eri &middot; <code>prj_FNJ7zfK5cAYQe1nbwgMX5xAPt6Mb</code> &middot; team khais-projects</div>
       <div><span>Domains</span> tryeri.ca, www.tryeri.ca (apex 307 &rarr; www; CLI targets www directly)</div>
       <div><span>Deploy</span> git integration auto-deploys branch <code>main</code> (push = prod build)</div>
       <div><span>GitHub</span> <code>github.com/uqeu/eri</code> (private)</div>
       <div><span>DB</span> Supabase Postgres <code>zvwzcqsdjuvuvtxbnrlq</code> (free tier - can auto-pause)</div>
+      <div><span>Phone</span> Spectrum / Photon webhooks (HMAC) - Vercel-serverless, no separate host</div>
     </div>
-    <div class="note small"><b>Deploy gotcha:</b> the Vercel MCP only returns instructions - it does not push bits. Deploy = commit + <code>git push origin main</code> (git integration builds). A direct <code>vercel deploy</code> from repo root tries to tarball the whole monorepo and hangs; push instead.</div>
+    <div class="note small"><b>eri is going cloud-resident on Railway.</b> Today the brain runs locally and pushes the recall projection to Vercel + Supabase. Next, eri runs in the cloud (Railway) so it works <b>with your laptop off</b> - reaching your <b>Composio connections</b> (Gmail, Calendar, your apps) to read your stuff and act for you from your phone. This is the ADR-0008 cloud-resident step made concrete (Railway + Composio); it comes after the recall seam. <span class="pill blue">planned / building</span></div>
     <h3>Env (Vercel)</h3>
-    <p class="kvs small"><code>ANTHROPIC_MASTER_KEY</code> <code>INCEPTION_MASTER_KEY</code> <code>OPENAI_MASTER_KEY</code> <code>GOOGLE_MASTER_KEY</code> <code>DATABASE_URL</code> <code>JWT_SECRET</code> <code>SUPABASE_*</code> <code>STRIPE_*</code> <code>GOOGLE_*</code> (OAuth) <code>NEXT_PUBLIC_BASE_URL</code> <code>ERI_SERVER_ENCRYPTION_KEY</code> (Tier-A at-rest, see <a href="#phone-memory">8e</a>)</p>
+    <p class="kvs small"><code>ANTHROPIC_MASTER_KEY</code> <code>INCEPTION_MASTER_KEY</code> <code>OPENAI_MASTER_KEY</code> <code>GOOGLE_MASTER_KEY</code> <code>DATABASE_URL</code> <code>JWT_SECRET</code> <code>SUPABASE_*</code> <code>STRIPE_*</code> <code>GOOGLE_*</code> (OAuth) <code>PHOTON_WEBHOOK_SECRET</code> <code>NEXT_PUBLIC_BASE_URL</code> <code>ERI_SERVER_ENCRYPTION_KEY</code> (Tier-A at-rest)</p>
 
-    <!-- 4 -->
-    <h2 id="data"><span class="tocnum">4</span>Data model</h2>
-    <p class="small muted">Supabase migrations <code>0001</code>-<code>0011</code> in <code>website/supabase/migrations/</code>.</p>
+    <!-- 12 -->
+    <h2 id="data"><span class="tocnum">12</span>Data model</h2>
+    <p class="small muted">Supabase migrations in <code>website/supabase/migrations/</code>.</p>
     <table>
       <tr><th>Table</th><th>Key columns</th><th>Purpose</th></tr>
       <tr><td><code>users</code></td><td>id, email (unique), display_name, tier (default free), stripe_customer_id, subscription_status</td><td>Account + plan tier</td></tr>
       <tr><td><code>api_tokens</code></td><td>id (<code>apt_</code>), user_id, token_hash (sha256 of <code>eri_sk_&lt;b64url32&gt;</code>), label, revoked_at, last_used_at</td><td>CLI/device bearers - only the hash is stored</td></tr>
-      <tr><td><code>device_code_grants</code></td><td>code (= secret device_code, PK), <b>user_code</b> (public, unique), user_id, api_token_id, pending_secret, redeemed_at, delivered_at, expires_at</td><td>RFC 8628 device flow (see <a href="#auth">Auth</a>)</td></tr>
-      <tr><td><code>token_buckets</code></td><td>user_id (PK), tokens_used, tokens_included, tokens_overage, <b>mercury_turns_used</b>, period_start/end, warned_at</td><td>Per-user monthly budget (Claude tokens + Mercury turns)</td></tr>
-      <tr><td><code>usage_records</code></td><td>id, user_id, ts, provider, model, intent, tokens_in, tokens_out, cost_usd_micros, latency_ms, status</td><td>Per-request audit log</td></tr>
-      <tr><td><code>memory_blobs</code> <span class="pill acc">0007</span></td><td>user_id (PK), blob (bytea), updated_at</td><td><b>Tier-B</b> - opaque E2E memory blob the server never reads (see <a href="#phone-memory">Phone eri</a>)</td></tr>
-      <tr><td><code>personalization_profiles</code> <span class="pill acc">0011</span></td><td>user_id (PK), profile_enc (bytea), dynamic_context_enc (bytea), updated_at</td><td><b>Tier-A</b> - server-readable profile, encrypted at rest with <code>K_server</code></td></tr>
-      <tr><td>refresh tokens</td><td>single-use rotating (consumed on use)</td><td>Web session refresh</td></tr>
+      <tr><td><code>device_code_grants</code></td><td>code (secret device_code, PK), <b>user_code</b> (public, unique), user_id, api_token_id, pending_secret, redeemed_at, expires_at</td><td>RFC 8628 device flow (<a href="#auth">Auth</a>)</td></tr>
+      <tr><td><code>token_buckets</code></td><td>user_id (PK), tokens_used, tokens_included, tokens_overage, mercury_turns_used, period_start/end</td><td>Per-user monthly budget (Claude tokens + Mercury turns)</td></tr>
+      <tr><td><code>usage_records</code></td><td>id, user_id, ts, provider, model, intent, tokens_in/out, cost_usd_micros, latency_ms, status</td><td>Per-request audit log</td></tr>
+      <tr><td><code>memory_blobs</code></td><td>user_id (PK), blob (bytea)</td><td><b>Tier-B</b> - opaque E2E memory blob the server never reads</td></tr>
+      <tr><td><code>personalization_profiles</code></td><td>user_id (PK), profile_enc, dynamic_context_enc</td><td><b>Tier-A</b> - server-readable projection, K_server at rest; the recall seam extends this</td></tr>
+      <tr><td><code>learned_facts</code> / proactive</td><td>per-user hybrid-recall facts; proactive log (<code>0020_proactive_log</code>)</td><td>phone-side recall + the proactive iMessage loop (strangler-fig &rarr; recall seam)</td></tr>
     </table>
 
-    <!-- 5 -->
-    <h2 id="auth"><span class="tocnum">5</span>Auth</h2>
+    <!-- 13 -->
+    <h2 id="auth"><span class="tocnum">13</span>Auth</h2>
     <h3>Web - Google OAuth + JWT</h3>
-    <p class="small">Google OAuth &rarr; short-lived JWT access token + single-use rotating refresh token. Client: <code>website/lib/auth-client.ts</code> (single-flight <code>refreshSession</code> to avoid races). Server verify: <code>userFromBearer()</code> in <code>website/lib/auth.ts</code> - <b>JWT only</b>.</p>
+    <p class="small">Google OAuth &rarr; short-lived JWT access token + single-use rotating refresh token. Client: <code>website/lib/auth-client.ts</code> (single-flight <code>refreshSession</code>). Server verify: <code>userFromBearer()</code> in <code>website/lib/auth.ts</code> - <b>JWT only</b>.</p>
     <h3>CLI / device - RFC 8628 Device Authorization Grant</h3>
-    <p class="small">The correct, race-proof flow (rebuilt 2026-06-04). Two distinct codes:</p>
-    <div class="flow">
-      <span class="node">CLI</span><span class="arrow">&rarr; POST /start</span>
-      <span class="node acc">device_code (secret)</span><span class="arrow">+</span><span class="node">user_code (public)</span>
-    </div>
-    <div class="flow">
-      <span class="node">browser</span><span class="arrow">enters user_code &rarr; POST /approve</span><span class="node">issue api_token, set pending_secret</span>
-    </div>
-    <div class="flow">
-      <span class="node">CLI</span><span class="arrow">POST /poll {device_code} &rarr;</span><span class="node acc">token (idempotent until expiry)</span>
-    </div>
-    <ul class="small">
-      <li><b>device_code</b>: 256-bit secret, only the polling client holds it, never in the browser/URL. The token endpoint key.</li>
-      <li><b>user_code</b>: short (<code>XXXX-XXXX</code>, Crockford base32), shown in the browser, used to approve. Cannot redeem the token.</li>
-      <li><b>Idempotent delivery</b>: <code>/poll</code> returns the token on every poll until the grant expires (10 min) - kills the single-delivery race where a duplicate poll consumed the one-shot secret.</li>
-      <li>Routes: <code>website/app/api/v1/auth/device/{start,approve,poll}/route.ts</code>; CLI: <code>crates/eri_cli/src/auth.rs</code>; lookups in <code>website/lib/inference/db.ts</code>.</li>
-    </ul>
-    <p class="small muted">Inference verify uses a different verifier: <code>authenticateApiBearer()</code> (<code>website/lib/auth/api_tokens.ts</code>) accepts the <code>eri_sk_</code> api_token. <code>userFromBearer</code> (JWT) rejects api_tokens - that's why <code>/poll</code> returns identity (email/tier) so the CLI can show who's signed in without a JWT-only call.</p>
+    <p class="small">Race-proof flow with two distinct codes: <b>device_code</b> (256-bit secret, only the polling client holds it, the token-endpoint key) and <b>user_code</b> (<code>XXXX-XXXX</code> Crockford base32, shown in the browser, can't redeem the token). <code>/poll</code> returns the token idempotently until the 10-min grant expires (kills the single-delivery race). Routes: <code>app/api/v1/auth/device/{start,approve,poll}</code>; CLI: <code>crates/eri_cli/src/auth.rs</code>. Inference verify uses <code>authenticateApiBearer()</code> (accepts <code>eri_sk_</code>), distinct from the JWT verifier.</p>
 
-    <!-- 6 -->
-    <h2 id="billing"><span class="tocnum">6</span>Billing &amp; plans</h2>
-    <p class="small">Stripe webhook (<code>website/app/api/billing/webhook/route.ts</code>) &rarr; sets <code>users.tier</code> &rarr; <code>applyTierToBucket()</code> resizes the bucket cap (keeps <code>tokens_used</code> on mid-cycle change). Defs in <code>website/lib/tiers.ts</code>; gates in <code>website/lib/usage/quota.ts</code>.</p>
-    <table>
-      <tr><th>Tier</th><th>Claude tokens/mo</th><th>Ghost overage</th><th>Hard cap</th><th>Mercury turns/mo</th></tr>
-      <tr><td>Free</td><td>0</td><td>0</td><td>0</td><td>150</td></tr>
-      <tr><td>Starter</td><td>200K</td><td>40K</td><td>240K</td><td>2,000</td></tr>
-      <tr><td>Pro</td><td>750K</td><td>150K</td><td>900K</td><td>10,000</td></tr>
-      <tr><td>Pro+</td><td>4M</td><td>800K</td><td>4.8M</td><td>50,000</td></tr>
-      <tr><td>Teams</td><td>3M</td><td>600K</td><td>3.6M</td><td>30,000</td></tr>
-    </table>
-    <ul class="small">
-      <li><b>included</b> = paid allowance; <b>ghost</b> = soft overage (request proceeds, header <code>x-eri-quota-warning: ghost</code>); <b>hard cap</b> = included + ghost &rarr; HTTP 402 <code>over_quota</code>.</li>
-      <li><b>Claude</b> metered in tokens (<code>tokens_in + tokens_out</code> from the provider's usage). <b>Mercury</b> metered in turns (<code>mercury_turns_used</code> vs <code>MERCURY_TURN_LIMITS</code>); <code>bill:false</code> so frontier tokens untouched.</li>
-      <li>Gates: <code>ensureWithinQuota()</code> (pre-flight 402), <code>recordUsage()</code> (post-stream, atomic increment), <code>ensureMercuryTurnAvailable()</code> / <code>recordMercuryTurn()</code>.</li>
-      <li>Wire: <code>GET /api/v1/usage</code> returns <code>IdeUsageWire</code> {tier, tokensUsed, tokensIncluded, tokensGhost, remainingIncluded, remainingGhost, softCapWarning, periodEnd}.</li>
-    </ul>
-
-    <!-- 6b -->
-    <h2 id="economics"><span class="tocnum">6b</span>Pricing &amp; economics</h2>
-    <p class="small">Every user request hits <b>our</b> master key, so <b>we pay the provider</b>. The user's bucket budget bounds their consumption = bounds our cost. The margin is only safe if revenue-per-token &gt; provider cost-per-token. <span class="muted">Provider rates as of 2026-06; verify against the live pricing pages before changing tiers.</span></p>
-
+    <!-- 14 -->
+    <h2 id="billing"><span class="tocnum">14</span>Billing &amp; economics</h2>
+    <p class="small">Stripe webhook &rarr; sets <code>users.tier</code> &rarr; <code>applyTierToBucket()</code> resizes the cap. Real tiers (<code>project_eri_pricing_and_spectrum</code>): <b>Free $0</b> (Mac-only), <b>Starter $15</b> (connect apps + phone), <b>Pro $30</b> (hands-free, multi-model, MCP), <b>Pro+ $60</b> (codebase training, private brain, 256K). Teams exists in Stripe but is kept <em>off</em> the cards (no teams yet). Metered = opt-in + eri credits.</p>
     <h3>How eri counts tokens</h3>
-    <ul class="small">
-      <li><b>Pre-flight estimate</b> (the gate): <code>estimateTokens(body)</code> in <code>lib/inference/tokens.ts</code> ~ chars/4. Used only by <code>ensureWithinQuota</code> to refuse obviously-over requests before calling the model.</li>
-      <li><b>Actual</b> (what's billed): <code>extractUsage(provider, payload)</code> pulls real <code>tokens_in</code> + <code>tokens_out</code> from the provider's <code>usage</code> object - Anthropic <code>message_delta.usage.{input_tokens,output_tokens}</code> from the SSE stream, captured in <code>countStreamUsage</code>. <code>recordUsage()</code> then increments <code>token_buckets.tokens_used</code> by <code>tokens_in + tokens_out</code>.</li>
-      <li><b>Unit today = 1 raw provider token, in or out, counted 1:1.</b> <code>cost_usd_micros</code> is computed (price table) for observability but is <b>not</b> used for billing.</li>
-      <li>Mercury is <b>not</b> token-billed: <code>bill:false</code>, metered as one <code>mercury_turns_used</code> per call.</li>
-    </ul>
-
-    <h3>Provider raw cost (per 1M tokens)</h3>
+    <p class="small">Every request hits <b>our</b> master key, so we pay the provider; the bucket budget bounds consumption = bounds our cost. <b>Unit today = 1 raw provider token (in or out), counted 1:1.</b> Actual usage from the provider's <code>usage</code> object (Anthropic <code>message_delta.usage</code> off the SSE stream). Mercury is turn-metered (<code>bill:false</code>).</p>
+    <div class="bad-note small"><b>The Pro+ risk:</b> counting in+out 1:1 ignores Sonnet's 5&times; output multiplier, so an output-heavy Pro+ user can erode margin. Mitigations (priority order): (1) weighted "eri credits" - deduct <code>tokens_in + W&times;tokens_out</code> (W ~3-5); (2) prompt caching on Claude (~90% off re-sent input - the biggest build saving); (3) token-frugal routing (fast-lane + local model + Mercury keep cloud tokens for real reasoning); (4) hard output/turn caps per run.</div>
     <table>
-      <tr><th>Model</th><th>Input</th><th>Output</th><th>Note</th></tr>
-      <tr><td>Mercury 2 (Inception)</td><td>$0.25</td><td>$0.75</td><td>~20x cheaper than Sonnet - the cheap lane</td></tr>
+      <tr><th>Model</th><th>In / 1M</th><th>Out / 1M</th><th>Role</th></tr>
+      <tr><td>Mercury 2 (Inception)</td><td>$0.25</td><td>$0.75</td><td>IDE fast-lane (~20&times; cheaper)</td></tr>
       <tr><td>Claude Haiku 4.5</td><td>$1.00</td><td>$5.00</td><td>chat / voice / cheap reasoning</td></tr>
-      <tr><td>Claude Sonnet 4.6</td><td>$3.00</td><td>$15.00</td><td>the builder - output is 5x input</td></tr>
-      <tr><td>Claude Opus 4.7</td><td>$5.00</td><td>$25.00</td><td>blocked by cost_guard on the shared proxy</td></tr>
+      <tr><td>Claude Sonnet 4.6</td><td>$3.00</td><td>$15.00</td><td>the base engine - builds, phone reply, control escalation</td></tr>
+      <tr><td>Local (Qwen, on-device)</td><td colspan="2">$0</td><td>Tier-0/1 low-level control - zero cloud tokens</td></tr>
     </table>
-    <p class="small muted">Levers: <b>prompt caching</b> cuts cached input ~90%; <b>batch</b> is 50% off (not usable for interactive). Output is always 5x input across Claude models.</p>
 
-    <h3>What each action costs us (Sonnet 4.6)</h3>
-    <table>
-      <tr><th>Action</th><th>Rough tokens</th><th>Our cost</th><th>Deducted from bucket</th></tr>
-      <tr><td>Single-file build (1 turn)</td><td>~8K in + 6K out</td><td>~$0.11</td><td>14K</td></tr>
-      <tr><td>Agentic multi-file build (~5 turns, context grows)</td><td>~60K in + 20K out</td><td>~$0.48</td><td>80K</td></tr>
-      <tr><td>Mercury fast edit</td><td>~4K in + 2K out</td><td>~$0.003</td><td>1 turn (no tokens)</td></tr>
-    </table>
-    <p class="small">Agentic loops re-send the growing context (file contents + history) every turn, so <b>input dominates</b> over a session - which is exactly why prompt caching is the biggest win.</p>
-
-    <h3 id="margin-risk">Margin per tier - and the Pro+ risk</h3>
-    <div class="bad-note small"><b>Counting in+out 1:1 ignores the 5x output multiplier.</b> At the worst case (output-heavy), a tier priced near $15 / 1M tokens of revenue can break even or lose money against Sonnet's $15/M output rate.</div>
-    <table>
-      <tr><th>Tier</th><th>Hard cap</th><th>Est. price</th><th>Rev / 1M</th><th>Cost worst (all out, $15/M)</th><th>Cost blended (1:1, $9/M)</th></tr>
-      <tr><td>Starter</td><td>240K</td><td>~$15</td><td>$62</td><td>$3.6 <span class="pill ok">safe</span></td><td>$2.2</td></tr>
-      <tr><td>Pro</td><td>900K</td><td>~$30</td><td>$33</td><td>$13.5 <span class="pill ok">safe</span></td><td>$8.1</td></tr>
-      <tr><td>Pro+</td><td>4.8M</td><td>~$60</td><td>$12.5</td><td>$72 <span class="pill bad">LOSS</span></td><td>$43 <span class="pill">~28% margin</span></td></tr>
-      <tr><td>Teams</td><td>3.6M</td><td>~$30/seat</td><td>$8.3</td><td>$54 <span class="pill bad">LOSS</span></td><td>$32 <span class="pill bad">thin</span></td></tr>
-    </table>
-    <p class="small muted">Prices are estimates from <code>lib/tiers.ts</code> context - confirm against live Stripe prices. Starter/Pro are very safe; <b>Pro+ and Teams are the exposed tiers</b> because their revenue-per-token is aggressive.</p>
-
-    <h3>Mitigations (recommended, in priority order)</h3>
-    <ol class="small">
-      <li><b>Weighted "eri credits" instead of raw 1:1 tokens.</b> Deduct <code>tokens_in + OUTPUT_WEIGHT x tokens_out</code> (e.g. weight 3-5) so the bucket maps to real $ cost and output-heavy builds can't blow margin. One-line change in <code>recordUsage</code> + show "credits" in the wire.</li>
-      <li><b>Prompt caching on Claude.</b> Add <code>cache_control</code> to the system prompt + large file blocks; agentic re-sends then cost ~90% less on input. Biggest absolute saving for builds.</li>
-      <li><b>Mercury-first routing.</b> Single-file edits and small diffs go to Mercury ($0.25/$0.75, ~free) via <code>/iterate</code>; reserve Claude tokens for genuine multi-file builds + reasoning. This is the core two-engine economic advantage.</li>
-      <li><b>Hard output cap + turn cap per build</b> so a runaway agent can't burn a month of budget in one prompt.</li>
-      <li><b>Re-price Pro+/Teams</b> to keep revenue-per-token above ~$9/M (the 1:1 blended floor) with comfortable margin, or lower their included allowance.</li>
-    </ol>
-
-    <!-- 7 -->
-    <h2 id="inference"><span class="tocnum">7</span>Inference</h2>
-    <p class="small">The metered proxy is the heart of the system and is <b>already production-grade</b>.</p>
-    <h3>runProxy - the metered passthrough <span class="pill ok">reuse as-is</span></h3>
-    <p class="small"><code>website/lib/inference/proxy.ts</code>. Each <code>/api/v1/inference/&lt;verb&gt;</code> is a one-liner calling <code>runProxy</code>. It:</p>
-    <ol class="small">
-      <li>Auths the api_token bearer; per-token rate-limits.</li>
-      <li><b>Forwards the full request body verbatim</b> &rarr; Anthropic <code>tools</code>/<code>system</code>/<code>messages</code>/<code>stream</code> all pass through. <b>Tool-use works.</b></li>
-      <li>Cost-guard (blocks Opus/o1/gpt-5-pro), quota gate (402 + ghost), master-key injection.</li>
-      <li><b>Captures real usage from the SSE stream</b> (<code>countStreamUsage</code> &rarr; <code>parseUsageFromSSEFrame</code>, incl. Anthropic <code>message_delta.usage</code>) and records it. BYOK fallback (<code>x-eri-byok</code>) skips quota/billing.</li>
-    </ol>
-    <table>
-      <tr><th>Endpoint</th><th>Provider</th><th>Billing</th></tr>
-      <tr><td><code>/api/v1/inference/messages</code></td><td>anthropic</td><td><span class="pill">tokens</span> the Claude builder lane</td></tr>
-      <tr><td><code>/api/v1/inference/iterate</code></td><td>inception (Mercury)</td><td><span class="pill">turns</span> <code>bill:false</code> + <code>mercury_turns_used</code></td></tr>
-      <tr><td><code>/api/v1/inference/chat|generate|ship</code></td><td>per route</td><td>via runProxy</td></tr>
-      <tr><td><code>/api/v1/agent/run</code></td><td>anthropic/inception</td><td><span class="pill bad">deprecated</span> token relay, no tools, broken metering</td></tr>
-    </table>
-    <h3>Providers &amp; keys</h3>
-    <p class="small"><code>website/lib/inference/providers.ts</code> maps provider &rarr; master env key + upstream URL + auth header. Anthropic: <code>/v1/messages</code> + <code>x-api-key</code>. Inception: <code>/v1/chat/completions</code> + Bearer. Rust mirror: <code>crates/eri_inference/src/providers/anthropic.rs</code>, <code>llm_provider.rs</code>.</p>
+    <!-- 15 -->
+    <h2 id="inference"><span class="tocnum">15</span>Inference</h2>
+    <p class="small">The metered proxy is the heart and is production-grade. <code>website/lib/inference/proxy.ts</code> - each <code>/api/v1/inference/&lt;verb&gt;</code> is a one-liner calling <code>runProxy</code>: auths the api_token, forwards the body verbatim (Anthropic <code>tools</code>/<code>system</code>/<code>messages</code>/<code>stream</code> pass through - tool-use works), cost-guards (blocks Opus on the shared proxy), quota-gates (402 + ghost), injects the master key, captures real usage from the SSE stream. BYOK (<code>x-eri-byok</code>) skips quota/billing.</p>
     <h3>Routing (Rust brain)</h3>
-    <p class="small"><code>crates/eri_router/src/brain_router.rs</code> classifies intent &rarr; picks model: Mercury for Edit/Build/Refactor; Claude Sonnet for Debug/Explain/Unknown; Claude Haiku for Chat/Voice/Search. Overridable via <code>ERI_ROUTE_*</code> env (<code>vendor:model-id</code>).</p>
+    <p class="small">Tiered, token-frugal (<code>project_eri_token_router</code>): Tier-0 deterministic fast-lane (shipped) &rarr; Tier-1 small local classifier &rarr; Tier-2 cloud-minimized with a per-tier context window. The <code>ControlTurn</code> / <code>BuildTurn</code> seams let Claude and the local model both drive a loop, with local&rarr;Claude escalation. <code>crates/eri_router</code>, <code>crates/eri_cli/src/control_turn.rs</code>.</p>
 
-    <!-- 8 -->
-    <h2 id="codegen"><span class="tocnum">8</span>Code-gen - current state</h2>
-    <div class="bad-note small"><b>The problem.</b> Two disconnected paths, neither correct.</div>
-    <div class="grid g2">
-      <div class="card"><h3>Path A - local Mercury</h3><p class="small"><code>eri build</code>/<code>iterate</code> &rarr; <code>MercuryBackend</code> (Rust). <span class="pill ok">writes files</span> via <code>write_file</code>/<code>apply_search_replace_blocks</code> <span class="pill bad">unmetered</span> needs local <code>MERCURY_API_KEY</code>, bypasses plan budget. ("build key not set" error.)</p></div>
-      <div class="card"><h3>Path B - metered relay</h3><p class="small"><code>eri ship</code> &rarr; <code>/api/v1/agent/run</code>. <span class="pill ok">metered</span> but <span class="pill bad">no tool execution</span> - pure token relay, streams text, <b>never writes files</b>. Also undercounts tokens (reads <code>tokensInSoFar</code> not <code>message_delta.usage</code>).</p></div>
-    </div>
-    <p class="small"><b>Existing apply primitives to reuse:</b> <code>crates/eri_control/src/eri_control.rs</code> &rarr; <code>apply_patch_to_disk()</code>, <code>write_build_files()</code>; <code>crates/eri_inference/src/eri_inference.rs</code> &rarr; <code>apply_search_replace_blocks()</code>, <code>parse_search_replace_blocks()</code>.</p>
-
-    <h2 id="target"><span class="tocnum">8b</span>Target - client-side agentic loop</h2>
-    <p class="small">The Claude Code / codex pattern (learned from public OAuth + agent-loop standards, not their source): <b>the agent loop runs in the CLI</b>, which owns the workspace and executes tools; the backend is a <b>stateless metered inference proxy</b> (<code>runProxy</code>, already built).</p>
-    <div class="flow">
-      <span class="node">CLI</span><span class="arrow">messages + tools &rarr;</span>
-      <span class="node acc">/inference/messages (metered)</span><span class="arrow">&rarr;</span>
-      <span class="node">Claude tool_use</span><span class="arrow">&rarr;</span>
-      <span class="node">CLI executes locally</span><span class="arrow">&rarr; tool_result, loop</span>
-    </div>
+    <!-- 16 -->
+    <h2 id="social"><span class="tocnum">16</span>eri social - vision <span class="pill bad">grilling in design</span></h2>
+    <p>The expansion bet: your digital half has a <b>presence</b>, and eris connect on your behalf - a social network <em>for engineered relative intelligence</em>. Not dating, not hookup; a place people unite through their digital imprint. The whitespace nobody's capitalized on.</p>
+    <div class="blue-note small"><b>The architectural insight that makes it fit:</b> the social layer is the <em>same</em> <a href="#recall">recall-projection primitive</a>, aimed <b>outward</b> (at other people / other eris) instead of at your own phone. The world model is already ~80% of the substrate. What's genuinely new is (1) a <b>consented-egress contract</b> - the loyalty boundary extends from "your devices only" to explicitly-consented recipients, per-item, opt-in, never automatic, revocable; (2) an <b>eri-to-eri protocol</b>, each half loyal to its own owner; (3) <b>autonomous-action gating</b> - any public post is irreversible + outward, so it's always-ask, always-disclosed-as-AI, never impersonating a human.</div>
     <ul class="small">
-      <li>CLI tools (path-jailed to workspace): <code>list_dir</code>, <code>read_file</code>, <code>write_file</code>, <code>str_replace</code>, <code>done</code> - executed via <code>eri_control</code> + <code>apply_search_replace_blocks</code>.</li>
-      <li>Claude builds &rarr; <code>/inference/messages</code> (token-billed). Mercury fast edits (<code>eri iterate</code>) &rarr; <code>/inference/iterate</code> (turn-metered).</li>
-      <li>Loop sends running <code>messages</code> each turn (server stateless), caps turns (~24), handles 402/403/ghost gracefully.</li>
-      <li>System prompt = <code>.eri/agents/builder.md</code> (the "cracked" quality bar) adapted to the tool protocol.</li>
-      <li>New module: <code>crates/eri_cli/src/build_agent.rs</code>. <code>/api/v1/agent/run</code> retires for tool work.</li>
+      <li><b>Non-negotiable:</b> the <a href="#safety">confidential core never leaves</a>; privacy zones never egress; the projection is recipient-parameterized so this extends the existing gate, not a second egress path.</li>
+      <li><b>Sequencing:</b> post-launch, vision layer. For YC it's the network-effect <em>moat / "where this goes"</em>, not the wedge - focus wins the app, the network multiplies the vision.</li>
+      <li>Designed in its own grill (<code>/grill-with-docs</code>); will land as its own ADR + vision doc; <b>do not pull into the current build.</b></li>
     </ul>
 
-    <!-- 8c -->
-    <h2 id="capabilities"><span class="tocnum">8c</span>Agent capability layer - what eri subsumes</h2>
-    <p class="small">Competitive read: a wave of YC tools (Nia/Nozomio $6.2M, Exa, Context7, Greptile, Cursor's index, v0/Lovable/Bolt builders) each sell <b>one slice</b> of the agent loop - retrieval, deep research, codebase index, doc Q&amp;A, or generation - as a separate product an agent bolts on via MCP. eri's wedge is to <b>own the whole loop inside the IDE</b> and have it <b>learn about you</b> (the personalization tier), so these are internal capabilities, not integrations to pay for. Arlan (Nia) names the real vision himself: "agents that get better the more you use them" - that is eri's product, at the IDE level.</p>
-    <div class="flow">
-      <span class="node">learn (you + your repo)</span><span class="arrow">&rarr;</span>
-      <span class="node acc">retrieve (context engine)</span><span class="arrow">&rarr;</span>
-      <span class="node">build (agentic loop)</span><span class="arrow">&rarr;</span>
-      <span class="node">verify (checker model)</span><span class="arrow">&rarr; loop, personalized</span>
-    </div>
+    <!-- 17 -->
+    <h2 id="landscape"><span class="tocnum">17</span>Competitive landscape</h2>
+    <p class="small">Two reads. <b>Personal-AI rivals</b> (<code>docs/competitive/personal-ai-landscape-2026-06.md</code>, 9 rivals): table stakes = iMessage + proactive + frictionless onboarding. <b>eri's whitespace</b> = own-machine hands-free control + cross-device bi-temporal memory + token-frugal + visible trust - <em>no rival holds &gt;2 of those 5</em>. <b>Agent-tooling rivals</b> (Nia/Exa/Context7/Cursor index, the Build slice): each sells one slice of the agent loop; eri owns the whole loop and learns you, so they're internal capabilities, not integrations to pay for.</p>
     <table>
-      <tr><th>Their slice</th><th>eri's internal capability</th><th>Status</th></tr>
-      <tr><td>Nia / Exa / Context7 - agentic retrieval over code + docs</td><td><b>eri Context Engine</b>: index workspace + dep docs into the build loop; reuse <code>eri_graph</code> TOON code compression + <code>eri_caveman</code> prose compression to keep retrieval token-cheap</td><td><span class="pill bad">roadmap</span></td></tr>
-      <tr><td>Nia Oracle / "deep research" agents</td><td>Oracle-style <b>research mode</b> - chain searches over the index before a build turn; same metered <code>/inference/messages</code> loop, just a research persona</td><td><span class="pill bad">roadmap</span></td></tr>
-      <tr><td>Nia Tracer / sandbox repo search</td><td>the build loop's <code>list_dir</code>/<code>read_file</code> tools already traverse a repo live; extend to read-only remote repos</td><td><span class="pill warn">partial (loop tools)</span></td></tr>
-      <tr><td>Context7 / docs MCP - "up-to-date library docs"</td><td><code>eri_coreutils/services/docs_cache</code> already caches lib docs; surface it as a loop tool</td><td><span class="pill warn">partial</span></td></tr>
-      <tr><td>v0 / Lovable / Bolt - generation</td><td>the agentic build loop (8b) + Mercury fast edits - already the core build</td><td><span class="pill ok">building</span></td></tr>
-      <tr><td>Nia "context sharing" / memory</td><td>eri personalization tier = persistent learn-about-you memory; the differentiator, not a feature to clone</td><td><span class="pill warn">positioned</span></td></tr>
-      <tr><td>Surface parity (their MCP + CLI + API + skill)</td><td>eri already ships IDE ext + Agent Manager + Rust CLI + <code>/api/v1</code>; one retrieval capability behind all four</td><td><span class="pill ok">have surfaces</span></td></tr>
+      <tr><th>Axis</th><th>eri's position</th></tr>
+      <tr><td>Hands-free own-machine control</td><td><span class="pill ok">the wedge</span> - eyes + voice + gated actuation, on your actual computer</td></tr>
+      <tr><td>Cross-device one brain + bi-temporal memory</td><td><span class="pill acc">building</span> - world model + recall seam (computer &harr; phone)</td></tr>
+      <tr><td>Token-frugal economics</td><td><span class="pill ok">core</span> - fast-lane + local model + Mercury keep cloud cost down</td></tr>
+      <tr><td>Visible trust</td><td><span class="pill ok">shipped</span> - action log, honest undo, ask-before-irreversible</td></tr>
+      <tr><td>Network effect (eri-to-eri)</td><td><span class="pill bad">vision</span> - the social layer nobody else has</td></tr>
     </table>
-    <p class="small muted"><b>Triage (do not clone all of it):</b> the wedge-aligned, build-amplifying piece is the <b>Context Engine</b> - it directly cuts code-gen hallucination AND feeds personalization. Deep-research + remote-repo modes are thin personas on the same metered loop. Everything else is positioning, not a separate product. Pricing impact: retrieval runs through the same eri-credit meter (token-cheap via TOON + caveman), so it does not open a new cost hole - see <a href="#economics">6b</a>.</p>
 
-    <!-- 8d -->
-    <h2 id="cli-parity"><span class="tocnum">8d</span>CLI parity (Claude Code / Codex class) + roadmap</h2>
-    <p class="small">The <code>eri</code> CLI is built to Claude-Code/Codex feature parity over Claude + Mercury, plus eri's edges (instant Mercury edits, voice/gaze, learns-about-you). All metered through the eri-credit meter; help text is vendor-neutral (a brand test forbids leaking Claude/Anthropic/Sonnet/Haiku/Mercury). Module map under <code>crates/eri_cli/src/</code>.</p>
+    <!-- roadmap -->
+    <h2 id="roadmap"><span class="tocnum"></span>Roadmap &amp; ADRs</h2>
     <table>
-      <tr><th>Capability</th><th>Surface</th><th>Status</th></tr>
-      <tr><td>Agentic build loop (tool-use, metered, materializes files)</td><td><code>build_agent.rs</code> · <code>eri build / iterate / ship</code></td><td><span class="pill ok">shipped</span></td></tr>
-      <tr><td>Persistent sessions + resume</td><td><code>session.rs</code> · <code>eri chat</code>, <code>--continue/--resume</code>, <code>eri sessions</code></td><td><span class="pill ok">shipped</span></td></tr>
-      <tr><td>Headless / CI</td><td><code>eri -p</code>, <code>--output-format text|json|stream-json</code>, <code>--max-turns</code> (exit 2 at cap)</td><td><span class="pill ok">shipped</span></td></tr>
-      <tr><td>Project context</td><td><code>project.rs</code> · <code>AGENTS.md</code> (symlink/injection-hardened) · <code>eri init</code></td><td><span class="pill ok">shipped</span></td></tr>
-      <tr><td><b>Tool superset</b> (bash, grep, glob, apply_patch, todo)</td><td><code>build_agent.rs</code> + <code>search.rs</code>: <code>bash</code> (opt-in, non-sandboxed, secret-scrubbed, kill-on-drop), gitignore-aware <code>grep</code>/<code>glob</code>, multi-file <code>apply_patch</code> (<code>eri_apply</code>), <code>todo_write</code>/<code>todo_read</code> checklist</td><td><span class="pill ok">shipped</span></td></tr>
-      <tr><td><b>Subagents</b></td><td><code>task</code> tool &rarr; nested <code>drive_loop</code>, restricted tool subset, depth-bounded (no recursion), returns a summary</td><td><span class="pill ok">shipped</span></td></tr>
-      <tr><td>Context compaction (single-shot)</td><td><code>/compact</code> (summarize history, metered)</td><td><span class="pill ok">shipped</span></td></tr>
-      <tr><td><b>Layered compaction pipeline</b> (Phase B)</td><td><code>context.rs</code>: budget-reduction &rarr; snip &rarr; microcompact (caveman), cheapest-first before every call vs a 150k target; pure + unit-tested; flags <code>needs_summarization</code> to escalate to <code>/compact</code></td><td><span class="pill ok">shipped</span></td></tr>
-      <tr><td><b>Hooks lifecycle</b> (Phase C)</td><td><code>eri_hooks</code> wired into <code>drive_loop</code>: <code>PreToolUse</code> exit-2 vetoes a call (block <code>rm -rf</code>, redact, enforce); <code>PostToolUse</code>/<code>PostToolError</code> format/log/notify; <code>SessionStart</code>; <code>.eri/hooks.json</code></td><td><span class="pill ok">shipped</span></td></tr>
-      <tr><td>Custom commands</td><td><code>commands.rs</code> · <code>.eri/commands/&lt;name&gt;.md</code> &rarr; <code>/&lt;name&gt;</code> (<code>$ARGUMENTS</code>)</td><td><span class="pill ok">shipped</span></td></tr>
-      <tr><td>Undo</td><td><code>checkpoint.rs</code> · <code>/rewind</code> (snapshot before each turn)</td><td><span class="pill ok">shipped</span></td></tr>
-      <tr><td>Config defaults</td><td><code>eri_config.rs</code> · <code>.eri/config.toml</code> (mode, max_turns) · <code>eri config</code></td><td><span class="pill ok">shipped</span></td></tr>
-      <tr><td>Permission mode</td><td><code>PermissionMode</code> enum (plan | accept-edits | workspace-write | bypass) · <code>--permission-mode</code> (overrides <code>--plan</code>/<code>--allow-shell</code>); read-only plan refuses write/shell/MCP tools</td><td><span class="pill ok">shipped</span></td></tr>
-      <tr><td>Skills (incl. Claude Code's)</td><td><code>skills.rs</code> · reads <code>.claude/skills</code>, <code>.agents/skills</code>, <code>.eri/skills</code>, <code>~/.claude/skills</code> · <code>/skill</code>, <code>eri skills</code></td><td><span class="pill ok">shipped</span></td></tr>
-      <tr><td><b>Output styles</b> (Phase E)</td><td><code>SystemStyle</code>: builder | reviewer | explainer | concise · <code>--style</code> / <code>.eri/config.toml style</code>; same tools + safety, different persona</td><td><span class="pill ok">shipped</span></td></tr>
-      <tr><td><b>Git tools</b></td><td><code>git_tools.rs</code>: <code>git_status</code>/<code>git_diff</code>/<code>git_log</code>/<code>git_commit</code> via <code>eri_git</code> -- version control without granting full shell</td><td><span class="pill ok">shipped</span></td></tr>
-      <tr><td><b>Session fork + recap</b> (Phase G)</td><td><code>Session::fork()</code> branches a conversation (new id, copies history, resets counters); <code>recap()</code> summarizes where it left off · <code>/fork</code>, <code>/recap</code></td><td><span class="pill ok">shipped</span></td></tr>
-      <tr><td><b>Plugins</b> (Phase E)</td><td><code>plugins.rs</code>: <code>.eri/plugins/&lt;name&gt;/</code> bundles commands + skills + hooks.json + mcp.json (all four auto-loaded; project wins on collision) · <code>eri plugins</code></td><td><span class="pill ok">shipped</span></td></tr>
-      <tr><td><b>Worktrees</b> (Phase I)</td><td><code>eri_git</code> add/list/remove + <code>eri worktree</code> -- isolated checkout + branch per parallel session, one object store</td><td><span class="pill ok">shipped</span></td></tr>
-      <tr><td><b>Bash sandbox</b> (Phase I)</td><td><code>sandbox.rs</code> · <code>--sandbox</code> runs shell under a macOS seatbelt (writes confined to the workspace, no network); fails closed off-platform. Live-verified enforcement test</td><td><span class="pill ok">shipped</span></td></tr>
-      <tr><td><b>Observability</b> (Phase I)</td><td><code>trace.rs</code> · <code>ERI_TRACE_FILE</code> -> JSONL of run_start / tool (name,ok,ms) / run_end; no prompt content</td><td><span class="pill ok">shipped</span></td></tr>
-      <tr><td>Flag consistency</td><td><code>--permission-mode</code>/<code>--style</code>/<code>--sandbox</code> honored uniformly across <code>build</code>, <code>chat</code>, and headless <code>-p</code></td><td><span class="pill ok">shipped</span></td></tr>
-      <tr><td><b>Background tasks</b> (Phase D)</td><td><code>background.rs</code> · bash <code>run_in_background</code> + <code>bash_output</code> + <code>kill_bash</code> + <code>list_bash</code>; detached reader drains pipes; Drop kills all children</td><td><span class="pill ok">shipped</span></td></tr>
-      <tr><td>Shell completions (Phase F)</td><td><code>eri completions &lt;bash|zsh|fish|...&gt;</code> via clap_complete</td><td><span class="pill ok">shipped</span></td></tr>
-      <tr><td>Session recap / fork (shell)</td><td><code>eri recap [id]</code> · <code>eri fork &lt;id&gt;</code> -- the chat slash commands as top-level commands</td><td><span class="pill ok">shipped</span></td></tr>
-      <tr><td><b>Interactive line editor</b> (Phase F)</td><td><code>line_editor.rs</code> · rustyline: history (<code>~/.config/eri/history</code>) + Ctrl-R search + emacs/vim keymaps + Ctrl-C-cancels-line; non-TTY fallback (piped input)</td><td><span class="pill ok">shipped</span></td></tr>
-      <tr><td><b>eri Agent SDK core</b> (Phase H)</td><td><code>crates/eri_agent</code> -- the agent loop AS A LIBRARY: <code>driver::run</code> over a <code>Transport</code> + <code>ToolBox</code>, plus <code>request</code>/<code>stream</code>/<code>tool</code>/<code>compaction</code>/<code>permission</code>/<code>style</code>. Loop is mock-tested end-to-end (no auth). The CLI's <code>build_agent</code> reuses request+stream+transport+compaction</td><td><span class="pill ok">shipped</span></td></tr>
-      <tr><td><b>Dynamic workflows</b> (Phase D)</td><td><code>workflow.rs</code> · <code>.eri/workflows/&lt;name&gt;.json</code> -- named multi-step pipelines, <code>{{step}}</code> references; <code>eri workflow list|run</code></td><td><span class="pill ok">shipped</span></td></tr>
-      <tr><td><b>Agent teams</b> (Phase D)</td><td><code>eri_agent::team::TeamBoard</code> -- shared task board (open/claimed/done, claim-guard, take_next) + inter-agent messages (direct/broadcast); the multi-agent coordination substrate</td><td><span class="pill ok">shipped</span></td></tr>
-      <tr><td><b>Agent SDK language bindings</b> (Phase H)</td><td><code>crates/eri_agent_py</code> (PyO3) + <code>crates/eri_agent_node</code> (napi) -- the utilities AND a full <code>run_agent</code> loop driven by host callbacks; each verified against a live runtime (CPython 3.13 / Node 22). <b>Release-ready:</b> the Python wheel installs from pip into a clean venv + passes its suite; the npm package packs lean (index.js + index.d.ts + .node)</td><td><span class="pill ok">shipped</span></td></tr>
-      <tr><td><b>SDK driver ↔ real eri tools</b> (Phase H)</td><td><code>sdk_tools.rs</code> -- eri's file tools as <code>eri_agent::Tool</code> impls; an integration test runs <code>eri_agent::driver::run</code> over them, writing a real file (verified on disk). The CLI loop reuses the SDK's request/stream/transport/compaction modules</td><td><span class="pill ok">shipped</span></td></tr>
-      <tr><td>Inline slash surface</td><td><code>/diff /status /commands /skills /model /cost /clear /init ...</code></td><td><span class="pill ok">shipped</span></td></tr>
-      <tr><td><b>MCP-as-tools in the loop</b></td><td><code>eri_mcp::Mcp</code> loaded at depth 0 (<code>.eri/mcp.json</code>/<code>~/.eri/mcp.json</code>); tools namespaced <code>server__tool</code> + appended to the cached tools tail; dispatch routes to <code>tools/call</code>; child procs kill-on-drop; plan mode refuses them</td><td><span class="pill ok">shipped</span></td></tr>
-      <tr><td><b>Keyboard / interactive UX</b></td><td>replace the stdin loop with a real line editor (<code>rustyline</code>/<code>reedline</code>): history + Ctrl-R, vim/emacs keymaps, multiline, Ctrl-C cancels the turn; <code>clap_complete</code> shell completions</td><td><span class="pill bad">roadmap (big)</span></td></tr>
-      <tr><td><b>Context engine (P3, beat-Nia)</b></td><td>see <a href="#capabilities">8c</a>: <code>search_context</code>/<code>read_docs</code> loop tools over a token-cheap workspace index (TOON + caveman); phased grep&rarr;index&rarr;remote/research</td><td><span class="pill bad">roadmap (largest)</span></td></tr>
+      <tr><th>Phase</th><th>What</th><th>State</th></tr>
+      <tr><td>P1 world model</td><td>one graph: entities/relations/observations/predictions, bi-temporal, provenance, reflection</td><td><span class="pill ok">shipped</span></td></tr>
+      <tr><td>P2 predict &rarr; gate &rarr; act</td><td>confirmation envelope, world-model forecast, unified gate</td><td><span class="pill ok">shipped</span></td></tr>
+      <tr><td>P3 sia loop</td><td>observe&rarr;propose&rarr;admit&rarr;apply&rarr;measure&rarr;keep/revert; only-tightens invariant</td><td><span class="pill ok">shipped</span></td></tr>
+      <tr><td>Recall seam (ADR-0010)</td><td>brain&rarr;phone projection; crates/ half done, live trigger + phone read/blend</td><td><span class="pill acc">finishing</span></td></tr>
+      <tr><td>Cloud-resident brain (ADR-0008)</td><td>Railway-hosted + Composio connections - serves your phone and acts with the computer off</td><td><span class="pill blue">planned</span></td></tr>
+      <tr><td>P4 persona / voice, P5 own-model (LoRA)</td><td>growing personality; per-user fine-tuning (S-LoRA)</td><td><span class="pill blue">planned</span></td></tr>
+      <tr><td>eri social</td><td>consented outward projection + eri-to-eri network</td><td><span class="pill bad">vision</span></td></tr>
     </table>
-    <p class="small muted">Phase A (tool superset + subagents + MCP-in-loop + permission model), Phase B (layered compaction), and Phase C (hooks) are shipped + unit-tested. Remaining multi-session builds: keyboard UX (raw-mode line editor), the context engine (index + retrieval), agent teams / dynamic workflows / background + scheduled tasks (Phase D), plugins + output styles (Phase E), session branch/fork + remote (Phase G), the eri Agent SDK (Phase H), and worktrees / sandbox / observability (Phase I). Each verifies with a signed-in CLI against a real workspace.</p>
+    <p class="small"><b>ADRs</b> (<code>docs/adr/</code>): 0001 two-tier memory &middot; 0002 transport + command queue &middot; 0006 user contract (confirmation envelope, refusal, loyalty, disclosure) &middot; 0007 world model = one graph &middot; 0008 confidential cloud-resident brain &middot; 0009 scope = digital human, prune IDE &middot; 0010 recall seam. Glossary in <code>CONTEXT.md</code>. Standing discipline: <code>/improve-codebase-architecture</code> at each milestone, TDD, user-scoped, refusal boundary absolute.</p>
 
-    <!-- 8e -->
-    <h2 id="phone-memory"><span class="tocnum">8e</span>Phone eri &amp; two-tier memory</h2>
-    <p>The same eri, reached by texting a phone number (iMessage via <b>Sendblue</b>) - the cloud half of one brain, backed by the computer-resident eri's memory, that can also act on the computer remotely. <span class="muted">Decisions: <code>docs/adr/0001</code> (memory: adopt patterns not a Python engine; two-tier sync), <code>docs/adr/0002</code> (Sendblue transport + polled command queue). Plan phased 0&rarr;1&rarr;2.</span></p>
-    <div class="grid g2">
-      <div class="card"><span class="pill acc">Tier-A</span><h3>Personalization profile <span class="pill ok">server-readable</span></h3><p class="small">A small (&le;32KB) projection - static facts + preference rollups + a live <code>dynamic_context</code> ("today you shipped X") - phone eri injects to sound like the user's eri. Encrypted <b>at rest</b> with <code>K_server</code> (defense-in-depth, not E2E). Never the raw log or secrets. <code>personalization_profiles</code> + <code>/api/v1/memory/profile</code>.</p></div>
-      <div class="card"><span class="pill acc">Tier-B</span><h3>Memory blob <span class="pill ok">E2E</span></h3><p class="small">The user's <b>full</b> observation log, E2E-encrypted with <code>K_user</code> (HKDF over a stored per-user salt, <em>not</em> the rotating bearer - stable across token rotation). The cloud only holds opaque bytes. <code>memory_blobs</code> + <code>/api/v1/memory/sync</code>. Deep/private questions <b>relay</b> to the running computer eri, which holds the keys.</p></div>
-    </div>
-    <p class="small"><b>The sync seam (Rust, <code>crates/eri_inference/src/memory/</code>):</b> <code>MemorySync</code> over a <code>SyncTransport</code> trait (in-memory stub for tests + <code>HttpSyncTransport</code> for prod) round-trips the encrypted blob; <code>sync()</code> pulls &rarr; <code>apply_merge</code> (union + last-write-wins by <code>ts_ms</code> + tombstones, so a <code>/forget</code> can't resurrect from a stale copy) &rarr; pushes the merged result so the cloud converges. <code>profile::distill</code> builds Tier-A from the visible observations (pure). Crypto is pure-Rust RustCrypto (<code>aes-gcm</code>/<code>hkdf</code>/<code>sha2</code>) - no C deps, offline-capable.</p>
+    <!-- models -->
+    <h2 id="models"><span class="tocnum"></span>Model IDs</h2>
     <table>
-      <tr><th>Phase</th><th>Scope</th><th>State</th></tr>
-      <tr><td><b>0</b> memory-sync foundation</td><td>tombstone <code>forget</code>, merge, <code>sync.rs</code>+<code>profile.rs</code>, Tier-A route + <code>personalization_profiles</code> migration</td><td><span class="pill ok">built</span> (Rust + cloud; Rust push-after-insert is Phase 1)</td></tr>
-      <tr><td><b>1</b> conversational phone eri</td><td>Sendblue webhook (<code>imessage/inbound</code>), <code>phone_links</code>/<code>phone_pairings</code>, <code>run_core</code> + Tier-A profile injection, <code>eri phone link</code></td><td><span class="pill">next</span></td></tr>
-      <tr><td><b>2</b> remote control + GitHub</td><td><code>command_queue</code> polled by the computer, <code>remote.rs</code> daemon &rarr; existing <code>run_control_agent</code>; risky &rarr; <code>awaiting_confirm</code> bounced to the phone</td><td><span class="pill">planned</span></td></tr>
+      <tr><th>Canonical</th><th>Wire id</th><th>Role</th></tr>
+      <tr><td>sonnet</td><td><code>claude-sonnet-4-6</code></td><td>base engine - phone reply, builds, control escalation</td></tr>
+      <tr><td>haiku</td><td><code>claude-haiku-4-5-20251001</code></td><td>cheap reasoning / classify</td></tr>
+      <tr><td>opus</td><td><code>claude-opus-4-8</code></td><td>heaviest reasoning (cost-guarded on the shared proxy)</td></tr>
+      <tr><td>mercury</td><td><code>mercury-2</code></td><td>IDE fast-lane (diffusion edits)</td></tr>
+      <tr><td>local</td><td><code>qwen2.5</code> (on-device)</td><td>Tier-0/1 control, zero cloud tokens</td></tr>
     </table>
-    <div class="note small"><b>Keys &amp; env:</b> <code>K_user</code> never leaves the user's devices (HKDF over a stored salt). <code>K_server</code> = <code>ERI_SERVER_ENCRYPTION_KEY</code> (base64 of 32 bytes) in the Vercel env; Tier-A is a server-readable projection, so a leaked DB dump alone is useless without it. Both routes reuse <code>authenticateApiBearer</code> + <code>featureLocked('cloudSync')</code>; every read/write is scoped to the bearer's <code>user_id</code> (no cross-tenant access).</div>
-
-    <!-- 9 -->
-    <h2 id="models"><span class="tocnum">9</span>Model IDs</h2>
-    <div class="bad-note small">Single source of truth needed. <code>claude-sonnet-4-5-20251015</code> is <b>invalid</b> (Anthropic 404) yet hardcoded in ~5 places.</div>
-    <table>
-      <tr><th>Canonical</th><th>Wire id</th><th>Status</th></tr>
-      <tr><td>sonnet</td><td><code>claude-sonnet-4-6</code></td><td><span class="pill ok">valid</span></td></tr>
-      <tr><td>haiku</td><td><code>claude-haiku-4-5-20251001</code></td><td><span class="pill ok">valid</span></td></tr>
-      <tr><td>(legacy)</td><td><code>claude-sonnet-4-5-20251015</code></td><td><span class="pill bad">404 - replace</span></td></tr>
-      <tr><td>mercury</td><td><code>mercury-2</code></td><td><span class="pill ok">valid</span></td></tr>
-    </table>
-    <p class="small">Hardcoded occurrences to centralize: <code>crates/eri_inference/src/llm_provider.rs</code> (278, 353), <code>website/lib/inference/tandem.ts</code>, <code>website/lib/inference/cost_guard.ts</code>, <code>ide/extensions/eri-ai-panel/src/agents/builtins.ts</code>, <code>.../ship</code>. Backend <code>/api/v1/agent/run</code> already fixed to <code>claude-sonnet-4-6</code>.</p>
 
     <!-- repo -->
-    <h2 id="repo">Repo map</h2>
+    <h2 id="repo"><span class="tocnum"></span>Repo map</h2>
     <pre>eri/
-  website/                Next.js 14 app (marketing + dashboard + /api/v1/*)  -> Vercel
-    app/api/v1/           auth/device, inference/{messages,iterate,...}, usage, agent/run
-    lib/                  auth.ts, auth-client.ts, tiers.ts, usage/quota.ts,
-                          inference/{proxy,providers,cost_guard,tokens,tandem,db}.ts
-    supabase/migrations/  0001-0008
-  crates/                Rust workspace
-    eri_cli/             the `eri` binary (auth.rs, agent.rs, client.rs, config.rs, eri_cli.rs)
-    eri_inference/       MercuryBackend, providers/anthropic, llm_provider, brain_iteration
-    eri_router/          brain_router.rs (intent -> model)
-    eri_control/         apply_patch_to_disk, write_build_files
-    eri_billing/ eri_coreutils/ eri_core/ eri_caveman/ eri_settings/
-  ide/extensions/eri-ai-panel/   VSCodium-fork IDE panel
-  apps/eri-agent-manager/        standalone WKWebView app
-  scripts/eri_agent_manager.swift
-  .eri/agents/           builder.md (cracked build persona), eri.md (personality)
-  docs/architecture/     this file</pre>
+  crates/                       Rust workspace - the brain
+    eri_graph/                  THE world model (entities/relations/observations/chains, bi-temporal)
+    eri_inference/              reflection, world_recall, recall projection, memory sync, providers
+    eri_cli/                    control + brain: control_agent, control_envelope, predict, sia,
+                                control_safety, control_turn, build_agent; the `eri` binary
+    eri_router/                 token-frugal intent -> model routing
+    eri_agent/                  the Build agent loop AS A LIBRARY (+ Python/Node bindings)
+    eri_billing/ eri_coreutils/ eri_core/ eri_caveman/ eri_settings/ eri_git/ eri_mcp/ eri_apply/
+  website/                      Next.js 14 (front door + phone backend + /api/v1/*) -> Vercel
+    app/api/v1/                 auth/device, inference/*, usage, memory/{sync,profile}, proactive
+    lib/                        auth, tiers, usage/quota, inference/{proxy,providers}, proactive/
+    supabase/migrations/        users, tokens, buckets, memory_blobs, personalization_profiles, ...
+  apps/eri-agent-manager/       macOS app (the computer surface) + floating overlay
+  ide/extensions/eri-ai-panel/  VSCodium-fork IDE panel  (RETIRED - ADR-0009; eri drives your editor instead)
+  docs/adr/                     0001-0010   docs/contracts/   docs/competitive/
+  CONTEXT.md                    glossary    docs/architecture/ this file</pre>
 
     <!-- status -->
-    <h2 id="status">Status &amp; active TODO</h2>
+    <h2 id="status"><span class="tocnum"></span>Status</h2>
     <table>
       <tr><th>Area</th><th>State</th></tr>
-      <tr><td>Device auth (RFC 8628)</td><td><span class="pill ok">done + deployed</span> race fixed, idempotent delivery</td></tr>
-      <tr><td>Sign-in + tier/credits</td><td><span class="pill ok">done</span> pro_plus, 4M tokens, usage wire</td></tr>
-      <tr><td>Metered inference proxy</td><td><span class="pill ok">exists</span> runProxy w/ tools + real usage</td></tr>
-      <tr><td>Code-gen agentic loop</td><td><span class="pill acc">in progress</span> client-side loop in CLI (build_agent.rs)</td></tr>
-      <tr><td>Model-id cleanup</td><td><span class="pill acc">in progress</span> kill 20251015</td></tr>
-      <tr><td>agent/run relay</td><td><span class="pill bad">deprecate</span> for tool work</td></tr>
+      <tr><td>World model + predict/gate/act + sia loop (P1-P3)</td><td><span class="pill ok">shipped, committed, workspace green</span></td></tr>
+      <tr><td>Recall seam (brain&rarr;phone)</td><td><span class="pill acc">crates/ half done; finishing the live trigger + phone read/blend</span></td></tr>
+      <tr><td>Computer control wedge</td><td><span class="pill ok">live, verified on-device</span> (eyes + voice + gated actuation + trust layer)</td></tr>
+      <tr><td>Phone eri (iMessage)</td><td><span class="pill ok">M1 live</span> on Sonnet; recall seam connects it to the real brain next</td></tr>
+      <tr><td>Build capability (harness)</td><td><span class="pill ok">shipped</span> (Claude-Code-class; demoted from "the product")</td></tr>
+      <tr><td>Cloud-resident brain / eri social</td><td><span class="pill blue">planned</span> / <span class="pill bad">vision</span></td></tr>
     </table>
 
-    <footer>eri architecture reference &middot; generated from in-repo exploration &middot; update this file whenever the stack changes, and refresh the <code>eri-architecture-doc</code> memory pointer.</footer>
+    <footer>eri architecture &amp; vision reference &middot; one brain, three surfaces, one safety spine &middot; update this file whenever the stack changes, and refresh the <code>reference_eri_architecture_doc</code> memory pointer.</footer>
   </main>
 </div>
 </body>

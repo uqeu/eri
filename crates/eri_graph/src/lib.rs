@@ -133,6 +133,15 @@ impl Graph {
         inner.store.get_node(id)
     }
 
+    /// **Hard-delete** `id` and every edge incident to it — a true ERASURE, not the
+    /// bi-temporal invalidation used for supersession. For privacy purges: a sensitive
+    /// observation (and its evidence edges) must leave NO trace, so an as-of query can
+    /// never resurface it. Returns whether a node existed. Idempotent.
+    pub fn remove_node(&self, id: &NodeId) -> Result<bool, GraphError> {
+        let inner = self.lock_inner()?;
+        inner.store.remove_node(id)
+    }
+
     /// Replace an edge's metadata JSON (e.g. to stamp `valid_to` when a
     /// bi-temporal relation stops being true — invalidate, don't delete).
     pub fn update_edge_metadata(

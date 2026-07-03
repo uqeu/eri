@@ -20,6 +20,7 @@ use eri_inference::memory::{
     keys::{KeychainStore, k_user},
     profile,
     profile_sync::{HttpProfileTransport, push_profile},
+    recall::{HttpRecallTransport, Recipient, push_recall, recall_projection},
     sync::{HttpSyncTransport, MemorySync},
 };
 
@@ -29,6 +30,8 @@ use crate::config;
 pub struct SyncReport {
     pub observations: usize,
     pub profile_facts: usize,
+    pub projection_entities: usize,
+    pub recall_pushed: bool,
 }
 
 fn now_ms() -> u64 {
@@ -56,13 +59,49 @@ fn sync_blocking(base: String, bearer: String, user_id: String) -> Result<SyncRe
         .sync(&mut store)
         .context("Tier-B memory sync")?;
 
-    // Tier-A: distill + push the server-readable profile so phone eri knows you.
+    // Tier-A: two INDEPENDENT server-readable pushes — neither short-circuits the
+    // other. The profile push is best-effort (a failure is surfaced as a warning,
+    // never fatal): Tier-B already converged so memory is safe, and the newer
+    // world-model push must not be held hostage to a profile-push failure.
     let prof = profile::distill(&store.all(), now_ms());
-    push_profile(&HttpProfileTransport::new(base, bearer), &prof).context("Tier-A profile push")?;
+    if let Err(e) = push_profile(
+        &HttpProfileTransport::new(base.clone(), bearer.clone()),
+        &prof,
+    ) {
+        eprintln!("eri: Tier-A profile push failed (continuing): {e}");
+    }
+
+    // Tier-A: push the world-model PROJECTION to the SIBLING recall endpoint
+    // (ADR-0010) so phone eri draws on the brain's world model — distinct path,
+    // SAME K_server-at-rest + AAD=user_id, NEVER the lossy profile route (which
+    // would silently drop every world-model field). Eventually-consistent: the
+    // projection carries an `as_of` stamp; the phone answers from the last push.
+    let mut projection = recall_projection(Some(&user_id), Recipient::OwnDevices, now_ms());
+    let projection_entities = projection.entities.len();
+    eprintln!(
+        "eri: recall projection ready — {} entities · {} relations · {} observations · {} predictions",
+        projection.entities.len(),
+        projection.relations.len(),
+        projection.recent_observations.len(),
+        projection.predictions.len(),
+    );
+    let recall_pushed = match push_recall(
+        &HttpRecallTransport::new(base, bearer),
+        &mut projection,
+        Recipient::OwnDevices,
+    ) {
+        Ok(()) => true,
+        Err(e) => {
+            eprintln!("eri: Tier-A recall push failed (continuing): {e}");
+            false
+        }
+    };
 
     Ok(SyncReport {
         observations: store.all().len(),
         profile_facts: prof.facts.len(),
+        projection_entities,
+        recall_pushed,
     })
 }
 
@@ -86,10 +125,32 @@ pub async fn run() -> Result<()> {
     let report = tokio::task::spawn_blocking(move || sync_blocking(base, bearer, user_id))
         .await
         .context("sync task panicked")??;
+    let recall = if report.recall_pushed {
+        format!("{} world-model entities pushed", report.projection_entities)
+    } else {
+        "world-model push FAILED (see warning above)".to_string()
+    };
     println!(
-        "synced ✓  {} memories · {} profile facts pushed to phone eri",
-        report.observations, report.profile_facts
+        "synced ✓  {} memories · {} profile facts · {}",
+        report.observations, report.profile_facts, recall
     );
+
+    // Continuous auto-index (Phase A, ADR-0012): pull what's new from connected
+    // accounts since the cursor and fold it into the world model. Best-effort — a
+    // connections failure (e.g. the source endpoint not yet live) NEVER breaks the
+    // sync; surfaced only under ERI_DEBUG.
+    match crate::connections::sync_connections().await {
+        Ok(c) if c.ingested > 0 || c.dropped_sensitive > 0 => println!(
+            "auto-indexed ✓  {} from connected accounts ({} sensitive dropped) · {} entities",
+            c.ingested, c.dropped_sensitive, c.entities
+        ),
+        Ok(_) => {}
+        Err(e) => {
+            if std::env::var("ERI_DEBUG").is_ok() {
+                eprintln!("eri: connections auto-index skipped: {e:#}");
+            }
+        }
+    }
     Ok(())
 }
 

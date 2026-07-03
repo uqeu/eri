@@ -16,7 +16,7 @@
  */
 
 import { AuthScheme, Composio } from "@composio/core";
-import { resolveAuthConfigId } from "@/lib/composio/auth_config";
+import { AuthConfigMissingError, resolveAuthConfigId } from "@/lib/composio/auth_config";
 
 /** One initiated connection: the hosted URL to open (empty for API-key links,
  *  which complete server-side with no consent screen), plus Composio's account id. */
@@ -146,6 +146,21 @@ function composio(): Composio {
   return new Composio({ apiKey: requireEnv("COMPOSIO_API_KEY") });
 }
 
+/** Extract the diagnostic detail from a Composio SDK error. A stainless `APIError`
+ *  carries the HTTP `status` and the parsed JSON body on `error` — the REAL reason a
+ *  request was rejected, otherwise hidden behind a generic message. Pure + tested. */
+export function describeComposioError(err: unknown): { status?: number; body?: unknown; message: string } {
+  if (err && typeof err === "object") {
+    const e = err as { status?: unknown; error?: unknown; message?: unknown };
+    return {
+      status: typeof e.status === "number" ? e.status : undefined,
+      body: "error" in e ? e.error : undefined,
+      message: typeof e.message === "string" ? e.message : String(err),
+    };
+  }
+  return { message: String(err) };
+}
+
 /**
  * Production adapter over the official `@composio/core` SDK. Per-toolkit auth
  * configs are resolved by `lib/composio/auth_config` (env COMPOSIO_AUTH_CONFIG_<SLUG>),
@@ -216,7 +231,24 @@ export class ComposioApiClient implements ComposioClient {
     // doesn't exist and returns the hosted consent URL. Passing our registered
     // `authConfigId` is what makes a custom-OAuth toolkit (our own app) work;
     // omitting it falls back to Composio's managed app.
-    const req = await composio().toolkits.authorize(userId, toolkit, authConfigId ?? undefined);
+    let req: { id?: string; redirectUrl?: string | null };
+    try {
+      req = await composio().toolkits.authorize(userId, toolkit, authConfigId ?? undefined);
+    } catch (err) {
+      // Surface the HIDDEN reason first — Composio's 400 body lives on the APIError
+      // (`status` + parsed `error`), otherwise swallowed into a generic 502. This is
+      // how we diagnose github's `POST /connected_accounts → 400` (gmail/spotify
+      // authorize fine on the same code+SDK, so the rejected field is github-specific).
+      const detail = describeComposioError(err);
+      console.log(
+        JSON.stringify({ event: "composio.authorize_failed", toolkit, hasAuthConfig: authConfigId != null, ...detail }),
+      );
+      // No config AND it failed → most likely the toolkit needs our own OAuth app we
+      // haven't registered (needs_setup). A present config that still fails is a real
+      // rejection → composio_error; the log above says exactly why.
+      if (authConfigId == null) throw new AuthConfigMissingError(toolkit);
+      throw err;
+    }
     if (!req.id || !req.redirectUrl) {
       throw new Error(`composio authorize returned no redirect for "${toolkit}"`);
     }

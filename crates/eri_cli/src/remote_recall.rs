@@ -109,7 +109,11 @@ fn relevant_hits(scored: Vec<(Observation, f32)>) -> Vec<Observation> {
     if relevant.len() >= 2 && relevant[0].1 >= WINNER_DOMINANCE * relevant[1].1 {
         relevant.truncate(1);
     }
-    relevant.into_iter().take(RECALL_LIMIT).map(|(o, _)| o).collect()
+    relevant
+        .into_iter()
+        .take(RECALL_LIMIT)
+        .map(|(o, _)| o)
+        .collect()
 }
 
 /// How far the top hit must beat the runner-up to be returned alone (a single
@@ -269,7 +273,10 @@ mod tests {
         assert_eq!(kept.len(), 1);
         assert!(kept[0].body.contains("khai@example.com"));
         // Two close, both-relevant hits → keep both (no single winner).
-        let close = vec![(obs("the deal closed at 40k"), 0.71), (obs("the deal was with Henderson"), 0.66)];
+        let close = vec![
+            (obs("the deal closed at 40k"), 0.71),
+            (obs("the deal was with Henderson"), 0.66),
+        ];
         assert_eq!(relevant_hits(close).len(), 2);
     }
 

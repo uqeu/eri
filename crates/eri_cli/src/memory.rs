@@ -102,6 +102,41 @@ pub async fn reflect(limit: usize) -> Result<()> {
     Ok(())
 }
 
+/// `eri memory ingest` — backfill the world model from the episodic store: extract
+/// the people/projects/relations in everything you've remembered into the world
+/// graph. Additive (memories untouched) + idempotent (skips what's already modelled,
+/// by source observation id). The prerequisite that gives `reflect` something to read
+/// and the recall projection something to surface. User-scoped.
+pub fn ingest() -> Result<()> {
+    let user_id = config::load().ok().and_then(|c| c.user_id);
+    let report = eri_inference::memory::world_recall::ingest_store(user_id.as_deref())
+        .context("world-model ingest")?;
+    println!(
+        "Ingested {} observation{} ({} already modelled) — {} entit{} in your world model.",
+        report.ingested,
+        if report.ingested == 1 { "" } else { "s" },
+        report.skipped,
+        report.entities,
+        if report.entities == 1 { "y" } else { "ies" }
+    );
+    Ok(())
+}
+
+/// `eri memory purge` — hard-erase every stored observation that trips the Q23
+/// privacy screen (remediation for data indexed before the precision pass). A true
+/// erasure via the world graph's `remove_node`; entities orphaned by it (0 evidence)
+/// drop from the recall projection on the next sync. User-scoped.
+pub fn purge() -> Result<()> {
+    let user_id = config::load().ok().and_then(|c| c.user_id);
+    let removed = eri_inference::memory::connections::purge_sensitive(user_id.as_deref())
+        .context("purge sensitive observations")?;
+    println!(
+        "Purged {removed} sensitive observation{} from your world model.",
+        if removed == 1 { "" } else { "s" }
+    );
+    Ok(())
+}
+
 /// `eri brief` — a daily "here's your day" recap from what eri actually
 /// remembers. NO fabrication: it only reports real observations on record.
 /// Calendar + email join this once the user connects those (honest note).

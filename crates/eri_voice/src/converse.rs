@@ -210,6 +210,16 @@ where
     }
 }
 
+/// Lets `&mut R` stand in as a `Responder`, so a test (or host) can keep
+/// ownership of the brain and inspect it after the loop returns. The same
+/// blanket pattern would apply to the other stages if a caller needs it; only
+/// the responder is borrowed back in practice.
+impl<R: Responder + ?Sized> Responder for &mut R {
+    fn respond(&mut self, utterance: &str) -> Result<String, ConverseError> {
+        (**self).respond(utterance)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -445,15 +455,5 @@ mod tests {
         assert!(!is_stop_word("open Spotify"));
         assert!(!is_stop_word(""));
         assert!(!is_stop_word("nonstop"));
-    }
-}
-
-/// Lets `&mut R` stand in as a `Responder`, so a test (or host) can keep
-/// ownership of the brain and inspect it after the loop returns. The same
-/// blanket pattern would apply to the other stages if a caller needs it; only
-/// the responder is borrowed back in practice.
-impl<R: Responder + ?Sized> Responder for &mut R {
-    fn respond(&mut self, utterance: &str) -> Result<String, ConverseError> {
-        (**self).respond(utterance)
     }
 }

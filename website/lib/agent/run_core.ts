@@ -18,6 +18,9 @@ export interface TierAProfile {
   preferences?: string[];
   /** Learned writing register — how this user writes, so eri mirrors them. */
   communication_style?: string | null;
+  /** Learned texting CADENCE — how this user paces messages, so eri mirrors their
+   *  rhythm (descriptor for the prompt, maxBubbles caps the reply split). */
+  cadence?: { descriptor?: string; maxBubbles?: number } | null;
 }
 
 /** An Anthropic tool the phone turn may call (e.g. control_computer). */
@@ -188,7 +191,8 @@ const DEFAULT_MAX_HOPS = 3;
 const BASE_PERSONA = [
   "You are eri, the user's personal AI, replying over text message (iMessage).",
   "Write concise, plain text (no markdown, it shows as literal symbols), usually a sentence or two. Sound like a real person, never an AI assistant: NEVER use AI tells ('Certainly!', 'I'd be happy to', 'As an AI', 'Is there anything else'), never over-explain or hedge, never narrate your own mechanics. Just talk.",
-  "ADAPT to how the user actually writes over time — their learned style is noted below ('Your typical writing style'). Reflect it as their AVERAGE voice WITH NATURAL VARIATION: if they emoji ~half the time, sometimes add one and sometimes don't; if they're usually lowercase but occasionally formal, trend lowercase without being rigid. Use the current message's tone as a lighter cue on top — but don't just parrot its exact register, and never default to casual when they're being formal. If no learned style is given yet, write naturally and lean toward how they're writing now.",
+  "ADAPT to how the user actually writes over time — their learned style is noted below ('Your typical writing style'). Reflect it as their AVERAGE voice WITH NATURAL VARIATION: if they emoji ~half the time, sometimes add one and sometimes don't; if they're usually lowercase but occasionally formal, trend lowercase without being rigid. Use the current message's tone as a lighter cue on top — but don't just parrot its exact register, and never default to casual when they're being formal. If no learned style is given yet, write naturally and lean toward how they're writing now. Mirror the PERSON, not their mistakes — match their vibe, never copy typos or broken grammar back at them.",
+  "MATCH THEIR TEXTING RHYTHM too, not just their words. You can reply in MORE THAN ONE message when it fits how they text — short, natural bubbles like a person, not one long block. Put a BLANK LINE between bubbles you want sent separately ('How they text' below says how many feel right). If they fire several quick texts, 2–3 short bubbles is natural; if they sent one terse line, send one. Keep every bubble real — never split a single thought or pad with filler just to look chatty.",
   "You already know the user from the context below — use it naturally; never invent facts you weren't given. When the user tells you something durable about themselves, save it with remember_fact so you know it next time.",
   // The single most important behavior rule: answer directly. The model was
   // dispatching trivia ("what's the date") to the user's computer and failing —
@@ -239,16 +243,20 @@ export function buildSystemBlocks(
   const facts = profile?.facts?.filter((f) => f.trim()) ?? [];
   const prefs = profile?.preferences?.filter((p) => p.trim()) ?? [];
   const style = (profile?.communication_style ?? "").trim();
+  const cadence = (profile?.cadence?.descriptor ?? "").trim();
   const dynamic = (dynamicContext ?? "").trim();
   const now = (nowText ?? "").trim();
 
   const parts: string[] = [];
   if (now) parts.push(`Right now it is ${now}.`);
-  if (facts.length > 0 || prefs.length > 0 || style !== "" || dynamic !== "") {
+  if (facts.length > 0 || prefs.length > 0 || style !== "" || cadence !== "" || dynamic !== "") {
     const lines: string[] = ["```", "What I know about you:"];
     for (const f of facts) lines.push(`- ${f}`);
     if (style) {
       lines.push(`- Your typical writing style (reflect on average, with natural variation): ${style}`);
+    }
+    if (cadence) {
+      lines.push(`- How they text (match this rhythm, multiple short bubbles ok): ${cadence}`);
     }
     if (dynamic) lines.push(`- ${dynamic}`);
     // P3: standing behavior preferences get their own labeled section the persona

@@ -18,7 +18,7 @@ use eri_graph::{Graph, GraphError, world};
 use world::Entity;
 
 use super::Observation;
-use super::extraction::{CueExtractor, ingest_observation};
+use super::extraction::{CueExtractor, IngestReport, ingest_all, ingest_observation};
 
 // --- integration facade -------------------------------------------------------
 // Encapsulates `eri_graph` behind a user-scoped, best-effort API so call sites
@@ -53,6 +53,40 @@ pub fn model_observation(user_id: Option<&str>, obs: &Observation) -> io::Result
     Ok(())
 }
 
+/// Backfill the user's whole episodic store into their world model (additive,
+/// idempotent). Opens the user's [`MemoryStore`](super::MemoryStore) + world graph
+/// and runs the cue extractor over every observation — the bridge that makes the
+/// already-stored `eri remember` facts queryable as people/projects/relations, and
+/// the prerequisite that gives the cold-path reflection pass something to read.
+/// Re-running only ingests what's new (skips by `source_id`).
+pub fn ingest_store(user_id: Option<&str>) -> io::Result<IngestReport> {
+    let store = super::MemoryStore::open_for(user_id)?;
+    let graph = open_world_graph(user_id)?;
+    ingest_all(&graph, &CueExtractor, &store.all())
+        .map_err(|e| io::Error::other(format!("ingest store: {e}")))
+}
+
+/// Total distinct entities across ALL kinds in a world graph (people, projects,
+/// apps, topics, places, life-events). The "real" entity count, independent of
+/// any single ingest or reflect pass (a deep backfill reports this, not just what
+/// one pass wrote). Pure over the graph; fixture-testable.
+pub fn entity_total_in(graph: &Graph) -> Result<usize, GraphError> {
+    let mut total = 0;
+    for kind in world::ENTITY_KINDS {
+        total += world::entities_of_kind(graph, kind)?.len();
+    }
+    Ok(total)
+}
+
+/// Total distinct entities in the user's world model — the count a backfill
+/// reports. Best-effort: `0` when the graph can't be opened or read.
+pub fn entity_total(user_id: Option<&str>) -> usize {
+    open_world_graph(user_id)
+        .ok()
+        .and_then(|g| entity_total_in(&g).ok())
+        .unwrap_or(0)
+}
+
 /// The Tier-A "Key People / Active Projects" block for the user's world model,
 /// or `""` when it is empty or unavailable. Blends with
 /// [`format_learned_block`](super::format_learned_block); best-effort, so a
@@ -73,6 +107,16 @@ pub fn world_block_for(user_id: Option<&str>, limit: usize) -> String {
 pub fn observe_transition(user_id: Option<&str>, from: &str, to: &str) -> io::Result<()> {
     let graph = open_world_graph(user_id)?;
     world::link_next(&graph, from, to).map_err(|e| io::Error::other(format!("link_next: {e}")))
+}
+
+/// Down-weight the learned chain transition `from` → `to` in the user's world
+/// model — the sia loop's chain-refine op (P3): it weakens a misfiring "after X
+/// you usually Y". Best-effort; the seam stays in `eri_inference` (callers never
+/// name `eri_graph`).
+pub fn downweight_transition(user_id: Option<&str>, from: &str, to: &str) -> io::Result<()> {
+    let graph = open_world_graph(user_id)?;
+    world::downweight_next(&graph, from, to)
+        .map_err(|e| io::Error::other(format!("downweight_next: {e}")))
 }
 
 /// "After X you usually Y" — the successor actions for `action`, ranked by how
@@ -231,6 +275,36 @@ mod tests {
             body: body.into(),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn entity_total_counts_distinct_entities_across_kinds() {
+        let g = Graph::open_in_memory().unwrap();
+        assert_eq!(
+            entity_total_in(&g).unwrap(),
+            0,
+            "an empty graph has no entities"
+        );
+        ingest_observation(
+            &g,
+            &CueExtractor,
+            &fact("I work with Alice on the eri project"),
+        )
+        .unwrap();
+        // A person (Alice) + a project (eri) — distinct kinds both counted.
+        assert_eq!(
+            entity_total_in(&g).unwrap(),
+            2,
+            "counts the person AND the project"
+        );
+        // Idempotent: re-ingesting the same fact doesn't double-count.
+        ingest_observation(
+            &g,
+            &CueExtractor,
+            &fact("I work with Alice on the eri project"),
+        )
+        .unwrap();
+        assert_eq!(entity_total_in(&g).unwrap(), 2, "distinct, not duplicated");
     }
 
     #[test]

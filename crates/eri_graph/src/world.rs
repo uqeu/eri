@@ -104,9 +104,29 @@ impl Observation {
             .unwrap_or("")
     }
 
+    /// When eri recorded this observation (ms epoch), if the node carries it
+    /// (`learned_at`, else `valid_from`, else 0 for a bare observation node).
+    pub fn learned_at(&self) -> u64 {
+        self.node
+            .body
+            .get("learned_at")
+            .and_then(|v| v.as_u64())
+            .or_else(|| self.node.body.get("valid_from").and_then(|v| v.as_u64()))
+            .unwrap_or(0)
+    }
+
     /// The underlying graph node id.
     pub fn id(&self) -> &NodeId {
         &self.node.id
+    }
+
+    /// The id of the source memory-store observation this node was bridged from
+    /// (`graph_bridge::write_observation` stamps `source_id`), if any — the "where
+    /// did this come from / forget this" provenance link the memory UI reads off an
+    /// entity's evidence. `None` for nodes written without a source (e.g. a bare
+    /// [`record_observation`]).
+    pub fn source_id(&self) -> Option<&str> {
+        self.node.body.get("source_id").and_then(|v| v.as_str())
     }
 }
 
@@ -229,8 +249,32 @@ pub fn find_entity(graph: &Graph, kind: &str, name: &str) -> Result<Option<Entit
 /// Whether `entity`'s canonical name or any alias equals the already-normalized
 /// `needle`. The shared exact-match rule for resolution.
 fn name_matches(entity: &Entity, needle: &str) -> bool {
-    normalize_name(entity.canonical_name()) == needle
-        || entity.aliases().iter().any(|a| normalize_name(a) == needle)
+    let key = strip_entity_noun(needle);
+    strip_entity_noun(&normalize_name(entity.canonical_name())) == key
+        || entity
+            .aliases()
+            .iter()
+            .any(|a| strip_entity_noun(&normalize_name(a)) == key)
+}
+
+/// Project/app nouns stripped from an entity name for resolution, so "atlas" and
+/// "atlas project" resolve to ONE entity. The base-engine reflection pass names
+/// projects with their noun ("atlas project") while the cue extractor uses the bare
+/// name ("atlas"); without this they'd fork into two entities.
+const ENTITY_NAME_NOUNS: &[&str] = &["project", "app", "repo", "codebase", "startup"];
+
+/// Strip a single trailing project/app noun from an already-normalized name (no-op
+/// if the name is only the noun, so an entity literally named "project" survives).
+fn strip_entity_noun(normalized: &str) -> &str {
+    for noun in ENTITY_NAME_NOUNS {
+        if let Some(rest) = normalized.strip_suffix(noun) {
+            let rest = rest.trim_end();
+            if !rest.is_empty() {
+                return rest;
+            }
+        }
+    }
+    normalized
 }
 
 /// Resolve-or-create an entity. Resolution is layered, cheapest-first:
@@ -628,6 +672,62 @@ fn name_grounds(hay: &[String], name: &str) -> bool {
         return false;
     }
     hay.windows(needle.len()).any(|w| w == needle.as_slice())
+}
+
+/// Every established proactive chain ("after X you usually Y", count ≥
+/// [`ESTABLISHED_TRANSITIONS`]), most-frequent first, capped at `limit` — the
+/// prediction slice of the recall projection (ADR-0010). Returns `(after, next,
+/// count)`.
+pub fn established_chains(
+    graph: &Graph,
+    limit: usize,
+) -> Result<Vec<(String, String, u64)>, GraphError> {
+    let mut out: Vec<(String, String, u64)> = Vec::new();
+    for node in graph.query_by_kind(node_kind::ACTION, ENTITY_SCAN_LIMIT)? {
+        let from = action_label(&node).to_string();
+        if from.is_empty() {
+            continue;
+        }
+        for (to, count) in next_steps(graph, &from, NEXT_LOOKUP_LIMIT)? {
+            if count >= ESTABLISHED_TRANSITIONS {
+                out.push((from.clone(), to, count));
+            }
+        }
+    }
+    out.sort_by(|a, b| {
+        b.2.cmp(&a.2)
+            .then_with(|| (a.0.as_str(), a.1.as_str()).cmp(&(b.0.as_str(), b.1.as_str())))
+    });
+    out.truncate(limit);
+    Ok(out)
+}
+
+/// Down-weight the learned chain `from_label` → `to_label` — reduce its
+/// transition count by one (it misfired). The sia loop's chain-refine op (P3): a
+/// decremented count weakens the "after X you usually Y" corroboration, and at 0
+/// it no longer reads as established. Stamps the edge `source = "sia"` for
+/// provenance (auditable). No-op if the transition was never learned. Reduces,
+/// never deletes — reversible.
+pub fn downweight_next(graph: &Graph, from_label: &str, to_label: &str) -> Result<(), GraphError> {
+    let Some(from) = find_action(graph, &normalize_name(from_label))? else {
+        return Ok(());
+    };
+    let to_needle = normalize_name(to_label);
+    for (edge, node) in graph.neighbors(&from, Some(relation::NEXT), Direction::Out)? {
+        if normalize_name(action_label(&node)) == to_needle {
+            let count = next_count(&edge).saturating_sub(1);
+            let mut meta = edge.metadata.clone();
+            if !meta.is_object() {
+                meta = json!({});
+            }
+            if let Some(obj) = meta.as_object_mut() {
+                obj.insert("count".into(), Value::from(count));
+                obj.insert("source".into(), Value::from("sia"));
+            }
+            return graph.update_edge_metadata(&edge.id, &meta);
+        }
+    }
+    Ok(())
 }
 
 fn edge_valid_at(edge: &Edge, at: u64) -> bool {

@@ -216,6 +216,16 @@ impl ActionLog {
             .collect()
     }
 
+    /// How many times `description` has been UNDONE in the trail — the support
+    /// the sia loop weighs a "raise the floor for this pattern" proposal against
+    /// (P3 Slice 3a). Pure.
+    pub fn undone_count(&self, description: &str) -> usize {
+        self.records
+            .iter()
+            .filter(|r| r.undone && r.description == description)
+            .count()
+    }
+
     pub fn len(&self) -> usize {
         self.records.len()
     }

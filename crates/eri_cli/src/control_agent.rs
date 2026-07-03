@@ -436,6 +436,13 @@ pub struct ControlGate {
     /// Empty (`Default`) when signed-out — the predict step then uses the engine's
     /// own confidence, no IO.
     view: crate::predict::WorldView,
+    /// The user's per-pattern confidence floors (P3 sia). `floor_for(describe())`
+    /// is the auto-execute floor the envelope gates on; an **empty policy returns
+    /// [`DEFAULT_CONFIDENCE_FLOOR`](crate::control_envelope::DEFAULT_CONFIDENCE_FLOOR)
+    /// for every pattern** — byte-for-byte today's behavior. sia can only RAISE a
+    /// floor (never lower it below the default), so it only ever makes eri ask
+    /// MORE — "sia tightens, never loosens".
+    floors: crate::sia::ConfidencePolicy,
     /// The credential vault — present only when configured. `None` (the default)
     /// means a `FillCredential` action falls through to the existing hand-back,
     /// so nothing regresses when no vault is wired. Shared (`Arc`) so the gate
@@ -456,6 +463,7 @@ impl ControlGate {
             permissions,
             force_confirm_risky: false,
             view: Default::default(),
+            floors: Default::default(),
             vault: None,
         }
     }
@@ -475,6 +483,14 @@ impl ControlGate {
     /// The world the predict step reads — the opened handle + cross-turn cursor.
     pub fn world_view(&self) -> &crate::predict::WorldView {
         &self.view
+    }
+
+    /// Attach the user's per-pattern confidence floors (P3 sia), loaded once per
+    /// run. An empty policy (the default) is byte-for-byte today's behavior.
+    /// Chainable.
+    pub fn with_floors(mut self, floors: crate::sia::ConfidencePolicy) -> Self {
+        self.floors = floors;
+        self
     }
 
     /// Attach the credential vault. Without it (the default), a `FillCredential`
@@ -502,6 +518,7 @@ impl ControlGate {
             permissions,
             force_confirm_risky: true,
             view: Default::default(),
+            floors: Default::default(),
             vault: None,
         }
     }
@@ -627,10 +644,15 @@ impl ControlGate {
             confidence,
             known: self.is_known_pattern(action),
         };
+        // The auto-execute floor is the user's per-pattern floor (P3 sia), which
+        // defaults to DEFAULT_CONFIDENCE_FLOOR for any pattern sia hasn't raised —
+        // so an empty policy is today's behavior, and a raised one only makes this
+        // pattern ask MORE. The lookup key is `action.describe()`, the SAME key the
+        // undo→RaiseFloor signal uses, so the learning isn't inert.
         match crate::control_envelope::gate(
             sensitive_text.unwrap_or(""),
             &prediction,
-            crate::control_envelope::DEFAULT_CONFIDENCE_FLOOR,
+            self.floors.floor_for(&action.describe()),
         ) {
             crate::control_envelope::Decision::AutoExecute => {
                 Ok(Disposition::Executed(apply(bridge, action).await?))
@@ -2753,7 +2775,13 @@ pub async fn run_control_agent(
     // reads through one handle instead of reopening the SQLite per action (fork
     // b). The caller's gate carries permissions/flags; we attach the world.
     let world = eri_inference::memory::world_recall::WorldModel::open(user_id.as_deref());
-    let gate = gate.clone().with_world(world);
+    // Load the user's per-pattern confidence floors (P3 sia) onto the loop gate.
+    // Empty (no file) = today's behavior; a sia-raised floor makes that pattern
+    // ask more. Same user-scoped path the undo→RaiseFloor signal writes.
+    let floors = crate::sia::confidence_path(user_id.as_deref())
+        .map(|p| crate::sia::ConfidencePolicy::load(&p))
+        .unwrap_or_default();
+    let gate = gate.clone().with_world(world).with_floors(floors);
     drive_control_loop(
         &refs, bridge, &gate, confirm, &sink, &system, &tools, goal, max_turns, autonomous, mcp_dyn,
     )
@@ -4761,6 +4789,56 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![OutcomeKind::Declined]
         );
+    }
+
+    #[tokio::test]
+    async fn undo_raises_the_floor_so_the_next_identical_action_asks() {
+        // P3 Slice 3a end-to-end (IO-free part): an action's pattern, undone enough
+        // to earn it (support 2), is proposed for a RaiseFloor, clears sia::accept,
+        // and is applied through the sia surface. The gate — keyed by the SAME
+        // `action.describe()` the undo signal uses — then ASKS for what it would
+        // have auto-executed. Proves the loop AND the key match (mismatch = inert
+        // learning, so this failing would catch it).
+        use crate::sia;
+        let action = ControlAction::OpenApp("Safari".into()); // reversible + known
+        let pattern = action.describe();
+
+        let proposal = sia::Proposal::RaiseFloor {
+            pattern: pattern.clone(),
+        };
+        let sia::Verdict::Accept(prov) = sia::accept(&proposal, 2) else {
+            panic!("two undos earn a RaiseFloor");
+        };
+        // Apply through the real sia surface (accept → apply → raise_floor).
+        struct InMemory<'a>(&'a mut sia::ConfidencePolicy);
+        impl sia::RefinablePolicy for InMemory<'_> {
+            fn raise_floor(&mut self, p: &str, prov: &sia::Provenance) {
+                self.0.raise(p, prov.support);
+            }
+            fn downweight_chain(&mut self, _: &str, _: &str, _: &sia::Provenance) {}
+            fn caution(&mut self, _: &str, _: &sia::Provenance) {}
+        }
+        let mut floors = sia::ConfidencePolicy::default();
+        sia::apply(&mut InMemory(&mut floors), &proposal, &prov);
+
+        let bridge = DryRunBridge;
+        // Confidence 0.82: above the default floor (0.8), below the raised one (0.85).
+        // Pre-learning it auto-executes; post-learning it asks — sia tightened.
+        assert!(matches!(
+            ControlGate::default()
+                .submit_confident(&bridge, &action, 0.82)
+                .await
+                .unwrap(),
+            Disposition::Executed(_)
+        ));
+        assert!(matches!(
+            ControlGate::default()
+                .with_floors(floors)
+                .submit_confident(&bridge, &action, 0.82)
+                .await
+                .unwrap(),
+            Disposition::NeedsConfirmation(_)
+        ));
     }
 
     #[tokio::test]

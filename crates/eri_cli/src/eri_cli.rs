@@ -35,12 +35,18 @@ mod build_turn;
 mod chat;
 mod checkpoint;
 mod client;
+mod code_dispatch;
+mod code_job;
+mod code_pr;
+mod code_sandbox;
+mod code_turn;
 mod coding_agent;
 mod coding_control;
 mod commands;
 mod composio;
 mod composio_session;
 mod config;
+mod connections;
 mod control_agent;
 mod control_envelope;
 #[cfg(test)]
@@ -53,6 +59,7 @@ mod eri_config;
 mod gaze_focus;
 mod genui;
 mod git_tools;
+mod inference;
 mod intent;
 mod line_editor;
 mod local_eval;
@@ -74,6 +81,7 @@ mod research;
 mod sandbox;
 mod sdk_tools;
 mod search;
+mod sensitivity;
 mod session;
 mod sia;
 mod skills;
@@ -483,6 +491,48 @@ pub enum Command {
     /// exposing the secret to the model. Values are never printed.
     #[command(subcommand)]
     Vault(VaultCommand),
+
+    /// Run one coding job end-to-end (Phase 3): the eri-code harness edits until
+    /// the tests are green, commits, then opens (or, with --update-pr, updates) a
+    /// PR — streaming CodeProgress as JSONL to stdout. The cloud worker runs THIS
+    /// command inside the sandbox; it reads the GitHub token from `GITHUB_TOKEN`.
+    #[command(name = "code-job")]
+    CodeJob {
+        /// The coding task — what to fix or add.
+        #[arg(long)]
+        task: String,
+        /// Path to the (already-cloned) working tree.
+        #[arg(long, default_value = ".")]
+        repo: PathBuf,
+        /// `owner/name` slug for the PR API. Default: derived from origin.
+        #[arg(long)]
+        slug: Option<String>,
+        /// Base branch for the PR. Default: the repo's default branch.
+        #[arg(long)]
+        base: Option<String>,
+        /// Test command. Default: detected (cargo / npm / pytest / go).
+        #[arg(long = "test-cmd")]
+        test_cmd: Option<String>,
+        /// Per-job token ceiling.
+        #[arg(long = "budget-tokens", default_value_t = 400_000)]
+        budget_tokens: u64,
+        /// Per-job wall-clock ceiling, seconds.
+        #[arg(long = "budget-seconds", default_value_t = 900)]
+        budget_seconds: u64,
+        /// Follow-up (B4): push another commit to this EXISTING PR number
+        /// instead of opening a new one.
+        #[arg(long = "update-pr")]
+        update_pr: Option<u64>,
+        /// The existing PR's URL (used with --update-pr for the reply link).
+        #[arg(long = "update-pr-url")]
+        update_pr_url: Option<String>,
+        /// Job branch for a fresh PR (default: derived from the task).
+        #[arg(long)]
+        branch: Option<String>,
+        /// Inference depth: fast | thinking | auto.
+        #[arg(long, value_enum)]
+        mode: Option<Mode>,
+    },
     /// MCP server setup and local connector status.
     #[command(subcommand)]
     Mcp(McpCommand),
@@ -586,6 +636,28 @@ pub enum MemoryCommand {
         #[arg(long, default_value_t = 50)]
         limit: usize,
     },
+    /// Backfill the world model from your episodic memory: extract the
+    /// people/projects/relations in everything you've remembered into the world
+    /// graph (additive — your memories are untouched; idempotent — safe to re-run).
+    Ingest,
+    /// Auto-index the last N months of your connected accounts (Gmail/Calendar) into
+    /// the world model — privacy-screened (sensitive dropped before storage), capped,
+    /// one reflect pass. Phase A: runs on-device (indexes while the computer is on).
+    Backfill {
+        #[arg(long, default_value_t = 6)]
+        months: u32,
+        #[arg(long, default_value_t = 0)]
+        max: usize,
+        /// Walk the WHOLE window (the deep-history backfill) instead of the
+        /// cost-bounded recent-N default — bounded only by the months floor.
+        #[arg(long)]
+        full: bool,
+    },
+    /// Hard-erase every stored observation that trips the Q23 privacy screen —
+    /// remediation for data indexed before the precision pass existed. Orphaned
+    /// entities (e.g. a bank whose only evidence was a financial email) drop from the
+    /// server-readable projection on the next sync.
+    Purge,
     /// Drop an observation by id, or "all" to clear everything.
     Forget { target: String },
 }
@@ -1008,10 +1080,44 @@ async fn dispatch(cli: Cli) -> anyhow::Result<()> {
         }
         Command::Memory(MemoryCommand::Who { project }) => memory::who(&project),
         Command::Memory(MemoryCommand::Reflect { limit }) => memory::reflect(limit).await,
+        Command::Memory(MemoryCommand::Ingest) => memory::ingest(),
+        Command::Memory(MemoryCommand::Purge) => memory::purge(),
+        Command::Memory(MemoryCommand::Backfill { months, max, full }) => {
+            connections::run(months, max, full).await
+        }
         Command::Memory(MemoryCommand::Forget { target }) => {
             let result = memory::forget(&target);
             sync::spawn_best_effort();
             result
+        }
+        Command::CodeJob {
+            task,
+            repo,
+            slug,
+            base,
+            test_cmd,
+            budget_tokens,
+            budget_seconds,
+            update_pr,
+            update_pr_url,
+            branch,
+            mode,
+        } => {
+            let model = model_for_mode(resolve_mode(mode, &repo)).to_string();
+            code_job::run_code_job(code_job::CodeJobArgs {
+                task,
+                repo_path: repo,
+                slug,
+                base,
+                test_cmd,
+                budget_tokens,
+                budget_seconds,
+                update_pr,
+                update_pr_url,
+                branch,
+                model,
+            })
+            .await
         }
         Command::Vault(VaultCommand::Add { origin, username }) => {
             credential_vault::cli_add(&origin, &username)
@@ -1673,6 +1779,52 @@ async fn run_control_undo(live: bool, log_path: Option<&std::path::Path>) -> any
                                 let _ = perms.save(&perm_path);
                                 println!(
                                     "[eri] noted — I'll check with you before \"{desc}\" next time."
+                                );
+                            }
+                        }
+                        // P3 Slice 3a: undo is the strongest negative signal. Fold
+                        // it into the one outcome stream, then propose RAISING the
+                        // confidence floor for this pattern — gated by sia::accept
+                        // (earns its keep + the canonical refusal re-check), applied
+                        // user-scoped + reversible. sia can only tighten: the floor
+                        // rises (asks more), never loosens.
+                        {
+                            use crate::control_turn::ControlTurnSink as _;
+                            let user_id = config::load().ok().and_then(|c| c.user_id);
+                            let sink = control_turn::MemorySink::new(user_id.clone());
+                            sink.record_outcome(&control_turn::Outcome {
+                                action: desc.clone(),
+                                disposition: control_turn::OutcomeKind::Undone,
+                            });
+                            let proposal = sia::Proposal::RaiseFloor {
+                                pattern: desc.clone(),
+                            };
+                            if let sia::Verdict::Accept(prov) =
+                                sia::accept(&proposal, log.undone_count(&desc))
+                            {
+                                let mut policy = sia::LiveRefinablePolicy::new(user_id.clone());
+                                sia::apply(&mut policy, &proposal, &prov);
+                                println!(
+                                    "[eri] learning: I'll be more careful before \"{desc}\" (floor raised)."
+                                );
+                            }
+                            // Close the loop (Slice 3b): re-measure the active
+                            // floors against the trail — keep the ones that reduced
+                            // repeat undos, revert (bi-temporal supersede) the ones
+                            // that didn't. A floor ALSO covered by a caution is
+                            // confounded and left untouched, so calibration never
+                            // credits the floor for the caution's work.
+                            let perms = control_safety::PermissionStore::default_path()
+                                .map(|p| control_safety::PermissionStore::load(&p))
+                                .unwrap_or_default();
+                            let reverted = sia::calibrate_floors(
+                                user_id.as_deref(),
+                                |p| log.undone_count(p),
+                                |p| perms.is_cautioned(p),
+                            );
+                            if reverted > 0 {
+                                println!(
+                                    "[eri] re-checked my learning — reverted {reverted} floor(s) that weren't helping."
                                 );
                             }
                         }
