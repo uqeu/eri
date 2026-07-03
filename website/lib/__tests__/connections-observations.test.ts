@@ -1,0 +1,171 @@
+import { strict as assert } from "node:assert";
+import {
+  calendarToObservation,
+  emailToObservation,
+  fetchObservations,
+  looksLikeSecret,
+  type Observation,
+} from "../connections/observations";
+import type { ConnectorDeps, ToolResult } from "../agent/connectors";
+
+// --- email mapper ---
+{
+  const o = emailToObservation({
+    messageId: "m1",
+    sender: "Priya Nair <priya@x.com>",
+    subject: "atlas sync",
+    messageText: "can we move standup?",
+    messageTimestamp: "2026-06-25T10:00:00Z",
+  });
+  assert.ok(o);
+  assert.equal(o!.sourceId, "gmail:m1");
+  assert.equal(o!.kind, "email");
+  assert.equal(o!.text, "Email from Priya Nair <priya@x.com>: atlas sync — can we move standup?");
+  assert.equal(o!.ts, Date.parse("2026-06-25T10:00:00Z"));
+  // missing subject → null; non-record → null
+  assert.equal(emailToObservation({ messageId: "m2", sender: "x" }), null);
+  assert.equal(emailToObservation("nope"), null);
+}
+
+// --- calendar mapper (nested gcal start + attendees) ---
+{
+  const o = calendarToObservation({
+    id: "e1",
+    summary: "Standup",
+    start: { dateTime: "2026-06-25T13:00:00Z" },
+    attendees: [{ displayName: "Sam" }, { email: "priya@x.com" }],
+  });
+  assert.ok(o);
+  assert.equal(o!.sourceId, "gcal:e1");
+  assert.equal(o!.kind, "calendar");
+  assert.ok(o!.text.startsWith("Standup with Sam, priya@x.com at "));
+  assert.equal(o!.ts, Date.parse("2026-06-25T13:00:00Z"));
+  assert.equal(calendarToObservation({ id: "e2" }), null); // no title/start
+}
+
+// --- defense-in-depth secret screen ---
+{
+  assert.equal(looksLikeSecret("Email from Bank: your verification code is 123456"), true);
+  assert.equal(looksLikeSecret("Email from Priya: lunch tomorrow?"), false);
+}
+
+function depsWith(
+  toolkits: string[],
+  exec: (slug: string) => ToolResult,
+): ConnectorDeps {
+  return {
+    activeToolkits: async () => new Set(toolkits),
+    executeTool: async (_userId: string, slug: string) => exec(slug),
+  };
+}
+
+async function run() {
+  const exec = (slug: string): ToolResult =>
+    slug.includes("GMAIL")
+      ? {
+          successful: true,
+          error: null,
+          data: {
+            messages: [
+              { messageId: "m1", sender: "Priya <p@x.com>", subject: "atlas", messageText: "hi", messageTimestamp: "2026-06-25T10:00:00Z" },
+              { messageId: "secret", sender: "Bank <b@x.com>", subject: "code", messageText: "your verification code is 999111", messageTimestamp: "2026-06-25T11:00:00Z" },
+            ],
+          },
+        }
+      : {
+          successful: true,
+          error: null,
+          data: { events: [{ id: "e1", summary: "Standup", start: { dateTime: "2026-06-25T09:00:00Z" }, attendees: [{ displayName: "Sam" }] }] },
+        };
+
+  // Merges email + calendar, drops the secret, sorts ascending by ts.
+  const r = await fetchObservations("usr_x", depsWith(["gmail", "googlecalendar"], exec), {
+    since: Date.parse("2026-06-01T00:00:00Z"),
+    limit: 50,
+  });
+  assert.equal(r.observations.length, 2, "secret dropped → 2 survive");
+  assert.equal(r.observations[0].sourceId, "gcal:e1", "09:00 sorts first");
+  assert.equal(r.observations[1].sourceId, "gmail:m1", "10:00 next");
+  assert.ok(!r.observations.some((o: Observation) => o.sourceId === "gmail:secret"), "secret dropped");
+  assert.equal(r.nextCursor, null, "under limit → exhausted");
+
+  // limit hit → nextCursor is the last returned ts.
+  const limited = await fetchObservations("usr_x", depsWith(["gmail", "googlecalendar"], exec), { since: 0, limit: 1 });
+  assert.equal(limited.observations.length, 1);
+  assert.equal(limited.nextCursor, limited.observations[0].ts);
+
+  // Unconnected → empty, never an error.
+  const none = await fetchObservations(
+    "usr_x",
+    depsWith([], () => ({ successful: true, error: null, data: {} })),
+    { since: 0, limit: 50 },
+  );
+  assert.deepEqual(none.observations, []);
+  assert.equal(none.nextCursor, null);
+
+  // REGRESSION: since=0 must NOT build `after:0` (Gmail returns 0 rows for it) —
+  // it's an empty query; and calendar timeMin must be recent, not 1970.
+  {
+    let gmailQuery: unknown = "UNSET";
+    let calTimeMin = "UNSET";
+    const capturing: ConnectorDeps = {
+      activeToolkits: async () => new Set(["gmail", "googlecalendar"]),
+      executeTool: async (_userId: string, slug: string, args: Record<string, unknown>) => {
+        if (slug.includes("GMAIL")) gmailQuery = args.query;
+        else calTimeMin = String(args.timeMin);
+        return { successful: true, error: null, data: {} };
+      },
+    };
+    await fetchObservations("usr_x", capturing, { since: 0, limit: 10 });
+    assert.equal(gmailQuery, "", "since=0 → empty gmail query, never after:0");
+    assert.ok(!calTimeMin.startsWith("1970"), "since=0 → calendar timeMin is recent, not 1970");
+  }
+
+  // REGRESSION: limit>=50 must NOT return empty (Composio caps a single call at
+  // ~40 and THROWS above) — page internally via page_token, capping each call.
+  {
+    const maxResultsSeen: number[] = [];
+    let served = 0;
+    const total = 95;
+    const pagingDeps: ConnectorDeps = {
+      activeToolkits: async () => new Set(["gmail"]),
+      executeTool: async (_userId: string, slug: string, args: Record<string, unknown>) => {
+        if (!slug.includes("GMAIL")) return { successful: true, error: null, data: {} };
+        maxResultsSeen.push(Number(args.max_results));
+        const want = Number(args.max_results) || 40;
+        const messages: Record<string, unknown>[] = [];
+        for (let i = 0; i < want && served < total; i += 1, served += 1) {
+          const ts = 2_000_000_000_000 - served * 1000; // unique, descending
+          messages.push({ messageId: `m${served}`, sender: `s${served}@x.com`, subject: `subj ${served}`, messageTimestamp: new Date(ts).toISOString() });
+        }
+        const more = served < total;
+        return { successful: true, error: null, data: { messages, ...(more ? { nextPageToken: `t${served}` } : {}) } };
+      },
+    };
+    const big = await fetchObservations("usr_x", pagingDeps, { since: 0, limit: 60 });
+    assert.equal(big.observations.length, 60, "limit=60 accumulates across pages, never empty");
+    assert.ok(maxResultsSeen.every((n) => n <= 40), "no single Composio call exceeds the safe cap");
+    assert.ok(maxResultsSeen.length >= 2, "actually paged (>1 call)");
+    assert.equal(big.nextCursor, big.observations[0].ts, "full page → nextCursor is the OLDEST ts (walk older)");
+  }
+
+  // BACKWARD paging: `before` becomes a Gmail `before:` clause alongside `after:`.
+  {
+    let q = "";
+    const capBefore: ConnectorDeps = {
+      activeToolkits: async () => new Set(["gmail"]),
+      executeTool: async (_userId: string, slug: string, args: Record<string, unknown>) => {
+        if (slug.includes("GMAIL")) q = String(args.query);
+        return { successful: true, error: null, data: {} };
+      },
+    };
+    await fetchObservations("usr_x", capBefore, { since: 1_000_000, before: 5_000_000, limit: 10 });
+    assert.ok(q.includes("after:1000"), "since → after:");
+    assert.ok(q.includes("before:5000"), "before → before: (backward paging)");
+  }
+
+  // eslint-disable-next-line no-console
+  console.log("connections-observations.test.ts: all assertions passed");
+}
+
+run();

@@ -44,11 +44,20 @@ export interface RecallPrediction {
   next: string;
   count: number;
 }
+/** Learned texting cadence — how the user paces their messages (bubbles/turn). */
+export interface RecallCadence {
+  /** Human phrase for the prompt ("short quick bursts, often 2-3 messages"). */
+  descriptor: string;
+  /** Typical bubbles per turn (1 = terse, 3 = bursty). Clamped 1..4. */
+  bubblesPerTurn: number;
+}
 export interface RecallProfile {
   facts: string[];
   preferences: string[];
   communicationStyle: string;
   dynamicContext: string;
+  /** Learned texting cadence — optional (absent on older projections / fresh users). */
+  cadence?: RecallCadence;
 }
 export interface RecallProjection {
   version: number;
@@ -78,6 +87,13 @@ function strList(v: unknown, cap: number): string[] {
     .filter((s) => s.trim())
     .slice(0, cap);
 }
+function coerceCadence(v: unknown): RecallCadence | undefined {
+  const o = rec(v);
+  const descriptor = str(o.descriptor).trim();
+  const bubblesPerTurn = num(o.bubblesPerTurn);
+  if (!descriptor && bubblesPerTurn <= 0) return undefined;
+  return { descriptor, bubblesPerTurn: Math.max(1, Math.min(Math.round(bubblesPerTurn) || 1, 4)) };
+}
 
 /**
  * Defensively shape any raw value into a well-formed, bounded RecallProjection.
@@ -88,6 +104,7 @@ function strList(v: unknown, cap: number): string[] {
 export function coerceRecallProjection(raw: unknown): RecallProjection {
   const r = rec(raw);
   const p = rec(r.profile);
+  const cadence = coerceCadence(p.cadence);
 
   const entities: RecallEntity[] = arr(r.entities)
     .map((e) => {
@@ -139,6 +156,7 @@ export function coerceRecallProjection(raw: unknown): RecallProjection {
       preferences: strList(p.preferences, MAX_PROFILE_LIST),
       communicationStyle: str(p.communicationStyle).trim(),
       dynamicContext: str(p.dynamicContext).trim(),
+      ...(cadence ? { cadence } : {}),
     },
   };
 }

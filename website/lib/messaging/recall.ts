@@ -65,6 +65,8 @@ export interface WorldModelContext {
   dynamic: string[];
   /** The brain's communication style, when present (empty until the sync slice). */
   style: string | null;
+  /** Learned texting cadence (descriptor + bubble cap), or null — drives multi-bubble. */
+  cadence: { descriptor: string; maxBubbles: number } | null;
   /** The brain profile's own facts/preferences/dynamicContext (empty until sync). */
   profileFacts: string[];
   preferences: string[];
@@ -73,7 +75,7 @@ export interface WorldModelContext {
 
 export function formatWorldModel(p: RecallProjection | null): WorldModelContext {
   if (!p) {
-    return { facts: [], dynamic: [], style: null, profileFacts: [], preferences: [], profileDynamicContext: "" };
+    return { facts: [], dynamic: [], style: null, cadence: null, profileFacts: [], preferences: [], profileDynamicContext: "" };
   }
 
   // Relations are the most informative ("who works with whom on what"); lead with
@@ -107,6 +109,12 @@ export function formatWorldModel(p: RecallProjection | null): WorldModelContext 
     facts,
     dynamic,
     style: p.profile.communicationStyle || null,
+    cadence: p.profile.cadence
+      ? {
+          descriptor: p.profile.cadence.descriptor,
+          maxBubbles: Math.max(1, Math.min(p.profile.cadence.bubblesPerTurn, 4)),
+        }
+      : null,
     profileFacts: p.profile.facts,
     preferences: p.profile.preferences,
     profileDynamicContext: p.profile.dynamicContext,
