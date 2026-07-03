@@ -65,19 +65,32 @@ pub(crate) async fn get_weather(location: &str) -> Result<String> {
     let cur = fc
         .get("current")
         .ok_or_else(|| anyhow!("forecast missing current conditions"))?;
-    let temp = cur.get("temperature_2m").and_then(Value::as_f64).unwrap_or(0.0);
+    let temp = cur
+        .get("temperature_2m")
+        .and_then(Value::as_f64)
+        .unwrap_or(0.0);
     let feels = cur
         .get("apparent_temperature")
         .and_then(Value::as_f64)
         .unwrap_or(temp);
-    let wind = cur.get("wind_speed_10m").and_then(Value::as_f64).unwrap_or(0.0);
-    let code = cur.get("weather_code").and_then(Value::as_i64).unwrap_or(-1);
+    let wind = cur
+        .get("wind_speed_10m")
+        .and_then(Value::as_f64)
+        .unwrap_or(0.0);
+    let code = cur
+        .get("weather_code")
+        .and_then(Value::as_i64)
+        .unwrap_or(-1);
     let units = fc
         .pointer("/current_units/temperature_2m")
         .and_then(Value::as_str)
         .unwrap_or("°C");
-    let hi = fc.pointer("/daily/temperature_2m_max/0").and_then(Value::as_f64);
-    let lo = fc.pointer("/daily/temperature_2m_min/0").and_then(Value::as_f64);
+    let hi = fc
+        .pointer("/daily/temperature_2m_max/0")
+        .and_then(Value::as_f64);
+    let lo = fc
+        .pointer("/daily/temperature_2m_min/0")
+        .and_then(Value::as_f64);
 
     let place_str = [name, admin, country]
         .iter()

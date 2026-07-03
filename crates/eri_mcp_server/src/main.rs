@@ -64,11 +64,7 @@ async fn main() -> anyhow::Result<()> {
     let mut reader = BufReader::new(stdin).lines();
     let mut stdout = tokio::io::stdout();
 
-    while let Some(line) = reader
-        .next_line()
-        .await
-        .context("read stdin")?
-    {
+    while let Some(line) = reader.next_line().await.context("read stdin")? {
         let trimmed = line.trim();
         if trimmed.is_empty() {
             continue;
@@ -105,17 +101,11 @@ fn tracing_subscriber_init() {
 async fn handle_request(req: JsonRpcRequest) -> Option<JsonRpcResponse> {
     let id = req.id.clone();
     match req.method.as_str() {
-        "initialize" => Some(success(
-            id.unwrap_or(Value::Null),
-            initialize_result(),
-        )),
+        "initialize" => Some(success(id.unwrap_or(Value::Null), initialize_result())),
         // The client signals it's done initialising via this notification;
         // we don't reply to notifications (id is None).
         "notifications/initialized" => None,
-        "ping" => Some(success(
-            id.unwrap_or(Value::Null),
-            serde_json::json!({}),
-        )),
+        "ping" => Some(success(id.unwrap_or(Value::Null), serde_json::json!({}))),
         "tools/list" => Some(success(
             id.unwrap_or(Value::Null),
             serde_json::json!({ "tools": tools::manifest() }),
@@ -164,11 +154,7 @@ async fn handle_tool_call(id: Value, params: Value) -> JsonRpcResponse {
     let p: ToolCallParams = match serde_json::from_value(params) {
         Ok(v) => v,
         Err(err) => {
-            return error_response(
-                id,
-                INVALID_PARAMS,
-                format!("tools/call params: {err}"),
-            );
+            return error_response(id, INVALID_PARAMS, format!("tools/call params: {err}"));
         }
     };
     match tools::dispatch(&p.name, p.arguments).await {

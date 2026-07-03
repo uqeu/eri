@@ -284,7 +284,9 @@ mod tests {
     fn parse_covers_every_coding_tool() {
         assert_eq!(
             parse_coding_action("editor_open_file", &json!({ "path": "a.rs" })).unwrap(),
-            CodingAction::OpenFile { path: "a.rs".into() }
+            CodingAction::OpenFile {
+                path: "a.rs".into()
+            }
         );
         assert_eq!(
             parse_coding_action("editor_command", &json!({ "command": "Run Tests" })).unwrap(),
@@ -326,14 +328,19 @@ mod tests {
     fn parse_trims_surrounding_whitespace() {
         assert_eq!(
             parse_coding_action("editor_open_file", &json!({ "path": "  a.rs  " })).unwrap(),
-            CodingAction::OpenFile { path: "a.rs".into() }
+            CodingAction::OpenFile {
+                path: "a.rs".into()
+            }
         );
     }
 
     #[test]
     fn describe_is_plain_and_quotes_user_content() {
         assert_eq!(
-            CodingAction::OpenFile { path: "a.rs".into() }.describe(),
+            CodingAction::OpenFile {
+                path: "a.rs".into()
+            }
+            .describe(),
             "open a.rs in the editor"
         );
         assert!(
@@ -350,10 +357,7 @@ mod tests {
             .describe()
             .contains("fix it")
         );
-        assert_eq!(
-            CodingAction::Save.describe(),
-            "save the file"
-        );
+        assert_eq!(CodingAction::Save.describe(), "save the file");
     }
 
     #[test]
@@ -379,12 +383,18 @@ mod tests {
         assert_eq!(specs.len(), 6);
         for spec in &specs {
             let name = spec["name"].as_str().expect("spec has a name");
-            assert!(is_coding_tool(name), "spec name {name} must be a coding tool");
+            assert!(
+                is_coding_tool(name),
+                "spec name {name} must be a coding tool"
+            );
             assert!(
                 spec["description"].as_str().is_some_and(|d| d.len() > 20),
                 "{name} needs a real description"
             );
-            assert!(spec["input_schema"].is_object(), "{name} needs an input schema");
+            assert!(
+                spec["input_schema"].is_object(),
+                "{name} needs an input schema"
+            );
         }
     }
 }

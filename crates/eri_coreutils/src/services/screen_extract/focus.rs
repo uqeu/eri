@@ -104,11 +104,14 @@ fn cmp_dist(a: f64, b: f64) -> std::cmp::Ordering {
 pub fn focused_element(gaze: GazePoint, elements: &[ScreenElement]) -> Option<&ScreenElement> {
     // Prefer a containing element; among containers, the nearest centre wins,
     // ties broken by the smaller (tighter) box.
-    let containing = elements.iter().filter(|el| contains(gaze, el)).min_by(|a, b| {
-        container_rank(gaze, a)
-            .partial_cmp(&container_rank(gaze, b))
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
+    let containing = elements
+        .iter()
+        .filter(|el| contains(gaze, el))
+        .min_by(|a, b| {
+            container_rank(gaze, a)
+                .partial_cmp(&container_rank(gaze, b))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
     if containing.is_some() {
         return containing;
     }
@@ -252,7 +255,10 @@ mod tests {
 
     #[test]
     fn focus_context_excludes_focused_from_neighbors() {
-        let elements = vec![el("a", 0.10, 0.10, 0.10, 0.10), el("b", 0.20, 0.20, 0.10, 0.10)];
+        let elements = vec![
+            el("a", 0.10, 0.10, 0.10, 0.10),
+            el("b", 0.20, 0.20, 0.10, 0.10),
+        ];
         let ctx = focus_context(gaze(0.15, 0.15), &elements, 5);
         assert_eq!(ctx.focused.map(|e| e.id.as_str()), Some("a"));
         // Only "b" remains; "a" (focused) is not duplicated into neighbors.
@@ -298,7 +304,10 @@ mod tests {
         // Two elements exactly equidistant from the gaze point: a tie must be
         // resolved deterministically (stable sort keeps input order) and never
         // panic.
-        let elements = vec![el("left", 0.30, 0.40, 0.10, 0.10), el("right", 0.60, 0.40, 0.10, 0.10)];
+        let elements = vec![
+            el("left", 0.30, 0.40, 0.10, 0.10),
+            el("right", 0.60, 0.40, 0.10, 0.10),
+        ];
         // Gaze centred between the two centres (0.35,0.45) and (0.65,0.45).
         let ctx = focus_context(gaze(0.50, 0.45), &elements, 5);
         let ids: Vec<&str> = ctx.neighbors.iter().map(|e| e.id.as_str()).collect();
