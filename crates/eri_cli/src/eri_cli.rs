@@ -645,6 +645,10 @@ pub enum MemoryCommand {
         months: u32,
         #[arg(long, default_value_t = 0)]
         max: usize,
+        /// Walk the WHOLE window (the deep-history backfill) instead of the
+        /// cost-bounded recent-N default — bounded only by the months floor.
+        #[arg(long)]
+        full: bool,
     },
     /// Hard-erase every stored observation that trips the Q23 privacy screen —
     /// remediation for data indexed before the precision pass existed. Orphaned
@@ -1075,8 +1079,8 @@ async fn dispatch(cli: Cli) -> anyhow::Result<()> {
         Command::Memory(MemoryCommand::Reflect { limit }) => memory::reflect(limit).await,
         Command::Memory(MemoryCommand::Ingest) => memory::ingest(),
         Command::Memory(MemoryCommand::Purge) => memory::purge(),
-        Command::Memory(MemoryCommand::Backfill { months, max }) => {
-            connections::run(months, max).await
+        Command::Memory(MemoryCommand::Backfill { months, max, full }) => {
+            connections::run(months, max, full).await
         }
         Command::Memory(MemoryCommand::Forget { target }) => {
             let result = memory::forget(&target);

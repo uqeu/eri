@@ -66,6 +66,27 @@ pub fn ingest_store(user_id: Option<&str>) -> io::Result<IngestReport> {
         .map_err(|e| io::Error::other(format!("ingest store: {e}")))
 }
 
+/// Total distinct entities across ALL kinds in a world graph (people, projects,
+/// apps, topics, places, life-events). The "real" entity count, independent of
+/// any single ingest or reflect pass (a deep backfill reports this, not just what
+/// one pass wrote). Pure over the graph; fixture-testable.
+pub fn entity_total_in(graph: &Graph) -> Result<usize, GraphError> {
+    let mut total = 0;
+    for kind in world::ENTITY_KINDS {
+        total += world::entities_of_kind(graph, kind)?.len();
+    }
+    Ok(total)
+}
+
+/// Total distinct entities in the user's world model — the count a backfill
+/// reports. Best-effort: `0` when the graph can't be opened or read.
+pub fn entity_total(user_id: Option<&str>) -> usize {
+    open_world_graph(user_id)
+        .ok()
+        .and_then(|g| entity_total_in(&g).ok())
+        .unwrap_or(0)
+}
+
 /// The Tier-A "Key People / Active Projects" block for the user's world model,
 /// or `""` when it is empty or unavailable. Blends with
 /// [`format_learned_block`](super::format_learned_block); best-effort, so a
@@ -254,6 +275,36 @@ mod tests {
             body: body.into(),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn entity_total_counts_distinct_entities_across_kinds() {
+        let g = Graph::open_in_memory().unwrap();
+        assert_eq!(
+            entity_total_in(&g).unwrap(),
+            0,
+            "an empty graph has no entities"
+        );
+        ingest_observation(
+            &g,
+            &CueExtractor,
+            &fact("I work with Alice on the eri project"),
+        )
+        .unwrap();
+        // A person (Alice) + a project (eri) — distinct kinds both counted.
+        assert_eq!(
+            entity_total_in(&g).unwrap(),
+            2,
+            "counts the person AND the project"
+        );
+        // Idempotent: re-ingesting the same fact doesn't double-count.
+        ingest_observation(
+            &g,
+            &CueExtractor,
+            &fact("I work with Alice on the eri project"),
+        )
+        .unwrap();
+        assert_eq!(entity_total_in(&g).unwrap(), 2, "distinct, not duplicated");
     }
 
     #[test]

@@ -71,14 +71,28 @@ pub struct BackfillOptions {
 pub struct BackfillReport {
     pub fetched: usize,
     pub ingested: usize,
+    /// Already-modelled observations skipped (idempotent by `source_id`) — not
+    /// new, not dropped; already in the world model from a prior run.
+    pub skipped: usize,
     /// Dropped by the Claude precision screen (the "exclude if unsure" gate).
     pub screened_out: usize,
     /// Dropped by the deterministic keyword floor inside ingest (defense in depth).
     pub dropped_sensitive: usize,
+    /// Total distinct entities in the world model AFTER this backfill — the real
+    /// count (people/projects/apps/… across the whole window), not just what the
+    /// single reflect pass wrote.
     pub entities: usize,
+    /// Pages fetched from the source (each a backward step through history).
+    pub pages: usize,
     /// The newest observation `ts` seen — the cursor the continuous trigger advances
     /// to, so the next on-sync pull only fetches what's newer.
     pub newest_ts: u64,
+    /// The oldest observation `ts` reached — with `since`, the actual window walked.
+    pub oldest_ts: u64,
+    /// True when paging stopped because history under the `since` floor was
+    /// exhausted (the WHOLE window was walked); false when it stopped at the
+    /// `max_observations` cap (more history remains under the floor).
+    pub reached_floor: bool,
 }
 
 /// Page size for the next fetch given the cap, or `None` to stop. Pure — the
@@ -104,18 +118,23 @@ pub async fn run_backfill(
     // `before` from newest toward oldest via each page's `next_cursor`.
     let mut before: Option<u64> = None;
     let mut report = BackfillReport::default();
+    let mut oldest_ts = u64::MAX;
     while let Some(want) = next_page(report.fetched, &opts) {
         let page = source
             .fetch(opts.since, before, want)
             .await
             .context("fetch connections")?;
         if page.observations.is_empty() {
+            // No more history under the floor — the WHOLE window was walked.
+            report.reached_floor = true;
             break;
         }
+        report.pages += 1;
         let page_len = page.observations.len();
         report.fetched += page_len;
         for o in &page.observations {
             report.newest_ts = report.newest_ts.max(o.ts_ms);
+            oldest_ts = oldest_ts.min(o.ts_ms);
         }
         // PRECISION pass (ADR-0012 / ADR-0010 §5): the Claude "exclude if unsure"
         // screen ABOVE the keyword floor. FAIL-CLOSED — a screen error drops the whole
@@ -137,30 +156,46 @@ pub async fn run_backfill(
         let ingest =
             ingest_connections(user_id, &safe).context("ingest connection observations")?;
         report.ingested += ingest.ingested;
+        report.skipped += ingest.skipped;
         report.dropped_sensitive += ingest.dropped_sensitive;
         match page.next_cursor {
             // Walk older: the page's oldest ts becomes the next `before` ceiling.
             Some(oldest) if Some(oldest) != before => before = Some(oldest),
-            // null (history exhausted) or non-advancing → stop (never spin a page).
-            _ => break,
+            // null (history exhausted) or non-advancing → the window is fully
+            // walked; stop (never spin a page).
+            _ => {
+                report.reached_floor = true;
+                break;
+            }
         }
     }
+    report.oldest_ts = if report.fetched == 0 { 0 } else { oldest_ts };
     // ONE batched reflect (haiku) pass for the cue-less entities — over the
     // most-recent ingested observations, capped so a backfill is bounded spend.
+    // Then report the REAL entity total (deterministic ingest across the whole
+    // window + what the reflect pass added), not just the reflect pass's count.
     if report.ingested > 0 {
-        report.entities = run_reflection(reflect, user_id, opts.reflect_batch)
+        run_reflection(reflect, user_id, opts.reflect_batch)
             .await
             .context("reflect over backfilled observations")?;
+        report.entities = eri_inference::memory::world_recall::entity_total(user_id);
     }
     Ok(report)
 }
 
-/// `eri memory backfill [--months N] [--max N]` — index the last N months of
-/// connected-account history into the world model: Q23-screened (sensitive dropped
-/// before storage), capped at `max`, one batched reflect pass. User-scoped. Phase A
+/// Safety ceiling for a `--full` deep-history walk — a runaway backstop, not the
+/// intended stopping point (the `since` floor is). Six months of a heavy inbox is
+/// well under this.
+const FULL_MAX: usize = 50_000;
+
+/// `eri memory backfill [--months N] [--max N] [--full]` — index the last N months
+/// of connected-account history into the world model: Q23-screened (sensitive
+/// dropped before storage), one batched reflect pass. Default is recent-N
+/// (cost-bounded onboarding); `--full` walks the WHOLE window (to the floor,
+/// bounded only by [`FULL_MAX`]) — the deep-history backfill. User-scoped. Phase A
 /// runs on-device — it indexes only while the computer is on (computer-off,
 /// always-on indexing is Phase B, a server-resident brain).
-pub async fn run(months: u32, max: usize) -> Result<()> {
+pub async fn run(months: u32, max: usize, full: bool) -> Result<()> {
     let creds = crate::config::load()?;
     if !creds.is_signed_in() {
         anyhow::bail!("not signed in — run `eri auth login` first");
@@ -170,6 +205,15 @@ pub async fn run(months: u32, max: usize) -> Result<()> {
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0);
     let since = now.saturating_sub(u64::from(months) * MONTH_MS);
+    // `--full`: walk the whole window (high ceiling); else recent-N (default cap
+    // unless an explicit --max is given).
+    let cap = if full {
+        FULL_MAX
+    } else if max == 0 {
+        DEFAULT_MAX
+    } else {
+        max
+    };
     let source = HttpConnectionSource::from_credentials(&creds)?;
     let report = run_backfill(
         &source,
@@ -178,22 +222,49 @@ pub async fn run(months: u32, max: usize) -> Result<()> {
         creds.user_id.as_deref(),
         BackfillOptions {
             since,
-            max_observations: if max == 0 { DEFAULT_MAX } else { max },
+            max_observations: cap,
             page_size: PAGE_SIZE,
             reflect_batch: REFLECT_BATCH,
         },
     )
     .await?;
-    let dropped = report.screened_out + report.dropped_sensitive;
-    println!(
-        "Indexed {} connection observation{} ({} dropped by the privacy screen) — {} entit{} in your world model.",
-        report.ingested,
-        if report.ingested == 1 { "" } else { "s" },
-        dropped,
-        report.entities,
-        if report.entities == 1 { "y" } else { "ies" },
-    );
+    print_report(months, &report);
     Ok(())
+}
+
+/// The real-counts summary a backfill reports: the window walked, what was
+/// indexed, the Q23 privacy breakdown, the entity total, and whether the WHOLE
+/// window was covered or the cap stopped it. Pure formatting — unit-tested.
+fn format_report(months: u32, r: &BackfillReport) -> String {
+    let coverage = if r.reached_floor {
+        format!(
+            "✓ walked your whole {months}-month window ({} page(s))",
+            r.pages
+        )
+    } else {
+        format!(
+            "⚠ stopped at the {}-observation cap — more history remains; re-run with --full",
+            r.fetched
+        )
+    };
+    format!(
+        "Indexed {ing} new observation(s) ({skipped} already known) of {fetched} fetched from your connected accounts.\n\
+         Privacy screen dropped {total_dropped} ({precision} by the precision pass, {floor} by the keyword floor).\n\
+         Your world model now holds {ent} entit{ent_suffix}.\n\
+         {coverage}.",
+        ing = r.ingested,
+        skipped = r.skipped,
+        fetched = r.fetched,
+        total_dropped = r.screened_out + r.dropped_sensitive,
+        precision = r.screened_out,
+        floor = r.dropped_sensitive,
+        ent = r.entities,
+        ent_suffix = if r.entities == 1 { "y" } else { "ies" },
+    )
+}
+
+fn print_report(months: u32, r: &BackfillReport) {
+    println!("{}", format_report(months, r));
 }
 
 /// The incremental on-sync pull is small — the backfill is the onboarding; this
@@ -328,11 +399,15 @@ mod tests {
     use std::sync::Mutex;
 
     fn obs(source_id: &str, text: &str) -> ConnectionObservation {
+        obs_ts(source_id, text, 1)
+    }
+
+    fn obs_ts(source_id: &str, text: &str, ts_ms: u64) -> ConnectionObservation {
         ConnectionObservation {
             source_id: source_id.into(),
             text: text.into(),
             kind: "email".into(),
-            ts_ms: 1,
+            ts_ms,
         }
     }
 
@@ -349,6 +424,45 @@ mod tests {
         assert_eq!(next_page(200, &opts), Some(50)); // only 50 left under the cap
         assert_eq!(next_page(250, &opts), None); // cap reached → stop
         assert_eq!(next_page(300, &opts), None);
+    }
+
+    #[test]
+    fn format_report_shows_real_counts_and_coverage() {
+        let full = BackfillReport {
+            fetched: 176,
+            ingested: 158,
+            skipped: 12,
+            screened_out: 18,
+            dropped_sensitive: 0,
+            entities: 42,
+            pages: 3,
+            reached_floor: true,
+            ..Default::default()
+        };
+        let s = format_report(6, &full);
+        assert!(s.contains("158 new observation(s)"), "new ingests: {s}");
+        assert!(
+            s.contains("12 already known"),
+            "idempotent skips surfaced: {s}"
+        );
+        assert!(s.contains("of 176 fetched"), "fetched total: {s}");
+        assert!(
+            s.contains("18 by the precision pass"),
+            "Q23 precision drops: {s}"
+        );
+        assert!(s.contains("42 entit"), "the real entity total: {s}");
+        assert!(s.contains("whole 6-month window"), "coverage: {s}");
+
+        // Cap case: history remains → nudge --full.
+        let capped = BackfillReport {
+            fetched: 1000,
+            reached_floor: false,
+            ..Default::default()
+        };
+        assert!(
+            format_report(6, &capped).contains("--full"),
+            "cap nudges --full"
+        );
     }
 
     /// A scripted source: hands out pre-set pages in order, recording the cap it was
@@ -408,6 +522,123 @@ mod tests {
     impl SensitivityScreen for DropAllScreen {
         async fn screen(&self, texts: &[&str]) -> Result<Vec<bool>> {
             Ok(vec![false; texts.len()])
+        }
+    }
+
+    #[allow(clippy::await_holding_lock)] // current-thread test; HOME isolation held across await
+    #[tokio::test]
+    async fn a_full_walk_reports_pages_window_and_reaching_the_floor() {
+        let _lock = crate::config::ENV_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let dir = tempfile::TempDir::new().unwrap();
+        let prev = std::env::var("HOME").ok();
+        unsafe {
+            std::env::set_var("HOME", dir.path());
+        }
+
+        // Two backward pages with distinct ts (newest 300 → oldest 100); the
+        // source drains (next_cursor None) → the whole window was walked.
+        let source = ScriptedSource {
+            pages: Mutex::new(
+                vec![
+                    vec![obs_ts(
+                        "gmail:1",
+                        "I work with Priya on the atlas project",
+                        300,
+                    )],
+                    vec![obs_ts(
+                        "gcal:1",
+                        "standup with Sam about the harbor app",
+                        100,
+                    )],
+                ]
+                .into(),
+            ),
+        };
+        let report = run_backfill(
+            &source,
+            &KeepAllScreen,
+            &MockReflect,
+            None,
+            BackfillOptions {
+                since: 0,
+                max_observations: 1000,
+                page_size: 100,
+                reflect_batch: 200,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(report.pages, 2, "two backward pages walked");
+        assert_eq!(report.newest_ts, 300);
+        assert_eq!(report.oldest_ts, 100, "the oldest observation reached");
+        assert!(
+            report.reached_floor,
+            "history exhausted under the floor → the WHOLE window was walked"
+        );
+        assert!(
+            report.entities >= 2,
+            "the real entity total spans the window (Priya, atlas, Sam, harbor)"
+        );
+
+        unsafe {
+            match prev.as_deref() {
+                Some(v) => std::env::set_var("HOME", v),
+                None => std::env::remove_var("HOME"),
+            }
+        }
+    }
+
+    #[allow(clippy::await_holding_lock)] // current-thread test; HOME isolation held across await
+    #[tokio::test]
+    async fn stopping_at_the_cap_has_not_reached_the_floor() {
+        let _lock = crate::config::ENV_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let dir = tempfile::TempDir::new().unwrap();
+        let prev = std::env::var("HOME").ok();
+        unsafe {
+            std::env::set_var("HOME", dir.path());
+        }
+
+        // Two pages available, but the cap stops after one → more history remains.
+        let source = ScriptedSource {
+            pages: Mutex::new(
+                vec![
+                    vec![obs_ts("gmail:1", "note about the atlas project", 300)],
+                    vec![obs_ts("gcal:1", "note about the harbor app", 100)],
+                ]
+                .into(),
+            ),
+        };
+        let report = run_backfill(
+            &source,
+            &KeepAllScreen,
+            &MockReflect,
+            None,
+            BackfillOptions {
+                since: 0,
+                max_observations: 1, // cap at one observation
+                page_size: 100,
+                reflect_batch: 200,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(report.fetched, 1, "stopped at the cap");
+        assert!(
+            !report.reached_floor,
+            "the cap (not the floor) stopped it → more history remains"
+        );
+
+        unsafe {
+            match prev.as_deref() {
+                Some(v) => std::env::set_var("HOME", v),
+                None => std::env::remove_var("HOME"),
+            }
         }
     }
 
