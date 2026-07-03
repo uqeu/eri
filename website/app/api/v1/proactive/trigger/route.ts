@@ -19,7 +19,7 @@ import { Composio } from "@composio/core";
 import { runAgentTurn, type TierAProfile } from "@/lib/agent/run_core";
 import { decryptAtRest } from "@/lib/crypto/server_encryption";
 import { sql } from "@/lib/db";
-import { sendReply } from "@/lib/imessage/provider";
+import { sendProactiveMessage } from "@/lib/messaging/spectrum";
 import type { CalendarSignal, EmailSignal } from "@/lib/proactive/detect";
 import { detectTriggers } from "@/lib/proactive/detect";
 import { dispatchProactive, type ProactiveDeps } from "@/lib/proactive/dispatch";
@@ -53,6 +53,27 @@ export async function GET(request: Request): Promise<NextResponse> {
 
   const nowMs = Date.now();
   const deps = makeDeps();
+
+  // Force a single proactive nudge for one user, bypassing signal detection — so a
+  // real text + a proactive_log row can be verified end-to-end (`?test=<userId>`).
+  // Still runs the REAL gate → compose → Spectrum send → recordSent, so it proves
+  // the whole delivery path (not the detector). Guarded by the same CRON_SECRET.
+  const testUserId = new URL(request.url).searchParams.get("test");
+  if (testUserId) {
+    const trigger: ProactiveTrigger = {
+      kind: "urgent_email",
+      summary: "Your Railway deploy for the eri project failed a little while ago — the build errored out.",
+      confidence: 1,
+      dedupeKey: `test-${nowMs}`,
+    };
+    const result = await dispatchProactive(testUserId, trigger, deps);
+    logEvent("proactive.test_dispatched", { userId: testUserId, branch: result.branch, reason: result.reason });
+    return NextResponse.json(
+      { ok: true, test: true, branch: result.branch, reason: result.reason, text: result.text ?? null },
+      { status: 200 },
+    );
+  }
+
   const counts = { candidates: 0, triggers: 0, sent: 0, gated: 0, skipped: 0, errored: 0, no_phone: 0 };
 
   const candidates = await sql()<{ user_id: string }[]>`
@@ -113,9 +134,10 @@ function makeDeps(): ProactiveDeps {
         lastSentMs: row?.last_ms != null ? Number(row.last_ms) : null,
         sentTodayCount: row ? Number(row.today) : 0,
         alreadySent: row ? Number(row.dup) > 0 : false,
-        // No per-user timezone stored yet → use UTC hour (tz refinement is a
-        // follow-up; the confidence/cap/gap gates are timezone-independent).
-        localHour: new Date(nowMs).getUTCHours(),
+        // Quiet hours must be in the USER's local time, not UTC — otherwise eri
+        // goes quiet during their actual waking hours (UTC evening == their
+        // afternoon). Resolve their tz (falls back to ERI_DEFAULT_TZ).
+        localHour: localHourInTz(nowMs, userTimezone(userId)),
       };
     },
     loadProfile,
@@ -128,7 +150,10 @@ function makeDeps(): ProactiveDeps {
       return rows[0]?.phone_e164 ?? null;
     },
     runTurn: runAgentTurn,
-    send: sendReply,
+    // eri INITIATES over the business line (Spectrum) now — no inbound space, so
+    // resolve/create a 1:1 space from the user's handle. (Was Sendblue, which is
+    // dead, so every nudge silently failed before recordSent → proactive_log = 0.)
+    send: sendProactiveMessage,
     recordSent: async (userId, trigger) => {
       await sql()`
         INSERT INTO proactive_log (user_id, dedupe_key, kind)
@@ -169,7 +194,15 @@ function makeSignalDeps(): SignalDeps {
       // The SDK is constructed per call so a missing key fails at request time
       // (and is caught by fetchSignalsForUser → empty), never at module load.
       const composio = new Composio({ apiKey: requireComposioKey() });
-      const result = await composio.tools.execute(slug, { userId, arguments: args });
+      // @composio/core 0.10+ requires a toolkit version for manual execution (else
+      // it throws "Toolkit version not specified"). Latest action + skip the strict
+      // check; the signal mappers are defensive against shape drift.
+      const result = await composio.tools.execute(slug, {
+        userId,
+        arguments: args,
+        version: "latest",
+        dangerouslySkipVersionCheck: true,
+      });
       return {
         data: (result?.data ?? {}) as Record<string, unknown>,
         error: result?.error ?? null,
@@ -204,6 +237,27 @@ async function loadProfile(
   } catch {
     logEvent("proactive.profile_decrypt_failed", { userId });
     return { profile: null, dynamicContext: "" };
+  }
+}
+
+/**
+ * The user's IANA timezone for quiet-hours. No per-user tz is stored yet, so this
+ * falls back to ERI_DEFAULT_TZ (US-Eastern — also correct for Toronto). Sourcing a
+ * real per-user tz from the world model (the brain knows where they live) is the
+ * follow-up; this is the seam for it.
+ */
+function userTimezone(_userId: string): string {
+  return process.env.ERI_DEFAULT_TZ || "America/New_York";
+}
+
+/** The user's local hour 0..23 at `nowMs`, in `tz`. UTC fallback on any failure. */
+function localHourInTz(nowMs: number, tz: string): number {
+  try {
+    const h = new Intl.DateTimeFormat("en-US", { hour: "numeric", hour12: false, timeZone: tz }).format(new Date(nowMs));
+    const n = parseInt(h, 10);
+    return Number.isFinite(n) ? n % 24 : new Date(nowMs).getUTCHours();
+  } catch {
+    return new Date(nowMs).getUTCHours();
   }
 }
 
