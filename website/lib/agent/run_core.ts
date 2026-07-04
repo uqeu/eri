@@ -367,7 +367,10 @@ export async function runAgentTurn(input: AgentTurnInput): Promise<AgentTurnResu
     const canCallMore = input.onToolCall && input.tools?.length && hop < maxHops;
     if (toolUses.length === 0 || !canCallMore) {
       return {
-        text: extractText(body.content) || "(eri had nothing to say)",
+        // Never go blank: if the model returns no text (e.g. a question it has no
+        // context for), fall back to a warm human nudge instead of a dead "(eri had
+        // nothing to say)" placeholder.
+        text: extractText(body.content) || "hmm — i'm not sure i've got the context for that. can you say a bit more?",
         tokensIn,
         tokensOut,
         model,
