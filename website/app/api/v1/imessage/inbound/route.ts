@@ -56,6 +56,8 @@ export async function POST(request: Request): Promise<Response> {
       return NextResponse.json({ ok: true, skipped: "duplicate" });
     case "skipped_outbound":
       return NextResponse.json({ ok: true, skipped: "outbound" });
+    case "skipped_empty":
+      return NextResponse.json({ ok: true, skipped: "empty" });
     case "bad_number":
       return NextResponse.json({ ok: true, skipped: "bad_number" });
     case "send_failed":

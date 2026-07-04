@@ -64,6 +64,7 @@ export type ProcessStatus =
   | "handled"
   | "duplicate"
   | "skipped_outbound"
+  | "skipped_empty"
   | "bad_number"
   | "send_failed"
   | "error";
@@ -87,6 +88,16 @@ export async function processInbound(
   opts: { inboundWasVoice?: boolean } = {},
 ): Promise<ProcessOutcome> {
   if (msg.isOutbound) return { status: "skipped_outbound" };
+
+  // Skip non-message events. A chat platform (Spectrum) delivers receipts,
+  // reactions, typing, and system events through the same webhook; they map to an
+  // empty-content inbound. Answering those with a chat turn produced a spurious
+  // SECOND bubble ("I don't have context…") alongside a real reply — the double-
+  // response quirk. A real text has content; a voice/media message is exempt.
+  if (!msg.content.trim() && !msg.mediaUrl && !opts.inboundWasVoice) {
+    logEvent("inbound.skipped_empty", { handle: msg.messageHandle });
+    return { status: "skipped_empty" };
+  }
 
   const e164 = normalizeE164(msg.fromNumber);
   if (!e164) return { status: "bad_number" };
