@@ -233,24 +233,29 @@ export class ComposioApiClient implements ComposioClient {
     // toolkit now needs its OWN registered auth config (COMPOSIO_AUTH_CONFIG_<SLUG>);
     // with none, it's genuinely unconnectable → needs_setup (clear message, not 502).
     if (!authConfigId) throw new AuthConfigMissingError(toolkit);
-    let req: { id?: string; redirectUrl?: string | null };
-    try {
-      // The current endpoint (connectedAccounts.link). `allowMultiple` lets a user
-      // reconnect without tripping Composio's "multiple accounts" guard.
-      req = await composio().connectedAccounts.initiate(userId, authConfigId, { allowMultiple: true });
-    } catch (err) {
-      // Surface the HIDDEN reason — Composio's error body lives on the APIError
-      // (`status` + parsed `error`), otherwise swallowed into a generic 502.
-      const detail = describeComposioError(err);
-      console.log(
-        JSON.stringify({ event: "composio.authorize_failed", toolkit, hasAuthConfig: true, ...detail }),
-      );
-      throw err;
+    // Composio RETIRED managed-OAuth connect-creation on BOTH `toolkits.authorize`
+    // AND the 0.10 SDK's `connectedAccounts.initiate` (it maps to the retired POST
+    // /connected_accounts) — both 400 with "use POST /connected_accounts/link
+    // instead" (confirmed in the prod log). The 0.10 SDK exposes no /link method, so
+    // POST the current endpoint raw (verified 201):
+    //   { auth_config_id, user_id } -> { redirect_url, connected_account_id }.
+    // `allow_multiple` lets a user reconnect without the "multiple accounts" guard.
+    const res = await fetch("https://backend.composio.dev/api/v3/connected_accounts/link", {
+      method: "POST",
+      headers: { "x-api-key": requireEnv("COMPOSIO_API_KEY"), "content-type": "application/json" },
+      body: JSON.stringify({ auth_config_id: authConfigId, user_id: userId, allow_multiple: true }),
+    });
+    if (!res.ok) {
+      // The reason IS the body (this is the raw endpoint, not an SDK error object).
+      const body = (await res.text().catch(() => "")).slice(0, 1000);
+      console.log(JSON.stringify({ event: "composio.authorize_failed", toolkit, hasAuthConfig: true, status: res.status, body }));
+      throw new Error(`composio /connected_accounts/link ${res.status}`);
     }
-    if (!req.id || !req.redirectUrl) {
-      throw new Error(`composio connect returned no redirect for "${toolkit}"`);
+    const data = (await res.json()) as { redirect_url?: string; connected_account_id?: string };
+    if (!data.redirect_url) {
+      throw new Error(`composio /link returned no redirect_url for "${toolkit}"`);
     }
-    return { connectedAccountId: req.id, redirectUrl: req.redirectUrl };
+    return { connectedAccountId: data.connected_account_id ?? "", redirectUrl: data.redirect_url };
   }
 
   async connectionStatus(connectedAccountId: string): Promise<"pending" | "active" | "error"> {
