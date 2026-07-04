@@ -227,30 +227,28 @@ export class ComposioApiClient implements ComposioClient {
       return { connectedAccountId: req.id, redirectUrl: req.redirectUrl ?? "" };
     }
 
-    // OAuth path (managed or custom): `authorize` creates the auth config if one
-    // doesn't exist and returns the hosted consent URL. Passing our registered
-    // `authConfigId` is what makes a custom-OAuth toolkit (our own app) work;
-    // omitting it falls back to Composio's managed app.
+    // OAuth path. Composio RETIRED managed-OAuth connect-creation on
+    // `toolkits.authorize` — it now 400s `ComposioLegacyConnectedAccountsEndpoint‑
+    // RetiredError` ("use POST /connected_accounts/link instead"). So every OAuth
+    // toolkit now needs its OWN registered auth config (COMPOSIO_AUTH_CONFIG_<SLUG>);
+    // with none, it's genuinely unconnectable → needs_setup (clear message, not 502).
+    if (!authConfigId) throw new AuthConfigMissingError(toolkit);
     let req: { id?: string; redirectUrl?: string | null };
     try {
-      req = await composio().toolkits.authorize(userId, toolkit, authConfigId ?? undefined);
+      // The current endpoint (connectedAccounts.link). `allowMultiple` lets a user
+      // reconnect without tripping Composio's "multiple accounts" guard.
+      req = await composio().connectedAccounts.initiate(userId, authConfigId, { allowMultiple: true });
     } catch (err) {
-      // Surface the HIDDEN reason first — Composio's 400 body lives on the APIError
-      // (`status` + parsed `error`), otherwise swallowed into a generic 502. This is
-      // how we diagnose github's `POST /connected_accounts → 400` (gmail/spotify
-      // authorize fine on the same code+SDK, so the rejected field is github-specific).
+      // Surface the HIDDEN reason — Composio's error body lives on the APIError
+      // (`status` + parsed `error`), otherwise swallowed into a generic 502.
       const detail = describeComposioError(err);
       console.log(
-        JSON.stringify({ event: "composio.authorize_failed", toolkit, hasAuthConfig: authConfigId != null, ...detail }),
+        JSON.stringify({ event: "composio.authorize_failed", toolkit, hasAuthConfig: true, ...detail }),
       );
-      // No config AND it failed → most likely the toolkit needs our own OAuth app we
-      // haven't registered (needs_setup). A present config that still fails is a real
-      // rejection → composio_error; the log above says exactly why.
-      if (authConfigId == null) throw new AuthConfigMissingError(toolkit);
       throw err;
     }
     if (!req.id || !req.redirectUrl) {
-      throw new Error(`composio authorize returned no redirect for "${toolkit}"`);
+      throw new Error(`composio connect returned no redirect for "${toolkit}"`);
     }
     return { connectedAccountId: req.id, redirectUrl: req.redirectUrl };
   }
