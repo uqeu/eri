@@ -42,7 +42,9 @@ export async function POST(request: Request): Promise<Response> {
           logEvent("spectrum.handling", { id: message.id, type: message.content?.type });
           const msg = spectrumMessageToInbound(space, message);
           const inboundWasVoice = message.content?.type === "voice";
-          const out = await processInbound(msg, makeSpectrumTransport(space), { inboundWasVoice });
+          // Pass the sender's handle so a send can self-heal a dead Photon token by
+          // re-resolving this conversation from a fresh app (see makeSpectrumTransport).
+          const out = await processInbound(msg, makeSpectrumTransport(space, message.sender?.id), { inboundWasVoice });
           logEvent("spectrum.done", { id: message.id, status: out.status, branch: out.branch });
         } catch (e) {
           logEvent("spectrum.handler_error", { error: e instanceof Error ? e.message : String(e) });

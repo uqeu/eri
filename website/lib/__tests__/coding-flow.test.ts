@@ -48,12 +48,12 @@ function sink(): StatusSink & { bubbles: string[]; typings: number } {
   };
 }
 
-const plan: CodeProgress = { stage: "plan", text: "on it — reproducing the failing checkout test" };
-const testGreen: CodeProgress = { stage: "test", text: "tests pass ✓ — 42 passed", command: "cargo test", passed: true };
-const testRed: CodeProgress = { stage: "test", text: "still red — 1 failing", passed: false };
-const prEvent: CodeProgress = { stage: "pr", text: "opened PR #123 — https://github.com/eri-labs/eri/pull/123", number: 123, url: "https://github.com/eri-labs/eri/pull/123" };
-const openedOutcome: CodeOutcome = { kind: "opened", text: "PR #123 — fixes the null-cart case, tests pass. https://github.com/eri-labs/eri/pull/123", number: 123, url: "https://github.com/eri-labs/eri/pull/123" };
-const testsRedOutcome: CodeOutcome = { kind: "testsRed", text: "couldn't get it green — checkout still red after 3 attempts. i didn't open a PR.", summary: "checkout still red after 3 attempts" };
+const plan: CodeProgress = { stage: "plan", text: "on it, reproducing the failing checkout test" };
+const testGreen: CodeProgress = { stage: "test", text: "tests pass ✓, 42 passed", command: "cargo test", passed: true };
+const testRed: CodeProgress = { stage: "test", text: "still red, 1 failing", passed: false };
+const prEvent: CodeProgress = { stage: "pr", text: "opened PR #123, https://github.com/eri-labs/eri/pull/123", number: 123, url: "https://github.com/eri-labs/eri/pull/123" };
+const openedOutcome: CodeOutcome = { kind: "opened", text: "PR #123, fixes the null-cart case, tests pass. https://github.com/eri-labs/eri/pull/123", number: 123, url: "https://github.com/eri-labs/eri/pull/123" };
+const testsRedOutcome: CodeOutcome = { kind: "testsRed", text: "couldn't get it green, checkout still red after 3 attempts. i didn't open a PR.", summary: "checkout still red after 3 attempts" };
 
 function record(over: Partial<CodeJobRecord>): CodeJobRecord {
   return { jobId: "job_x", repo: "eri-labs/eri", phase: "running", prNumber: null, events: [], outcome: null, ...over };

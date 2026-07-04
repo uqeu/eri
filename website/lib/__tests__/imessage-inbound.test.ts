@@ -379,14 +379,14 @@ async function run() {
       "+1",
       deps({
         runTurn: async () => { ranTurn = true; throw new Error("should not chat"); },
-        dispatchCodingJob: async (_userId, intent) => { seen.intent = intent; return { ack: "on it — cloning eri 🌿" }; },
+        dispatchCodingJob: async (_userId, intent) => { seen.intent = intent; return { ack: "on it, cloning eri 🌿" }; },
       }),
     );
     assert.equal(out.branch, "coding");
     assert.equal(ranTurn, false, "a coding task must not hit the chat model");
     assert.equal(out.meter, null, "the brain meters the job, not the phone turn");
     assert.equal(seen.intent?.verb, "fix", "the classified intent reaches the dispatch");
-    assert.deepEqual(out.replyChunks, ["on it — cloning eri 🌿"]);
+    assert.deepEqual(out.replyChunks, ["on it, cloning eri 🌿"]);
   }
 
   // Dispatch declines (repo not linked / feature off) → fall through to normal chat.

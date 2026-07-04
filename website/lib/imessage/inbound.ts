@@ -57,13 +57,13 @@ export const REPLY = {
   notLinked:
     "Hey! I don't recognize this number yet 🌿 Run `eri phone link` on your computer and text me the code it gives you to connect.",
   welcomeNew:
-    "hey, i'm eri 🌿 i don't know you yet — tap here to set yourself up, and i'll be linked to this number:",
-  linked: 'You\'re linked! 🌿 Text me anything — I know your day. Try "what was I working on?"',
-  locked: "Texting with eri is a Pro+ feature — upgrade at tryeri.ca to chat with me here.",
+    "hey, i'm eri 🌿 i don't know you yet, tap here to set yourself up, and i'll be linked to this number:",
+  linked: 'You\'re linked! 🌿 Text me anything, I know your day. Try "what was I working on?"',
+  locked: "Texting with eri is a Pro+ feature, upgrade at tryeri.ca to chat with me here.",
   overQuota:
-    "You're out of eri credits for this cycle — they reset next period, or upgrade at tryeri.ca.",
-  errored: "Sorry — I hit a snag answering that. Try me again in a sec 🌿",
-  confirmed: "On it — I'll text you the moment it's done. 🌿",
+    "You're out of eri credits for this cycle, they reset next period, or upgrade at tryeri.ca.",
+  errored: "Sorry, I hit a snag answering that. Try me again in a sec 🌿",
+  confirmed: "On it, I'll text you the moment it's done. 🌿",
   cancelled: "Okay, I'll leave that one. 🌿",
 } as const;
 
