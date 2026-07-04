@@ -41,5 +41,12 @@ import { chunkMessage, formatReply, stripMarkdown } from "../imessage/format";
   assert.deepEqual(out, ["hello world"]);
 }
 
+// em-dashes are softened to commas (real texters don't em-dash); en-dash → hyphen.
+{
+  assert.equal(stripMarkdown("happy to — i just need access"), "happy to, i just need access");
+  assert.equal(stripMarkdown("PR #12—tests pass"), "PR #12, tests pass");
+  assert.equal(stripMarkdown("range 3–5"), "range 3-5");
+}
+
 // eslint-disable-next-line no-console
 console.log("imessage-format.test.ts: all assertions passed");

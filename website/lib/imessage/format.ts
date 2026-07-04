@@ -29,6 +29,10 @@ export function stripMarkdown(text: string): string {
       // headings / blockquotes at line start → drop the marker
       .replace(/^\s{0,3}#{1,6}\s+/gm, "")
       .replace(/^\s{0,3}>\s?/gm, "")
+      // eri (Claude) loves em-dashes; real texters don't. Soften to a comma so it
+      // reads like a person ("happy to — i just" → "happy to, i just"); en-dash → hyphen.
+      .replace(/\s*—\s*/g, ", ")
+      .replace(/\s*–\s*/g, "-")
       // collapse 3+ newlines to a paragraph break
       .replace(/\n{3,}/g, "\n\n")
       .trim()
