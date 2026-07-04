@@ -17,7 +17,7 @@ import { Spectrum, typing, voice, type Message, type Space } from "spectrum-ts";
 import { imessage } from "@spectrum-ts/imessage";
 import type { InboundMessage } from "@/lib/imessage/webhook";
 import { logEvent, type InboundTransport } from "@/lib/messaging/inbound_runtime";
-import { withSendRetry } from "@/lib/messaging/send_retry";
+import { isTokenExpired, withSendRetry } from "@/lib/messaging/send_retry";
 import { synthesizeSpeech, textForSpeech } from "@/lib/messaging/voice";
 
 /**
@@ -128,30 +128,64 @@ export function spectrumMessageToInbound(space: Space, message: Message): Inboun
  * the real Photon error so a failure is diagnosable (not swallowed like Sendblue).
  */
 export async function sendProactiveMessage(to: string, chunks: string[]): Promise<boolean> {
+  const clean = chunks.filter((c) => c.trim());
+  let sent = 0; // resume index — survives the token-refresh retry so nothing double-sends
+  const run = async () => {
+    const space = await imessage(await getSpectrumApp()).space.create(to);
+    for (; sent < clean.length; sent++) await withSendRetry(() => space.send(clean[sent]));
+  };
   try {
-    const app = await getSpectrumApp();
-    const space = await imessage(app).space.create(to);
-    for (const chunk of chunks) {
-      if (!chunk.trim()) continue;
-      await withSendRetry(() => space.send(chunk));
-    }
+    await run();
     return true;
   } catch (e) {
+    // Self-heal a DEAD Photon token (expired, reused across a warm Fluid instance):
+    // drop the memoized app so the next getSpectrumApp() re-exchanges a fresh token,
+    // rebuild the space, and resume from the un-sent chunk. So eri never goes silent.
+    if (isTokenExpired(e)) {
+      try {
+        logEvent("spectrum.token_expired_refresh", { where: "proactive", to, ...describeSpectrumError(e) });
+        resetSpectrumApp();
+        await run();
+        return true;
+      } catch (e2) {
+        logEvent("proactive.spectrum_send_failed", { to, retried: true, ...describeSpectrumError(e2) });
+        return false;
+      }
+    }
     logEvent("proactive.spectrum_send_failed", { to, ...describeSpectrumError(e) });
     return false;
   }
 }
 
-/** A reply/typing transport bound to one Spectrum conversation. */
-export function makeSpectrumTransport(space: Space): InboundTransport {
+/**
+ * A reply/typing transport bound to one Spectrum conversation. `replyHandle` (the
+ * sender's handle, from the inbound message) lets a send SELF-HEAL a dead Photon
+ * token: on tokenExpired/UNAUTHENTICATED we drop the memoized app (fresh token
+ * next), re-resolve the conversation from a fresh app, and retry — so eri never
+ * goes silent behind an expired token reused across a warm Fluid instance.
+ */
+export function makeSpectrumTransport(space: Space, replyHandle?: string): InboundTransport {
+  /** Re-resolve this conversation from a FRESH app (after resetSpectrumApp). */
+  const freshSpace = async (): Promise<Space> => imessage(await getSpectrumApp()).space.create(replyHandle as string);
+
   return {
     sendTyping: async () => {
       try {
         await space.send(typing());
       } catch (e) {
-        // best-effort — a missing typing bubble must never block the reply — but
-        // surface the cause: it's the same Photon auth path the real send uses, so
-        // a typing failure is an early warning of a send failure.
+        // A typing failure is the SAME Photon auth path as the real send, so a
+        // tokenExpired here is the early warning: reset now so the reply that follows
+        // gets a fresh token (and best-effort re-send the indicator). Never blocks.
+        if (isTokenExpired(e) && replyHandle) {
+          logEvent("spectrum.token_expired_refresh", { where: "typing", spaceId: space.id, ...describeSpectrumError(e) });
+          resetSpectrumApp();
+          try {
+            await (await freshSpace()).send(typing());
+          } catch {
+            /* the reply path will heal; a missing typing bubble is harmless */
+          }
+          return;
+        }
         logEvent("spectrum.typing_failed", { spaceId: space.id, ...describeSpectrumError(e) });
       }
     },
@@ -176,19 +210,34 @@ export function makeSpectrumTransport(space: Space): InboundTransport {
           }
         }
       }
-      for (const chunk of chunks) {
-        if (!chunk.trim()) continue;
-        try {
-          await withSendRetry(() => space.send(chunk));
-        } catch (e) {
-          // The REAL Photon outbound error — previously swallowed. This line names
-          // the cause: bad creds (401/invalid_client), plan/quota (402/403), or a
-          // line-not-provisioned-for-outbound. It's the whole point of this fix.
-          logEvent("spectrum.send_failed", { spaceId: space.id, ...describeSpectrumError(e) });
-          return false;
+      const clean = chunks.filter((c) => c.trim());
+      let sent = 0; // resume index — survives the token-refresh retry so nothing double-sends
+      const run = async (sp: Space) => {
+        for (; sent < clean.length; sent++) await withSendRetry(() => sp.send(clean[sent]));
+      };
+      try {
+        await run(space);
+        return true;
+      } catch (e) {
+        // Self-heal a dead Photon token: reset the memoized app (fresh token next),
+        // re-resolve the conversation, resume from the un-sent chunk. So eri never
+        // goes silent behind an expired token.
+        if (isTokenExpired(e) && replyHandle) {
+          try {
+            logEvent("spectrum.token_expired_refresh", { where: "reply", spaceId: space.id, ...describeSpectrumError(e) });
+            resetSpectrumApp();
+            await run(await freshSpace());
+            return true;
+          } catch (e2) {
+            logEvent("spectrum.send_failed", { spaceId: space.id, retried: true, ...describeSpectrumError(e2) });
+            return false;
+          }
         }
+        // The REAL Photon outbound error — names the cause: bad creds, plan/quota,
+        // or a line not provisioned for outbound.
+        logEvent("spectrum.send_failed", { spaceId: space.id, ...describeSpectrumError(e) });
+        return false;
       }
-      return true;
     },
   };
 }
