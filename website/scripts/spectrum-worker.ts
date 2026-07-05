@@ -70,7 +70,9 @@ async function consumeStream(): Promise<void> {
       try {
         const msg = spectrumMessageToInbound(space, message);
         const inboundWasVoice = message.content.type === "voice";
-        const out = await processInbound(msg, makeSpectrumTransport(space), { inboundWasVoice });
+        // Pass the sender's handle so a reply can self-heal a dead Photon token by
+        // re-resolving this conversation from a fresh app (same as the webhook route).
+        const out = await processInbound(msg, makeSpectrumTransport(space, message.sender?.id), { inboundWasVoice });
         console.log(`[eri] handled ${message.id}: ${out.status}${out.branch ? " / " + out.branch : ""}`);
       } catch (e) {
         console.error("[eri] message error:", errMsg(e));
@@ -114,6 +116,12 @@ const heartbeat = setInterval(
   HEARTBEAT_MS,
 );
 heartbeat.unref?.();
+
+// The Photon SDK registers a process listener per connection; even with the old
+// stream disposed on reset (resetSpectrumApp), a burst of reconnects can transiently
+// pass Node's default 10-listener cap. Lift the ceiling so a healthy reconnect never
+// logs a false MaxListenersExceededWarning.
+process.setMaxListeners(20);
 
 // Clean shutdown so Railway redeploys without a hard kill mid-message.
 for (const signal of ["SIGTERM", "SIGINT"] as const) {
