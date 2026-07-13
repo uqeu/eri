@@ -79,6 +79,7 @@ export interface InboundMeter {
 
 export type InboundBranch =
   | "paired"
+  | "invited"
   | "not_linked"
   | "locked"
   | "confirmed"
@@ -111,6 +112,12 @@ export interface AgentTurnResultLike {
 export interface InboundDeps {
   consumePairing(code: string, e164: string): Promise<{ userId: string } | null>;
   resolveUserByPhone(e164: string): Promise<ResolvedUser | null>;
+  /** Invite-by-number: if this un-bound number has a PENDING invite (an owner added
+   *  it on the web), ATOMICALLY create + bind the friend's account (hijack-proof —
+   *  refuses if the number is already someone's) + consume the invite, and return the
+   *  new account (with the inviter's name for the welcome). null → no pending invite
+   *  (→ the magic-link flow). Optional: unset = feature off (existing behavior). */
+  acceptPendingInvite?(e164: string): Promise<{ userId: string; inviterName: string | null } | null>;
   /** Mint + store a single-use magic sign-up link for an unknown number, so a
    *  stranger can sign up and auto-link THIS number (hijack-proof). Returns the
    *  absolute URL to text back. */
@@ -197,6 +204,22 @@ export async function handleInbound(
   // code-shaped ("Sounds") is answered, not mis-parsed (review L3).
   const user = await deps.resolveUserByPhone(e164);
   if (!user) {
+    // A friend the owner invited BY NUMBER: the first text from an invited, un-bound
+    // number auto-creates + binds their account (atomic on phone_e164, hijack-proof —
+    // a number already bound to anyone else refuses) — no link, no sign-up form. Their
+    // only action was texting. Returns null when there's no pending invite → fall
+    // through to the magic-link flow below.
+    if (deps.acceptPendingInvite) {
+      const invited = await deps.acceptPendingInvite(e164);
+      if (invited) {
+        const who = invited.inviterName ? `${invited.inviterName} added you to eri` : "you're on eri now";
+        return {
+          replyChunks: [`hey 🌿 ${who}, you're all set, no sign-up needed. text me anything and i'll help. what's up?`],
+          meter: null,
+          branch: "invited",
+        };
+      }
+    }
     // Unknown number — its only valid first move is to text a pairing code.
     const code = extractPairingCode(msg.content);
     if (code) {
