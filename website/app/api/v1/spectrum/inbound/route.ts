@@ -28,6 +28,18 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300; // allow the background reply work up to 5 min
 
+/** The SDK's own discriminator: a native Spectrum envelope's first non-whitespace
+ *  byte is `{`. Anything else is a protobuf ("fusor") body — or nothing at all.
+ *  Used to tell a delivery we can never speak (retrying won't help) from one we
+ *  simply failed to process (retrying will). */
+function looksLikeNativeEnvelope(bytes: Uint8Array): boolean {
+  for (const byte of bytes) {
+    if (byte === 0x20 || byte === 0x09 || byte === 0x0a || byte === 0x0d) continue;
+    return byte === 0x7b; // '{'
+  }
+  return false; // empty body
+}
+
 export async function POST(request: Request): Promise<Response> {
   const body = new Uint8Array(await request.arrayBuffer());
   const headers: Record<string, string> = {};
@@ -77,13 +89,19 @@ export async function POST(request: Request): Promise<Response> {
       );
     });
   } catch (e) {
-    // A delivery the SDK cannot classify at all — today: a protobuf "fusor" body,
-    // which `webhook()` THROWS on when no fusor provider is registered. That throw
-    // used to surface as a 500, which only makes Photon retry it forever. 400 is
-    // the honest answer (this endpoint doesn't speak that body) and the
-    // fingerprint above records what actually arrived.
-    logEvent("spectrum.unroutable_delivery", { bytes: body.length, ...describeSpectrumError(e) });
-    return new Response(JSON.stringify({ error: "unroutable" }), { status: 400 });
+    // Split the two reasons `webhook()` can throw, because they want OPPOSITE
+    // answers. A non-JSON body is a protobuf "fusor" delivery we have no provider
+    // for: it will never succeed, so 400 and stop Photon retrying it forever
+    // (as the old 500 did). A native envelope that threw is OUR failure — 500, so
+    // the retry we actually want still happens.
+    const native = looksLikeNativeEnvelope(body);
+    logEvent(native ? "spectrum.webhook_failed" : "spectrum.unroutable_delivery", {
+      bytes: body.length,
+      ...describeSpectrumError(e),
+    });
+    return new Response(JSON.stringify({ error: native ? "webhook_failed" : "unroutable" }), {
+      status: native ? 500 : 400,
+    });
   }
 
   // A 200 that never reached our handler is a SILENT DROP — exactly the failure
