@@ -78,6 +78,36 @@ async function run() {
     assert.deepEqual(out.replyChunks, [REPLY.notLinked]);
   }
 
+  // Invite-by-number: an un-bound number with a PENDING invite auto-onboards on the
+  // first text — no link, no sign-up form; the welcome names the inviter.
+  {
+    let mintTried = false;
+    const out = await handleInbound(
+      msg("hey"),
+      "+1",
+      deps({
+        resolveUserByPhone: async () => null,
+        acceptPendingInvite: async () => ({ userId: "u_friend", inviterName: "Khai" }),
+        mintSignupLink: async () => { mintTried = true; return "x"; },
+      }),
+    );
+    assert.equal(out.branch, "invited");
+    assert.equal(out.meter, null);
+    assert.ok(out.replyChunks[0].includes("Khai added you"), "welcome names the inviter");
+    assert.equal(mintTried, false, "an invited number is auto-onboarded, never sent a sign-up link");
+  }
+
+  // No pending invite → falls through to the magic-link flow (unchanged).
+  {
+    const out = await handleInbound(
+      msg("hey"),
+      "+1",
+      deps({ resolveUserByPhone: async () => null, acceptPendingInvite: async () => null }),
+    );
+    assert.equal(out.branch, "not_linked");
+    assert.ok(out.replyChunks[0].includes("join?t=test123"));
+  }
+
   // A LINKED user texting something code-shaped is answered, not treated as pairing (L3).
   {
     let pairingTried = false;

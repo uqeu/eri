@@ -39,6 +39,7 @@ import { startCodingJob } from "@/lib/coding/kickoff";
 import { connectGithubUrl, kickCodeJob, mintJobId, resolveRepoLive } from "@/lib/coding/live";
 import { consumePairing, normalizeE164, resolveUserByPhone } from "@/lib/imessage/identity";
 import { mintSignupLink } from "@/lib/phone/signup_link_db";
+import { acceptPendingInvite } from "@/lib/phone/invite";
 import type { InboundMessage } from "@/lib/imessage/webhook";
 import { formatWorldModel, readRecallProjection } from "@/lib/messaging/recall";
 import { getUserSettings } from "@/lib/messaging/settings";
@@ -182,6 +183,7 @@ export function makeInboundDeps(): InboundDeps {
     consumePairing,
     resolveUserByPhone,
     mintSignupLink,
+    acceptPendingInvite,
     withinQuota: async (userId, tier) => (await ensureWithinQuota(userId, tier, 1000)).ok,
     loadProfile,
     runTurn: runAgentTurn,
