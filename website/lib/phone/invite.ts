@@ -51,9 +51,11 @@ export async function acceptPendingInvite(
       const email = `phone_${e164.replace(/\D/g, "")}@invite.eri`;
       // Unusable password ('' is not a valid hash → never matches): the friend auths
       // by TEXTING, not the web. Comped tier so phoneEri is unlocked.
+      // `created_at` is deliberately omitted — it's a bigint EPOCH with a default
+      // (0001_init.sql), so passing now() (timestamptz) fails the insert outright.
       await tx`
-        INSERT INTO users (id, email, password_hash, display_name, tier, created_at)
-        VALUES (${userId}, ${email}, '', ${null}, ${INVITE_TIER}, now())
+        INSERT INTO users (id, email, password_hash, display_name, tier)
+        VALUES (${userId}, ${email}, '', ${null}, ${INVITE_TIER})
       `;
       // Atomic hijack-proof bind — a number already bound to anyone else conflicts.
       const bound = await tx`
@@ -71,7 +73,18 @@ export async function acceptPendingInvite(
     });
   } catch (e) {
     if (e instanceof NoRebindError) return null;
-    throw e;
+    // This runs on the FIRST text from every unknown number — ahead of the magic-link
+    // flow, which is the live front door. A throw here (missing table because 0033
+    // hasn't been applied yet, a transient DB blip) would take new-user onboarding
+    // down with it. Degrade to "no invite" and fall through, but say so loudly: an
+    // optional feature must never be able to break the path it sits in front of.
+    console.log(
+      JSON.stringify({
+        event: "invite.accept_failed",
+        error: e instanceof Error ? e.message : String(e),
+      }),
+    );
+    return null;
   }
 }
 
