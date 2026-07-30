@@ -18,6 +18,7 @@ import { imessage } from "@spectrum-ts/imessage";
 import type { InboundMessage } from "@/lib/imessage/webhook";
 import { logEvent, type InboundTransport } from "@/lib/messaging/inbound_runtime";
 import { isTokenExpired, withSendRetry } from "@/lib/messaging/send_retry";
+import { aliasWirePlatformKeys, readPlatformRegistry } from "@/lib/messaging/spectrum_platforms";
 import { synthesizeSpeech, textForSpeech } from "@/lib/messaging/voice";
 
 /**
@@ -97,6 +98,31 @@ export function getSpectrumApp(): ReturnType<typeof createApp> {
  *  reconnect (a stale app's stream won't resume). */
 export function resetSpectrumApp(): void {
   appPromise = null;
+}
+
+/**
+ * The memoized app, prepared for `app.webhook()`.
+ *
+ * `app.webhook()` routes by the platform id in the delivery envelope
+ * (`"imessage"`) while the SDK's registry is keyed by the provider definition
+ * name (`"iMessage"`), so without this the SDK ACKs every inbound message with
+ * 200 and never calls our handler — see `spectrum_platforms.ts` for the full
+ * account. Aliasing the wire id onto the SAME runtime state restores routing.
+ *
+ * Deliberately NOT applied inside `getSpectrumApp()`: `app.messages` and
+ * `app.stop()` ITERATE that registry, so a duplicate entry would double-
+ * subscribe the worker's stream and double-destroy the client on shutdown. Only
+ * the webhook route — which touches neither — opts in.
+ *
+ * Re-applied on every call because `resetSpectrumApp()` (the token self-heal)
+ * can swap the instance underneath us; the alias is idempotent.
+ */
+export async function getSpectrumWebhookApp(): Promise<Awaited<ReturnType<typeof createApp>>> {
+  const app = await getSpectrumApp();
+  const added = aliasWirePlatformKeys(readPlatformRegistry(app));
+  if (added === null) logEvent("spectrum.platform_alias_unavailable", {});
+  else for (const alias of added) logEvent("spectrum.platform_alias", { ...alias });
+  return app;
 }
 
 /** Map an inbound Spectrum message onto eri's existing InboundMessage shape so
