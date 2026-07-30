@@ -97,7 +97,17 @@ export function getSpectrumApp(): ReturnType<typeof createApp> {
  *  token. Used by the always-on streaming worker to fully re-establish on a
  *  reconnect (a stale app's stream won't resume). */
 export function resetSpectrumApp(): void {
+  const old = appPromise;
   appPromise = null;
+  // DISPOSE the old app's message stream so its underlying gRPC client — and the
+  // process (SIGTERM) listener the SDK registers per connection — is torn down.
+  // Otherwise every reconnect / token-refresh leaks one, tripping
+  // MaxListenersExceededWarning over a long-lived worker. Best-effort + async.
+  if (old) {
+    void Promise.resolve(old)
+      .then((app) => (app as { messages?: { close?: () => Promise<void> } })?.messages?.close?.())
+      .catch(() => {});
+  }
 }
 
 /**
